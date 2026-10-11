@@ -35,7 +35,9 @@ func TestNativeBusCoordinatorArgumentPreservesExactDependencyWiring(t *testing.T
 		t.Fatal("coordinator dependency graph or constructor behavior changed beyond unused argument removal")
 	}
 	actual := selectedCausalObservationBody(t, row.File, row.Function)
-	if actual != row.After {
+	retired := "\t\tFlowRoutes:              eventBus,\n"
+	current := strings.Replace(row.After, retired, "", 1)
+	if strings.Count(row.After, retired) != 1 || row.Successor != current || actual != current {
 		t.Fatal("actual coordinator no longer consumes the exact reviewed dependency graph")
 	}
 	for _, pair := range [][2]string{

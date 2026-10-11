@@ -130,9 +130,9 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, fixture.forkRun)
 			before := selectedForkDiscardDurableCounts(t, ctx, db, fixture.forkRun, eventID, deliveryID)
-			// Include the real provider receiver and the independent pending
-			// receiver; discard must remove both exact construction sets.
-			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 2 || before.Readiness != 2 || before.Construction != 2 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
+			// Include the real provider tree and the independent physical cleanup
+			// row; discard must remove all three exact construction coordinates.
+			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 3 || before.Readiness != 3 || before.Construction != 3 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
 				t.Fatalf("retained pending-delivery fixture incomplete: %#v", before)
 			}
 			var beforeRevision int64
@@ -305,6 +305,7 @@ func selectedForkDiscardDurableCounts(t *testing.T, ctx context.Context, db *sql
 func seedSelectedForkDiscardConstructionRows(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
 	at := time.Now().UTC()
+	entityID := uuid.NewString()
 	for _, statement := range []struct {
 		query string
 		args  []any
@@ -312,14 +313,14 @@ func seedSelectedForkDiscardConstructionRows(t *testing.T, ctx context.Context, 
 		{`INSERT INTO flow_instances
 			(run_id, instance_path, entity_id, flow_template, mode, config, status,
 			 stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-			VALUES ($1, 'discard-native', $1, 'discard-native', 'static', '{}', 'active',
-			 FALSE, 'operating', '{}', '{}', '{}', 1, $2, $2, $2)`, []any{runID, at}},
+			VALUES ($1, 'discard-native', $3, 'discard-native', 'static', '{}', 'active',
+			 FALSE, 'operating', '{}', '{}', '{}', 1, $2, $2, $2)`, []any{runID, at, entityID}},
 		{`INSERT INTO flow_instance_runtime_readiness
 			(run_id, instance_path, plan, plan_hash, created_at, updated_at)
 			VALUES ($1, 'discard-native', '{}', $2, $3, $3)`, []any{runID, "sha256:" + strings.Repeat("a", 64), at}},
 		{`INSERT INTO workflow_instance_initial_materializations
 			(run_id, entity_id, instance_path, projection_version, projection, occurred_at, created_at)
-			VALUES ($1, $1, 'discard-native', 2, '{}', $2, $2)`, []any{runID, at}},
+			VALUES ($1, $3, 'discard-native', 3, '{}', $2, $2)`, []any{runID, at, entityID}},
 	} {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed native discard construction rows: %v", err)

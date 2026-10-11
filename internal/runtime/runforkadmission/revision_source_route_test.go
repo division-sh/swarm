@@ -123,10 +123,8 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		wantHistoryEvents int
 		wantFrontierCodes []string
 		wantHistoryCodes  []string
-		wantRouteFacts    bool
 	}
 	nonMutating := runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating
-	flowHistory := runfork.RunForkBlockerFlowRouteHistoryUnproven
 	consumerNode := identitytest.FlowNode(t, "consumer", "consumer-node").Key()
 	cases := []testCase{
 		{
@@ -137,7 +135,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			explicitSelector: true,
 			source:           runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
-			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes: []string{nonMutating},
 		},
 		{
 			name:          "latest template fork point without delivery",
@@ -146,7 +144,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:   events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
 			source:        runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory:   []string{consumerNode}, wantHistoryEvents: 1,
-			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes: []string{nonMutating},
 		},
 		{
 			name:             "completed delivery deterministically agrees with fork point",
@@ -156,7 +154,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			explicitSelector: true, deliveryStatus: "completed",
 			source:      runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory: []string{consumerNode}, wantHistoryEvents: 1,
-			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes: []string{nonMutating},
 		},
 		{
 			name:             "pending delivery remains frontier work",
@@ -167,7 +165,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			source:            runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantFrontier:      []string{consumerNode},
 			wantFrontierCodes: []string{runfork.RunForkBlockerContractFrontierExecutionUnsupported},
-			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes:  []string{nonMutating},
 		},
 		{
 			name:             "static source preserves static connect",
@@ -179,7 +177,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				return runforkadmission.ContractFrontierConnectSourceForTest(t, "static")
 			},
 			wantHistory: []string{consumerNode}, wantHistoryEvents: 1,
-			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes: []string{nonMutating},
 		},
 		{
 			name:             "root source needs no child route identity",
@@ -209,7 +207,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			explicitSelector:  true,
 			source:            runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistoryEvents: 1,
-			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
+			wantHistoryCodes:  []string{nonMutating},
 		},
 	}
 
@@ -292,9 +290,6 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			}
 			if got := blockerCodes(history.UnsupportedBlockers); strings.Join(got, "\x00") != strings.Join(tc.wantHistoryCodes, "\x00") {
 				t.Fatalf("history blocker codes = %v, want %v", got, tc.wantHistoryCodes)
-			}
-			if history.SourceRouteFactsPresent != tc.wantRouteFacts {
-				t.Fatalf("source route facts present = %v, want %v", history.SourceRouteFactsPresent, tc.wantRouteFacts)
 			}
 		})
 	}

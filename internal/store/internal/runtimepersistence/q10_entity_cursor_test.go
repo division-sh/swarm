@@ -68,11 +68,6 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					Setup:       pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: entities},
 					Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}},
 				}
-				for _, construction := range plan.ConstructionPlans() {
-					command.Activations[0].RouteTopology = append(command.Activations[0].RouteTopology, runtimebus.FlowInstanceRouteRecordSet{
-						Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-					})
-				}
 				if result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command); err != nil || !result.Acknowledged {
 					t.Fatalf("cursor cohort setup: %+v %v", result, err)
 				}

@@ -271,6 +271,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		backend,
 		decisionObligation,
 		runlifecyclefixture.ScenarioSetupOrigin(),
+		nil,
 	)
 }
 
@@ -279,6 +280,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	backend string,
 	decisionObligation bool,
 	origin runtimerunlifecycle.RunOrigin,
+	source semanticview.Source,
 	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
 ) completeEventDispatchFixture {
 	t.Helper()
@@ -291,7 +293,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	opts := runtimebus.EventBusOptions{}
+	opts := runtimebus.EventBusOptions{ContractBundle: source}
 	for _, reader := range originReaders {
 		opts.Durable.RunOrigins = reader(selected)
 	}
@@ -299,7 +301,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
@@ -357,10 +359,18 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		createdAt,
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, completeEventAgentOwnerURI(agentID))
+	ownerURI := completeEventAgentOwnerURI(agentID)
+	if source != nil {
+		scope, found := source.FlowScopeByID(semanticview.RootExecutionFlowID(source))
+		if !found || scope.AgentURIs[agentID] == "" {
+			t.Fatal("complete-event fixture requires its declared root agent")
+		}
+		ownerURI = scope.AgentURIs[agentID]
+	}
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, ownerURI)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
-		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
+		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity, source: source,
 	}
 	if decisionObligation {
 		fixture.insertDecisionObligation(t)
@@ -526,8 +536,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		DeliveryStore:      f.store,
 		ExecutionPosture:   executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
-			RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus,
+			AgentRoutes:       f.bus,
+			CreationPublisher: f.bus, DeliveryRuntime: f.bus,
 			LifecycleState: f.store,
 		},
 		WorkOwner:         owner,

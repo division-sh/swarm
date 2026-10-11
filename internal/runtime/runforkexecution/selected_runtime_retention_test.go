@@ -148,21 +148,12 @@ func (p *selectedRuntimeRetirementProbe) Retire(context.Context) error {
 type selectedRetainedActivationProbe struct {
 	failAt   string
 	failing  bool
-	routes   int
 	timers   int
 	attempts int
 }
 
 func (p *selectedRetainedActivationProbe) ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
 	return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, errors.New("unexpected pending admission in retained activation control")
-}
-
-func (p *selectedRetainedActivationProbe) Retire() error {
-	p.routes++
-	if p.failAt == "route" && p.failing {
-		return errors.New("injected route retirement failure")
-	}
-	return nil
 }
 
 func (p *selectedRetainedActivationProbe) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
@@ -182,13 +173,13 @@ func (p *selectedRetainedActivationProbe) AbandonDynamicFlowRuntimeActivationAtt
 }
 
 func TestSelectedPartialActivationInventoryRetainsEveryFailedStage(t *testing.T) {
-	for _, stage := range []string{"route", "timer", "attempt"} {
+	for _, stage := range []string{"timer", "attempt"} {
 		t.Run(stage, func(t *testing.T) {
 			grant := &selectedRuntimeRetirementProbe{}
 			probe := &selectedRetainedActivationProbe{failAt: stage, failing: true}
 			runtime := &selectedContractAgentRuntime{
 				generationGrant: grant, pipeline: probe,
-				pendingActivations: []selectedFlowActivation{{publication: probe, timersProjected: true}},
+				pendingActivations: []selectedFlowActivation{{timersProjected: true}},
 			}
 			operation := selectedContractOperationForTest(t, worklifetime.WithProcess(context.Background(), worklifetime.NewProcess()))
 			prepared := &PreparedSelectedFork{operation: operation, retainedRuntime: runtime}

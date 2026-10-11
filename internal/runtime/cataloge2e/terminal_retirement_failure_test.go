@@ -219,8 +219,10 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 			if err != nil || !found || state.Status != "terminated" {
 				t.Fatalf("direct committed terminal readback: %+v found=%t err=%v", state, found, err)
 			}
-			if h.rt.Bus.HasFlowInstanceRoute(owner) {
-				t.Fatal("committed unwind retained a process-visible terminal flow route")
+			observed := catalogRunScopedInstanceObservation(t, h, runScopedCatalogStore(t, h), catalogRuntimeRunID, path)
+			occupied, err := observed.WorkflowInstance()
+			if err != nil || occupied.Status != "terminated" || occupied.TerminatedAt.IsZero() || occupied.EntityID != state.EntityID {
+				t.Fatalf("committed unwind did not retain exact terminal occupancy: %+v err=%v", occupied, err)
 			}
 		})
 	}

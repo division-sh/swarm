@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,27 +33,31 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type targetRouteMemoryStore struct {
-	mu                sync.Mutex
-	constructions     map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
-	events            map[string]events.Event
-	settlements       map[string]events.RouteSettlement
-	routes            map[string][]events.DeliveryRoute
-	scopes            map[string]runtimepipelineobligation.CommittedScope
-	missing           []events.PersistedReplayEvent
-	receipts          map[string]string
-	receiptErrs       map[string]*runtimefailures.Envelope
-	claimIssuer       *runtimepipelineobligation.ClaimIssuer
-	scanIssuer        *runtimepipelineobligation.ScanIssuer
-	claims            map[string]runtimepipelineobligation.Claim
-	scans             map[string]runtimepipelineobligation.ScanRequest
-	active            map[string]bool
-	flowRoutes        []FlowInstanceRouteRecord
-	targetOwners      []ActiveTargetDescriptor
-	workflowInstances []runtimepipeline.WorkflowInstance
+	mu                      sync.Mutex
+	instanceObservations    []runtimepipeline.FlowInstanceObservation
+	instanceIndexReads      int
+	instanceIndexErr        error
+	constructionIndexSource semanticview.Source
+	constructions           map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
+	events                  map[string]events.Event
+	settlements             map[string]events.RouteSettlement
+	routes                  map[string][]events.DeliveryRoute
+	scopes                  map[string]runtimepipelineobligation.CommittedScope
+	missing                 []events.PersistedReplayEvent
+	receipts                map[string]string
+	receiptErrs             map[string]*runtimefailures.Envelope
+	claimIssuer             *runtimepipelineobligation.ClaimIssuer
+	scanIssuer              *runtimepipelineobligation.ScanIssuer
+	claims                  map[string]runtimepipelineobligation.Claim
+	scans                   map[string]runtimepipelineobligation.ScanRequest
+	active                  map[string]bool
+	targetOwners            []ActiveTargetDescriptor
+	workflowInstances       []runtimepipeline.WorkflowInstance
 }
 
 func (s *targetRouteMemoryStore) installConstructionReceipt(owner runtimeflowidentity.RunScopedFlowInstance, evidence runtimepipeline.FlowConstructionPublicationEvidence) {
@@ -79,24 +82,6 @@ func (s *targetRouteMemoryStore) LoadFlowConstructionPublication(ctx context.Con
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("absent exact test construction receipt")
 	}
 	return evidence, nil
-}
-
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]ActiveTargetDescriptor(nil), s.targetOwners...), nil
-}
-
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var selected []ActiveTargetDescriptor
-	for _, owner := range s.targetOwners {
-		if slices.Contains(instancePaths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
 }
 
 func (s *targetRouteMemoryStore) setTargetOwners(owners ...ActiveTargetDescriptor) {
@@ -140,94 +125,6 @@ func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTarge
 	}.Normalized()
 }
 
-func targetRouteIdentity(identity runtimeflowidentity.RunScopedFlowInstance) runtimeflowidentity.RunScopedFlowInstance {
-	identity.Route = runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
-	return identity.Normalize()
-}
-
-func sameTargetRoute(left, right runtimeflowidentity.RunScopedFlowInstance) bool {
-	return targetRouteIdentity(left) == targetRouteIdentity(right)
-}
-
-func (s *targetRouteMemoryStore) UpsertFlowInstanceRoute(_ context.Context, route FlowInstanceRouteRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	route.Identity = targetRouteIdentity(route.Identity)
-	for i, existing := range s.flowRoutes {
-		if sameTargetRoute(existing.Identity, route.Identity) && existing.EventPattern == route.EventPattern && existing.SubscriberType == route.SubscriberType && existing.SubscriberID == route.SubscriberID {
-			s.flowRoutes[i] = route
-			return nil
-		}
-	}
-	s.flowRoutes = append(s.flowRoutes, route)
-	return nil
-}
-
-func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return s.RollbackFlowInstanceRoute(context.Background(), identity)
-}
-
-func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(s.flowRoutes))
-	routes := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(s.flowRoutes))
-	for _, record := range s.flowRoutes {
-		identity := targetRouteIdentity(record.Identity)
-		if _, ok := seen[identity]; ok {
-			continue
-		}
-		seen[identity] = struct{}{}
-		routes = append(routes, identity)
-	}
-	return routes, nil
-}
-
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	retained := s.flowRoutes[:0]
-	for _, existing := range s.flowRoutes {
-		if !sameTargetRoute(existing.Identity, identity) {
-			retained = append(retained, existing)
-		}
-	}
-	s.flowRoutes = retained
-	for _, route := range routes {
-		route.Identity = targetRouteIdentity(route.Identity)
-		s.flowRoutes = append(s.flowRoutes, route)
-	}
-	return nil
-}
-
-func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	var routes []FlowInstanceRouteRecord
-	for _, route := range s.flowRoutes {
-		if sameTargetRoute(route.Identity, identity) {
-			routes = append(routes, route)
-		}
-	}
-	return routes, nil
-}
-
-func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	retained := s.flowRoutes[:0]
-	for _, existing := range s.flowRoutes {
-		if !sameTargetRoute(existing.Identity, identity) {
-			retained = append(retained, existing)
-		}
-	}
-	s.flowRoutes = retained
-	return nil
-}
-
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 	return &targetRouteMemoryStore{
 		events:      map[string]events.Event{},
@@ -252,12 +149,10 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	if _, exists := s.events[event.ID()]; exists {
 		result := CommittedPublication{
 			AppendOutcome: EventAppendExactDuplicate,
-			RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 		}
 		for _, plan := range command.Activations {
 			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, ReadinessAttemptOrdinal: 1})
 		}
-		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()
 	}
@@ -277,7 +172,6 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
-		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	for _, plan := range command.Activations {
 		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
@@ -285,13 +179,21 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
 		}
 		for _, constructor := range plan.ConstructionPlans() {
+			observed, err := admitConstructionIndexTestObservation(s.constructionIndexSource, constructor.Readiness.RunID, constructor.Identity, constructor.Instance.InstanceKey)
+			if err != nil {
+				return CommittedPublication{}, err
+			}
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: constructor.Readiness.RunID, Route: constructor.Identity.Route()}
-			if _, exists := s.constructions[owner]; !exists {
-				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
+			if existing, exists := s.constructions[owner]; exists {
+				if existing.Identity != constructor.Identity || existing.InstanceKey != constructor.Instance.InstanceKey || !reflect.DeepEqual(existing.Fields, constructor.Instance.Fields) {
+					return CommittedPublication{}, fmt.Errorf("component publication changed immutable constructor evidence")
+				}
+			} else {
+				s.instanceObservations = append(s.instanceObservations, observed)
+				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, InstanceKey: constructor.Instance.InstanceKey, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
 			}
 		}
 	}
-	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
@@ -313,33 +215,6 @@ func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eve
 		return PreparedPublishEvent{}, false, err
 	}
 	return PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
-}
-
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
-	if err := validateFlowInstanceRouteTopology(sets); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.replaceFlowInstanceRouteTopologyLocked(sets)
-	return nil
-}
-
-func (s *targetRouteMemoryStore) replaceFlowInstanceRouteTopologyLocked(sets []FlowInstanceRouteRecordSet) {
-	for _, set := range sets {
-		identity := targetRouteIdentity(set.Identity)
-		retained := s.flowRoutes[:0]
-		for _, existing := range s.flowRoutes {
-			if !sameTargetRoute(existing.Identity, identity) {
-				retained = append(retained, existing)
-			}
-		}
-		s.flowRoutes = retained
-		for _, route := range set.Routes {
-			route.Identity = targetRouteIdentity(route.Identity)
-			s.flowRoutes = append(s.flowRoutes, route)
-		}
-	}
 }
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
@@ -985,6 +860,7 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			runID := uuid.NewString()
 			exact := events.RouteIdentity{
 				FlowID: "review", FlowInstance: "review/exact", EntityID: eventtest.UUID("targeted-declared-key-exact-" + test.name),
 			}.Normalized()
@@ -1001,6 +877,7 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler))
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
+				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 					return []DeliveryRouteBlueprint{{
 						Recipient: events.MustNodeDeliveryRecipient(node), Target: exact,
@@ -1013,9 +890,15 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 			}
 			eventID := uuid.NewString()
 			evt := eventtest.RuntimeControl(
-				eventID, eventType, "", "", []byte(`{"account_id":"payload-key"}`), 0, uuid.NewString(), "",
+				eventID, events.EventType(source.ResolveFlowEventReference("review", eventType)), "", "", []byte(`{"account_id":"payload-key"}`), 0, runID, "",
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Now().UTC(),
 			)
+			for _, target := range []events.RouteIdentity{exact, competing} {
+				identity := ConstructedFlowInstanceIdentityFixture(source, target.FlowID, path.Base(target.FlowInstance), runID)
+				identity.EntityID = target.EntityID
+				store.installIndexObservation(constructionIndexObservation(t, source, runID, identity, path.Base(target.FlowInstance)))
+				store.installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}, runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: path.Base(target.FlowInstance)})
+			}
 			if err := eb.Publish(context.Background(), evt); err != nil {
 				t.Fatalf("publish targeted %s: %v", test.name, err)
 			}
@@ -1162,12 +1045,6 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	targetBlueprint := DeliveryRouteBlueprint{Recipient: targetRoute.Recipient, Target: target,
 		Handler: targetHandler.ForEvent("work.started")}
-	rt := newRouteTable(nil)
-	rt.eventPath[eventType] = struct{}{}
-	rt.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(targetNode), Path: "worker",
-		LocalizedEvent: "work.started", handlerNode: targetNode, targetHandler: targetHandler,
-		routeSource: subscriberRouteSourceSubscription,
-	}}
 	interceptor := &targetRouteConsumingInterceptor{}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
@@ -1175,11 +1052,11 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(t,
 			"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
 		)),
-		RouteTable: rt,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{targetBlueprint}, nil
 		},
 		Interceptors: []EventInterceptor{interceptor},
+		Durable:      DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1493,11 +1370,11 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 	}
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient: events.MustNodeDeliveryRecipient(handlerNode), Path: ".", LocalizedEvent: event,
 					handlerNode: handlerNode, targetHandler: handler.ForEvent(eventType),
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1553,11 +1430,11 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 	}
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient: events.MustNodeDeliveryRecipient(handlerNode), LocalizedEvent: event,
 					handlerNode: handlerNode, targetHandler: handler.ForEvent(eventType),
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
@@ -1727,8 +1604,11 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 		t.Fatal("Publish succeeded, want missing agent-channel failure")
 	}
 	failure, ok := runtimefailures.As(err)
+	if !ok {
+		t.Fatalf("Publish failure = %v, want missing agent only", err)
+	}
 	missing, _ := failure.Failure.Detail.Attributes["missing_recipients"].([]string)
-	if !ok || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" || len(missing) != 1 || !strings.Contains(missing[0], "agent-missing") {
+	if failure.Failure.Detail.Code != "authoritative_delivery_incomplete" || len(missing) != 1 || !strings.Contains(missing[0], "agent-missing") {
 		t.Fatalf("Publish failure = %#v, want missing agent only", failure)
 	}
 }
@@ -1741,11 +1621,11 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-a", "child-a-listener")), Path: "child-a/inst-1"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-b", "child-b-listener")), Path: "child-b/inst-1"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -1820,11 +1700,11 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-002"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -1883,8 +1763,8 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -1922,9 +1802,6 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
 	}
 	evt := eventtest.RuntimeControlWithRoutingSource(
 		uuid.NewString(),
@@ -1975,47 +1852,47 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if err != nil {
 		t.Fatalf("load fixture bundle: %v", err)
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	source := semanticview.Wrap(bundle)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
+	installConnectionSourceConstruction(t, eb, source, ".")
+	instance := StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, eventtest.UUID("worker/w-001"))
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "w-001"))
+	store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: "w-001"})
+	bound, err := eb.RouteTable().PubsubReceiverDefinitions(busInternalTestRunID, instance, []string{instance.InstancePath + "/work.assign"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	materialized := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001")))
 	taskHandler := testFlowNode(t, "worker", "task-handler")
-	hasRoute := func(eventPattern string) bool {
-		for _, route := range materialized {
-			if route.EventPattern == eventPattern && route.SubscriberID == taskHandler.Key() {
-				return true
-			}
-		}
-		return false
+	if len(bound) != 1 || bound[0].Recipient.ID() != taskHandler.Key() || bound[0].Path != instance.InstancePath || bound[0].LocalizedEvent != "work.assign" || bound[0].MatchPattern != instance.InstancePath+"/work.assign" {
+		t.Fatalf("compiled receivers = %#v, want the exact task-handler local subscription", bound)
 	}
-	if !hasRoute("worker/w-001/work.assign") {
-		t.Fatalf("materialized routes = %#v, want task-handler instance-scoped work.assign route; node entries=%v", materialized, semanticview.Wrap(bundle).ExecutableNodeRecords())
-	}
-	if subscriberListContainsRouteSource(eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"), "task-handler", "worker/w-001", "receiver_carrier") {
-		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"))
-	}
-	if resolved := eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
-		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)
+	if subscriberListContainsRouteSource(bound, "task-handler", instance.InstancePath, "receiver_carrier") {
+		t.Fatalf("compiled receivers = %#v, want no receiver_carrier route", bound)
 	}
 	target := events.RouteIdentity{
 		FlowID:       "worker",
 		FlowInstance: "worker/w-001",
 		EntityID:     runtimeflowidentity.EntityID(eventtest.UUID("worker/w-001")),
 	}
-	evt := eventtest.RuntimeControl(
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		uuid.NewString(),
-		events.EventType("worker/work.assign"),
+		events.EventType(instance.InstancePath+"/work.assign"),
 		"",
 		"",
 		[]byte(`{"task_label":"route-me"}`),
 		0,
 		busInternalTestRunID,
-		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		routingSource,
 		time.Now().UTC(),
 	)
 
@@ -2053,9 +1930,6 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
@@ -2122,9 +1996,6 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RuntimeControlWithRoutingSource(
@@ -2196,9 +2067,6 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"))}); err != nil {
-				t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
-			}
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(concreteEventType))
 			defer unsubscribeTestAgent(eb, "workflow-runtime")
@@ -2250,9 +2118,16 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 
 func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("ent-validation")})
+	entityID := runtimeflowidentity.EntityID("validation")
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
+		id: "validation", mode: "static", nodes: map[string]runtimecontracts.SystemNodeContract{
+			"entity-writer": {SubscribesTo: []string{"thing.reviewed"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
+		},
+	}}, nil))
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{{FlowInstance: "validation", EntityID: entityID}})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2267,8 +2142,8 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		0,
 		busInternalTestRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation"),
-		mustFlowOwnedControlRoutingSource(t, "validation", "validation", eventtest.UUID("ent-validation")),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation"),
+		mustFlowOwnedControlRoutingSource(t, "validation", "validation", entityID),
 		time.Now().UTC(),
 	)
 
@@ -2286,7 +2161,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	if !route.Recipient.IsNode() || route.Recipient.LocalID() != "entity-writer" {
 		t.Fatalf("delivery route = %#v, want node/entity-writer", route)
 	}
-	if target := route.Target.Route(); target.FlowInstance != "validation" || target.EntityID != eventtest.UUID("ent-validation") {
+	if target := route.Target.Route(); target.FlowInstance != "validation" || target.EntityID != entityID {
 		t.Fatalf("delivery route target = %#v, want validation ent-validation", route.Target)
 	}
 	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != route.Recipient.ID() || plan.RoutedRecipients[0].Path != "validation" {
@@ -2297,7 +2172,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		t.Fatalf("Publish: %v", err)
 	}
 	got := requireBusEvent(t, ch, "semantic-scope concrete route event delivery")
-	if got.FlowInstance() != "validation" || got.EntityID() != eventtest.UUID("ent-validation") {
+	if got.FlowInstance() != "validation" || got.EntityID() != entityID {
 		t.Fatalf("delivered route identity flow=%q entity=%q, want validation ent-validation", got.FlowInstance(), got.EntityID())
 	}
 	routes := store.routes[evt.ID()]
@@ -2308,9 +2183,16 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 
 func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesSystemNodeRouteWithoutLiveSubscription(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("ent-validation")})
+	entityID := runtimeflowidentity.EntityID("validation")
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
+		id: "validation", mode: "static", nodes: map[string]runtimecontracts.SystemNodeContract{
+			"entity-writer": {SubscribesTo: []string{"thing.reviewed"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
+		},
+	}}, nil))
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{{FlowInstance: "validation", EntityID: entityID}})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2324,8 +2206,8 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		0,
 		busInternalTestRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation"),
-		mustFlowOwnedControlRoutingSource(t, "validation", "validation", eventtest.UUID("ent-validation")),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation"),
+		mustFlowOwnedControlRoutingSource(t, "validation", "validation", entityID),
 		time.Now().UTC(),
 	)
 
@@ -2347,7 +2229,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	if !route.Recipient.IsNode() || route.Recipient.LocalID() != "entity-writer" {
 		t.Fatalf("delivery route = %#v, want node/entity-writer", route)
 	}
-	if target := route.Target.Route(); target.FlowInstance != "validation" || target.EntityID != eventtest.UUID("ent-validation") {
+	if target := route.Target.Route(); target.FlowInstance != "validation" || target.EntityID != entityID {
 		t.Fatalf("delivery route target = %#v, want validation ent-validation", route.Target)
 	}
 
@@ -2363,8 +2245,20 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforePersistence(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "child", FlowInstance: "child", EntityID: eventtest.UUID("ent-child")})
+	bundle := connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
+		id: "child", mode: runtimecontracts.FlowModeStatic,
+		nodes: map[string]runtimecontracts.SystemNodeContract{
+			"child-intake": {
+				SubscribesTo: []string{"child.start"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"child.start": existingOwnerHandlerFixture(),
+				},
+			},
+		},
+	}}, nil)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedNodeStaticChildBundle()),
+		ContractBundle: semanticview.Wrap(bundle),
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2383,8 +2277,9 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 		time.Now().UTC(),
 	)
 
-	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "without exact same-instance, explicit-target, or compiled-connect authority") {
-		t.Fatalf("CheckPublishRecipientPlan error = %v, want missing target-owner authority", err)
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil || len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0 || len(plan.PersistedRecipients) != 0 || !reflect.DeepEqual(plan.Recipients, []string{"child-intake"}) {
+		t.Fatalf("CheckPublishRecipientPlan = %#v, %v, want only the subscribed local carrier, without durable private receiver authority", plan, err)
 	}
 	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "does not identify a local declaration") {
 		t.Fatalf("Publish error = %v, want root-source metadata refusal", err)
@@ -2405,11 +2300,8 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 	}
 }
 
-func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersistence(t *testing.T) {
-	const (
-		pattern   = "component-scaffold/*/opco.repo_scaffold_requested"
-		eventType = "component-scaffold/component-a/opco.repo_scaffold_requested"
-	)
+func TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients(t *testing.T) {
+	const eventType = "repo-scaffold/opco.repo_scaffold_requested"
 	componentFlow := runtimecontracts.FlowContractView{
 		Path: "component-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
@@ -2425,43 +2317,18 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{componentFlow, repositoryFlow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+	bundle := &runtimecontracts.WorkflowContractBundle{SourceArtifact: sourceartifactfixture.Artifact(), FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &root,
 		ByID: map[string]*runtimecontracts.FlowContractView{
 			"component-scaffold": &root.Children[0],
 			"repo-scaffold":      &root.Children[1],
 		},
 	}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	source := semanticview.Wrap(bundle)
-	componentNode := testFlowNode(t, "component-scaffold", "component-node")
-	componentHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, componentNode)
-	if err != nil {
-		t.Fatalf("admit component target handler: %v", err)
-	}
-	repositoryNode := testFlowNode(t, "repo-scaffold", "repo-scaffold-node")
-	repositoryHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, repositoryNode)
-	if err != nil {
-		t.Fatalf("admit repository target handler: %v", err)
-	}
-	rt := newRouteTable(source)
-	rt.eventPath[eventType] = struct{}{}
-	rt.patterns = []routePattern{
-		{
-			EventPattern: eventType,
-			Subscriber: Subscriber{Recipient: events.MustNodeDeliveryRecipient(componentNode), Path: "component-scaffold/component-a",
-				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "opco.repo_scaffold_requested",
-				handlerNode: componentNode, targetHandler: componentHandler,
-			},
-		},
-		{
-			EventPattern: pattern,
-			Subscriber: Subscriber{Recipient: events.MustNodeDeliveryRecipient(repositoryNode), Path: "repo-scaffold",
-				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "opco.repo_scaffold_requested",
-				handlerNode: repositoryNode, targetHandler: repositoryHandler,
-			},
-		},
-	}
-	rt.rebuildLocked()
+	rt := derivedRouteTableFixture(t, source)
 
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(
@@ -2471,6 +2338,7 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 	eventID := uuid.NewString()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		RouteTable: rt, ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2489,11 +2357,11 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 		time.Now().UTC(),
 	)
 
-	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "requires an exact admitted target handler") {
-		t.Fatalf("CheckPublishRecipientPlan error = %v, want uncompiled receiver rejection", err)
+	if plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err != nil || len(plan.RoutedRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
+		t.Fatalf("uncompiled declarations invented recipients: plan=%+v err=%v", plan, err)
 	}
-	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "requires an exact admitted target handler") {
-		t.Fatalf("Publish error = %v, want uncompiled receiver rejection", err)
+	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "does not identify a local declaration") {
+		t.Fatalf("Publish error = %v, want foreign source-metadata refusal", err)
 	}
 	if _, ok := store.events[eventID]; ok || len(store.routes[eventID]) != 0 {
 		t.Fatalf("store partially mutated for mixed valid/invalid routes: event=%v routes=%#v", ok, store.routes[eventID])
@@ -2506,6 +2374,7 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Path: "child/grandchild", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"micro.start": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"grandchild-worker": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -2519,28 +2388,21 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
-	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+	bundle := &runtimecontracts.WorkflowContractBundle{SourceArtifact: sourceartifactfixture.Artifact(), FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &root,
 		ByID: map[string]*runtimecontracts.FlowContractView{
 			"child": &root.Children[0], "child/grandchild": &root.Children[0].Children[0],
 		},
 	}}
-	source := semanticview.Wrap(bundle)
-	handlerNode := testFlowNode(t, "child/grandchild", "grandchild-worker")
-	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, handlerNode)
-	if err != nil {
-		t.Fatalf("admit grandchild target handler: %v", err)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
-	routes := newRouteTable(source)
-	routes.eventPath["child/grandchild/micro.start"] = struct{}{}
-	routes.patterns = []routePattern{{EventPattern: "child/grandchild/micro.start", Subscriber: Subscriber{
-		Recipient: events.MustNodeDeliveryRecipient(handlerNode), Path: "child/grandchild",
-		MatchPattern: "child/grandchild/micro.start", routeSource: subscriberRouteSourceSubscription,
-		LocalizedEvent: "micro.start", handlerNode: handlerNode, targetHandler: handler,
-	}}}
-	routes.rebuildLocked()
+	source := semanticview.Wrap(bundle)
+	routes := derivedRouteTableFixture(t, source)
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{RouteTable: routes, ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{RouteTable: routes, ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2560,16 +2422,17 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, currentRoute.EntityID), currentRoute.FlowInstance),
 		routingSource, time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
-	if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil || !strings.Contains(err.Error(), `routed node "`+handlerNode.Key()+`"`) {
-		t.Fatalf("CheckPublishRecipientPlan error = %v, want descendant-without-connect rejection", err)
+	if plan, err := eb.CheckPublishRecipientPlan(ctx, evt); err != nil || len(plan.RoutedRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
+		t.Fatalf("descendant acquired undeclared recipient authority: plan=%+v err=%v", plan, err)
 	}
 	if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "does not identify a local declaration") {
 		t.Fatalf("Publish error = %v, want source-metadata refusal before descendant delivery", err)
 	}
-	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected descendant publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 {
+		t.Fatalf("rejected descendant publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2588,10 +2451,10 @@ func TestRouteTableRootInputDoesNotSubscribePrivateChildren(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got := rt.ResolveForRun(busInternalTestRunID, "thing.created"); len(got) != 0 {
+				if got := rt.PubsubDeclarationDefinitionsFixture(t, "validation", "thing.created"); len(got) != 0 {
 					t.Fatalf("root name manufactured private subscriptions: %#v", got)
 				}
-				if got := rt.ResolveForRun(busInternalTestRunID, "validation/thing.created"); len(got) != 1 || got[0].RouteSourceCode() != "subscription" {
+				if got := rt.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created"); len(got) != 1 || got[0].RouteSourceCode() != "subscription" {
 					t.Fatalf("ordinary private subscription lost: %#v", got)
 				}
 			})
@@ -2612,11 +2475,11 @@ func TestRouteTableConnectedPrivateInputUsesSemanticLocalizationOwner(t *testing
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.ResolveForRun(busInternalTestRunID, "task.assigned")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, "worker", "task.assigned")
 	if len(got) != 0 {
 		t.Fatalf("root event manufactured an unclaimed private subscription: %#v", got)
 	}
-	qualified := rt.ResolveForRun(busInternalTestRunID, "worker/task.assigned")
+	qualified := rt.PubsubDeclarationDefinitionsFixture(t, "worker", "worker/task.assigned")
 	if len(qualified) != 1 || qualified[0].RouteSourceCode() != "subscription" || qualified[0].LocalizedEvent != "task.assigned" {
 		t.Fatalf("Resolve(worker/task.assigned) = %#v, want one localized subscription role", qualified)
 	}
@@ -2626,9 +2489,17 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 	for _, explicitTarget := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicitTarget), func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			target := events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("unconnected-owner")}
+			target := events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: runtimeflowidentity.EntityID("validation")}
 			store.setTargetOwnerRoutes(target, events.RouteIdentity{FlowID: ".", FlowInstance: busInternalTestRunID, EntityID: runtimeflowidentity.EntityID(busInternalTestRunID)})
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle())})
+			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
+				{id: ".", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
+				{id: "validation", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
+					"entity-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+				}},
+			}, nil))
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2636,8 +2507,9 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			if explicitTarget {
 				envelope = events.EnvelopeForTargetRoute(envelope, target)
 			}
-			installConnectionSourceConstruction(t, eb, eb.semanticSource, ".")
+			installConnectionSourceConstruction(t, eb, source, "validation")
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "thing.created", "", "", []byte("{}"), 0, busInternalTestRunID, "", envelope, time.Now().UTC())
+			store.requireConstructionUnchanged(t)
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
 				t.Fatalf("unconnected child received root input: %#v", plan)
@@ -2649,7 +2521,7 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			if !explicitTarget && publishErr != nil {
 				t.Fatal(publishErr)
 			}
-			if len(store.routes[evt.ID()]) != 0 || len(store.flowRoutes) != 0 {
+			if len(store.routes[evt.ID()]) != 0 {
 				t.Fatal("unconnected publication created child delivery or receiver")
 			}
 			if explicitTarget && (len(store.events) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0) {
@@ -2678,6 +2550,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceBeforePersistence(t 
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		runID, "", events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want root-input admission refusal", err)
@@ -2686,9 +2559,9 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceBeforePersistence(t 
 		t.Fatalf("Publish error = %v, want root-input admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected internal root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected internal root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2714,6 +2587,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceWithExplicitTarget(t
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		runID, "", envelope, eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want explicit-target root-input admission refusal", err)
@@ -2722,25 +2596,32 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceWithExplicitTarget(t
 		t.Fatalf("Publish error = %v, want explicit-target root-input admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected targeted root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected targeted root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
 func TestEventBusPublish_ExplicitTargetSelectsOrdinaryFlowWithoutAuthorizingSameIDRootInputSibling(t *testing.T) {
 	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
-	ordinaryTarget := events.RouteIdentity{
-		FlowID: "ordinary", FlowInstance: "ordinary", EntityID: eventtest.UUID("duplicate-id-ordinary-owner"),
-	}.Normalized()
-	rootInputTarget := events.RouteIdentity{
-		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("duplicate-id-root-input-owner"),
-	}.Normalized()
+	runID := uuid.NewString()
+	ordinary := ConstructedFlowInstanceIdentityFixture(source, "ordinary", "", runID)
+	validation := ConstructedFlowInstanceIdentityFixture(source, "validation", "", runID)
+	ordinaryTarget := events.RouteIdentity{FlowID: ordinary.TemplateID, FlowInstance: ordinary.InstancePath, EntityID: ordinary.EntityID}
+	rootInputTarget := events.RouteIdentity{FlowID: validation.TemplateID, FlowInstance: validation.InstancePath, EntityID: validation.EntityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(ordinaryTarget, rootInputTarget)
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routes})
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routes,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("create duplicate-ID EventBus: %v", err)
+	}
+	for _, target := range []events.RouteIdentity{ordinaryTarget, rootInputTarget} {
+		instance := ConstructedFlowInstanceIdentityFixture(source, target.FlowID, "", runID)
+		instance.EntityID = target.EntityID
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, instance, ""))
+		store.installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}, runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 	}
 	sourceRoute := events.RouteIdentity{
 		FlowID: "ordinary", FlowInstance: "ordinary", EntityID: ordinaryTarget.EntityID,
@@ -2750,7 +2631,7 @@ func TestEventBusPublish_ExplicitTargetSelectsOrdinaryFlowWithoutAuthorizingSame
 	eventID := uuid.NewString()
 	event := eventtest.PersistedChildForProducer(
 		eventID, events.EventType("ordinary/thing.created"), eventtest.Producer(events.EventProducerNode, "shared-writer"), "",
-		[]byte(`{"scope":"ordinary"}`), 0, uuid.NewString(), uuid.NewString(), envelope, time.Now().UTC(),
+		[]byte(`{"scope":"ordinary"}`), 0, runID, uuid.NewString(), envelope, time.Now().UTC(),
 	)
 
 	plan, err := eventBus.CheckPublishRecipientPlan(context.Background(), event)
@@ -2792,6 +2673,7 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		uuid.NewString(), "", envelope, eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil {
 		t.Fatalf("duplicate-ID root-input preflight error = %v, want typed admission refusal", err)
@@ -2800,16 +2682,20 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 		t.Fatalf("duplicate-ID root-input publish error = %v, want typed admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected duplicate-ID root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected duplicate-ID root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
 func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *testing.T) {
 	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
-	ordinary := routes.routes[routeResolutionKey{eventType: "ordinary/thing.created"}][0]
-	rootInput := routes.routes[routeResolutionKey{eventType: "validation/thing.created"}][0]
+	ordinaryDefinitions := routes.PubsubDeclarationDefinitionsFixture(t, "ordinary", "ordinary/thing.created")
+	rootDefinitions := routes.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created")
+	if len(ordinaryDefinitions) != 1 || len(rootDefinitions) != 1 {
+		t.Fatalf("exact scoped definitions: ordinary=%+v validation=%+v", ordinaryDefinitions, rootDefinitions)
+	}
+	ordinary, rootInput := ordinaryDefinitions[0], rootDefinitions[0]
 	event := eventtest.OperatorInjected(
 		uuid.NewString(), events.EventType("ordinary/thing.created"), "operator", "", nil, 0,
 		uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
@@ -2837,30 +2723,39 @@ func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *
 func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 	for _, explicitTarget := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicitTarget), func(t *testing.T) {
-			bundle := routedRootInputFlowNodeBundle()
-			addRoutedRootInputFlowNodeSibling(bundle)
-			source := semanticview.Wrap(bundle)
+			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
+				{id: ".", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
+				{id: "validation", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
+					"entity-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+				}},
+				{id: "audit", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
+					"audit-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+				}},
+			}, nil))
 			endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
 			if err != nil {
 				t.Fatal(err)
 			}
-			lifecycleStore := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+			lifecycleStore := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 			store := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
-			target := events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("api-private-owner")}
+			target := events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: runtimeflowidentity.EntityID("validation")}
 			store.setTargetOwnerRoutes(target)
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			runID, eventID := uuid.NewString(), uuid.NewString()
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			lifecycleStore.bus = eb
 			envelope := events.EventEnvelope{}
 			if explicitTarget {
 				envelope = events.EnvelopeForTargetRoute(envelope, target)
 			}
-			runID, eventID := uuid.NewString(), uuid.NewString()
 			store.setTargetOwnerRoutes(target, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)})
-			installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
+			installConnectionSourceConstructionForRun(t, eb, source, "validation", runID)
+			installConnectionSourceConstructionForRun(t, eb, source, "audit", runID)
 			evt := eventtest.OperatorInjectedWithRoutingSource(eventID, "thing.created", "operator", "", []byte("{}"), 0, runID, nil, envelope, eventtest.RootRoutingSource(runID), time.Now().UTC())
+			store.requireConstructionUnchanged(t)
 			plan, err := eb.CheckAPIEventPublishRecipientPlan(context.Background(), evt, &endpoint)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
 				t.Fatalf("API admission manufactured private delivery: %#v", plan)
@@ -2874,54 +2769,13 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			if !explicitTarget && publishErr != nil {
 				t.Fatal(publishErr)
 			}
-			if len(store.routes[eventID]) != 0 || len(store.flowRoutes) != 0 {
+			if len(store.routes[eventID]) != 0 {
 				t.Fatal("API admission created child delivery or receiver")
 			}
 			if explicitTarget && (len(store.events) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || store.completion.ResourceID != "") {
 				t.Fatal("rejected API target mutated persistence or completion")
 			}
 		})
-	}
-}
-
-func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContractBundle) {
-	audit := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			FlowPath:   "audit",
-			SchemaFile: "audit/schema.yaml", EventsFile: "audit/events.yaml",
-		},
-		Path: "audit",
-		Schema: runtimecontracts.FlowSchemaDocument{
-
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"entity-writer": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": existingOwnerHandlerFixture(),
-				},
-			},
-		},
-	}
-	validation := bundle.FlowTree.Root.Children[0]
-	bundle.FlowTree.Root.Children = []runtimecontracts.FlowContractView{validation, audit}
-	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{
-		".":          bundle.FlowTree.Root,
-		"validation": &bundle.FlowTree.Root.Children[0],
-		"audit":      &bundle.FlowTree.Root.Children[1],
-	}
-	bundle.FlowTree.ByPath = bundle.FlowTree.ByID
-	for index := range bundle.FlowTree.Root.Children {
-		bundle.FlowTree.Root.Children[index].Parent = bundle.FlowTree.Root
-	}
-	bundle.FlowSchemas["audit"] = audit.Schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
 	}
 }
 
@@ -2948,15 +2802,19 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 	}
 	ordinary := flow("ordinary")
 	validation := flow("validation")
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{ordinary, validation}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{ordinary, validation}}
+	for i := range root.Children {
+		root.Children[i].Parent = &root
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: sourceartifactfixture.Artifact(),
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"ordinary": &root.Children[0], "validation": &root.Children[1],
+				".": &root, "ordinary": &root.Children[0], "validation": &root.Children[1],
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
@@ -2967,37 +2825,10 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 		t.Fatalf("CompileWorkflowSemantics: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	ordinaryNode := testFlowNode(t, "ordinary", "shared-writer")
-	ordinaryHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, ordinaryNode)
+	routes, err := DeriveRouteTable(source)
 	if err != nil {
-		t.Fatalf("admit ordinary duplicate-ID handler: %v", err)
+		t.Fatal(err)
 	}
-	validationNode := testFlowNode(t, "validation", "shared-writer")
-	rootInputHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, validationNode)
-	if err != nil {
-		t.Fatalf("admit root-input duplicate-ID handler: %v", err)
-	}
-	routes := newRouteTable(source)
-	routes.routes = map[routeResolutionKey][]Subscriber{
-		{eventType: "ordinary/thing.created"}: {{
-			Recipient: events.MustNodeDeliveryRecipient(ordinaryNode), Path: "ordinary", MatchPattern: "thing.created",
-			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "thing.created", handlerNode: ordinaryNode,
-			targetHandler: ordinaryHandler,
-		}},
-		{eventType: "validation/thing.created"}: {{
-			Recipient: events.MustNodeDeliveryRecipient(validationNode), Path: "validation", MatchPattern: "thing.created",
-			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "thing.created", handlerNode: validationNode,
-			targetHandler: rootInputHandler,
-		}},
-	}
-	routes.patterns = nil
-	routes.eventPath = map[string]struct{}{"thing.created": {}}
-	for key, subscribers := range routes.routes {
-		for _, subscriber := range subscribers {
-			routes.patterns = append(routes.patterns, routePattern{EventPattern: key.eventType, Subscriber: subscriber})
-		}
-	}
-	routes.rebuildLocked()
 	return source, routes
 }
 
@@ -3021,7 +2852,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	resolved := rt.ResolveForRun(busInternalTestRunID, "item.received")
+	resolved := rt.PubsubDeclarationDefinitionsFixture(t, ".", "item.received")
 	if len(resolved) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one compiler-owned root subscription", resolved)
 	}
@@ -3118,7 +2949,7 @@ func TestRouteTablePrivateInputsDoNotAcquirePublicIngressAuthority(t *testing.T)
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
-			resolved := routes.ResolveForRun(busInternalTestRunID, tc.eventType)
+			resolved := routes.PubsubDeclarationDefinitionsFixture(t, tc.wantPath, tc.eventType)
 			wantCount := 1
 			if len(resolved) != wantCount {
 				t.Fatalf("Resolve(%s) = %#v, want %d exact roles", tc.eventType, resolved, wantCount)
@@ -3214,21 +3045,24 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, semanticview.Wrap(bundle), "producer")
+	installConnectionSourceConstruction(t, eb, semanticview.Wrap(bundle), "consumer")
 	sourceFact, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
 		FlowID:       "producer",
 		FlowInstance: "producer",
-		EntityID:     eventtest.UUID("parent-connect-producer"),
+		EntityID:     runtimeflowidentity.EntityID("producer"),
 	})
 	if err != nil {
 		t.Fatalf("build parent-connect routing source: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(), events.EventType("producer/work.ready"), "", "",
-		[]byte(`{"work_id":"work-1"}`), 0, "", "", events.EventEnvelope{}, sourceFact, time.Now().UTC(),
+		[]byte(`{"work_id":"work-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, sourceFact, time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -3349,10 +3183,11 @@ func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstructio
 	})
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+		eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: currentRunID}}})
 		if err != nil {
 			t.Fatalf("attempt %d NewEventBusWithOptions: %v", attempt, err)
 		}
+		store.requireConstructionUnchanged(t)
 		if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
 			t.Fatalf("attempt %d preflight error = %v", attempt, err)
 		}
@@ -3361,8 +3196,8 @@ func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstructio
 		}
 		_, persisted := store.events[eventID]
 		_, settled := store.settlements[eventID]
-		if persisted || len(store.routes[eventID]) != 0 || settled || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-			t.Fatalf("attempt %d wrong-run root target mutated event store: event=%t routes=%#v settled=%t scopes=%#v receipts=%#v flow_routes=%#v", attempt, persisted, store.routes[eventID], settled, store.scopes, store.receipts, store.flowRoutes)
+		if persisted || len(store.routes[eventID]) != 0 || settled || len(store.scopes) != 0 || len(store.receipts) != 0 {
+			t.Fatalf("attempt %d wrong-run root target mutated event store: event=%t routes=%#v settled=%t scopes=%#v receipts=%#v", attempt, persisted, store.routes[eventID], settled, store.scopes, store.receipts)
 		}
 	}
 }
@@ -3433,7 +3268,7 @@ func TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute(t *test
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.ResolveForRun(busInternalTestRunID, "thing.created")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, ".", "thing.created")
 	rootInput := 0
 	for _, subscriber := range got {
 		if subscriber.Recipient.LocalID() == "reviewer" && subscriber.Recipient.IsNode() && subscriber.Path == "." && subscriber.MatchPattern == "thing.created" && subscriber.RouteSourceCode() == "subscription" {
@@ -3549,20 +3384,6 @@ func (s rejectingDeliveryRouteStore) LoadFlowConstructionPublication(ctx context
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent rejecting-store root receipt")
 	}
 	return s.construction, nil
-}
-
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
-}
-
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, paths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
-	var selected []ActiveTargetDescriptor
-	for _, owner := range s.owners {
-		if slices.Contains(paths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
 }
 
 func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
@@ -3794,68 +3615,6 @@ func routedCallbackTemplateBundle(t testing.TB) *runtimecontracts.WorkflowContra
 	}
 	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "repo-scaffold"))
 	return compileRoutedNodeBundle(bundle)
-}
-
-func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle {
-	validation := runtimecontracts.FlowContractView{
-		Path:  "validation",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "validation"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"thing.reviewed": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"entity-writer": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.reviewed"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.reviewed": existingOwnerHandlerFixture(),
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{validation}}
-	return compileRoutedNodeBundle(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"validation": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"validation": {},
-		},
-	})
-}
-
-func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
-	child := runtimecontracts.FlowContractView{
-		Path:  "child",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"child.start": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"child-intake": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"child.start"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"child.start": existingOwnerHandlerFixture(),
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}}
-	return compileRoutedNodeBundle(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"child": {},
-		},
-	})
 }
 
 func compileRoutedNodeBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {

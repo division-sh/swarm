@@ -75,7 +75,8 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 					switch operation {
 					case "fork_materialization":
 						fork, err := owner.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
-						if err != nil || !fork.ExecutionReady || fork.MaterializedEntityCount != 1 {
+						// The shared fixture constructs the root and its keyed child.
+						if err != nil || !fork.ExecutionReady || fork.MaterializedEntityCount != 2 {
 							t.Fatalf("real fork materialization = %+v, %v", fork, err)
 						}
 					case "standalone_card_first":

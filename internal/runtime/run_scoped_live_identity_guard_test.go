@@ -80,12 +80,12 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 
 	routing := runScopedIdentityRead(t, root, "internal/runtime/bus/routing_derivation.go")
 	routingFields := strings.Join(strings.Fields(routing), " ")
-	for _, required := range []string{
-		"instanceOwners map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance",
-		"instanceEventPath map[runtimeflowidentity.RunScopedFlowInstance][]string",
+	for _, forbidden := range []string{
+		"instanceOwners ",
+		"instanceEventPath ",
 	} {
-		if !strings.Contains(routingFields, required) {
-			t.Errorf("RouteTable stopped keying process topology by exact live flow owner %q", required)
+		if strings.Contains(routingFields, forbidden) {
+			t.Errorf("RouteTable reintroduced mutable live-owner membership %q", forbidden)
 		}
 	}
 
@@ -155,7 +155,8 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 	for _, required := range []string{
 		"WHERE run_id = NEW.run_id AND flow_template",
 		"fi.run_id = NEW.run_id",
-		"fi.run_id = rr.run_id",
+		"m.run_id = fi.run_id AND m.instance_path = fi.instance_path AND m.entity_id = fi.entity_id",
+		"r.run_id = fi.run_id AND r.instance_path = fi.instance_path",
 		"fi.run_id = (SELECT run_id FROM events",
 	} {
 		if !strings.Contains(testSQL, required) {

@@ -6,26 +6,32 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
+	for owner, retired := range map[reflect.Type][]string{
+		reflect.TypeOf(RouteTable{}):              {"templateObservers"},
+		reflect.TypeOf(routeResolvedPattern{}):    {"SourceTemplatePath", "SourceLocalEvent", "RoutePath", "MatchPattern"},
+		reflect.TypeOf(routeSubscriberTemplate{}): {"IDTemplate"},
+	} {
+		for _, name := range retired {
+			if _, present := owner.FieldByName(name); present {
+				t.Errorf("compiled %s retains retired observer authority %s", owner, name)
+			}
+		}
+	}
 	files := parseBusProductionFiles(t)
 	requiredCalls := map[string]map[string]bool{
-		"routeTemplateSourceObserverKey": {
-			"resolvedSubscriberRoleKey": false,
-		},
-		"routePatternIdentity": {
-			"resolvedSubscriberRoleKey": false,
-		},
 		"appendUniqueSubscriber": {
 			"resolvedSubscriberRoleKey": false,
 		},
 		"dedupeSubscribers": {
 			"resolvedSubscriberRoleKey": false,
 		},
-		"deliveryPlanner.planAtGeneration": {
+		"deliveryPlanner.planRecipients": {
 			"planIndependentPubsubBranch":    false,
 			"composeIndependentPubsubBranch": false,
 		},
@@ -44,12 +50,29 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		},
 	}
 	forbiddenIdentifiers := map[string]struct{}{
-		"EventDeliveryTargetReader":  {},
-		"DeliveryTargets":            {},
-		"ListEventDeliveryTargets":   {},
-		"deliveryTargetsForManifest": {},
-		"deliveryTargetsForEvent":    {},
-		"cloneRouteTargetMap":        {},
+		"ActiveFlowInstanceDescriptor":             {},
+		"FlowInstanceRouteRecord":                  {},
+		"FlowInstanceRouteMaterializationRequest":  {},
+		"FlowInstanceRouteTopologyResult":          {},
+		"EffectiveSystemNodeSubscriptions":         {},
+		"templateObservers":                        {},
+		"routeTemplateSourceObserver":              {},
+		"addTemplateSourceObserverLocked":          {},
+		"materializeTemplateSourceObserversLocked": {},
+		"materializeTemplateSourceObserverLocked":  {},
+		"compiledRouteOwnerDependencies":           {},
+		"routeExecutableNodeDeclaration":           {},
+		"routeAgentDeclaration":                    {},
+		"pubsubObserverDeclarations":               {},
+		"SourceTemplatePath":                       {},
+		"SourceLocalEvent":                         {},
+		"SourceInstancePath":                       {},
+		"EventDeliveryTargetReader":                {},
+		"DeliveryTargets":                          {},
+		"ListEventDeliveryTargets":                 {},
+		"deliveryTargetsForManifest":               {},
+		"deliveryTargetsForEvent":                  {},
+		"cloneRouteTargetMap":                      {},
 	}
 
 	for path, file := range files {
