@@ -141,10 +141,10 @@ func expectSelectedCompletionRunLock(mock sqlmock.Sqlmock, postgres bool, state 
 
 func executeSelectedCompletionTest(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, owner runAuthorityOwner, now time.Time) (runtimerunlifecycle.CompletionResult, error) {
 	if postgres {
-		return (&RunLifecyclePostgresOwner{runAuthority: owner}).executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{})
+		return (&RunLifecyclePostgresOwner{runAuthority: owner}).executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{}, nil)
 	}
 	return (&RunLifecycleSQLiteOwner{runAuthority: owner, nowFn: func() time.Time { return now }}).
-		executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{})
+		executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{}, nil)
 }
 
 func TestSelectedCompletionBindAuthorityExactlyOnce(t *testing.T) {

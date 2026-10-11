@@ -15,10 +15,7 @@ import (
 // store catalog, lease, or later execution ownership.
 type observedSelectedJoinCatalog struct {
 	SelectedContractForkLifecycle
-	t       *testing.T
-	want    []string
-	scopes  []authoractivity.Scope
-	resolve func(authoractivity.Scope, string) (authoractivity.EventDescriptor, bool)
+	scopes []authoractivity.Scope
 }
 
 type selectedJoinCatalogSource struct{ semanticview.Source }
@@ -83,21 +80,5 @@ func (o *observedSelectedJoinCatalog) RegisterAuthorActivityEventCatalog(scope a
 		return nil, err
 	}
 	o.scopes = append(o.scopes, scope)
-	for _, name := range o.want {
-		got, found := o.resolve(scope, name)
-		if !found || got.Disposition != authoractivity.StoryDifferent {
-			o.t.Errorf("selected preparation omitted exact internal descriptor %s: %+v found=%v", name, got, found)
-		}
-		other := scope
-		other.RuntimeInstanceID += "-other"
-		if _, found := o.resolve(other, name); found {
-			o.t.Error("selected descriptor leaked to another runtime")
-		}
-		other = scope
-		other.BundleHash += "-other"
-		if _, found := o.resolve(other, name); found {
-			o.t.Error("selected descriptor leaked to another bundle")
-		}
-	}
 	return lease, nil
 }
