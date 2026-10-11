@@ -37487,6 +37487,9 @@ api_specification:
         a completed exact key does not require the original bundle to remain loaded. Eventless starts
         retain their exact run/root/feed activation responsibility without inventing an event or claim.
         First/replay returns the native recorded method result, not mutable run/feed reconstruction.
+        An acknowledged feed-only commit with an invalid returned receipt fails closed to the caller,
+        while the original accepted owner retains activation and joined disposition responsibility.
+        The invalid projection cannot authorize a success response or erase the committed obligation.
 
         '
       scope:

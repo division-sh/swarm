@@ -67,6 +67,7 @@ type deploymentRunStartProbeStore struct {
 	root         runtimepipeline.FlowInstanceActivationPlan
 	acknowledged bool
 	replay       bool
+	rejected     bool
 	fault        error
 	cancel       context.CancelFunc
 }
@@ -74,8 +75,32 @@ type deploymentRunStartProbeStore struct {
 func (s *deploymentRunStartProbeStore) CommitDeploymentRunCreation(_ context.Context, command DeploymentRunCreationCommand) (CommittedDeploymentRunCreation, error) {
 	s.calls++
 	s.got, s.root = command.RunCreation, command.Root.Plan
-	result := CommittedDeploymentRunCreation{Record: durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunCreation.RunID, Outcome: "created", Status: "running"}}, Acknowledged: s.acknowledged, Replay: s.replay}
-	if !s.replay {
+	items := make([]durabledata.RunCreationDataItem, 0, len(command.RunCreation.Data.Pins))
+	for _, selected := range command.RunCreation.Data.Pins {
+		items = append(items, durabledata.RunCreationDataItem{Kind: "pin", Pin: &durabledata.Pin{
+			RunID: command.RunCreation.RunID, RunState: "running", Declaration: selected.Declaration,
+			VersionID: selected.VersionID, Selection: "explicit",
+			SchemaDigest: "resource-schema-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}})
+	}
+	page := durabledata.FirstEvidencePage(items)
+	record := durabledata.RunCreationOperationRecord{
+		Summary: durabledata.RunCreationOperationSummary{
+			Kind: "run_creation", RunID: command.RunCreation.RunID, BundleHash: command.RunCreation.BundleHash,
+			Outcome: "created", Status: "running", PinCount: len(items),
+			CompletedAt: time.Now().UTC().Truncate(time.Microsecond), Rejection: durabledata.NoRunCreationRejection(),
+		},
+		Binding:  durabledata.DataBinding{State: "bound", RunID: command.RunCreation.RunID, PinCount: len(items), Evidence: &page},
+		Evidence: durabledata.RunCreationEvidence{RunBinding: items},
+	}
+	if s.rejected {
+		selected := command.RunCreation.Data.Pins[0]
+		record.Summary.Outcome, record.Summary.Status, record.Summary.PinCount = "data_rejected", "", 0
+		record.Summary.Rejection = durabledata.RunCreationRejection{State: "rejected", Code: durabledata.RunCreationRejectionVersionMissing, Declaration: &selected.Declaration, VersionID: selected.VersionID}
+		record.Binding, record.Evidence = durabledata.DataBinding{State: "none"}, durabledata.RunCreationEvidence{}
+	}
+	result := CommittedDeploymentRunCreation{Record: record, Acknowledged: s.acknowledged, Replay: s.replay}
+	if !s.replay && !s.rejected {
 		result.Activations = []runtimepipeline.CommittedFlowInstanceActivation{{Plan: command.Root.Plan, Created: true, ReadinessAttemptOrdinal: 1, Acknowledged: s.acknowledged}}
 	}
 	if s.cancel != nil {
@@ -89,17 +114,27 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 		name         string
 		acknowledged bool
 		replay       bool
+		rejected     bool
 		cancel       bool
+		fault        bool
 		wantCalls    int
 	}{
-		{"unknown-commit", false, false, false, 0},
-		{"acknowledged-cleanup-error", true, false, false, 1},
-		{"acknowledged-cancellation", true, false, true, 1},
-		{"permanent-receipt-replay", true, true, false, 0},
+		{name: "success", acknowledged: true, wantCalls: 1},
+		{name: "unknown-commit", fault: true},
+		{name: "unknown-commit-without-error"},
+		{name: "acknowledged-cleanup-error", acknowledged: true, fault: true, wantCalls: 1},
+		{name: "acknowledged-cancellation", acknowledged: true, cancel: true, fault: true, wantCalls: 1},
+		{name: "permanent-receipt-replay", acknowledged: true, replay: true},
+		{name: "permanent-receipt-replay-cleanup-error", acknowledged: true, replay: true, fault: true},
+		{name: "valid-rejected-receipt", acknowledged: true, rejected: true},
+		{name: "valid-rejected-replay", acknowledged: true, replay: true, rejected: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			fault := errors.New("deployment post-commit diagnostic")
-			store := &deploymentRunStartProbeStore{acknowledged: test.acknowledged, replay: test.replay, fault: fault}
+			var fault error
+			if test.fault {
+				fault = errors.New("deployment post-commit diagnostic")
+			}
+			store := &deploymentRunStartProbeStore{acknowledged: test.acknowledged, replay: test.replay, rejected: test.rejected, fault: fault}
 			source, _ := acknowledgedRootInputEndpoint(t)
 			bundle, _ := semanticview.Bundle(source)
 			bundle.Semantics.Version = "1"
@@ -143,7 +178,14 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 					t.Fatal("accepted deployment consequence did not finalize")
 				}
 			}
-			if !errors.Is(err, fault) || got.Record.Summary.RunID != command.RunID || calls != test.wantCalls || store.calls != 1 {
+			wantErr := fault
+			if !test.acknowledged {
+				wantErr = errors.Join(fault, errors.New("deployment run creation commit was not acknowledged"))
+			}
+			if validationErr := durabledata.ValidateRunCreationReceiptForCommand(got.Record, store.got); validationErr != nil {
+				t.Fatalf("mock returned an invalid canonical receipt: %v", validationErr)
+			}
+			if (err == nil) != (wantErr == nil) || (err != nil && err.Error() != wantErr.Error()) || got.Record.Summary.RunID != command.RunID || calls != test.wantCalls || store.calls != 1 {
 				t.Fatalf("commit evidence: result=%+v err=%v finalizations=%d commits=%d", got, err, calls, store.calls)
 			}
 		})
