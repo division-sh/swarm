@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -81,6 +82,53 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				}
 				f.requireCounts(t, 1)
 				f.requireCreationOccurrence(t, plan, 0)
+				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !found {
+					t.Fatal("restart requires its original source fact")
+				}
+				lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				index := f.store.(pipeline.FlowInstanceIndexReader)
+				original, found, err := index.LookupFlowInstance(f.ctx, lookup)
+				if err != nil || !found {
+					t.Fatalf("original native construction: found=%t err=%v", found, err)
+				}
+				originalHeader, err := original.WorkflowInstance()
+				if err != nil || originalHeader.CurrentState != "pending" || originalHeader.EnteredStageAt.IsZero() {
+					t.Fatalf("original construction lacks initial-entry evidence: %+v err=%v", originalHeader, err)
+				}
+				originalReceipt, found, err := original.NativeConstruction()
+				if err != nil || !found {
+					t.Fatalf("original immutable construction receipt: found=%t err=%v", found, err)
+				}
+				ledgerStore := exactFactStore{db: f.db, postgres: backend == "postgres"}
+				originalLedger := assertActualMutationLedger(t, f.ctx, ledgerStore, plan.Readiness.RunID, plan.Identity.EntityID)
+				if len(originalLedger) == 0 {
+					t.Fatal("original construction has no initial mutation evidence")
+				}
+				requireOriginalConstruction := func() {
+					t.Helper()
+					observed, found, err := index.LookupFlowInstance(f.ctx, lookup)
+					if err != nil || !found {
+						t.Fatalf("restart lost exact native construction: found=%t err=%v", found, err)
+					}
+					if err := observed.ValidateSelection(lookup); err != nil {
+						t.Fatal(err)
+					}
+					header, err := observed.WorkflowInstance()
+					if err != nil || !reflect.DeepEqual(header, originalHeader) {
+						t.Fatalf("restart changed initial construction/header: before=%+v after=%+v err=%v", originalHeader, header, err)
+					}
+					receipt, found, err := observed.NativeConstruction()
+					if err != nil || !found || !reflect.DeepEqual(receipt, originalReceipt) {
+						t.Fatalf("restart replaced immutable creating receipt: before=%+v after=%+v found=%t err=%v", originalReceipt, receipt, found, err)
+					}
+					if ledger := assertActualMutationLedger(t, f.ctx, ledgerStore, plan.Readiness.RunID, plan.Identity.EntityID); !reflect.DeepEqual(ledger, originalLedger) {
+						t.Fatal("restart repeated construction or initial-entry mutations")
+					}
+				}
 				if boundary == "numeric_substitution" {
 					binding, err := f.grant.ProcessExecutionBinding()
 					if err != nil {
@@ -117,6 +165,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					}
 					f.requireCreationOccurrence(t, plan, 0)
 					f.requireConfig(t, plan)
+					requireOriginalConstruction()
 					return
 				}
 				if err := f.manager.Shutdown(); err != nil {
@@ -140,6 +189,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					}
 					f.requireCreationOccurrence(t, plan, want)
 					f.requireConfig(t, plan)
+					requireOriginalConstruction()
 					if removeFault != nil {
 						removeFault()
 					}
@@ -156,21 +206,14 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					restarted.requireCounts(t, 1)
 					restarted.requireConfig(t, plan)
 					restarted.requireCreationOccurrence(t, plan, 1)
+					requireOriginalConstruction()
 				}
 				agents, err := f.store.LoadAgents(f.ctx)
 				if err != nil || len(agents) != 1 {
 					t.Fatalf("restarted agents=%d err=%v", len(agents), err)
 				}
 				requireNativeReceiverAgentCarrier(t, agents[0].Config)
-				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
-				if !found {
-					t.Fatal("restart requires its original source fact")
-				}
-				lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()})
-				if err != nil {
-					t.Fatal(err)
-				}
-				observed, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+				observed, found, err := index.LookupFlowInstance(f.ctx, lookup)
 				if err != nil || !found || observed.Identity() != plan.Identity || observed.InstanceKey() != plan.Instance.InstanceKey {
 					t.Fatalf("restart lost exact native construction: %+v found=%t err=%v", observed.Identity(), found, err)
 				}
