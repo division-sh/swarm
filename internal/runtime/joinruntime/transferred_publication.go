@@ -20,18 +20,31 @@ type TransferredPublication struct {
 	ExecutionMode  executionmode.Mode `json:"execution_mode"`
 }
 
-func (p TransferredPublication) Validate(ref timeridentity.JoinRef) error {
+func (p TransferredPublication) Validate(runID string, ref timeridentity.JoinRef) error {
 	entry := ref.StageEntry()
-	if !ref.Valid() || ref.Mode() != timeridentity.JoinRefModeArrival || entry.Empty() || entry.FlowScope != ref.FlowPath() {
-		return fmt.Errorf("transferred publication requires its exact arrival stage entry")
+	if !ref.Valid() {
+		return fmt.Errorf("transferred publication requires its exact join owner")
 	}
-	for _, value := range []string{entry.RunID, p.EventID, p.SourceRunID, p.SourceEventID} {
+	switch ref.Mode() {
+	case timeridentity.JoinRefModeArrival:
+		if entry.Empty() || entry.RunID != runID || entry.FlowScope != ref.FlowPath() {
+			return fmt.Errorf("transferred publication requires its exact arrival stage entry")
+		}
+	case timeridentity.JoinRefModeFanOutDelivery:
+		intent, valid := ref.FanOutDelivery()
+		if !valid || intent.TriggeringDeliveryID() == "" {
+			return fmt.Errorf("transferred publication requires its exact fan-out intent")
+		}
+	default:
+		return fmt.Errorf("transferred publication join kind is unsupported")
+	}
+	for _, value := range []string{runID, p.EventID, p.SourceRunID, p.SourceEventID} {
 		id, err := uuid.Parse(value)
 		if err != nil || id == uuid.Nil || id.String() != value {
 			return fmt.Errorf("transferred publication requires canonical nonzero run and event UUIDs")
 		}
 	}
-	if p.SourceRunID == entry.RunID || p.EventID != activityidentity.ForkLineageEventID(entry.RunID, p.SourceEventID) {
+	if p.SourceRunID == runID || p.EventID != activityidentity.ForkLineageEventID(runID, p.SourceEventID) {
 		return fmt.Errorf("transferred publication requires distinct source run and deterministic destination event")
 	}
 	if p.AuthorityStamp == "" || p.AuthorityStamp != strings.TrimSpace(p.AuthorityStamp) || !p.ExecutionMode.Valid() {

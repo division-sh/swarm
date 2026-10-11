@@ -117,7 +117,7 @@ func (a Activation) Validate() error {
 		return fmt.Errorf("join activation requires one valid typed timer handle")
 	}
 	if a.TransferredPublication != nil {
-		if err := a.TransferredPublication.Validate(a.JoinRef()); err != nil {
+		if err := a.TransferredPublication.Validate(a.JoinRef().StageEntry().RunID, a.JoinRef()); err != nil {
 			return err
 		}
 	}

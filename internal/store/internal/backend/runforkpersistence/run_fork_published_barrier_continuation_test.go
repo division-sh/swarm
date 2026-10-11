@@ -2,7 +2,9 @@ package runforkpersistence
 
 import (
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -49,6 +51,64 @@ func TestPublishedBarrierContinuationPreservesOriginalOccurrenceWithoutRearming(
 			}
 			if source.ValidateForkJoinRestorationSource() == nil {
 				t.Fatal("transferred publication authorized rearming its fired source")
+			}
+		})
+	}
+}
+
+func TestPublishedBarrierContinuationRejectsChangedFrozenEvidence(t *testing.T) {
+	for _, change := range []string{"due", "mode", "summary", "extra_payload", "event", "authority"} {
+		t.Run(change, func(t *testing.T) {
+			snapshot, obligations := publishedBarrierEvidenceFixture(t, false, executionmode.Live, deliverylifecycle.StatusPending,
+				fanoutbarrier.Summary{Total: 2, Succeeded: 1, DeadLettered: 1}, attemptgeneration.Generation{})
+			source, err := projectRunForkGenericActivation(snapshot.Timers[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, _, err := runForkPublishedFanOutBarrierEvidence(snapshot, *obligations[0].Barrier, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child := source.Command
+			child.RunID = uuid.NewString()
+			switch change {
+			case "due":
+				child.Due = genericschedule.AbsoluteDue(child.Due.Absolute.Add(time.Second))
+			case "mode":
+				child.ExecutionMode = executionmode.Mock
+			case "summary", "extra_payload":
+				payload := child.Payload.Interface().(map[string]any)
+				if change == "summary" {
+					payload["join"] = (fanoutbarrier.Summary{Total: 2, Succeeded: 2}).Context()
+				} else {
+					payload["invented_authority"] = true
+				}
+				child.Payload, err = canonicaljson.FromGo(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			continuation, err := genericschedule.ProjectPublishedJoinContinuation(source, original.Event(), child)
+			if change != "event" && change != "authority" {
+				if err == nil || continuation.Present() {
+					t.Fatal("changed barrier meaning accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			publication, err := continuation.RetainedPublication("exact-selected-owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change == "event" {
+				publication.EventID = uuid.NewString()
+			} else {
+				publication.AuthorityStamp = ""
+			}
+			if err := (genericschedule.TransferredJoinOccurrence{Command: child, Publication: publication}).Validate(); err == nil {
+				t.Fatal("invalid retained publication accepted")
 			}
 		})
 	}

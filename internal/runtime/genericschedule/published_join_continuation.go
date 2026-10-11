@@ -53,6 +53,9 @@ func validatePublishedJoinContinuationProjection(source, child AdmissionCommand)
 	if err != nil {
 		return err
 	}
+	if sourceRef.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+		return validatePublishedBarrierContinuation(source, child, sourceRef, childRef)
+	}
 	return validatePublishedJoinContinuationSemantics(source, child, sourceRef, childRef)
 }
 
@@ -88,17 +91,42 @@ func publishedJoinContinuationRefs(source, child AdmissionCommand) (timeridentit
 	}
 	sourceHandle, sourceRef, sourceOK := timeridentity.ParseJoinHandle(sourcePayload)
 	childHandle, childRef, childOK := timeridentity.ParseJoinHandle(childPayload)
-	if !sourceOK || !childOK || sourceRef.Mode() != timeridentity.JoinRefModeArrival || childRef.Mode() != timeridentity.JoinRefModeArrival ||
-		sourceHandle.Kind() != childHandle.Kind() || !sourceRef.Declaration().Equal(childRef.Declaration()) {
-		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, fmt.Errorf("published join continuation requires the same exact arrival declaration and handle kind")
+	if !sourceOK || !childOK || sourceRef.Mode() != childRef.Mode() || sourceHandle.Kind() != childHandle.Kind() {
+		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, fmt.Errorf("published join continuation requires the same exact join kind")
 	}
-	if err := validateExactWorkflowJoinAdmissionCommand(source, sourceHandle); err != nil {
+	if sourceRef.Mode() == timeridentity.JoinRefModeArrival && !sourceRef.Declaration().Equal(childRef.Declaration()) {
+		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, fmt.Errorf("published arrival continuation requires its original declaration")
+	}
+	if err := validateExactJoinContinuationCommand(source, sourceHandle); err != nil {
 		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, err
 	}
-	if err := validateExactWorkflowJoinAdmissionCommand(child, childHandle); err != nil {
+	if err := validateExactJoinContinuationCommand(child, childHandle); err != nil {
 		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, err
 	}
 	return sourceRef, childRef, nil
+}
+
+func validatePublishedBarrierContinuation(source, child AdmissionCommand, before, after timeridentity.JoinRef) error {
+	original, originalOK := before.FanOutDelivery()
+	projected, projectedOK := after.FanOutDelivery()
+	if !originalOK || !projectedOK || before.Node() != after.Node() || before.HandlerEvent() != after.HandlerEvent() || before.JoinID() != after.JoinID() ||
+		!original.DeclarationIdentity().Equal(projected.DeclarationIdentity()) || original.TriggeringDeliveryID() != projected.TriggeringDeliveryID() {
+		return fmt.Errorf("published barrier continuation changes its exact intent or outcome declaration")
+	}
+	beforeGeneration, afterGeneration := before.Generation(), after.Generation()
+	if beforeGeneration.Valid() != afterGeneration.Valid() || beforeGeneration.FlowID != afterGeneration.FlowID || beforeGeneration.LoopID != afterGeneration.LoopID ||
+		beforeGeneration.RevisionField != afterGeneration.RevisionField || beforeGeneration.Attempt != afterGeneration.Attempt {
+		return fmt.Errorf("published barrier continuation changes retained generation meaning")
+	}
+	originalSummary, err := joinContinuationBarrierSummary(source)
+	if err != nil {
+		return err
+	}
+	projectedSummary, err := joinContinuationBarrierSummary(child)
+	if err != nil || originalSummary != projectedSummary {
+		return fmt.Errorf("published barrier continuation changes its frozen terminal summary")
+	}
+	return nil
 }
 
 func validatePublishedJoinContinuationSemantics(source, child AdmissionCommand, sourceRef, childRef timeridentity.JoinRef) error {

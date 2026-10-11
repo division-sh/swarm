@@ -333,7 +333,7 @@ func TestTransferredJoinPublicationRejectsHostileCoordinates(t *testing.T) {
 			case "mode":
 				changed.ExecutionMode = "invalid"
 			}
-			if err := changed.Validate(join.JoinRef()); err == nil {
+			if err := changed.Validate(join.JoinRef().StageEntry().RunID, join.JoinRef()); err == nil {
 				t.Fatal("hostile publication coordinates accepted")
 			}
 			join.TransferredPublication = &changed
@@ -344,7 +344,7 @@ func TestTransferredJoinPublicationRejectsHostileCoordinates(t *testing.T) {
 	}
 	_, occurrence, _ := transferredJoinOccurrenceFixture(t, "orders", timeridentity.TimerHandleJoinTimeout, executionmode.Live)
 	_, ref, _ := timeridentity.ParseJoinHandle(occurrence.Command.Payload.Interface().(map[string]any))
-	if occurrence.Publication.Validate(timeridentity.JoinRef{}) == nil || occurrence.Publication.Validate(ref.Declaration()) == nil {
+	if occurrence.Publication.Validate(occurrence.Command.RunID, timeridentity.JoinRef{}) == nil || occurrence.Publication.Validate(occurrence.Command.RunID, ref.Declaration()) == nil {
 		t.Fatal("publication coordinates accepted without an exact arrival stage entry")
 	}
 	entry := ref.StageEntry()
@@ -353,7 +353,7 @@ func TestTransferredJoinPublicationRejectsHostileCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if occurrence.Publication.Validate(ref) == nil {
+	if occurrence.Publication.Validate(entry.RunID, ref) == nil {
 		t.Fatal("publication accepted a nil current run UUID")
 	}
 }

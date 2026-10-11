@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 )
 
-// TransferredJoinOccurrence is non-executable retained arrival evidence. It
+// TransferredJoinOccurrence is non-executable retained join evidence. It
 // neither admits a schedule nor proves historical event or delivery membership.
 type TransferredJoinOccurrence struct {
 	Command     AdmissionCommand
@@ -39,17 +39,17 @@ func (o TransferredJoinOccurrence) Validate() error {
 	command := o.Command.Canonical()
 	payload, object := command.Payload.Interface().(map[string]any)
 	if !object {
-		return fmt.Errorf("transferred occurrence requires an object arrival handle")
+		return fmt.Errorf("transferred occurrence requires an object join handle")
 	}
 	handle, ref, valid := timeridentity.ParseJoinHandle(payload)
-	if !valid || ref.Mode() != timeridentity.JoinRefModeArrival || command.OwnerKind != OwnerSystem ||
+	if !valid || command.OwnerKind != OwnerSystem ||
 		command.Due.Kind != DueAbsolute || command.ReplyContext != "" || command.ExecutionMode != o.Publication.ExecutionMode {
-		return fmt.Errorf("transferred occurrence requires exact one-shot arrival owner, due and mode without reply authority")
+		return fmt.Errorf("transferred occurrence requires exact one-shot join owner, due and mode without reply authority")
 	}
-	if err := o.Publication.Validate(ref); err != nil {
+	if err := o.Publication.Validate(command.RunID, ref); err != nil {
 		return err
 	}
-	return validateExactWorkflowJoinAdmissionCommand(command, handle)
+	return validateExactJoinContinuationCommand(command, handle)
 }
 
 // Project consumes correspondence only. It does not assert that the source
