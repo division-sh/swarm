@@ -13,7 +13,8 @@ import (
 
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
-	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
@@ -273,7 +274,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	if err != nil {
 		t.Fatalf("generate selected-store schema plans: %v", err)
 	}
-	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(context.Background(), sqlitePath)
+	selected, err := selectedtest.OpenProcessLeaseFixture(context.Background(), backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: sqlitePath}, "")
 	if err != nil {
 		t.Fatalf("open selected SQLite store: %v", err)
 	}
