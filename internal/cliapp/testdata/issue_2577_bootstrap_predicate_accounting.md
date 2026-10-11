@@ -211,3 +211,11 @@ The both-store `-race` journey passes at this checkpoint. Earlier native receipt
 wait timeouts, including a captured private-database fsync stack, remain retained
 as qualification evidence; this passing run alone is not a causal latency repair
 or deadline waiver. Physical provider interoperability is still unqualified.
+
+`TestSessionLogoutReservationIsolatesSameAccountSiblingBothStores` reserves two
+distinct connections through the canonical operation owner, without copied rows.
+Logout retires only its original connection; the same-account sibling's complete
+operation stays unchanged and does not inherit pending cleanup possession. A
+cross-connection destruction target is refused with no second responsibility.
+This is selected-store isolation proof, not an assertion that metadata alone
+grants native execution or that competing physical registrations are supported.
