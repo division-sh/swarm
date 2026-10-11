@@ -74,3 +74,74 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 		})
 	}
 }
+
+func TestNativeRootForkMilestoneSuccessorRejectsHostileCuts(t *testing.T) {
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var selected *recipe
+	for i := range rows {
+		if rows[i].Function == "runLifecycleRootForkPolicy" {
+			if selected != nil {
+				t.Fatal("ambiguous root-fork successor")
+			}
+			selected = &rows[i]
+		}
+	}
+	if selected == nil || selected.Successor == "" || selected.Removed || selected.Mechanical != nil {
+		t.Fatal("root-fork successor changed its migration identity")
+	}
+	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+	const gate = "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n"
+	const snapshot = "\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n"
+	const fork = "\t\t\trequireServedJSONRPCResult(t, rt.Endpoint, \"run.fork\", params, &fork)\n"
+	withoutGate := strings.Replace(actual, gate, "", 1)
+	mutants := map[string]string{
+		"missing":         withoutGate,
+		"duplicate":       strings.Replace(actual, gate, gate+gate, 1),
+		"wrong_run":       strings.Replace(actual, gate, strings.Replace(gate, "seed.RunID", "frontier.RunID", 1), 1),
+		"wrong_event":     strings.Replace(actual, gate, strings.Replace(gate, "frontier.EventID", "seed.EventID", 1), 1),
+		"after_snapshot":  strings.Replace(withoutGate, snapshot, snapshot+gate, 1),
+		"after_fork":      strings.Replace(withoutGate, fork, fork+gate, 1),
+		"assertion":       strings.Replace(actual, "fork.ExecutedEventCount != 1", "fork.ExecutedEventCount != 0", 1),
+		"source_identity": strings.Replace(actual, "\"source_run_id\": seed.RunID", "\"source_run_id\": frontier.RunID", 1),
+	}
+	if err := validateRootForkMilestoneSuccessor(*selected, actual); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutant := range mutants {
+		t.Run(name, func(t *testing.T) {
+			if mutant == actual || validateRootForkMilestoneSuccessor(*selected, mutant) == nil {
+				t.Fatal("changed temporal cut or business assertion accepted")
+			}
+		})
+	}
+}
+
+func validateRootForkMilestoneSuccessor(row recipe, actual string) error {
+	want, err := canonicalFunction(row.Successor)
+	if err != nil {
+		return err
+	}
+	got, err := canonicalFunction(actual)
+	if err != nil || got != want {
+		return fmt.Errorf("actual root-fork function differs from exact successor: %v", err)
+	}
+	const gate = "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n"
+	publication := strings.Index(actual, "frontier := requireServedEventPublishRPCResult")
+	observation := strings.Index(actual, gate)
+	snapshot := strings.Index(actual, "before := lifecycleStoredSnapshot(t, rt, seed.RunID)")
+	if strings.Count(actual, gate) != 1 || publication < 0 || observation <= publication || snapshot <= observation {
+		return fmt.Errorf("exact frontier gate is not between publication and snapshot")
+	}
+	before, err := canonicalFunction(row.After)
+	if err != nil {
+		return err
+	}
+	restored, err := canonicalFunction(strings.Replace(actual, gate, "", 1))
+	if err != nil || restored != before {
+		return fmt.Errorf("root-fork setup or assertions changed beyond the one gate: %v", err)
+	}
+	return nil
+}
