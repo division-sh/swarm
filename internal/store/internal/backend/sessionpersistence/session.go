@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,6 +28,12 @@ type Owner struct {
 }
 
 func Open(ctx context.Context, path, expectedAccount string, nonempty bool) (*Owner, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("WhatsApp private database requires a caller context")
+	}
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
 	region := trace.StartRegion(ctx, "whatsapp.private.open")
 	defer region.End()
 	owner, err := openDatabase(path)
@@ -37,6 +44,9 @@ func Open(ctx context.Context, path, expectedAccount string, nonempty bool) (*Ow
 		_, err = owner.CurrentDevice(ctx, expectedAccount)
 	} else if expectedAccount != "" {
 		err = ErrSessionAccount
+	}
+	if err == nil {
+		err = owner.configureDurability(ctx)
 	}
 	if err == nil {
 		trace.WithRegion(ctx, "whatsapp.private.sdk-upgrade", func() {
@@ -64,6 +74,32 @@ func openDatabase(path string) (*Owner, error) {
 }
 
 func (o *Owner) Close() error { return o.db.Close() }
+
+func (o *Owner) configureDurability(ctx context.Context) error {
+	if ctx == nil || o == nil || o.db == nil {
+		return fmt.Errorf("WhatsApp private durability requires its database and caller context")
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	region := trace.StartRegion(ctx, "whatsapp.private.durability")
+	defer region.End()
+	var journal string
+	if err := o.db.QueryRowContext(ctx, `PRAGMA journal_mode=WAL`).Scan(&journal); err != nil {
+		return err
+	}
+	var synchronous, foreignKeys int
+	if err := o.db.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous); err != nil {
+		return err
+	}
+	if err := o.db.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		return err
+	}
+	if journal != "wal" || synchronous != 2 || foreignKeys != 1 {
+		return fmt.Errorf("WhatsApp private database requires WAL, FULL durability and foreign keys")
+	}
+	return nil
+}
 
 func (o *Owner) CurrentDevice(ctx context.Context, expectedAccount string) (*store.Device, error) {
 	region := trace.StartRegion(ctx, "whatsapp.private.current-device")
@@ -157,6 +193,9 @@ func OpenSDKFixture(ctx context.Context, path string) (*Owner, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := owner.configureDurability(ctx); err != nil {
+		return nil, errors.Join(err, owner.Close())
+	}
 	if err := owner.container.Upgrade(ctx); err != nil {
 		return nil, errors.Join(err, owner.Close())
 	}
@@ -167,5 +206,12 @@ func OpenCaptureFixture(path string) (*Owner, error) {
 	if err := openFixtureFile(path); err != nil {
 		return nil, err
 	}
-	return openDatabase(path)
+	owner, err := openDatabase(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := owner.configureDurability(context.Background()); err != nil {
+		return nil, errors.Join(err, owner.Close())
+	}
+	return owner, nil
 }
