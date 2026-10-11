@@ -66,7 +66,9 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
 				var rawFields string
-				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='sink/tail' AND current_state='done'`, started.RunID).Scan(&rawFields); err != nil {
+				if err := rt.DB.QueryRow(`SELECT CAST(es.fields AS TEXT) FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='sink/tail' AND fi.current_state='done'`, started.RunID, flowidentity.EntityID("sink/tail")).Scan(&rawFields); err != nil {
 					t.Fatal(err)
 				}
 				var fields map[string]any
