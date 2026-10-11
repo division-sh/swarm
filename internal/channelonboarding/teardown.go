@@ -165,6 +165,7 @@ type TeardownStore interface {
 	ListChannelTeardowns(context.Context) ([]TeardownOperation, error)
 	RetireChannelTeardownAuthority(context.Context, RetireTeardownAuthorityRequest) (TeardownOperation, error)
 	CompleteChannelTeardown(context.Context, CompleteTeardownRequest) (TeardownOperation, error)
+	RecoverUnlaunchedChannelLogout(context.Context, string, int64, time.Time) (TeardownOperation, error)
 }
 
 type DestructiveStore interface {
@@ -384,10 +385,10 @@ func (s *DestructiveService) Recover(ctx context.Context) error {
 		case TeardownContextRetirement:
 			_, err = s.RetireContext(resumeCtx, op.Scope.BundleHash, op.Scope.ContextPublicationGeneration, op.RequestKeyHash, op.RequestHash, "runtime_context_retired")
 		case TeardownLogout:
-			// Only the effect journal can recover unlink evidence. The prior
-			// process's SDK occurrence cannot be reconstructed or redispatched
-			// by destructive startup recovery, including before authorization.
-			continue
+			// Existing journal evidence stays with its effect owner. Only an
+			// irreversibly withdrawn original with no authorization can close
+			// here; no SDK occurrence is reconstructed or redispatched.
+			_, err = s.store.RecoverUnlaunchedChannelLogout(ctx, op.TeardownID, op.Revision, s.now().UTC())
 		default:
 			err = fmt.Errorf("%w: unsupported teardown kind %q", ErrConflict, op.Kind)
 		}

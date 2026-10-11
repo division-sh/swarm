@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -98,7 +99,13 @@ func SettleLogoutEffectTx(ctx context.Context, tx *sql.Tx, s effects.Settlement,
 	if op.Phase != domain.TeardownAuthorityRetired || op.Revision != s.Authority.ChannelLogout.TeardownRevision {
 		return domain.ErrRevisionConflict
 	}
-	now := canonicalTime(s.Now)
+	return settleLogoutResultTx(ctx, tx, d, op, phase, code, message, s.Now)
+}
+
+func settleLogoutResultTx(ctx context.Context, tx *sql.Tx, d dialect, op domain.TeardownOperation,
+	phase domain.TeardownPhase, code, message string, at time.Time,
+) error {
+	now := canonicalTime(at)
 	result, err := tx.ExecContext(ctx, d.bind(`UPDATE channel_onboarding_teardowns
 		SET phase=?,teardown_revision=teardown_revision+1,failure_code=?,failure_message=?,updated_at=?,completed_at=?
 		WHERE teardown_id=? AND teardown_revision=? AND phase='authority_retired'`),
