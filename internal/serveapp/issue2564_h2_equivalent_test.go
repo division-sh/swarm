@@ -1118,8 +1118,10 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 					t.Fatalf("H2 requires one root plus six real keyed-child constructions: %d %v", constructions, err)
 				}
 				accepted := issue2564H2Bumps(t, rt, seed, workload.bumps, workload.rate)
-				issue2564H2AdmissionEvidence(t, first.output.String(), accepted)
 				rt.waitDeliveries(t, seed.RunID)
+				// Native ACK may precede EventPersisted. The existing exact delivery
+				// settlement boundary follows that observer and bounds this assertion.
+				issue2564H2AdmissionEvidence(t, first.output.String(), accepted)
 				before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 				issue2564H2Deliveries(t, rt, seed.RunID, accepted, workload.bumps+6)
 				issue2564H2CommittedStageEvidence(t, rt, seed.RunID, accepted)
