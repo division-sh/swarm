@@ -41543,6 +41543,10 @@ managed_external_effect_authority:
       declared actor/configuration/entity expectation. The native attempt and unpublished occurrence are rechecked
       after observation. This neither extends the original frozen catalog nor authorizes an unknown instance from
       its declaration; the existing construction/attachment and delivery owners retain execution authority.
+      Before observing a probing actor, initial or later, the retained selected workspace's existing lifecycle
+      owner initializes its prerequisites and system workspaces exactly once. An empty or API-only initial census
+      does not eagerly initialize future workspaces. Initialization never touches the source workspace; cancellation,
+      failure or release refuses observation through that same owner without weakening the post-observation checks.
       Non-executing host admission may create only its owned workspace root. Selected preparation requires exact
       receipts for every admitted subprocess descriptor, including mock, and preserves its closed actor census;
       an API descriptor does not acquire a fictional subprocess receipt. A complete native worker response retains
