@@ -1,0 +1,5 @@
+start:
+  execution_type: system_node
+  subscribes_to: [notice.requested]
+  event_handlers:
+    notice.requested: {}
