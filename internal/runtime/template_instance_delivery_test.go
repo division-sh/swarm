@@ -135,7 +135,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
 		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
 		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg,
 	})

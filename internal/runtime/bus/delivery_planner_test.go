@@ -304,7 +304,7 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
+	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-scope-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), []deliveryRecipientCandidate{
+	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("internal-subscribers-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC()), []deliveryRecipientCandidate{
 		{ID: "workflow-runtime", PersistAsDelivery: false},
 		{ID: "node:scan-orchestrator", PersistAsDelivery: false},
 		{ID: "agent-a", PersistAsDelivery: true},
@@ -370,7 +370,7 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				selected.EntityID = ""
 			}
 			policy := deliveryRecipientPolicy{
-				semanticSource: deliveryPlannerHandlerSource(false),
+				semanticSource: connectRoutePlanRootProducerSingletonSource(t),
 				loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 					descriptors := make(map[agentidentity.Identity]ActiveAgentDescriptor)
 					if !test.registered.IsZero() {
@@ -383,8 +383,8 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				},
 				requireTargetOwners: true,
 			}
-			evt := eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, selected), time.Time{})
-			manifest, err := policy.Evaluate(context.Background(), evt, []deliveryRecipientCandidate{{
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("constructed-static-publication"), "task.completed", "operator", "", nil, 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, selected), time.Now().UTC())
+			manifest, err := policy.Evaluate(admittedAgentConstructionContext(t, policy.semanticSource, runID), evt, []deliveryRecipientCandidate{{
 				ID: "reviewer", AgentIdentity: identity, PersistAsDelivery: true, AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
 			}})
 			if err != nil || len(manifest.DeliveryRoutes) != test.want {
@@ -412,7 +412,7 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 
 func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 	source := connectRoutePlanRootProducerSingletonSource(t)
-	identity := agentidentitytest.Declared(t, "reviewer", "implicit-source", "review", "one", "review/one")
+	identity := agentidentitytest.Declared(t, "reviewer", "implicit-source", "consumer", "consumer", "consumer")
 	nodeEntity := eventtest.UUID("constructed-node-owner")
 	for _, test := range []struct {
 		name     string
@@ -424,19 +424,20 @@ func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 		{"entityless", identity, "", false, 1},
 		{"same_entity", identity, nodeEntity, false, 1},
 		{"foreign_entity", identity, eventtest.UUID("foreign-entity"), false, 0},
-		{"foreign_run", agentidentitytest.DeclaredForRun(t, eventtest.UUID("foreign-run"), "reviewer", "implicit-source", "review", "one", "review/one"), "", false, 0},
-		{"foreign_instance", agentidentitytest.Declared(t, "reviewer", "implicit-source", "review", "two", "review/two"), "", false, 0},
+		{"foreign_run", agentidentitytest.DeclaredForRun(t, eventtest.UUID("foreign-run"), "reviewer", "implicit-source", "consumer", "consumer", "consumer"), "", false, 0},
+		{"foreign_instance", agentidentitytest.Declared(t, "reviewer", "implicit-source", "consumer", "two", "consumer/two"), "", false, 0},
 		{"explicit_entity_cannot_be_erased", identity, "", true, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			agents := map[agentidentity.Identity]ActiveAgentDescriptor{test.identity: {Identity: test.identity, EntityID: test.entity}}
 			projection := selectedRunTargetOwnerProjection{agentsAvailable: true, agents: agents, required: true, source: source}
-			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: nodeEntity}}
+			projection.context = admittedAgentConstructionContext(t, source, identity.RunID)
+			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: nodeEntity}}
 			envelope := events.EventEnvelope{}
 			if test.explicit {
 				envelope = events.EnvelopeForTargetRoute(envelope, local.route)
 			}
-			evt := eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, identity.RunID, "", envelope, time.Time{})
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("implicit-local-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, envelope, time.Now().UTC())
 			candidates := []deliveryRecipientCandidate{{ID: test.identity.AgentID(), AgentIdentity: test.identity, PersistAsDelivery: true}}
 			got, err := filterDeliveryRecipientCandidates(source, evt, candidates, agents, nil, projection, local)
 			if err != nil || len(got.DeliveryRoutes) != test.want {
