@@ -274,7 +274,12 @@ type activityForkSourceEvidence struct {
 func readActivityForkSourceEvidence(t *testing.T, db activityForkFixtureDB, runID, entityID, requestID string) activityForkSourceEvidence {
 	t.Helper()
 	var out activityForkSourceEvidence
-	if err := db.QueryRowContext(context.Background(), `SELECT flow_instance,entity_type,current_state,fields,accumulator FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID).Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator); err != nil {
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT es.flow_instance, es.entity_type, fi.current_state, es.fields, fi.accumulator
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+		WHERE es.run_id=$1::uuid AND es.entity_id=$2::uuid
+	`, runID, entityID).Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRowContext(context.Background(), `SELECT payload_bytes FROM events WHERE event_id=$1::uuid AND run_id=$2::uuid`, requestID, runID).Scan(&out.Payload); err != nil {
@@ -544,8 +549,12 @@ func seedSelectedContractActivityLoop(t *testing.T, db activityForkFixtureDB, ru
 	accumulator := selectedContractActivityJSON(t, buckets)
 	handlerLoops := selectedContractActivityJSON(t, buckets[loopruntime.BucketKey])
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID, accumulator); err != nil {
+	result, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID, accumulator)
+	if err != nil {
 		t.Fatalf("seed source loop accumulator: %v", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		t.Fatalf("seed source loop accumulator affected %d headers, want 1: %v", affected, err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
