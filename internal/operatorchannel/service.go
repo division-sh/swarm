@@ -119,6 +119,12 @@ func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Bi
 		}
 		admitted, current, err := proof.ProviderAuthority.AdmitExecution(ctx, s.credentials)
 		if err != nil {
+			if ctx.Err() != nil {
+				return Principal{}, nil, errors.Join(err, ctx.Err())
+			}
+			if knownUnavailableSession(proof.ProviderAuthority, err) {
+				continue
+			}
 			return Principal{}, nil, fmt.Errorf("observe provider credential for retained proof: %w", err)
 		}
 		if !current {
