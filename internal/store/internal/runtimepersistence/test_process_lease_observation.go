@@ -10,7 +10,7 @@ import (
 // Witness the original constructed backend, even if its filesystem path changed.
 func ReadProcessGenerationCardinalityForTest(ctx context.Context, selected any) (rows, generation int, err error) {
 	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*), generation FROM runtime_process_generation GROUP BY generation`).Scan(&rows, &generation)
+		return tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runtime_process_generation), generation FROM runtime_process_generation WHERE singleton_id=1`).Scan(&rows, &generation)
 	})
 	return
 }
