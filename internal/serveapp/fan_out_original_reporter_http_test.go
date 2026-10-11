@@ -250,7 +250,13 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 					t.Fatal(err)
 				}
 				var atCut cliapp.DiagnosticRunDiagnosisResult
-				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &atCut)
+				response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, 30*time.Second)
+				if response.Error != nil {
+					t.Fatalf("pre-handoff run.diagnose refused: %+v", response.Error)
+				}
+				if err := json.Unmarshal(response.Result, &atCut); err != nil {
+					t.Fatalf("decode pre-handoff run.diagnose: %v; %s", err, response.Result)
+				}
 				settledBeforeHandoff = atCut.FanOut.Settled == 500 && atCut.FanOut.Unsettled == 0 && atCut.FanOut.Owed == 0
 				t.Logf("pre-handoff descendant disposition: settled=%d unsettled=%d owed=%d native_settlements=%d", atCut.FanOut.Settled, atCut.FanOut.Unsettled, atCut.FanOut.Owed, receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits)
 				continuation = storetest.ReplaceTransactions(t, transactions, storetest.TransactionProbeOptions{})
