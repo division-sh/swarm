@@ -68,6 +68,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.FailNow()
 			}
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			a2WaitJoinPublicRun(t, rt, started.RunID, "", 0, true)
 			first, joins := readRetainedRootJoins(t, rt, started.RunID)
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
@@ -78,6 +79,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			a2WaitJoinPublicRun(t, rt, started.RunID, "", 0, true)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
