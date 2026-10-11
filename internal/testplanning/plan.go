@@ -285,6 +285,11 @@ func (p RunPlan) Validate() error {
 	if len(p.Units) == 0 || len(p.Packages) == 0 {
 		return fmt.Errorf("run plan has no units or package inventory")
 	}
+	if p.BuildContext != (BuildContext{}) {
+		if err := p.BuildContext.Validate(); err != nil {
+			return err
+		}
+	}
 	seenUnits := map[string]bool{}
 	seenPackages := map[string][]ProofUnit{}
 	deferred := map[TestRoot]bool{}
@@ -327,9 +332,6 @@ func (p RunPlan) Validate() error {
 			soakBackends[backend] = true
 		}
 		if p.BuildContext.GOOS != "" {
-			if p.BuildContext.GOARCH == "" || p.BuildContext.CGOEnabled == "" {
-				return fmt.Errorf("run plan has incomplete Go build context")
-			}
 			selected := map[string]bool{}
 			for _, root := range unit.SelectedRoots {
 				if deferred[root] {
@@ -418,6 +420,9 @@ func (p RunPlan) Unit(id string) (ProofUnit, error) {
 
 func (p RunPlan) ValidateExecutionSHA(actual string) error {
 	if err := p.Validate(); err != nil {
+		return err
+	}
+	if err := p.BuildContext.Validate(); err != nil {
 		return err
 	}
 	actual = strings.TrimSpace(actual)

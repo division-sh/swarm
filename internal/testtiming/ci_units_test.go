@@ -129,7 +129,7 @@ func TestCIUnitsTimingCanonicalSupplementCannotEscapeCost(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			inventory := testplanning.RootInventory{BuildContext: testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1"}, Packages: map[string]testplanning.PackageRoots{
+			inventory := testplanning.RootInventory{BuildContext: testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}, Packages: map[string]testplanning.PackageRoots{
 				"example/p":              {Package: "example/p", HasTestFiles: true, Roots: []string{"TestOrdinary", "TestExtra"}},
 				release:                  {Package: release, HasTestFiles: true, Roots: releaseRoots},
 				testplanning.SoakPackage: {Package: testplanning.SoakPackage, HasTestFiles: true, Roots: []string{testplanning.SoakTest}},

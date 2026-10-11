@@ -47,6 +47,11 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	plan.BuildContext = BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}
+	plan.Digest, err = planDigest(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var pr MergedPR
 	pr.Number = 7
 	pr.Merged, pr.State, pr.MergeCommitSHA, pr.Body = true, "closed", "master", "CI-Tier: core"
@@ -68,7 +73,7 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 	if err := ValidateMasterReplay("division-sh/swarm", "refs/heads/master", "master", "tree", "tree", []MergedPR{pr}, run, checks, protected, plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "malformed_tier", "new_units", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan", "selection_missing", "selection_skipped", "selection_foreign", "selection_attempt", "wrong_suite", "missing_suite"} {
+	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "malformed_tier", "new_units", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan", "selection_missing", "selection_skipped", "selection_foreign", "selection_attempt", "wrong_suite", "missing_suite", "unversioned", "unbound_policy"} {
 		t.Run(mutation, func(t *testing.T) {
 			candidate := pr
 			prs, reference, tree := []MergedPR{candidate}, "refs/heads/master", "tree"
@@ -119,6 +124,15 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 				cs = append(cs, cs[0])
 			case "invalid_plan":
 				p.Digest = "stale"
+			case "unversioned", "unbound_policy":
+				p.BuildContext.GOVERSION = ""
+				if mutation == "unbound_policy" {
+					p.BuildContext = BuildContext{}
+				}
+				p.Digest, err = planDigest(p)
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "selection_missing":
 				cs = cs[:2]
 			case "selection_skipped":

@@ -100,6 +100,9 @@ func ValidateMasterReplay(repository, ref, masterSHA, masterTree, planTree strin
 	if err := plan.Validate(); err != nil {
 		return err
 	}
+	if err := plan.BuildContext.Validate(); err != nil {
+		return err
+	}
 	if err := CheckCurrentCISelection(plan, pr.Body); err != nil {
 		return err
 	}
