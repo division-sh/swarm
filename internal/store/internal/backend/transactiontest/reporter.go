@@ -13,11 +13,16 @@ func ValidateReporterIssuance(receipt Snapshot, submitted time.Time, chunks uint
 	}
 	for _, operation := range []Operation{FanOutClaim, FanOutChunk} {
 		counts := receipt.ByOperation[operation]
+		if counts.Failed != 0 || counts.CommitFailures != 0 || counts.CleanupFailures != 0 {
+			return fmt.Errorf("reporter issuance has failed %s attempts: %+v", operation, counts)
+		}
 		if counts.WriteCommits != chunks || counts.ReadCommits != 0 || counts.DelayedCommits != chunks || counts.InjectedDelay != time.Duration(chunks)*delay || counts.FirstCommitAt.Before(submitted) || counts.LastCommitAt.Before(counts.FirstCommitAt) || counts.LastCommitAt.IsZero() {
 			return fmt.Errorf("reporter issuance has incomplete %s acknowledgements: %+v", operation, counts)
 		}
 	}
-	if receipt.ByOperation[FanOutRelease].WriteCommits != 0 || receipt.Total.Failed != 0 || receipt.Total.CommitFailures != 0 || receipt.Total.CleanupFailures != 0 {
+	// Failed counts every unacknowledged attempt, including read-only rollback
+	// and refused speculative work. Keep those receipts, without inventing COMMITs.
+	if receipt.ByOperation[FanOutRelease].WriteCommits != 0 || receipt.Total.CommitFailures != 0 || receipt.Total.CleanupFailures != 0 {
 		return fmt.Errorf("reporter issuance has release or failed attempts: %+v", receipt)
 	}
 	if receipt.Total.DelayedCommits != 2*chunks || receipt.Total.InjectedDelay != time.Duration(2*chunks)*delay {
@@ -31,12 +36,12 @@ func ValidateReporterIssuance(receipt Snapshot, submitted time.Time, chunks uint
 func ValidateReporterContinuation(issuance, detached, successor Snapshot) error {
 	for _, operation := range []Operation{FanOutClaim, FanOutChunk} {
 		before, after := issuance.ByOperation[operation], detached.ByOperation[operation]
-		if before != after || successor.ByOperation[operation].WriteCommits != 1 {
+		if before != after || successor.ByOperation[operation].WriteCommits != 1 || successor.ByOperation[operation].Failed != 0 {
 			return fmt.Errorf("reporter continuation lost or reassigned %s receipts: old=%+v final=%+v successor=%+v", operation, before, after, successor.ByOperation[operation])
 		}
 	}
 	for _, receipt := range []Snapshot{detached, successor} {
-		if receipt.Total.Failed != 0 || receipt.Total.CommitFailures != 0 || receipt.Total.CleanupFailures != 0 {
+		if receipt.Total.CommitFailures != 0 || receipt.Total.CleanupFailures != 0 {
 			return fmt.Errorf("reporter continuation has failed attempts: %+v", receipt)
 		}
 	}
@@ -54,7 +59,10 @@ func ValidateReporterStress(issuance, final Snapshot, delay time.Duration) error
 	}
 	for operation, counts := range final.ByOperation {
 		commits := counts.ReadCommits + counts.WriteCommits
-		if counts.Failed != 0 || counts.CommitFailures != 0 || counts.CleanupFailures != 0 || counts.DelayedCommits != commits || counts.InjectedDelay != time.Duration(commits)*delay {
+		if (operation == FanOutClaim || operation == FanOutChunk) && counts.Failed != 0 {
+			return fmt.Errorf("all-commit reporter has failed %s serving attempts: %+v", operation, counts)
+		}
+		if counts.CommitFailures != 0 || counts.CleanupFailures != 0 || counts.DelayedCommits != commits || counts.InjectedDelay != time.Duration(commits)*delay {
 			return fmt.Errorf("all-commit reporter lost post-issuance injection for %s: %+v", operation, counts)
 		}
 	}
