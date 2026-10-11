@@ -65,14 +65,27 @@ func (p *publishedBarrierClaimProbe) NotifyLifecycle(ctx context.Context, signal
 }
 
 func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testing.T) {
-	verifyPublishedFanOutBarrierContinuation(t, false)
+	verifyPublishedFanOutBarrierContinuation(t, publishedBarrierCompletionSuccess)
 }
 
-func TestIssue642PublishedBarrierCompletionFailureRollsBackBothStores(t *testing.T) {
-	verifyPublishedFanOutBarrierContinuation(t, true)
+func TestIssue642PublishedBarrierCompletionEvaluationFailureBothStores(t *testing.T) {
+	verifyPublishedFanOutBarrierContinuation(t, publishedBarrierCompletionEvaluationFailure)
 }
 
-func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bool) {
+func TestIssue642PublishedBarrierCompletionSQLFailureRollsBackBothStores(t *testing.T) {
+	verifyPublishedFanOutBarrierContinuation(t, publishedBarrierCompletionSQLFailure)
+}
+
+type publishedBarrierCompletionProof uint8
+
+const (
+	publishedBarrierCompletionSuccess publishedBarrierCompletionProof = iota
+	publishedBarrierCompletionEvaluationFailure
+	publishedBarrierCompletionSQLFailure
+)
+
+func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarrierCompletionProof) {
+	failingCompletion := proof != publishedBarrierCompletionSuccess
 	for _, backend := range []string{"sqlite", "postgres"} {
 		if crashBackend := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
 			continue
@@ -143,14 +156,14 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bo
 				t.Fatal(err)
 			}
 			targetRoot := root
-			if failingCompletion {
+			if proof == publishedBarrierCompletionEvaluationFailure {
 				targetRoot = canonicalrouting.CopyForkFanOutBarrierCompletionFailure(t)
 			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, targetRoot, filepath.Join(repo, "platform-spec.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if failingCompletion {
+			if proof == publishedBarrierCompletionEvaluationFailure {
 				joins := semanticview.Wrap(bundle).WorkflowJoins()
 				if len(joins) != 1 || len(joins[0].Spec.OnComplete.DataAccumulation.Writes) != 1 || !joins[0].Spec.OnComplete.DataAccumulation.Writes[0].Value.HasCELValue() {
 					t.Fatal("completion failure must compile a real evaluation, not a literal")
@@ -176,7 +189,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bo
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 					AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: childProbe}},
 			}
-			if failingCompletion {
+			if proof == publishedBarrierCompletionEvaluationFailure {
 				request.ExpectedBundleHash = bundle.SourceArtifact.BundleHash()
 				request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: request.ExpectedBundleHash}
 				if request.ExpectedBundleHash == rt.Options.SourceArtifactFact.BundleHash() {
@@ -223,7 +236,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bo
 				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, before.Entity.Revision)
 			}
 			if failingCompletion {
-				verifyPublishedBarrierCompletionRollback(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before)
+				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before, proof)
 				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
 					t.Fatalf("failed barrier completion retained owned process work: active=%d baseline=%d", active, baselineWork)
 				}
