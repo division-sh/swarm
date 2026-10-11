@@ -123,6 +123,51 @@ func TestRunForkSelectedFanOutReplayAdmissionMixedPartition(t *testing.T) {
 	}
 }
 
+func TestSelectedFanOutReplayDeliveryAdmissionRequiresExactDisposition(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*RunForkReplayResumeAdmission, *RunForkPendingWork)
+	}{
+		{"exact", func(*RunForkReplayResumeAdmission, *RunForkPendingWork) {}},
+		{"foreign_admission", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) { a.Owner = "foreign" }},
+		{"missing", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) { a.Dispositions = a.Dispositions[1:] }},
+		{"duplicate", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) {
+			a.Dispositions = append(a.Dispositions, a.Dispositions[0])
+		}},
+		{"unrelated_owner", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) { a.Dispositions[0].Owner = "foreign" }},
+		{"terminal", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) {
+			a.Dispositions[0].Disposition = RunForkReplayResumeDispositionLineageOnly
+		}},
+		{"blocked", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) {
+			a.Dispositions[0].BlockerCode = RunForkBlockerDeliveryHistoryUnproven
+		}},
+		{"wrong_fact", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) {
+			a.Dispositions[0].Fact = RunForkReplayResumeFactDeliveryCompletedHistory
+		}},
+		{"wrong_classification", func(a *RunForkReplayResumeAdmission, _ *RunForkPendingWork) {
+			a.Dispositions[0].Classification = RunForkPendingClassificationDeliveredCompleted
+		}},
+		{"foreign_delivery", func(_ *RunForkReplayResumeAdmission, i *RunForkPendingWork) { i.DeliveryID = uuid.NewString() }},
+		{"foreign_event", func(_ *RunForkReplayResumeAdmission, i *RunForkPendingWork) { i.EventID = uuid.NewString() }},
+		{"receipt_only", func(_ *RunForkReplayResumeAdmission, i *RunForkPendingWork) {
+			i.DeliveryID, i.SubscriberType, i.SubscriberID = "", "platform", "pipeline"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := fanOutPendingPartitionFixture(t)
+			admission, err := RunForkSelectedFanOutReplayAdmission(plan, fanOutReplayAdmissionFixture(plan))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := plan.PendingWork[0]
+			tc.edit(&admission, &item)
+			if got := SelectedFanOutReplayDeliveryAdmitted(admission, item); got != (tc.name == "exact") {
+				t.Fatalf("exact admission = %t: item=%+v admission=%+v", got, item, admission)
+			}
+		})
+	}
+}
+
 func checkFanOutReplayMixedPartition(t *testing.T, plan RunForkPlan, fresh bool) {
 	t.Helper()
 	if fresh {

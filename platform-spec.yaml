@@ -4759,7 +4759,11 @@ handler_specification:
           partition, not re-emission of the ordinal or replay of settled recipients. Admission carries explicit
           source delivery IDs and retains the terminal source contribution. Selected routing resolves those exact
           executable slots before receiver preparation, while current child grants, claims and generation checks
-          still authorize execution. Publication, child delivery obligations, selected execution lineage and the
+          still authorize execution. Materialization and activation consume that exact canonical delivery admission
+          before applying generic source-attempt/session-coupling refusal. A pending, in-progress or retryable source
+          attempt in the admitted partition remains lineage, never a resumed child claim, session or provider turn.
+          An unrelated delivery, mismatched disposition, or unresolved source-history blocker still fails closed.
+          Publication, child delivery obligations, selected execution lineage and the
           continued ordinal outcome commit together. The outcome pairs the child event with its distinct immediate
           source event; it never fabricates terminal child deliveries. An unfinished child keeps the ordinal pending
           even when its retained contribution is failure or cancellation. Once all continuing recipients settle,
