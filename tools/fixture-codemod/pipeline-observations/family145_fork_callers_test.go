@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 145 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "5e34c817d2097ee83fdd599c520669adc1e37d76b250186547ad76a70da58f9d" {
+	if err != nil || len(rows) != 148 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b5b03abb1f89aa841c6de3c298d1b4b53f2d87bad4c15d35e5d252f9233cc259" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -71,7 +71,7 @@ func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSo
 		assertFamily145ReplayFaultAssertions(t, beforeSource, afterSource)
 		return
 	}
-	if function == "gateLifecycleDiagnosticOverlap" || function == "loadNotifyAllChildrenNumericRegistrations" {
+	if function == "gateLifecycleDiagnosticOverlap" || function == "loadNotifyAllChildrenNumericRegistrations" || function == "loadNotifyAllChildrenSingleEventID" {
 		before, beforeErr := family145DiagnosticBusinessAssertions(beforeSource)
 		after, afterErr := family145DiagnosticBusinessAssertions(afterSource)
 		if beforeErr != nil || afterErr != nil || strings.Join(before, "\n") != strings.Join(after, "\n") {
@@ -145,7 +145,7 @@ func family145SemanticOwner(function string) bool {
 		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
 		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
-		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations":
+		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations", "loadNotifyAllChildrenSingleEventID":
 		return true
 	}
 	return false

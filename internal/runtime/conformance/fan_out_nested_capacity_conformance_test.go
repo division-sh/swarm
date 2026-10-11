@@ -172,7 +172,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	assertNestedSiblingTaskEffects(t, ctx, rt.selected, db, runID,
 		"account.task.requested", "account.task.completed", parents)
 	assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: len(accounts), Succeeded: len(accounts)})
-	completionID := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, db, runID, source.ResolveFlowEventReference("portfolio", "portfolio.notify.completed"))
+	completionID := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, runID, source.ResolveFlowEventReference("portfolio", "portfolio.notify.completed"))
 	completion, err := reader.LoadOperatorEvent(ctx, completionID)
 	if err != nil || completion.Payload["total"] != float64(len(accounts)) || completion.Payload["succeeded"] != float64(len(accounts)) {
 		t.Fatalf("parent direct-membership public summary=%+v err=%v", completion, err)

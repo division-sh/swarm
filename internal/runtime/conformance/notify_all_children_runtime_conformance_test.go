@@ -473,26 +473,23 @@ func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
 func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		setup func(*testing.T) notifyAllChildrenStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.DatabaseForTest(selected)
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.setup(t)
+			selected := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true})
@@ -545,7 +542,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 				}
 			}
 
-			completionID := loadNotifyAllChildrenSingleEventID(t, ctx, selected, db, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
+			completionID := loadNotifyAllChildrenSingleEventID(t, ctx, selected, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
 			completion, err := operatorStore.LoadOperatorEvent(ctx, completionID)
 			if err != nil {
 				t.Fatalf("load fan-out barrier output: %v", err)
@@ -562,8 +559,8 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			if completion.NoDelivery != nil || len(completion.Deliveries) != 1 || completion.Deliveries[0].SubscriberID != conformanceNode(t, "portfolio", "portfolio-coordinator").Key() || completion.Deliveries[0].Status != string(runtimedelivery.StatusDelivered) || !completion.Deliveries[0].Terminal {
 				t.Fatalf("barrier business output settlement = deliveries:%#v no_delivery:%#v", completion.Deliveries, completion.NoDelivery)
 			}
-			var status string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&status); err != nil {
+			status, err := storetest.ReadRunFanOutBarrierStatusStorage(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if status != "fired" {
@@ -1172,26 +1169,10 @@ func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context
 	return out
 }
 
-func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, eventName string) string {
+func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, runID, eventName string) string {
 	t.Helper()
-	query := `SELECT CAST(event_id AS TEXT) FROM events WHERE run_id=$1::uuid AND event_name=$2 ORDER BY created_at,event_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id FROM events WHERE run_id=? AND event_name=? ORDER BY created_at,event_id`
-	}
-	rows, err := db.QueryContext(ctx, query, runID, eventName)
+	ids, err := storetest.ReadRunNamedEventIdentitiesStorage(ctx, notifyAllChildrenNativeObservationOwner(backend), runID, eventName)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	ids := make([]string, 0, 2)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 1 {

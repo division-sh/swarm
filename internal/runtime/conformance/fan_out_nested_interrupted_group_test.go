@@ -168,7 +168,7 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 	for _, parent := range parents {
 		view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 		name := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
-		id := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, db, runID, name)
+		id := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, runID, name)
 		completion, err := reader.LoadOperatorEvent(ctx, id)
 		if err != nil || completion.Payload["account_id"] != parent.AccountID || completion.NoDelivery == nil || len(completion.Deliveries) != 0 {
 			t.Fatalf("recovered child public barrier=%+v err=%v", completion, err)

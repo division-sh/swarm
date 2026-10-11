@@ -794,3 +794,54 @@ The finite corpus is1009 rows /145 transitions, digest
 Named admission survey remaining142, or143 excluding unqualified Docker removal.
 No fresh global count/baseline change, restart proof, push, PR or family/parent
 closure claim; other approved shared admission dependencies may continue locally.
+
+## Completion Event Identity And Barrier Admission Dependency
+
+All three completion-event callers consume their original selected owner rather
+than a pool. The existing eventrecord owner now contains both fixed physical
+read shapes: full run/name identity history in created-at/event-ID order, and
+the unchanged LIMIT2 ambiguity witness for existing exact-one consumers. The
+public bridges expose only exact data coordinates and detached identities, not
+query/order/limit choices. Missing/ambiguous scalar refusals are preserved;
+the complete history consumer retains its original zero-or-multiple refusal,
+including every observed ID. No row is selected or truncated to fake success.
+
+The original run-only fan-out barrier status QueryRow belongs to pipelinepersistence,
+without extra source/flow/status filters, ordering or normalization. These
+separate observations retain their original cuts; no aggregate snapshot or
+canonical decoding substitutes for either. The complete real delivery-barrier
+fixture opens natively at its original location and has no pool, raw getter or
+reconstructed store. Nested fixtures still have other raw observations and are
+not claimed closed. All scheduler, six output counters, exact public delivery
+settlement, real handoff/ack-loss and joined cleanup assertions remain unchanged.
+
+completion-identity-native-consumers.jsonl PASS66.362s under race/count1: three
+original roots, six backend cells (direct barrier membership, group handoff
+acknowledgment loss, real delivery barrier firing/public readback). Existing
+bounded identity and new four-row ordered-history proofs pass both stores in
+completion-identity-native-owner.jsonl PASS13.087s, including ties, foreign scope,
+detachment, original read counters, cancelled/closed/raw refusal and retained
+scalar ambiguity behavior. New barrier absence/invalid/raw/cancel/closed refusal
+proof passes both stores12.324s; actual nonempty fired status is execution-proven
+by the original runtime root, not fabricated by a test seed.
+
+Deliberate ordered-history LIMIT2 regression fails both stores in completion-
+identity-truncation-counterexample.jsonl RED8.867s at the four-row oracle. Exact
+full query restored; the same root passes10.207s in completion-identity-truncation-
+restored.jsonl. Original workload and unchanged bounded-shape receipts carry;
+there is no retry-until-green or production repair. Finite/current/historical,
+cardinality assertion-bypass and adjacent catalog identity controls PASS1.512s.
+The committed finite recipe mechanism source-pins the complete three-call
+propagation and every original business assertion; only scan/iteration transport
+checks move to the owner. Adjacent delivery/event/runforkrevision guards PASS3.004s;
+six-package U1000 is green and complete codemod dry run Changes=[].
+
+The corpus is1012 rows /148 transitions, digest
+b5b03abb1f89aa841c6de3c298d1b4b53f2d87bad4c15d35e5d252f9233cc259.
+All893 immutable records retain their exact0064a225... hash and the approved
+24-receipt pin is unchanged. Named supplied-pool admissions remaining141, or142
+excluding Docker's unqualified removal. M01 and Docker remain qualification-open
+under #2353; no attribution beyond the reviewed pre-cohort M01 reproduction.
+No new census/baseline, aggregate codemod, local tier, restart, push, PR or whole-
+family/parent closure. New owner construction here is measured separately from
+the finite caller propagation; unchanged evidence is not rerun as a whole matrix.
