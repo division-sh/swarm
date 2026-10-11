@@ -3087,31 +3087,8 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 		)
 	}
 
-	var flow, typ, state string
-	var score any
-	var entityQuery string
-	var entityArgs []any
-	switch backend {
-	case "postgres":
-		entityQuery = `
-			SELECT flow_instance, entity_type, fields->>'score'
-			FROM entity_state
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-		`
-		entityArgs = []any{runID, entityID}
-	case "sqlite":
-		entityQuery = `
-			SELECT flow_instance, entity_type, json_extract(fields, '$.score')
-			FROM entity_state
-			WHERE run_id = ? AND entity_id = ?
-		`
-		entityArgs = []any{runID, entityID}
-	}
-	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &score); err != nil {
-		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
-	}
-	_, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, ".", flow, entityID)
-	state = instance.CurrentState
+	record, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, ".", runID, entityID)
+	flow, typ, state, score := record.State.FlowInstance, record.State.EntityType, instance.CurrentState, instance.Fields["score"]
 	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}

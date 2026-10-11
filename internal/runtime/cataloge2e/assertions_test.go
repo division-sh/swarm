@@ -55,26 +55,6 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	startedAt := time.Now().UTC().Add(-time.Second)
 
-	for _, stmt := range []struct {
-		entityID string
-		flow     string
-	}{
-		{entityID: rootID, flow: rootID},
-		{entityID: childID, flow: "child"},
-		{entityID: grandchildID, flow: "grandchild"},
-	} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
-			)
-			VALUES (
-				$1::uuid, $2::uuid, $3, 'default', '{}'::jsonb, now(), now()
-			)
-		`, catalogRuntimeRunID, stmt.entityID, stmt.flow); err != nil {
-			t.Fatalf("insert entity_state %s: %v", stmt.entityID, err)
-		}
-	}
-
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
@@ -121,6 +101,10 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 		if _, ok := got[candidate]; !ok {
 			t.Fatalf("causal entity ids missing %s (%v)", candidate, got)
 		}
+	}
+	physical, err := storetest.ReadWorkflowEnginePhysicalCounts(ctx, pg)
+	if err != nil || physical.EntityStates != 0 || physical.ConstructedHeaders != 0 {
+		t.Fatalf("causal identity unexpectedly required a state projection: %+v err=%v", physical, err)
 	}
 }
 
