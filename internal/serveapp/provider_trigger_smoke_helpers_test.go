@@ -236,12 +236,7 @@ func seedProviderTriggerSmokeRuntime(
 	`, runID, flowInstance, entityID, entitySlug, string(configBytes), now, now, now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name,
-			fields, created_at, updated_at
-		) VALUES (?, ?, ?, 'default', ?, 'Customer A', '{}', ?, ?)
-	`, runID, entityID, flowInstance, entitySlug, now, now); err != nil {
+	if changed, err := storetest.AddWorkflowProjectionEmptyFields(ctx, sqliteStore, runID, entityID); err != nil || changed != 1 {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	agentContext := runtimecorrelation.WithSourceArtifactFact(ctx, fixtureSource)
