@@ -350,16 +350,9 @@ func validateFanOutPendingPartition(plan RunForkPlan, obligation RunForkFanOutOb
 	if len(replay.SourceDeliveryIDs) == 0 {
 		return fmt.Errorf("fork fan-out pending event %s requires explicit unfinished delivery IDs", eventID)
 	}
-	owedDeliveries := make(map[string]struct{}, len(replay.SourceDeliveryIDs))
-	for _, deliveryID := range replay.SourceDeliveryIDs {
-		deliveryUUID, err := uuid.Parse(deliveryID)
-		if err != nil || deliveryUUID == uuid.Nil || deliveryUUID.String() != deliveryID {
-			return fmt.Errorf("fork fan-out pending event %s requires exact canonical delivery UUID", eventID)
-		}
-		if _, duplicate := owedDeliveries[deliveryID]; duplicate {
-			return fmt.Errorf("fork fan-out pending event %s repeats delivery %s", eventID, deliveryID)
-		}
-		owedDeliveries[deliveryID] = struct{}{}
+	owedDeliveries, err := fanOutPendingDeliverySet(replay)
+	if err != nil {
+		return err
 	}
 	seenDeliveries := make(map[string]struct{})
 	matchedDeliveries := make(map[string]struct{}, len(owedDeliveries))
@@ -400,6 +393,21 @@ func validateFanOutPendingPartition(plan RunForkPlan, obligation RunForkFanOutOb
 		}
 	}
 	return nil
+}
+
+func fanOutPendingDeliverySet(replay RunForkFanOutPendingReplay) (map[string]struct{}, error) {
+	owed := make(map[string]struct{}, len(replay.SourceDeliveryIDs))
+	for _, deliveryID := range replay.SourceDeliveryIDs {
+		deliveryUUID, err := uuid.Parse(deliveryID)
+		if err != nil || deliveryUUID == uuid.Nil || deliveryUUID.String() != deliveryID {
+			return nil, fmt.Errorf("fork fan-out pending event %s requires exact canonical delivery UUID", replay.SourceEventID)
+		}
+		if _, duplicate := owed[deliveryID]; duplicate {
+			return nil, fmt.Errorf("fork fan-out pending event %s repeats delivery %s", replay.SourceEventID, deliveryID)
+		}
+		owed[deliveryID] = struct{}{}
+	}
+	return owed, nil
 }
 
 func validateCanonicalFanOutPendingDelivery(sourceRunID string, pending RunForkPendingWork) (bool, error) {
