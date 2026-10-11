@@ -4545,6 +4545,88 @@ func TestConnectRecipientIndexedCandidatesMatchFullGraphEvaluation(t *testing.T)
 	compare("re-added", []events.RouteIdentity{first}, 1)
 }
 
+type connectCarrierReadCountFixture struct {
+	constructionIndexTestReader
+	lookups int
+}
+
+func (r *connectCarrierReadCountFixture) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	r.lookups++
+	return r.constructionIndexTestReader.LookupFlowInstance(ctx, request)
+}
+
+func TestConnectMaterializationReadsEachCarrierOncePerEvaluation(t *testing.T) {
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if len(graph.Plans()) != 1 {
+		t.Fatal("carrier proof requires one compiled connection")
+	}
+	plan := graph.Plans()[0]
+	reader := &connectCarrierReadCountFixture{}
+	resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
+	ctx := constructionIndexContext(t, source)
+	var targets []events.RouteIdentity
+	for _, id := range []string{"first", "second"} {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "consumer", id, busInternalTestRunID)
+		reader.observations = append(reader.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, id))
+		targets = append(targets, events.RouteIdentity{FlowID: "consumer", FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+	}
+	for _, count := range []int{1, 2} {
+		t.Run(fmt.Sprintf("targets=%d", count), func(t *testing.T) {
+			reader.lookups = 0
+			materialized := runtimepinrouting.ConnectRoutePlanMaterialization{TargetSet: targets[:count]}
+			routes, live, subscribers, ledger, err := resolver.deliveryRoutesForMaterialization(ctx, busInternalTestRunID, plan, materialized, connectInstanceSelection{}, false)
+			if err != nil || len(routes) != count || len(live) != count || len(subscribers) != count {
+				t.Fatalf("carrier projection lost selected deliveries: routes=%+v live=%+v subscribers=%+v err=%v", routes, live, subscribers, err)
+			}
+			if reader.lookups != count {
+				t.Fatalf("same evaluation repeated native reads: got=%d want=%d", reader.lookups, count)
+			}
+			for _, target := range targets[:count] {
+				matched := 0
+				for _, route := range routes {
+					if route.Target == target {
+						matched++
+					}
+				}
+				if matched != 1 {
+					t.Fatalf("carrier projection changed the selected receiver: target=%+v routes=%+v", target, routes)
+				}
+			}
+			fresh, err := resolver.evaluateSelectedReceiverCarriers(ctx, busInternalTestRunID, plan, targets[:count])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := fresh.Ledger()
+			if err != nil || !reflect.DeepEqual(ledger, want) {
+				t.Fatalf("carriers and ledger disagree: got=%+v want=%+v err=%v", ledger, want, err)
+			}
+			if reader.lookups != 2*count {
+				t.Fatal("a later evaluation reused stale instance observations")
+			}
+			stored := reader.observations
+			reader.observations = nil
+			routes, _, _, _, err = resolver.deliveryRoutesForMaterialization(ctx, busInternalTestRunID, plan, materialized, connectInstanceSelection{}, false)
+			reader.observations = stored
+			if !isolatedInstanceLookupMiss(err) || len(routes) != 0 {
+				t.Fatalf("a later materialization reused stale observations: routes=%+v err=%v", routes, err)
+			}
+			for _, failure := range []error{context.Canceled, errors.New("carrier observation failed"), errors.Join(context.Canceled, errors.New("independent carrier observation failed"))} {
+				reader.err = failure
+				routes, _, _, _, err = resolver.deliveryRoutesForMaterialization(ctx, busInternalTestRunID, plan, materialized, connectInstanceSelection{}, false)
+				reader.err = nil
+				if !errors.Is(err, failure) || len(routes) != 0 {
+					t.Fatalf("materialization suppressed its fresh observation error: routes=%+v err=%v want=%v", routes, err, failure)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkConnectRecipientSelectedCandidatePopulation(b *testing.B) {
 	for _, population := range []int{128, 512, 1362} {
 		b.Run(fmt.Sprintf("receivers=%d", population), func(b *testing.B) {
