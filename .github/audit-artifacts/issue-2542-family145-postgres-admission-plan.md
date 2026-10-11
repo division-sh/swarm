@@ -1640,3 +1640,73 @@ integrated/local tier or repeat of unchanged native-owner proofs.
 Named admissions remain130/131 excluding unqualified Docker; no new global
 census/ratchet or zero-additions claim. #2542/#2151 remain open; M01 and Docker
 remain qualification-open in #2353. No push, PR, server2 or parent closure.
+
+## Whole Preparation Snapshot Observer And Fifteen Callers
+
+selectedPreparationDatabaseSnapshot is now only a testing adapter to the
+existing closed ReadSelectedForkApplicationStorageSnapshot owner. The second
+table enumerator, caller-owned read transaction, backend dispatch, SQL escaping,
+row scanning, joined column header and byte-to-string reconstruction are deleted.
+The original selected coordinator owns the same consistent whole-store/base-table
+read. Explicit typed Columns/Rows retain empty tables, duplicates, NULLs and
+physical values instead of an ambiguous joined header; this is not event/history
+admission, a table/predicate selector or a new owner. Its existing native
+inventory/failure/cancellation/partial-result proofs carry unchanged.
+
+All fifteen call sites across preparation, source cleanup, workspace, constructed
+input, crash inspection/recovery and Claude failure diagnostics are migrated.
+Crash observers retain their original capabilityStore; other consumers retain
+their original selected instance. Source cleanup's local stop-result boolean is
+renamed didSelect to avoid shadowing that store, with the original refusal check
+and message intact. Preparation and source cleanup have no remaining pool use,
+so both PostgreSQL constructors now open natively, and both SQLite getters are
+removed. Other coupled constructors/readers/faults remain explicit parent debt.
+
+The constructed-input source-immutability check still tests the original run-ID
+substring over textual or byte field DATA, then requires exact whole physical
+row retention. The transport encodes byte fields in base64; testing that transport
+string instead of decoding cells would silently hide PostgreSQL UUID/payload
+evidence. The consumer now uses the existing detached-cell decoder, not a new
+storage reader or row-ownership inference. A cheap text/bytes/NULL/numeric oracle
+compares with the predecessor's exact predicate. No old representation is
+kept as a compatibility formatter or second persistence owner. Diagnostic
+logging prints the typed snapshot with %+v; no correctness assertion is removed.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Duplicate whole-store SQL/transaction interpreter | reproduced and fixed | Exact native adapter guard; complete fifteen-call native-owner inventory and hostile partial/raw-owner controls; existing full physical inventory/partial-failure proofs carry |
+| Preparation process authority / source cleanup constructors and observers | execution-proven through the same corrected path | Both original roots under race: missing/foreign process capability and prepare-close plus all34 source-cleanup cells, persistent/fail-once/panic/workspace/retained-stop, all original state/resource/join assertions |
+| Workspace snapshot and failure evidence | execution-proven through the same corrected path | Both-store probe_order/cancellation/cleanup_fail_once cells under race; original allowed-failure evidence and no-mutation/active-count assertions |
+| Constructed-source row immutability | execution-proven through the same corrected path | All six constructed/nested-input native cells under race pass; same substring scope and exact typed row retention; byte/text scope oracle and real helper transport mutation RED/GREEN |
+| Process death, inspection and retained-history observers | execution-proven through the same corrected path | Both-store actual event_committed death/recovery cut under race; same native observer and original read-only/history assertions |
+| Claude failure-only diagnostic read | execution-proven through the same corrected path | Finite exact native-owner call mapping, compiled affected package, existing source-pinned exact snapshot owner receipts; no new failure injection or broad execution claim |
+| No surviving or extra shared observer caller | execution-proven through the same corrected path | TestFamily145PreparationSnapshotRetiresInterpreterAndAllFifteenPoolCallers scans package test declarations and rejects raw/partial owner substitutions; full cheap family145/historical/finite/successor set |
+
+Vemew: preparation/source-cleanup package GREEN95.105s; workspace selected cells
+GREEN33.857s; actual killed-process cut GREEN29.161s. All six constructed-input
+cells PASS (22.89s root plus66.12s nested root) in the disclosed RED89.07s aggregate:
+only the NEW pure transport oracle failed because its synthetic numeric value
+was Go int rather than a native SQL int64. Fixed that fixture type and the pure
+oracle passes1.032s; no unchanged six-cell rerun or timeout change. Earlier
+affected package attempt was build RED because one consumer still ranged the
+old slice shape; fixed the complete row/column consumer, no test executed in that
+attempt. Actual helper cell.Value transport substitution gives expected RED0.025s
+on its byte case; restore GREEN1.025s. Complete cheap family plus related
+native-run-setup/historical/finite/successor guards GREEN16.015s; affected store
+closed-owner guards GREEN16.401s. No behavioral red is waived.
+
+Corpus1053/197 transitions, digest
+f435377ff364c9ac6f96a657d3597cd1711f7bc8f80ab773f1789495e3204b0f.
+Original893 tuples/24 receipts remain unchanged. Exact finite helper/caller
+source mappings use existing successor records where present and candidate
+After otherwise. Codemod Changes=[], affected U1000 and diff clean;
+committed-head complexity is checked separately. platform-spec.yaml records
+the shared physical snapshot and original byte/text scope contract.
+
+Named admissions130 ->128 calls (129 excluding unqualified Docker); no fresh
+global census/ratchet or zero-additions claim. The full observer/caller family
+and two ordinary constructor seams are canonicalized, not #2542/#2151 parent
+closure. Existing watchlist mapping/architecture disposition stand; prefer
+existing native construction and closed physical/revision owners, no framework,
+legacy compatibility, getter substitute or automatic tier. M01/Docker remain
+qualification-open in #2353. No push, PR, server2 or integrated qualification.

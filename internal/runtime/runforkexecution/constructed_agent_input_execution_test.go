@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -214,7 +215,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			t.Fatalf("exact constructed route proof: frontier=%+v history=%+v topology=%+v err=%v", frontier, history, topology, err)
 		}
 	}
-	before := selectedPreparationDatabaseSnapshot(t, db, backend)
+	before := selectedPreparationDatabaseSnapshot(t, selected)
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
@@ -274,16 +275,66 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			t.Fatalf("fork companion lost retained business field: %+v", header.Fields)
 		}
 	}
-	after := selectedPreparationDatabaseSnapshot(t, db, backend)
+	after := selectedPreparationDatabaseSnapshot(t, selected)
 	for table, rows := range before {
 		if table == "runs" {
 			continue
 		}
-		for _, row := range rows {
-			if strings.Contains(row, runID) && !slices.Contains(after[table], row) {
+		for _, row := range rows.Rows {
+			if selectedPreparationStorageRowContainsRun(t, rows.Columns, row, runID) && !slices.Contains(after[table].Rows, row) {
 				t.Fatalf("fork changed source evidence in %s: %s", table, row)
 			}
 		}
 	}
 
+}
+
+func selectedPreparationStorageRowContainsRun(t testing.TB, columns []string, row, runID string) bool {
+	t.Helper()
+	decoded, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: []string{row}})
+	if err != nil || len(decoded) != 1 {
+		t.Fatalf("source physical snapshot row: %v", err)
+	}
+	// Keep the original substring scope over textual/byte values, without
+	// accidentally treating the snapshot's base64 transport as source data.
+	for _, cell := range decoded[0] {
+		if cell.Type != "string" && cell.Type != "[]uint8" {
+			continue
+		}
+		value, err := cell.Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(value, runID) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSelectedPreparationStorageRunSubstringKeepsByteAndTextScope(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
+	for _, values := range [][]any{
+		{runID, nil}, {[]byte(runID), "other"}, {"other", []byte(`{"source":"` + runID + `"}`)},
+		{"prefix" + runID + "suffix", int64(7)}, {"unrelated", nil}, {[]byte(`{}`), true},
+	} {
+		columns := []string{"first", "second"}
+		row, err := storetest.EncodeSelectedForkSnapshotValues(columns, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacyValues := append([]any(nil), values...)
+		for i, value := range legacyValues {
+			if raw, ok := value.([]byte); ok {
+				legacyValues[i] = string(raw)
+			}
+		}
+		original, err := json.Marshal(legacyValues)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := selectedPreparationStorageRowContainsRun(t, columns, row, runID), strings.Contains(string(original), runID); got != want {
+			t.Fatalf("source substring scope changed over byte/text/null/numeric transport: got%t want%t row=%s", got, want, row)
+		}
+	}
 }

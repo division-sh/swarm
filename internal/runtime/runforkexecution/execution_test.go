@@ -2153,9 +2153,9 @@ fi
 		},
 	})
 	if err != nil {
-		snapshot := selectedPreparationDatabaseSnapshot(t, db, backend)
+		snapshot := selectedPreparationDatabaseSnapshot(t, selected)
 		for _, table := range []string{"event_receipts", "dead_letters", "runtime_external_effect_attempts", "runtime_external_effect_operations", "agents", "events"} {
-			t.Logf("selected Claude failure evidence %s: %s", table, snapshot[table])
+			t.Logf("selected Claude failure evidence %s: %+v", table, snapshot[table])
 		}
 		captures := map[string]string{}
 		for _, name := range []string{"count", "1.args", "1.stdin", "2.args", "2.stdin", "2.mcp-error", "3.mcp-error"} {
