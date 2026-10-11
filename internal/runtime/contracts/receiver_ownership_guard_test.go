@@ -68,6 +68,9 @@ func TestReceiverCompositionOwnershipGuardHostileRetiredFlowDescriptor(t *testin
 		t.Fatal(err)
 	}
 	hostile := append(append([]byte(nil), original...), []byte(`
+type ActiveFlowInstanceDescriptor struct {
+    FlowTemplate, InstanceID, EntityID, FlowInstance string
+}
 func (unfamiliar ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
     return ActiveTargetDescriptor{FlowID: unfamiliar.FlowTemplate, ID: unfamiliar.InstanceID, EntityID: unfamiliar.EntityID, FlowInstance: unfamiliar.FlowInstance}
 }

@@ -217,9 +217,13 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			if err != nil {
 				return CommittedPublication{}, err
 			}
-			s.instanceObservations = append(s.instanceObservations, observed)
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: constructor.Readiness.RunID, Route: constructor.Identity.Route()}
-			if _, exists := s.constructions[owner]; !exists {
+			if existing, exists := s.constructions[owner]; exists {
+				if existing.Identity != constructor.Identity || existing.InstanceKey != constructor.Instance.InstanceKey || !reflect.DeepEqual(existing.Fields, constructor.Instance.Fields) {
+					return CommittedPublication{}, fmt.Errorf("component publication changed immutable constructor evidence")
+				}
+			} else {
+				s.instanceObservations = append(s.instanceObservations, observed)
 				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, InstanceKey: constructor.Instance.InstanceKey, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
 			}
 		}
@@ -2766,7 +2770,7 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lifecycleStore := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+			lifecycleStore := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 			store := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
 			target := events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: runtimeflowidentity.EntityID("validation")}
 			store.setTargetOwnerRoutes(target)
