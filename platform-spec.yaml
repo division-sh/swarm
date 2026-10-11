@@ -40843,7 +40843,10 @@ agent_topology_authority:
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
-      starts only after serialization. SQLite proof access does not wait for an ordinary workload connection.
+      starts only after serialization, before the first native I/O. PostgreSQL possession and canonical generation
+      are proved in one retained read transaction under that decision, including BEGIN, queries, COMMIT or rollback
+      and native settlement. Expiry withdraws local grants/readiness independently of stalled SQL, without releasing
+      possession or claiming a join; late success cannot undo fencing. SQLite proof access does not wait for an ordinary workload connection.
       Its existing backend-failure budget still covers fresh I/O; pool saturation alone cannot terminalize healthy
       ownership. Real failure, corruption, disposal, or database/coordinate replacement still fails closed without
       reconnect or fallback. Release cancellation is checked after serialization and before backend I/O;
