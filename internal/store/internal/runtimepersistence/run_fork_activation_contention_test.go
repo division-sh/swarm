@@ -158,6 +158,9 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					barrier.awaitGate(t, ctx, gate)
 					winnerOnly := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
 					if outcome != "commit" && !reflect.DeepEqual(before, winnerOnly) {
+						for _, diagnostic := range forkContentionFailureDiagnostics(before, winnerOnly, won, loser) {
+							t.Log(diagnostic)
+						}
 						t.Fatal("rolled-back/cancelled winner changed complete source/child/application tables")
 					}
 					barrier.openGate(t, gate)
