@@ -3,6 +3,7 @@ package conformance
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/importer"
 	"go/parser"
 	"go/token"
@@ -24,6 +25,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestR7NestedPortfolioProofRemainsInDefaultBuild(t *testing.T) {
+	root := canonicalrouting.RepoRoot(t)
+	included, err := build.Default.MatchFile(filepath.Join(root, "internal/serveapp"), "a2_nested_portfolio_isolation_test.go")
+	if err != nil || !included {
+		t.Fatalf("required nested same-period/member isolation proof is outside the default build: included=%t err=%v", included, err)
+	}
+}
 
 func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	templateFieldType := reflect.TypeOf(runtimecontracts.TemplateInstanceField{})
