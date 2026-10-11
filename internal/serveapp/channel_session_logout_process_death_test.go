@@ -100,6 +100,11 @@ func requireServedNativeUncertainLogout(t *testing.T, endpoint string, params ma
 		replay.Teardown.Revision != historical.Logout.Teardown.Revision || replay.Teardown.Phase != channelonboarding.TeardownFailed {
 		t.Fatal("uncertain public replay replaced history or fabricated success", replay)
 	}
+	cli := requireServedNativeCLILogout(t, endpoint, original.Operation.OperationID, params["idempotency_key"].(string))
+	if cli.EffectOperationID != replay.EffectOperationID || cli.Teardown.TeardownID != replay.Teardown.TeardownID ||
+		cli.Teardown.Phase != replay.Teardown.Phase || cli.Teardown.Revision != replay.Teardown.Revision {
+		t.Fatal("CLI replay changed uncertain logout history", cli)
+	}
 	changed := map[string]any{"operation_id": params["operation_id"], "expected_revision": params["expected_revision"], "idempotency_key": "changed-logout-key"}
 	requireServedJSONRPCError(t, endpoint, "channel.logout", changed)
 }

@@ -323,6 +323,19 @@ type logoutRecoveryProbe struct {
 	dispatched []domain.TeardownOperation
 }
 
+type logoutRecoveryCanceledReadStore struct {
+	domain.Store
+	cancel context.CancelFunc
+}
+
+func (s logoutRecoveryCanceledReadStore) ListChannelTeardowns(ctx context.Context) ([]domain.TeardownOperation, error) {
+	rows, err := s.Store.ListChannelTeardowns(ctx)
+	if err == nil {
+		s.cancel()
+	}
+	return rows, err
+}
+
 func (p *logoutRecoveryProbe) PrepareSessionLogout(context.Context, domain.Operation) (domain.SessionLogoutTarget, error) {
 	p.prepared++
 	return domain.SessionLogoutTarget{}, errors.New("recovery must not select a successor SDK occurrence")
@@ -369,6 +382,16 @@ func TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores(t *testing.
 			readback, err := domain.NewSessionLogoutReadback(current)
 			if err != nil || readback.OperationID != op.OperationID || readback.ExpectedRevision != op.Revision {
 				t.Fatal("recovery lost authenticated operation readback", err)
+			}
+			canceledRead, stop := context.WithCancel(context.Background())
+			defer stop()
+			readService, err := domain.NewDestructiveService(logoutRecoveryCanceledReadStore{Store: f.selected, cancel: stop},
+				logoutRecoveryIdentity{principal: f.principal}, logoutRecoveryCleanup{}, logoutRecoveryCleanup{}, nil, nil, probe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := readService.Recover(canceledRead); !errors.Is(err, context.Canceled) {
+				t.Fatal("cancellation during retained lookup reported successful recovery", err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
