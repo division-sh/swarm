@@ -138,6 +138,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(failures) != 0 {
 		return failures
 	}
+	head, base, baseActual, failures = debtProcessLeaseRelocationComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	old, current := debtQuiescenceUncertaintyTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -323,8 +327,8 @@ func debtCollectorDigest(root string) (string, error) {
 	// Include the whole census implementation and the ratchet/scope policy.
 	// Hostile tests and generated debt rows do not define the permission model.
 	hash := sha256.New()
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go"} {
-		if path == "internal/store/persistence_authority_debt_cache_test.go" || path == "internal/store/persistence_authority_debt_sidecar_test.go" {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go", "internal/store/persistence_authority_debt_process_lease_test.go"} {
+		if path == "internal/store/persistence_authority_debt_cache_test.go" || path == "internal/store/persistence_authority_debt_sidecar_test.go" || path == "internal/store/persistence_authority_debt_process_lease_test.go" {
 			if _, err := os.Stat(filepath.Join(root, path)); os.IsNotExist(err) {
 				continue // Only immutable predecessor archives predate these owners.
 			}
@@ -643,6 +647,9 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if bootstrap && !debtSitesEqual(head.Sites, trusted.Sites) {
 		t.Fatal("bootstrap baseline must equal actual extraction-base debt exactly")
 	}
+	if err := debtValidateProcessLeaseRelocationSource(root, baseRoot, actual, baseActual); err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -650,6 +657,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if refresh == "downward" {
 		removed := authorityDebtCount(head.Sites) - authorityDebtCount(actual)
 		normalized, _, _, _ := debtRunFixtureSignatureComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		normalized, _, _, _ = debtProcessLeaseRelocationComparisons(actual, normalized, trusted.Sites, baseActual)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -704,6 +712,10 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if base == debtFixtureRoleCollectorTo && trusted.Collector == base && current == debtProcessLeaseCollectorTo && head.Collector == current &&
+		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
