@@ -21088,12 +21088,16 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies connect-time resolution through the exhaustive current matrix
-        (`create` and `select-or-create` can create; `select`, `fan-out`, and `reply` cannot) as
-        unsupported while the selected-fork container has no admitted dynamic construction owner. Workflow,
+        (`create` and `select-or-create` require construction; `select` and `reply` do not) through
+        the existing retained selected manager, canonical construction and readiness owners. The exact
+        construction requirement is retained in the admission and rechecked against the selected source.
+        Invalid compiled resolution modes remain refused. Workflow,
         arrival and fan-out delivery-barrier schedules use the retained selected runtime, existing completion owner
-        and generic schedule lifecycle. Their declaration alone is not an unavailable capability. Dynamic creation
-        rejects before materialization; staged activation rejects before
-        delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
+        and generic schedule lifecycle. Their declaration alone is not an unavailable capability. Dynamic construction
+        runs only after exact selected activation, under current child authority; a source declaration, materialized
+        row or preparation receipt alone cannot start it. The retained manager admits readiness from the canonical
+        constructor and observes each actual future provider through its existing selected gateway hook before execution.
+        Missing owners, failed construction admission or stale authority still refuse before dependent execution. The admission is
         carried through selected execution admission and every container construction. Exact fan-out barrier historical
         materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
         selected dispatch of pending schedules. A child barrier folds exact retained terminal recipient contributions
@@ -21508,8 +21512,9 @@ run_model:
         arrival schedules require exact retained source evidence, native child inventory and current selected
         authority; pending arrival deadlines continue their original due and membership through actual publication,
         delivery and settlement. Completed or failed source occurrences are not fresh arms. Handler fan-out barriers
-        preserve all-settled semantics through their retained completion and schedule owners; semantically
-        dynamic-flow-creating input resolution and other unproved capabilities remain blocked. Unsupported
+        preserve all-settled semantics through their retained completion and schedule owners. Current compiled
+        dynamic-flow-creating resolutions consume the retained selected construction/readiness owner under fresh
+        child authority, never ordinary runtime authority or inferred source ownership. Other unproved capabilities remain blocked. Unsupported
         historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized

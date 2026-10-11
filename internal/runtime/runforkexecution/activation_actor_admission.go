@@ -58,7 +58,10 @@ func observeSelectedActivationActor(ctx context.Context, req publishSelectedCont
 		return err
 	}
 	coordinates := req.Prepared.coordinates
-	coordinates.AdmittedPlanFingerprint = admission.PlanFingerprint
+	coordinates.AdmittedPlanFingerprint, err = selectedPreparationFingerprint(admission)
+	if err != nil {
+		return err
+	}
 	coordinates.CatalogFingerprint = catalog.Fingerprint()
 	if err := req.AgentRuntime.observeActivationGateway(ctx, catalog, binding, turns, actor, uuid.NewString(), coordinates); err != nil {
 		return err

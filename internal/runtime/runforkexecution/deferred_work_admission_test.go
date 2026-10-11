@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -27,11 +26,10 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 1},
 	}
 	for _, tc := range []struct {
-		name       string
-		plan       runfork.RunForkPlan
-		source     semanticview.Source
-		wantCode   string
-		capability string
+		name         string
+		plan         runfork.RunForkPlan
+		source       semanticview.Source
+		construction bool
 	}{
 		{
 			name:   "clean source",
@@ -71,36 +69,43 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
 		},
 		{
-			name:       "connected declarative dynamic flow creation",
-			plan:       basePlan,
-			source:     semanticview.Wrap(loadRunForkExecutionFixtureBundle(t, "examples/routing/template-create-minted-key")),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:         "connected declarative creation requires retained construction",
+			plan:         basePlan,
+			source:       semanticview.Wrap(loadRunForkExecutionFixtureBundle(t, "examples/routing/template-create-minted-key")),
+			construction: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			admission, err := admitSelectedContractDeferredWork(tc.plan, tc.source)
-			if tc.wantCode == "" {
-				if err != nil {
-					t.Fatalf("admitSelectedContractDeferredWork: %v", err)
-				}
-				if admission.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
-					t.Fatalf("admission = %#v", admission)
-				}
-				if len(tc.plan.UnsupportedBlockers) != 0 && tc.plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
-					t.Fatal("owner availability rewrote the native timer evidence blocker")
-				}
-				return
+			if err != nil {
+				t.Fatalf("admitSelectedContractDeferredWork: %v", err)
 			}
-			failure, ok := runtimefailures.EnvelopeFromError(err)
-			if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != tc.wantCode {
-				t.Fatalf("error = %v, failure=%#v, want %s", err, failure, tc.wantCode)
+			if admission.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
+				t.Fatalf("admission = %#v", admission)
 			}
-			capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-			if !ok || !containsSelectedDeferredWorkCapability(capabilities, tc.capability) {
-				t.Fatalf("capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], tc.capability)
+			if admission.dynamicConstructionRequired != tc.construction {
+				t.Fatalf("construction requirement=%v want=%v", admission.dynamicConstructionRequired, tc.construction)
+			}
+			if len(tc.plan.UnsupportedBlockers) != 0 && tc.plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
+				t.Fatal("owner availability rewrote the native timer evidence blocker")
 			}
 		})
+	}
+}
+
+func TestSelectedContractDeferredWorkCannotDropConstructionRequirement(t *testing.T) {
+	source := semanticview.Wrap(loadRunForkExecutionFixtureBundle(t, "examples/routing/template-create-minted-key"))
+	plan := runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 1}}
+	admission, err := admitSelectedContractDeferredWork(plan, source)
+	if err != nil || !admission.dynamicConstructionRequired {
+		t.Fatalf("compiled creation lost construction requirement: %+v err=%v", admission, err)
+	}
+	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, source); err != nil {
+		t.Fatal(err)
+	}
+	admission.dynamicConstructionRequired = false
+	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, source); err == nil || !strings.Contains(err.Error(), "construction requirement") {
+		t.Fatalf("construction requirement disappeared from retained admission: %v", err)
 	}
 }
 
@@ -375,13 +380,4 @@ func selectedDeferredWorkTestSource(timers []runtimecontracts.WorkflowTimerContr
 			Joins:   joins,
 		},
 	})
-}
-
-func containsSelectedDeferredWorkCapability(capabilities []string, want string) bool {
-	for _, capability := range capabilities {
-		if capability == want {
-			return true
-		}
-	}
-	return false
 }

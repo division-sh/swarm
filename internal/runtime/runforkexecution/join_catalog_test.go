@@ -6,13 +6,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
 // Observe the real selected preparation registration, without replacing its
-// store catalog, lease, or later deferred-execution rejection.
+// store catalog, lease, or later execution ownership.
 type observedSelectedJoinCatalog struct {
 	SelectedContractForkLifecycle
 	t       *testing.T
@@ -48,30 +48,30 @@ func (s *observedActivationJoinCatalog) RegisterAuthorActivityEventCatalog(scope
 	return lease, nil
 }
 
-func TestSelectedActivationReconstructsJoinCatalogWithoutDeferredAuthority(t *testing.T) {
+func TestSelectedActivationReconstructsJoinCatalogWithRetainedOwner(t *testing.T) {
 	forkID := uuid.NewString()
 	binding := testSelectedContractBinding(forkID)
 	loaded := testLoadedSelectedSource(binding.ContractSelection)
 	loaded.Source = selectedJoinCatalogSource{loaded.Source}
 	store := &observedActivationJoinCatalog{fakeSelectedContractActivationStore: &fakeSelectedContractActivationStore{
 		binding: binding, bindingOK: true, bundleAvailability: testSelectedContractBundleAvailability(forkID), plan: testSelectedContractStateOnlyPlan(binding),
+		activation: runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkID, Activated: true},
 	}, registry: authoractivity.NewEventCatalogRegistry(), t: t}
 	loader := &fakeSelectedContractSourceLoader{loaded: loaded, original: originalActivationSourceFixture(t)}
 	owner := selectedContractGateOwnerForTest(t)
 	for attempt := 0; attempt < 2; attempt++ {
-		_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+		result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 			ExecutionOwner: owner, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability}, ForkRunID: forkID, Store: store, SourceLoader: loader,
 		})
-		failure, ok := failures.EnvelopeFromError(err)
-		if !ok || failure.Detail.Code != selectedContractDeferredWorkOwnerUnavailable {
-			t.Fatalf("activation changed deferred policy: %v", err)
+		if err != nil || !result.Activated || result.ForkRunID != forkID || result.SourceRunID != binding.SourceRunID {
+			t.Fatalf("retained-owner activation was not acknowledged: %+v err=%v", result, err)
 		}
-		if store.activateCalled || len(store.scopes) != attempt+1 {
-			t.Fatal("catalog reconstruction bypassed policy or did not register")
+		if !store.activateCalled || len(store.scopes) != attempt+1 {
+			t.Fatal("activation did not consume its store owner and exact catalog")
 		}
 		for _, scope := range store.scopes {
 			if scope.RuntimeInstanceID == "" || !strings.HasPrefix(scope.BundleHash, "bundle-v2:sha256:") || store.registry.HasScope(scope) {
-				t.Fatalf("refusal retained or crossed activation scope: %+v", scope)
+				t.Fatalf("acknowledged activation retained or crossed catalog scope: %+v", scope)
 			}
 		}
 	}
