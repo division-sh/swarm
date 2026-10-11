@@ -65,6 +65,7 @@ func ValidFamily(family Family) bool {
 type Effects struct {
 	byRun              map[string]map[Family]*familySelection
 	pendingEventCounts []counterprojection.Delta
+	starts             map[string]StartProjection
 }
 
 // SetPendingEventCounts transfers finalization data, never transaction authority.
@@ -85,6 +86,9 @@ func (e *Effects) HasDeclarations() bool {
 	if e == nil {
 		return false
 	}
+	if len(e.starts) != 0 {
+		return true
+	}
 	for _, families := range e.byRun {
 		if len(families) != 0 {
 			return true
@@ -98,10 +102,15 @@ func (e *Effects) HasDeclarations() bool {
 // rolled-back attempts must not survive, while predeclared effects must.
 func (e *Effects) AttemptReset() func() {
 	baseline := cloneSelections(e)
+	var starts map[string]StartProjection
+	if e != nil {
+		starts = cloneStarts(e.starts)
+	}
 	return func() {
 		if e != nil {
 			e.byRun = cloneSelections(&Effects{byRun: baseline})
 			e.pendingEventCounts = nil
+			e.starts = cloneStarts(starts)
 		}
 	}
 }

@@ -20,5 +20,7 @@ func (a Activation) WithForkReference(ref timeridentity.JoinRef) (Activation, er
 	if err != nil {
 		return Activation{}, err
 	}
+	// The fork owner must bind new immediate publication coordinates separately.
+	a.TransferredPublication = nil
 	return a, a.Validate()
 }

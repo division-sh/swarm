@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
@@ -70,67 +68,6 @@ func requireExactMaterializedRunForkDeploymentFeeds(ctx context.Context, tx *sql
 	return nil
 }
 
-func bindRunForkDeploymentPendingReplays(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, forkRunID string, obligation runfork.RunForkFanOutObligation, now time.Time) error {
-	if len(obligation.PendingReplays) == 0 {
-		return nil
-	}
-	key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, forkRunID, obligation.Intent.Source.Declaration)
-	if err != nil {
-		return err
-	}
-	var versionID string
-	if err := tx.QueryRowContext(ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1 AND deployment_feed_id=$2 AND origin_kind='deployment'`,
-		forkRunID, key.DeploymentFeedID).Scan(&versionID); err != nil {
-		return err
-	}
-	if versionID != string(obligation.Intent.Source.VersionID) {
-		return nil // Old-version replay remains history, not progress in the new feed.
-	}
-	for _, replay := range obligation.PendingReplays {
-		forkEventID := deterministicRunForkReplayEventID(forkRunID, replay.SourceEventID)
-		var replayCount int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays
-			WHERE fork_run_id=$1 AND source_event_id=$2 AND fork_event_id=$3`,
-			forkRunID, replay.SourceEventID, forkEventID).Scan(&replayCount); err != nil {
-			return err
-		}
-		if replayCount != 1 {
-			return fmt.Errorf("fork deployment pending ordinal %d lacks exact child replay", replay.Ordinal)
-		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO fan_out_outcomes
-			(run_id,deployment_feed_id,ordinal,outcome_kind,event_id,created_at)
-			VALUES ($1,$2,$3,'committed',$4,$5)
-			ON CONFLICT (run_id,deployment_feed_id,ordinal) DO NOTHING`,
-			forkRunID, key.DeploymentFeedID, replay.Ordinal, forkEventID, now.UTC())
-		if err != nil {
-			return fmt.Errorf("bind fork deployment pending ordinal %d: %w", replay.Ordinal, err)
-		}
-		inserted, err := rowsAffected(result)
-		if err != nil {
-			return err
-		}
-		if inserted {
-			ref, err := runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)
-			if err != nil {
-				return err
-			}
-			if err := attempt.AddFacts(forkRunID, ref); err != nil {
-				return err
-			}
-		}
-		var eventID, sourceEventID, disposition sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT),CAST(source_event_id AS TEXT),inherited_disposition
-			FROM fan_out_outcomes WHERE run_id=$1 AND deployment_feed_id=$2 AND ordinal=$3`,
-			forkRunID, key.DeploymentFeedID, replay.Ordinal).Scan(&eventID, &sourceEventID, &disposition); err != nil {
-			return err
-		}
-		if eventID.String != forkEventID || sourceEventID.Valid || disposition.Valid {
-			return fmt.Errorf("fork deployment pending ordinal %d contradicts child replay", replay.Ordinal)
-		}
-	}
-	return nil
-}
-
 func requireRunForkDeploymentFeedRowTx(ctx context.Context, tx *sql.Tx, key fanoutobligation.IntentKey, bundleHash string, target runtimedata.PinnedSource, carriage forkDeploymentCarriage) (int, error) {
 	var gotBundle, kind, flowPath, eventName, versionID, schemaDigest, status string
 	var cardinality, cursor, disjoint int
@@ -178,11 +115,27 @@ func requireRunForkDeploymentOutcomesTx(ctx context.Context, tx *sql.Tx, postgre
 	for _, outcome := range carriage.outcomes {
 		wantInherited[outcome.Ordinal] = outcome
 	}
-	wantPending := make(map[int]string, len(carriage.pending))
-	for _, pending := range carriage.pending {
-		wantPending[pending.Ordinal] = deterministicRunForkReplayEventID(key.RunID, pending.SourceEventID)
+	wantPending := make(map[int]fanoutobligation.Outcome, len(carriage.pendingDeployment))
+	for _, pending := range carriage.pendingDeployment {
+		if _, duplicate := wantPending[pending.Ordinal]; duplicate {
+			return fmt.Errorf("fork deployment repeats pending ordinal %d", pending.Ordinal)
+		}
+		wantPending[pending.Ordinal] = fanoutobligation.Outcome{
+			Ordinal: pending.Ordinal, Kind: fanoutobligation.OutcomeContinued,
+			EventID:       activityidentity.ForkLineageEventID(key.RunID, pending.SourceEventID),
+			SourceEventID: pending.SourceEventID, InheritedDisposition: pending.InheritedDisposition,
+		}
+	}
+	for ordinal := range wantPending {
+		if ordinal < 0 || ordinal >= carriage.cursor {
+			return fmt.Errorf("fork deployment pending ordinal %d is outside inherited prefix", ordinal)
+		}
+		if _, terminal := wantInherited[ordinal]; terminal {
+			return fmt.Errorf("fork deployment ordinal %d repeats terminal and pending evidence", ordinal)
+		}
 	}
 	seen := make(map[int]bool)
+	bound := make(map[int]runForkContinuedOutcomeRow, len(wantPending))
 	for rows.Next() {
 		var ordinal int
 		var kind string
@@ -214,14 +167,19 @@ func requireRunForkDeploymentOutcomesTx(ctx context.Context, tx *sql.Tx, postgre
 				return fmt.Errorf("fork deployment inherited ordinal %d changed", ordinal)
 			}
 		} else if wantedReplay, present := wantPending[ordinal]; present {
-			if kind != string(fanoutobligation.OutcomeCommitted) || eventID.String != wantedReplay || sourceEventID.Valid || disposition.Valid || len(failure) != 0 {
+			if !matchesRunForkFanOutContinuedOutcome(wantedReplay, kind, eventID, sourceEventID, disposition, failure != nil) {
 				return fmt.Errorf("fork deployment pending replay ordinal %d changed", ordinal)
 			}
+			bound[ordinal] = runForkContinuedOutcomeRow{kind: kind, eventID: eventID, sourceEventID: sourceEventID,
+				disposition: disposition, failurePresent: failure != nil, createdAt: createdAt}
 		} else if ordinal < carriage.cursor || sourceEventID.Valid || disposition.Valid {
 			return fmt.Errorf("fork deployment ordinal %d borrowed or lost inherited evidence", ordinal)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
 		return err
 	}
 	for ordinal := range wantInherited {
@@ -232,6 +190,16 @@ func requireRunForkDeploymentOutcomesTx(ctx context.Context, tx *sql.Tx, postgre
 	for ordinal := carriage.cursor; ordinal < cursor; ordinal++ {
 		if !seen[ordinal] {
 			return fmt.Errorf("fork deployment child-owned ordinal %d is missing", ordinal)
+		}
+	}
+	for _, pending := range carriage.pendingDeployment {
+		row, present := bound[pending.Ordinal]
+		if err := requireRunForkContinuedPublicationReadback(ctx, tx, postgres, key.RunID,
+			runfork.RunForkPlan{SourceRunID: carriage.sourceRunID}, runfork.RunForkFanOutPendingReplay{
+				Ordinal: pending.Ordinal, SourceEventID: pending.SourceEventID, SourceDeliveryIDs: pending.SourceDeliveryIDs,
+				InheritedDisposition: pending.InheritedDisposition,
+			}, row, present); err != nil {
+			return err
 		}
 	}
 	return nil

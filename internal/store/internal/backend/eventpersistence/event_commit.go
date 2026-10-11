@@ -18,7 +18,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -216,7 +215,7 @@ func commitSelectedForkEvent(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
-	insertLineage func(context.Context, *sql.Tx, runfork.RunForkSelectedContractExecutionLineage) error,
+	lineageOwner selectedForkLineageOwner,
 	req runtimebus.CommitSelectedForkEventRequest,
 ) (runtimebus.CommittedSelectedForkEvent, error) {
 	if err := validateSelectedForkCommitRequest(req); err != nil {
@@ -230,18 +229,19 @@ func commitSelectedForkEvent(
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	if result.AppendOutcome == runtimebus.EventAppendExactDuplicate {
+		if err := lineageOwner.RequireSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage); err != nil {
+			return runtimebus.CommittedSelectedForkEvent{}, err
+		}
 		return result, result.Validate()
 	}
 	if result.AppendOutcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("selected-fork operation returned invalid append outcome")
 	}
-	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return insertLineage(ctx, tx, req.Lineage)
-	}); err != nil {
-		return runtimebus.CommittedSelectedForkEvent{}, err
-	}
 	result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(ctx, req.Commit, true)
 	if err != nil {
+		return runtimebus.CommittedSelectedForkEvent{}, err
+	}
+	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes); err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	return result, result.Validate()
@@ -251,14 +251,14 @@ func (s *EventPostgresOwner) CommitSelectedForkTx(ctx context.Context, attempt *
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event PostgreSQL run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork, req)
 }
 
 func (s *EventSQLiteOwner) CommitSelectedForkTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event SQLite run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork, req)
 }
 
 func commitPublication(
@@ -420,6 +420,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelinePostgresOwner); err != nil {
 					return err
 				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
+					return err
+				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)
 				if completeErr != nil {
 					return completeErr
@@ -516,6 +519,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 					return completeErr
 				}
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelineSQLiteOwner); err != nil {
+					return err
+				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
 					return err
 				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)

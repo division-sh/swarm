@@ -37,7 +37,8 @@ func TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor(t *t
 	}{
 		{"deployment-retired", runfork.RunForkPointDeploymentRevision, worklifetime.ErrRetired, 0, 0},
 		{"deployment-failed", runfork.RunForkPointDeploymentRevision, errors.New("business failure"), 1, 1},
-		{"event-retired", runfork.RunForkPointEvent, worklifetime.ErrRetired, 1, 1},
+		{"event-retired", runfork.RunForkPointEvent, worklifetime.ErrRetired, 0, 0},
+		{"event-failed", runfork.RunForkPointEvent, errors.New("business failure"), 1, 1},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			store := &selectedInterruptionExecutionStore{}

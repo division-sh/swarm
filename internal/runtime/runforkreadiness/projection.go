@@ -123,6 +123,20 @@ func Project(
 		}
 		prepared.Attachments = append(prepared.Attachments, attachment)
 	}
+	// A recorded root can owe a timer or return without a dispatch frontier.
+	// Its fresh readiness is still required for materialization and recovery;
+	// root agents retain their separately admitted static declarations.
+	for _, entity := range plan.Entities {
+		if entity.MaterializationMetadata.FlowTemplate != semanticview.RootExecutionFlowID(source) {
+			continue
+		}
+		attachment, err := selectedContractReadinessState(source, "", semanticview.RootExecutionFlowID(source), entity)
+		if err != nil {
+			return nil, err
+		}
+		attachment.ExecutionMode = modelOptions.ExecutionPosture.RootMode()
+		prepared.Attachments = append(prepared.Attachments, attachment)
+	}
 	byEntity := make(map[string]runfork.RunForkSelectedContractWorkflowState)
 	recordState := func(state runfork.RunForkSelectedContractWorkflowState) error {
 		eventID := strings.TrimSpace(state.SourceEventID)

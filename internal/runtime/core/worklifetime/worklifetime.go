@@ -1088,6 +1088,13 @@ func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	return s.occurrence.begin(WithOccurrence(WithProcess(ctx, s.process), s))
 }
 
+func (s *SelectedForkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*Lease, error) {
+	if s == nil {
+		return nil, errors.New("selected-fork occurrence is required")
+	}
+	return s.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, s.process), s))
+}
+
 func (s *SelectedForkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")

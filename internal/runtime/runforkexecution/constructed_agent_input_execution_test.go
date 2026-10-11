@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -234,8 +235,40 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			},
 		},
 	})
-	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
-		t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
+	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
+		t.Fatalf("actual selected constructed-input acknowledgment: result=%#v err=%v", result, err)
+	}
+	// Activation acknowledges the retained executor, not its later delivery.
+	// Observe the exact native settlement before inspecting actor execution.
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var delivery storetest.ManagedDeliveryStorage
+	for {
+		delivery, err = storetest.ReadManagedDeliveryStorage(wait, selected, result.Materialization.ForkRunID, "")
+		if err != nil || len(delivery.Failures) != 0 {
+			t.Fatalf("constructed-input delivery failed: %+v err=%v", delivery, err)
+		}
+		if delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
+			break
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("constructed-input delivery did not settle: %+v err=%v", delivery, wait.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	forkEventID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, eventID)
+	forkEvent := storetest.LoadCanonicalEventRecord(t, wait, selected, forkEventID)
+	lineage, retained := forkEvent.SelectedForkLineage()
+	if !retained || lineage.SourceRunID() != runID || lineage.SourceEventID() != eventID || forkEvent.RunID() != result.Materialization.ForkRunID {
+		t.Fatalf("constructed input lost its exact committed lineage: event=%+v lineage=%+v", forkEvent, lineage)
+	}
+	count, err := storetest.ReadLifecycleEventCardinality(wait, selected, result.Materialization.ForkRunID, string(forkEvent.Type()))
+	if err != nil || count != 1 {
+		t.Fatalf("constructed input executed event count=%d, want one: %v", count, err)
+	}
+	if err := owner.RetireSelectedContexts(wait); err != nil {
+		t.Fatalf("join constructed-input selected execution: %v", err)
 	}
 	wantActors := 1
 	if nested {
@@ -255,6 +288,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		if seen := agent.SeenRunIDs(); len(seen) != 0 {
 			if len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {
 				t.Fatalf("actor escaped exact selected owner: %v", seen)
+			}
+			if seenEvents := agent.SeenEventIDs(); len(seenEvents) != 1 || seenEvents[0] != forkEventID {
+				t.Fatalf("actor consumed a different committed input: %v", seenEvents)
 			}
 			executions++
 		}

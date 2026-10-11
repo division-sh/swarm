@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type fanOutCensusCountingSource struct {
@@ -70,7 +73,23 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 		Semantics:    rc.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]rc.SystemNodeEventHandler{"worker": {"batch.ready": handler}}},
 		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"offset": {Type: "integer"}}}},
 	}
-	source := &fanOutCensusCountingSource{Source: fanOutSourceWithBundleIdentity(t, bundle)}
+	// The two compiled fixture variants must not claim the same artifact.
+	fixtureRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "schema.yaml"), []byte("name: engine-fan-out-test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodeSource, err := json.Marshal(bundle.Nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "nodes.yaml"), nodeSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle.SourceArtifact, err = sourceartifact.AdmitDirectory(fixtureRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &fanOutCensusCountingSource{Source: mustCompileEngineSource(bundle)}
 	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +128,43 @@ func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
 	}
 	if payload["note"] != `row=0,meta={"missing":null}` || payload["value"] != float64(5) {
 		t.Fatalf("prepared R2 payload = %#v", payload)
+	}
+}
+
+func TestFanOutSelectedEmitUsesFrozenSourceAndExactCompiledPlan(t *testing.T) {
+	_, original, trigger, _ := preparedFanOutFixture(t)
+	selectedExecutor, selected, _, _ := preparedFanOutFixture(t, true)
+	if original.Request.PlanRef.SemanticDigest == selected.Request.PlanRef.SemanticDigest {
+		t.Fatal("fixture did not change the compiled emit semantics")
+	}
+	if original.Request.PlanRef.BundleHash == selected.Request.PlanRef.BundleHash {
+		t.Fatal("different fixture declarations claimed the same source artifact")
+	}
+	request := original.Request
+	request.PlanRef = selected.Request.PlanRef
+	original.Request = request
+	prepared, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), original, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit, err := prepared.EvaluateOrdinal(context.Background(), int64(1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emit.Event.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["value"] != float64(6) || payload["note"] != `row=1,meta={"missing":null}` || payload["index"] != float64(1) || payload["count"] != float64(33) {
+		t.Fatalf("selected emit did not use the retained source frame and ordinal: %#v", payload)
+	}
+	if original.Request.Capsule.SourcePlanRef == original.Request.PlanRef || original.Request.Capsule.SourceProjection.Emit.Fields["note"].CEL != "" {
+		t.Fatal("selected plan replaced the immutable original witness")
+	}
+	wrong := original
+	wrong.Request.PlanRef = wrong.Request.Capsule.SourcePlanRef
+	if _, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), wrong, trigger); err == nil {
+		t.Fatal("loaded selected source accepted an unselected executable reference")
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
@@ -47,7 +48,7 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		err := q.QueryRowContext(ctx, `
 			SELECT execution_id::text, fork_run_id::text, generation, admission_fingerprint,
 			       container_plan_fingerprint, actor_census_fingerprint, effective_config_fingerprint,
-			       state, COALESCE(execution_owner,''), lease_expires_at > CURRENT_TIMESTAMP, fence_generation
+			       state, COALESCE(execution_owner,''), lease_expires_at > clock_timestamp(), fence_generation
 			FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1::uuid
 		`, authority.SelectedFork.ExecutionID).Scan(&current.executionID, &current.forkRunID, &current.generation, &current.admissionFingerprint,
 			&current.containerFingerprint, &current.actorFingerprint, &current.configFingerprint, &current.state,
@@ -286,7 +287,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			  AND state='running' AND execution_owner=$4 AND fence_generation=$5
 			  AND admission_fingerprint=$6 AND container_plan_fingerprint=$7
 			  AND actor_census_fingerprint=$8 AND effective_config_fingerprint=$9
-			  AND lease_expires_at>CURRENT_TIMESTAMP
+			  AND lease_expires_at>clock_timestamp()
 		`, selected.ExecutionID, selected.ForkRunID, selected.Generation, authority.ExecutionOwner, authority.FenceGeneration,
 			selected.AdmissionFingerprint, selected.ContainerPlanFingerprint, selected.ActorCensusFingerprint, selected.EffectiveConfigFingerprint)
 	case runtimeeffects.AuthorityConversationForkChat:
@@ -357,6 +358,10 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 
 func (s *EffectPostgresOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
+}
+
+func (s *EffectPostgresOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
+	return externalEffectAuthorityCurrentPostgres(ctx, q, authority)
 }
 
 func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
@@ -459,6 +464,10 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 
 func (s *EffectSQLiteOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
+}
+
+func (s *EffectSQLiteOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
+	return externalEffectAuthorityCurrentSQLite(ctx, q, authority)
 }
 
 func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, authority runtimeeffects.Authority) error {

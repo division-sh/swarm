@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -38,7 +39,7 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			source: selectedDeferredWorkTestSource(nil, nil),
 		},
 		{
-			name: "revision timer history",
+			name: "revision timer history retains native admission responsibility",
 			plan: runfork.RunForkPlan{
 				SourceRunID: basePlan.SourceRunID,
 				ForkPoint:   basePlan.ForkPoint,
@@ -46,9 +47,7 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 					Code: runfork.RunForkBlockerTimerHistoryUnproven,
 				}},
 			},
-			source:     selectedDeferredWorkTestSource(nil, nil),
-			wantCode:   runfork.RunForkBlockerTimerHistoryUnproven,
-			capability: selectedContractDeferredWorkRevisionTimerHistory,
+			source: selectedDeferredWorkTestSource(nil, nil),
 		},
 		{
 			name: "workflow timer declaration",
@@ -56,26 +55,20 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			source: selectedDeferredWorkTestSource([]runtimecontracts.WorkflowTimerContract{{
 				ID: "deadline",
 			}}, nil),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkWorkflowTimer,
 		},
 		{
-			name: "workflow join deadline retains timeout capability",
+			name: "workflow join deadline has retained execution ownership",
 			plan: basePlan,
 			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
 				Spec: runtimecontracts.JoinSpec{
 					Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
 				},
 			}}),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
 		{
-			name:       "fan-out barrier declaration requires deferred execution owner",
-			plan:       basePlan,
-			source:     selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkFanOutBarrier,
+			name:   "fan-out barrier declaration has retained execution ownership",
+			plan:   basePlan,
+			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
 		},
 		{
 			name:       "connected declarative dynamic flow creation",
@@ -93,6 +86,9 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 				}
 				if admission.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 					t.Fatalf("admission = %#v", admission)
+				}
+				if len(tc.plan.UnsupportedBlockers) != 0 && tc.plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
+					t.Fatal("owner availability rewrote the native timer evidence blocker")
 				}
 				return
 			}
@@ -149,9 +145,23 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	}
 	sourceRef := selected
 	sourceRef.BundleHash = "bundle-v2:sha256:" + strings.Repeat("0", 64)
-	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
-		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef}},
-	}}}
+	selectedPlan, ok := source.FanOutPlanForElement(selected.ElementRef)
+	if !ok {
+		t.Fatal("selected fan-out declaration has no compiled plan")
+	}
+	frozenSource := selectedPlan.SemanticEvidence()
+	frozenSource.Emit.Event = "previous.output"
+	sourceRef.SemanticDigest, err = canonicaljson.Hash(frozenSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fieldSource := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, Field: strings.TrimPrefix(frozenSource.ItemsFrom, "payload.")}
+	if strings.HasPrefix(frozenSource.ItemsFrom, "entity.") {
+		fieldSource.Kind, fieldSource.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(frozenSource.ItemsFrom, "entity.")
+	}
+	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{
+		selectedFanOutHistoryFixture(t, selectedPlan, sourceRef, fieldSource, frozenSource),
+	}}
 	refs, err := admitSelectedContractFanOutPlans(plan, source)
 	if err != nil {
 		t.Fatalf("admit selected fan-out with unchanged semantics: %v", err)
@@ -162,14 +172,23 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 
 	changed := plan
 	changed.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
-	changed.FanOutObligations[0].Intent.Request.PlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
-	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "changed semantic digest") {
+	changed.FanOutObligations[0].Intent.Request.Capsule.SourcePlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
+	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "contradict the same artifact") {
 		t.Fatalf("changed semantic digest error = %v", err)
 	}
 
 	missing := plan
 	missing.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
 	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.SemanticPath = "missing." + uuid.NewString()
+	missingRequest := &missing.FanOutObligations[0].Intent.Request
+	missingRequest.Key.ElementRef = missingRequest.PlanRef.ElementRef
+	missingRequest.Capsule.SourceProjection = frozenSource.Clone()
+	missingRequest.Capsule.SourceProjection.ElementRef = missingRequest.PlanRef.ElementRef
+	missingRequest.PlanRef.SemanticDigest, err = canonicaljson.Hash(missingRequest.Capsule.SourceProjection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingRequest.Capsule.SourcePlanRef = missingRequest.PlanRef
 	if _, err := admitSelectedContractFanOutPlans(missing, source); err == nil || !strings.Contains(err.Error(), "missing pending fan_out declaration") {
 		t.Fatalf("missing element error = %v", err)
 	}
@@ -231,14 +250,12 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifted := selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
-		Spec: runtimecontracts.JoinSpec{
-			Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
-		},
-	}})
+	drifted := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v2"},
+	})
 	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||
-		!strings.Contains(err.Error(), selectedContractDeferredWorkWorkflowJoinTimeout) {
-		t.Fatalf("source drift error = %v, want workflow join capability rejection", err)
+		!strings.Contains(err.Error(), "workflow identity does not match") {
+		t.Fatalf("source drift error = %v, want exact workflow identity rejection", err)
 	}
 }
 
@@ -288,13 +305,20 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 		})
 	}
 	for function, want := range map[string]int{
-		"admitSelectedContractDeferredWork":              3, // initial execution, activation gate, recovered finite feed
-		"BuildSelectedContractExecutionAdmission":        3, // initial execution, activation gate, recovered finite feed
+		"admitSelectedContractDeferredWork":              2, // preparation (including recovery), staged activation
+		"BuildSelectedContractExecutionAdmission":        2, // common execution (including recovery), staged activation
 		"buildSelectedContractForkLocalRuntimeContainer": 2,
 	} {
 		if got := counts[function]; got != want {
 			t.Fatalf("production %s call count = %d, want %d exact admitted entry points", function, got, want)
 		}
+	}
+	recoverySource, err := os.ReadFile("execution.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recoverySource), "return ExecuteSelectedContractRunFork(ctx, admitted.request)") {
+		t.Fatal("recovery bypasses the common selected admission/execution sequence")
 	}
 	if imperativeCalls != 0 {
 		t.Fatalf("imperative activation consumers = %d, want none", imperativeCalls)

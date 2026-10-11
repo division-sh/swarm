@@ -26,6 +26,9 @@ func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx 
 	if req.RecoveryFromExecutionID != "" {
 		result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
 			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
+				if err := requireSelectedSuccessorWorkflowTimers(txctx, attempt, req, postgresRunForkWorkflowTimerReadbackPort(s)); err != nil {
+					return runfork.SelectedContractRuntimeExecution{}, err
+				}
 				return issueSelectedSuccessorExecution(txctx, attempt, postgresDialect{}, req, postgresDeliveryAdapter)
 			})
 		if !result.Acknowledged() {
@@ -53,6 +56,9 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 	if req.RecoveryFromExecutionID != "" {
 		result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected successor execution issuance", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
 			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
+				if err := requireSelectedSuccessorWorkflowTimers(txctx, attempt, req, sqliteRunForkWorkflowTimerReadbackPort(s)); err != nil {
+					return runfork.SelectedContractRuntimeExecution{}, err
+				}
 				return issueSelectedSuccessorExecution(txctx, attempt, sqliteDialect{}, req, sqliteDeliveryAdapter)
 			})
 		if !result.Acknowledged() {
@@ -75,8 +81,8 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationprotocol.Attempt, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest, deliveries interface {
 	TransferSelectedSuccessorAuthority(context.Context, *mutationprotocol.Attempt, string, runtimedelivery.ExecutionAuthority) error
 }) (runfork.SelectedContractRuntimeExecution, error) {
-	if req.Admission.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected successor issuance is restricted to finite deployment feeds")
+	if err := req.Admission.ForkPoint.Validate(); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected successor requires exact typed cut: %w", err)
 	}
 	var issued runfork.SelectedContractRuntimeExecution
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {

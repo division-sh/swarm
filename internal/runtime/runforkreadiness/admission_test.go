@@ -390,7 +390,8 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 			FlowTemplate: "consumer", Mode: "template", StageDefined: graph.StageCount() != 0,
 			EntityType: "deployment", FlowInstance: "consumer/item",
-			FlowConfig: selectedAgentHeaderConfig(t, constructed),
+			FlowConfig:             selectedAgentHeaderConfig(t, constructed),
+			InitialMaterialization: selectedConstructionReceipt(t, effective.Source(), runID, constructed, nil, entered),
 		},
 	}}}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})

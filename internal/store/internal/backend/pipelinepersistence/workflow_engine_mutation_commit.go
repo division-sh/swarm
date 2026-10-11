@@ -522,7 +522,7 @@ func commitWorkflowEngineMutation(
 			if command.FanOutBarrierCompletion != nil {
 				runID := command.State.Identity.RunID
 				updatedAt := command.State.UpdatedAt
-				if err := commitFanOutBarrierCompletionTx(txctx, attempt, postgres, runID, *command.FanOutBarrierCompletion, updatedAt); err != nil {
+				if err := commitFanOutBarrierCompletionTx(txctx, attempt, postgres, runID, *command.FanOutBarrierCompletion, command.DeliverySuccess.Claim, updatedAt); err != nil {
 					return err
 				}
 			}
