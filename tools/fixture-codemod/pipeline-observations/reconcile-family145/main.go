@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "7d45308e73d8c4ca810e1d93da08efb4b98c130182b303c3314bc8086a2be974"
+const targetDigest = "62df45fb0ff2fca7d3ec20cd35fe9809689dd98f55f98cfce54ba093a5e88e6d"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -36,7 +36,9 @@ var files = []string{
 	"internal/apiv1/operator_agent_control_test.go",
 	"internal/apiv1/operator_data_test.go",
 	"internal/apiv1/operator_event_publish_test.go",
+	"internal/apiv1/operator_event_replay_test.go",
 	"internal/apiv1/operator_run_start_test.go",
+	"internal/apiv1/sqlite_observability_supported_surface_test.go",
 	"internal/cliapp/data_show_selected_test.go",
 	"internal/cliapp/runtime_log_filter_supported_test.go",
 	"internal/runtime/conformance/reply_resolution_conformance_test.go",
@@ -111,6 +113,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		if key == "postgresEventDeliveryTargetRoutes" && after["publicationDeliveryTargetRoutes"] != "" {
 			return after["publicationDeliveryTargetRoutes"], false
 		}
+	}
+	if path == "internal/apiv1/operator_event_replay_test.go" && (key == "updateCompleteReplayChainDepth" || key == "updateCompleteReplayTargetRoute") {
+		return "", true
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
 }

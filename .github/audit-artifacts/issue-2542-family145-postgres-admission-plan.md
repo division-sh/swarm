@@ -414,3 +414,77 @@ U1000 passed, including the served delta; no cross-platform union is claimed.
 No intermediate checkpoint was pushed or submitted for review. The additional
 counter-owner delta still requires final complexity/unused evidence and the
 whole-family census at the final checkpoint.
+
+## Historical Receipt Pin Repair And Replay/Observability Cohort
+
+Reviewer-b F1 at cd3bb5895 is repaired exactly: historical_model_test.go now
+expects c9f96f9b765ee14eb563ff0c90a9f4c4dc6dde8c1c0cb52b7aa0da786894de16.
+The 24 mechanical-record count, digest algorithm and all immutable historical
+inputs are unchanged. Only the already-reviewed two publication successors
+changed that aggregate. The three TestHistoricalMechanical controls passed
+under race/count1 (historical-receipt-pin-repair.jsonl, 6.663s). This control is
+now part of the affected recipe validation, rather than omitted from it.
+
+The entire shared replay-session association helper and its three callers no
+longer carry a raw pool or dialect. The existing llmpersistence row owner seeds
+only the original nine columns, with unchanged database defaults and exact
+session/run/name/source/route/flow coordinates. It does not acquire or invent a
+lease, turn, grant or attempt. Actual claims, session binding and settlement
+remain the existing delivery operations. The native-owner proof counts exactly
+one original write and no revision finalization, inspects all nine coordinates
+and absent lease columns through the existing closed snapshot witness, and
+proves duplicate/cancelled/invalid/foreign/closed refusal without partial writes.
+
+All three remaining event-replay PostgreSQL openings and the split ordinary
+observability constructor now open natively at the original resource-opening
+point. Both full caller files have no raw pool, getter, SQL or dialect carrier.
+Opaque-missing-event cardinality uses the three existing physical count owners
+without adding eligibility or read admission. All public method/refusal/replay,
+route-sibling, target-set, chronology, payload, managed-frame and no-dispatch
+assertions remain unchanged.
+
+The negative chain-depth probe reuses its existing named original-writer fault,
+still reaching the real database CHECK rather than pre-validating depth. The
+fixed target-route corruption and exact original typed-target restoration move
+behind eventrecord and the same original mutation coordinator. Both require one
+exact event row; only target_route changes, no production revision is published,
+and existing decoder/replay refusal and subsequent successful dispatch remain
+the execution proof. The dedicated both-store proof compares every other table
+and event column, restores an identical full physical snapshot, counts both
+native writes, and rejects missing/cancelled/invalid/foreign/closed operations.
+Both fixed writers have explicit physical-writer census rows and spec contracts.
+
+Focused vemew race/count1/GOMAXPROCS2 receipts:
+- replay-observability-native-consumers-fixed.jsonl: six affected original roots
+  passed, including both-store replay/sibling/missing-event and SQLite/PG
+  observability; 52.045s, no selected failure/skip.
+- replay-native-owners-repaired.jsonl: both native owner controls, the existing
+  real chain-depth constraint control and exact physical-writer census passed;
+  four roots, 22.128s, no selected failure/skip.
+- replay-finite-controls.jsonl: exact finite transitions, immutable historical
+  receipts, inert recipes and hostile owner/caller controls passed, 55.316s.
+- replay-adjacent-guards.jsonl: closed delivery, revision-accessor inventory and
+  semantic event-fixture owner guards passed; replay-event-construction-guard
+  passed separately in its actual internal/events package.
+- replay-unused.log: native U1000 passed for all touched API/store/domain/bridge
+  packages and the finite reconciliation tool; no platform-union claim.
+
+Initial proof receipts remain explicit: replay-session-native-owner.jsonl and
+replay-observability-native-consumers.jsonl are compile refusals (wrong probe
+field and constructor arity). replay-session-native-owner-fixed.jsonl is RED
+because the new proof omitted the required agent parent. The proof now admits
+that parent through the same existing static fixture as the real caller, not a
+raw seed or fake grant. replay-native-owners-final.jsonl is a compile refusal
+for the canonical reader's return arity, corrected in the final owner receipt.
+No unchanged retry loop, timeout/coverage change or production repair occurred.
+
+The finite corpus now has 973 rows / 104 exact transitions, digest
+62df45fb0ff2fca7d3ec20cd35fe9809689dd98f55f98cfce54ba093a5e88e6d.
+All 893 historical Before/After/Mechanical records are retained; the two raw
+replay update helpers have explicit finite retirement rows. The complete tool
+package is being rerun for F1; its result is not yet claimed here.
+Named live Admit calls: 156 -> 153 (202 initially), plus the separately removed
+ordinary NewPostgresStoreForTest/bootstrap chain. The one Docker candidate is
+still unqualified, so the proven-cohort count is 154. No fresh global census,
+baseline decrease, global zero-additions, tier, push, PR or whole-family closure
+is claimed. Last qualified global census remains 10698 / 7754 / 67 unresolved.

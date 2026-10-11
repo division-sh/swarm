@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 93 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "7d45308e73d8c4ca810e1d93da08efb4b98c130182b303c3314bc8086a2be974" {
+	if err != nil || len(rows) != 104 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "62df45fb0ff2fca7d3ec20cd35fe9809689dd98f55f98cfce54ba093a5e88e6d" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,12 +67,45 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity" {
+		assertFamily145ReplayFaultAssertions(t, beforeSource, afterSource)
+		return
+	}
 	if function != "TestTerminalPanicFinalizationBothStores" {
 		return
 	}
 	before, after := family145PanicLifecycleCalls(beforeSource), family145PanicLifecycleCalls(afterSource)
 	if len(before) != 2 || strings.Join(before, "\n") != strings.Join(after, "\n") {
 		t.Fatal("terminal panic migration changed or removed its real lifecycle proofs")
+	}
+}
+
+func assertFamily145ReplayFaultAssertions(t testing.TB, beforeSource, afterSource string) {
+	t.Helper()
+	before, beforeErr := runSetupAssertions(beforeSource)
+	after, afterErr := runSetupAssertions(afterSource)
+	if beforeErr != nil || afterErr != nil {
+		t.Fatalf("replay proof parse: %v/%v", beforeErr, afterErr)
+	}
+	remove := func(calls []string, expected string) []string {
+		var kept []string
+		found := 0
+		for _, call := range calls {
+			if call == expected {
+				found++
+			} else {
+				kept = append(kept, call)
+			}
+		}
+		if found != 1 {
+			t.Fatalf("replay fault transport assertion %q occurs %d times, want one", expected, found)
+		}
+		return kept
+	}
+	before = remove(before, `t.Fatalf("encode original target route: %v", err)`)
+	after = remove(after, `t.Fatalf("corrupt replay target route: %v", err)`)
+	if strings.Join(before, "\n") != strings.Join(after, "\n") {
+		t.Fatal("replay migration lost a behavioral assertion")
 	}
 }
 
@@ -103,14 +136,15 @@ func family145SemanticOwner(function string) bool {
 		"selectedForkExecutableMutationSnapshotForTest", "selectedContractDynamicRuntimeGlobalSnapshot",
 		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
-		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores":
+		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
+		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity":
 		return true
 	}
 	return false
 }
 
 func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {
-	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go"} {
+	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go", "operator_event_replay_test.go", "sqlite_observability_supported_surface_test.go"} {
 		data, err := os.ReadFile(filepath.Join("../../..", "internal/apiv1", name))
 		if err != nil {
 			t.Fatal(err)
