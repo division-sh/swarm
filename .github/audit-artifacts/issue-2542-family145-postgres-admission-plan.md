@@ -742,3 +742,55 @@ The corpus is1006 rows /142 transitions, digest
 the approved24-receipt pin is unchanged. Named admission inventory is145, or146
 excluding Docker's qualification-open removal. No new global census/baseline,
 tier, restart qualification, push, PR or family/parent closure is claimed.
+
+## Complete Numeric Registration Reader Family
+
+One fixed eventrecord operation replaces the shared numeric-registration SQL
+reader and all eight pool-bearing calls in six files. Original exact run/name,
+created-at/event-ID order, physical payload rendering and repeated account rows
+are preserved. JSON decoding, missing-account refusal, numeric extraction,
+last-row-per-account mapping and every workload/cardinality assertion remain
+with the original consumers. The original selected read coordinator owns query,
+scan, iteration/close failure and cancellation; detached results confer no SQL,
+callback, selector, inferred outcome or new execution authority.
+
+Three outer fixtures now open native owners at their original location: empty
+reporter, shared multi-grant serving and internal-delivery settlement. The first
+two complete files contain no SQL, raw getter, supplied pool or reconstructed
+store. The guarded codemod pins the owner-repaired six-file intermediate and
+deletes only the exact third pool argument in eight calls. Its first complete
+preflight caught the third newly unused outer pool, wrote no files, and forced
+that original fixture dependency to be repaired natively. The unchanged opaque
+source, clocks,25-item/chunk workloads, runtime join and cleanup cuts remain.
+
+numeric-registration-native-owner.jsonl PASS13.920s under race/count1: two new
+roots on both stores prove zero/nonzero physical evidence, all three same-account
+rows, timestamp ties/event-ID sorting, foreign run/name exclusion, exact native
+payload bytes, detachment, original read counters, cancellation and closed/raw/
+nil/invalid ownership refusal. numeric-registration-finite-controls.jsonl
+PASS1.389s covers the four exact/hostile caller and business-assertion controls,
+all145 source transitions and historical receipt controls. The immutable893
+record hash and approved24-receipt pin are unchanged. Adjacent delivery/event/
+runforkrevision guards PASS3.371s; five-package U1000 is green and complete dry
+run Changes=[]. No aggregate codemod, local tier or global census is repeated.
+
+numeric-registration-native-consumers.jsonl is explicitly RED270.064s, not a
+passing package receipt. Five original roots pass both stores: empty reporter,
+expired-evaluation, shared-grant serving,500/502-row valid/rejected reporter and
+25-row internal settlement. M01 PostgreSQL passes but SQLite misses its original
+750ms real-turn deadline before reaching the changed registration witness.
+One bounded serial same-host/race/count1 comparison reproduces the exact SQLite
+signature on pre-cohort5439a144d (RED16.178s) and candidate (RED14.991s), with
+PostgreSQL passing both times. Their complete receipts/hashes and unchanged-cut
+analysis are recorded in #2353's issue-body M01 intake. This proves reproduction
+before the numeric cohort, not clean-master inheritance or a pressure cause.
+M01 remains unclassified and qualification-open. No production repair, timeout
+increase, skip, assertion weakening or retry-until-green; scratch control removed.
+Docker remains its separate qualification-open intake. These are landing-proof
+obligations, not permissions to disguise the failed representative cell.
+
+The finite corpus is1009 rows /145 transitions, digest
+5e34c817d2097ee83fdd599c520669adc1e37d76b250186547ad76a70da58f9d.
+Named admission survey remaining142, or143 excluding unqualified Docker removal.
+No fresh global count/baseline change, restart proof, push, PR or family/parent
+closure claim; other approved shared admission dependencies may continue locally.

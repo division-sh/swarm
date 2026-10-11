@@ -315,7 +315,7 @@ func (f *servingMatrixFixture) assertSettled(t *testing.T, runtimeIndex int, run
 	if err != nil || summary.Intents != cardinality || summary.Cardinality != cardinality || summary.Cursor != cardinality || summary.Committed != cardinality || summary.SemanticRejected != 0 || summary.Owed != 0 || summary.Unsettled != 0 {
 		t.Fatalf("exact shared-serving outcomes: %+v err=%v", summary, err)
 	}
-	registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, f.db, runID)
+	registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, runID)
 	if len(registrations) != cardinality {
 		t.Fatalf("durable publications=%d want=%d", len(registrations), cardinality)
 	}

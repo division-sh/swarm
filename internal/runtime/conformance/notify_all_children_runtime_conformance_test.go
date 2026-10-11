@@ -781,7 +781,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Fatalf("valid numeric reporter summary = %#v", validSummary)
 			}
 			assertReporterFanOutSingleChunkHistory(t, validCtx, db, validRunID)
-			registrations := loadNotifyAllChildrenNumericRegistrations(t, validCtx, selected, db, validRunID)
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, validCtx, selected, validRunID)
 			if len(registrations) != 500 {
 				t.Fatalf("valid numeric registration events = %d, want 500", len(registrations))
 			}
@@ -856,7 +856,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 					}
 				}
 			}
-			mixedRegistrations := loadNotifyAllChildrenNumericRegistrations(t, mixedCtx, selected, db, mixedRunID)
+			mixedRegistrations := loadNotifyAllChildrenNumericRegistrations(t, mixedCtx, selected, mixedRunID)
 			if len(mixedRegistrations) != 502 || mixedRegistrations["mixed-before"].ID == "" || mixedRegistrations["mixed-after"].ID == "" || mixedRegistrations["mixed-empty-uuid"].ID != "" || mixedRegistrations["mixed-bad-number"].ID != "" {
 				t.Fatalf("mixed numeric registrations = %#v", mixedRegistrations)
 			}
@@ -921,26 +921,23 @@ func assertNumericRegistrationDelivery(t *testing.T, event operatorread.Operator
 func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		setup func(*testing.T) notifyAllChildrenStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.DatabaseForTest(selected)
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.setup(t)
+			selected := tc.setup(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows:   true,
 				NumericInternalSettlement: true,
@@ -976,7 +973,7 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 			if err != nil || summary.Cardinality != len(rows) || summary.Cursor != len(rows) || summary.Committed != len(rows) || summary.Settled != len(rows) || summary.Unsettled != 0 || summary.Owed != 0 {
 				t.Fatalf("internal-delivery fan-out summary = %#v err=%v", summary, err)
 			}
-			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runID)
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, runID)
 			if len(registrations) != len(rows) {
 				t.Fatalf("internal-delivery registrations = %d, want %d", len(registrations), len(rows))
 			}
@@ -1151,26 +1148,15 @@ func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, 
 	return out
 }
 
-func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[string]notifyAllChildrenNumericRegistration {
+func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, runID string) map[string]notifyAllChildrenNumericRegistration {
 	t.Helper()
-	query := `SELECT CAST(event_id AS TEXT),payload FROM events WHERE run_id=$1::uuid AND event_name=$2 ORDER BY created_at,event_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id,payload FROM events WHERE run_id=? AND event_name=? ORDER BY created_at,event_id`
-	}
-	rows, err := db.QueryContext(ctx, query, runID, "portfolio/account.registered")
+	rows, err := storetest.ReadNumericRegistrationStorage(ctx, notifyAllChildrenNativeObservationOwner(backend), runID)
 	if err != nil {
 		t.Fatalf("query numeric registration events: %v", err)
 	}
-	defer rows.Close()
 	out := map[string]notifyAllChildrenNumericRegistration{}
-	for rows.Next() {
-		var (
-			id  string
-			raw any
-		)
-		if err := rows.Scan(&id, &raw); err != nil {
-			t.Fatalf("scan numeric registration event: %v", err)
-		}
+	for _, row := range rows {
+		id, raw := row.ID, row.Payload
 		payload := map[string]any{}
 		if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &payload); err != nil {
 			t.Fatalf("decode numeric registration event: %v", err)
@@ -1182,9 +1168,6 @@ func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context
 			t.Fatalf("numeric registration event %s lacks account identity: %#v", id, payload)
 		}
 		out[accountID] = notifyAllChildrenNumericRegistration{ID: id, EngRoles: int(engRoles), GemScore: gemScore}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read numeric registration events: %v", err)
 	}
 	return out
 }

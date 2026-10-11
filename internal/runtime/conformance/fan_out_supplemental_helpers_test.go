@@ -328,7 +328,7 @@ func assertSupplementalEffects(t *testing.T, f *servingMatrixFixture, runID stri
 	if err != nil || s.Intents != intents || s.Cardinality != want || s.Cursor != want || s.Committed != want || s.SemanticRejected != 0 || s.Owed != 0 || s.Unsettled != 0 {
 		t.Fatalf("supplemental summary=%+v want=%d err=%v", s, want, err)
 	}
-	actual := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, f.db, runID)
+	actual := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, runID)
 	if len(actual) != want {
 		t.Fatalf("exact supplemental effects=%d want=%d", len(actual), want)
 	}

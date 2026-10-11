@@ -48,9 +48,16 @@ func main() {
 	write := flag.Bool("write", false, "apply the finite reviewed rewrites after complete preflight")
 	forkCallers := flag.Bool("family145-fork-callers", false, "propagate the source-pinned original selected fork owners")
 	notifyRuntime := flag.Bool("family145-notify-runtime", false, "remove the source-pinned notify runtime pool carriers")
+	numericRegistration := flag.Bool("family145-numeric-registration", false, "remove the source-pinned numeric registration pool carriers")
 	flag.Parse()
-	if flag.NArg() != 0 || (*forkCallers && *notifyRuntime) {
-		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-family145-fork-callers | -family145-notify-runtime] [-write]")
+	selectedModes := 0
+	for _, selected := range []bool{*forkCallers, *notifyRuntime, *numericRegistration} {
+		if selected {
+			selectedModes++
+		}
+	}
+	if flag.NArg() != 0 || selectedModes > 1 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-family145-fork-callers | -family145-notify-runtime | -family145-numeric-registration] [-write]")
 		os.Exit(1)
 	}
 	if *forkCallers {
@@ -62,6 +69,13 @@ func main() {
 	}
 	if *notifyRuntime {
 		if err := migrateFamily145NotifyRuntimeCallers(*write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *numericRegistration {
+		if err := migrateFamily145NumericRegistrationCallers(*write); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

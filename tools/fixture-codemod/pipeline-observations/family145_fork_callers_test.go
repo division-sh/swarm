@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 142 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "0ca51ec94eedf1a4d7009a01abe50dc89a7f0cd9b611f23b7faf7484e0b41fa3" {
+	if err != nil || len(rows) != 145 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "5e34c817d2097ee83fdd599c520669adc1e37d76b250186547ad76a70da58f9d" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -71,11 +71,11 @@ func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSo
 		assertFamily145ReplayFaultAssertions(t, beforeSource, afterSource)
 		return
 	}
-	if function == "gateLifecycleDiagnosticOverlap" {
+	if function == "gateLifecycleDiagnosticOverlap" || function == "loadNotifyAllChildrenNumericRegistrations" {
 		before, beforeErr := family145DiagnosticBusinessAssertions(beforeSource)
 		after, afterErr := family145DiagnosticBusinessAssertions(afterSource)
 		if beforeErr != nil || afterErr != nil || strings.Join(before, "\n") != strings.Join(after, "\n") {
-			t.Fatalf("diagnostic overlap lost a gate, decode or one-log assertion: %v/%v", beforeErr, afterErr)
+			t.Fatalf("physical observation lost a behavioral assertion: %v/%v", beforeErr, afterErr)
 		}
 		return
 	}
@@ -145,7 +145,7 @@ func family145SemanticOwner(function string) bool {
 		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
 		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
-		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap":
+		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations":
 		return true
 	}
 	return false
