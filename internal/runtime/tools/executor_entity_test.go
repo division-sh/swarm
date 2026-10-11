@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -598,10 +600,17 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}
 
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "validation/inst-1", "validation_case", map[string]any{
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	owner := constructEntityToolFixture(t, ctx, fixture.selected, fixture.pipeline, fixture.source, "validation", "validation/inst-1", entityID, "queued", map[string]any{
+		"fixture_key":    "inst-1",
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
+	before, found, err := fixture.pipeline.Load(ctx, owner)
+	if err != nil || !found || before.EntityID != entityID || before.CurrentState != "queued" || before.Revision < 1 {
+		t.Fatalf("malformed-write control requires a live constructed target: found=%t instance=%+v err=%v", found, before, err)
+	}
+	beforeField := persistedEntityField(t, db, entityID, "business_brief")
 	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
@@ -614,17 +623,45 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/inst-1"),
 		time.Time{},
 	))
-	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+	_, err = exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
 		"value": map[string]any{
 			"summary":    "after",
 			"confidence": 9,
 			"notes":      "runtime bypass must reject",
 		},
-	}); err == nil {
-		t.Fatal("runtime execution accepted undeclared nested key")
+	})
+	failure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
+	if failure.Component != "tool-executor" || failure.Operation != "execute.validate_runtime_tool_input" ||
+		failure.Detail.Attributes["tool"] != "save_validation_case_business_brief" {
+		t.Fatalf("malformed payload failed at an unintended gate: %+v", failure)
 	}
-	if got := persistedEntityField(t, db, entityID, "business_brief"); strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
+	var violation *eventschema.Violation
+	if !errors.As(err, &violation) || violation.Path != "$.value.notes" || violation.Constraint != "additionalProperties" ||
+		violation.Expected != "declared property" || violation.Actual != "undeclared property" {
+		t.Fatalf("malformed payload must reject exactly the undeclared notes property: %#v, %v", violation, err)
+	}
+	if got := persistedEntityField(t, db, entityID, "business_brief"); got != beforeField || strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
 		t.Fatalf("runtime validation failure still mutated entity: %s", got)
+	}
+	after, found, err := fixture.pipeline.Load(ctx, owner)
+	if err != nil || !found || !reflect.DeepEqual(after, before) {
+		t.Fatalf("runtime validation failure changed constructed state: found=%t instance=%+v err=%v", found, after, err)
+	}
+	output, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+		"value": map[string]any{"summary": "after", "confidence": 9},
+	})
+	if err != nil {
+		t.Fatalf("valid sibling payload could not write through the same constructed context: %v", err)
+	}
+	response, ok := output.(map[string]any)
+	if !ok || response["entity_id"] != entityID || response["field"] != "business_brief" ||
+		testNumericValue(response["revision"]) != float64(before.Revision+1) {
+		t.Fatalf("valid sibling payload has no exact write acknowledgement: %#v", output)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal([]byte(persistedEntityField(t, db, entityID, "business_brief")), &saved); err != nil ||
+		!reflect.DeepEqual(saved, map[string]any{"summary": "after", "confidence": float64(9)}) {
+		t.Fatalf("valid sibling payload was not persisted exactly: %#v err=%v", saved, err)
 	}
 }
 
