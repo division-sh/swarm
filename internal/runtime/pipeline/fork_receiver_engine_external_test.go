@@ -158,6 +158,10 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				resumeSettled := func() { resumeSettledOnce.Do(func() { close(probe.resumeSettled) }) }
 				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
+				// A durable source receipt can precede release of its ordinary lease.
+				if err := rt.Bus.WaitForQuiescence(forkCtx); err != nil {
+					t.Fatalf("source execution did not join before measuring retained work: %v", err)
+				}
 				baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
 				done := make(chan struct{})
@@ -526,6 +530,10 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 }
 
 func startForkEngineRuntimeOwner(t *testing.T, backend, root string, probe lifecycleprobe.Observer) (*swarmruntime.Runtime, *storeselected.Owner, string, startupownership.ProcessCapability, string, string) {
+	return startForkEngineRuntimeOwnerAt(t, backend, root, probe, "")
+}
+
+func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lifecycleprobe.Observer, requestedAddress string) (*swarmruntime.Runtime, *storeselected.Owner, string, startupownership.ProcessCapability, string, string) {
 	t.Helper()
 	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -538,6 +546,9 @@ func startForkEngineRuntimeOwner(t *testing.T, backend, root string, probe lifec
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
 	sqlitePath := filepath.Join(dir, "runtime.db")
+	if backend == "sqlite" && requestedAddress != "" {
+		sqlitePath = requestedAddress
+	}
 	config := map[string]any{
 		"runtime": map[string]any{"recovery_on_startup": false},
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
@@ -547,7 +558,10 @@ func startForkEngineRuntimeOwner(t *testing.T, backend, root string, probe lifec
 	driver, address := "sqlite", sqlitePath
 	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: sqlitePath}
 	if backend == "postgres" {
-		dsn = testutil.StartPostgresDSN(t)
+		dsn = requestedAddress
+		if dsn == "" {
+			dsn = testutil.StartPostgresDSN(t)
+		}
 		driver, address = "postgres", dsn
 		connection, err := testpostgres.ParseConnection(dsn)
 		if err != nil {

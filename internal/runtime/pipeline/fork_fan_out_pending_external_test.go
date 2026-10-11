@@ -71,9 +71,16 @@ func TestIssue642FanOutContinuedChildReforkBothStores(t *testing.T) {
 }
 
 func runMixedFanOutPendingMatrix(t *testing.T, refork bool) {
+	runMixedFanOutPendingMatrixWithCrash(t, refork, nil)
+}
+
+func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixedFanOutCrashFixture) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, retained := range []fanoutobligation.InheritedTerminalDisposition{fanoutobligation.InheritedSucceeded, fanoutobligation.InheritedDeadLettered} {
+			if crash != nil && (backend != crash.backend || retained != crash.retained) {
+				continue
+			}
 			t.Run(backend+"/"+string(retained), func(t *testing.T) {
 				runID := uuid.NewString()
 				consumer, err := identity.AdmitExecutableNodeDeclaration("consumer", "collector")
@@ -87,7 +94,11 @@ func runMixedFanOutPendingMatrix(t *testing.T, refork bool) {
 				sourceProbe := &mixedFanOutSourceProbe{runID: runID, receiver: consumer.Key(), history: lifecycleprobe.New(),
 					claimed: make(chan forkEngineObservation, 1), cut: make(chan string, 1), resume: make(chan struct{})}
 				root := canonicalrouting.CopyForkFanOutReceiverOwnership(t)
-				rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, sourceProbe)
+				var address string
+				if crash != nil {
+					address = crash.address
+				}
+				rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, sourceProbe, address)
 				var sourceRelease sync.Once
 				t.Cleanup(func() { sourceRelease.Do(func() { close(sourceProbe.resume) }) })
 				ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -169,6 +180,13 @@ func runMixedFanOutPendingMatrix(t *testing.T, refork bool) {
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
 				}
+				if crash != nil {
+					executionRequest.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "mixed-fanout-crash", IdempotencyKey: "pending-cut", TransportHash: "mixed-fanout-crash-transport",
+						SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
+						AllowSourceFreeze: true, ContractSelection: executionRequest.ContractSelection,
+					}
+				}
 				result, err := family.Execute(forkCtx, executionRequest)
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
 					t.Fatalf("mixed fan-out activation acknowledgment: %+v err=%v", result, err)
@@ -203,6 +221,13 @@ func runMixedFanOutPendingMatrix(t *testing.T, refork bool) {
 				if err != nil || beforeChild.Fields["processed_token"] != "seeded" || childEntity != sourceConsumer.EntityID ||
 					beforeChild.Entity.RunID != claim.RunID() || beforeChild.Entity.FlowInstance != "consumer" {
 					t.Fatalf("child did not retain run-scoped fixed-cut receiver ownership: %+v err=%v", beforeChild, err)
+				}
+				if crash != nil {
+					crash.publishCheckpoint(t, mixedFanOutCrashCheckpoint{
+						Proof: request, BundleHash: rt.Options.SourceArtifactFact.BundleHash(),
+						SourceEntityID: sourceConsumer.EntityID, ChildEntityID: childEntity,
+						SourceRevision: beforeSource.Entity.Revision, ChildRevision: beforeChild.Entity.Revision, Token: token,
+					})
 				}
 				release.Do(func() { close(probe.resume) })
 				select {
