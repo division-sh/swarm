@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -109,4 +110,14 @@ func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 		t.Fatalf("load bundle: %v", err)
 	}
 	return semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}
+}
+
+func runtimeOwnershipFixtureContext(t *testing.T, module semanticOnlyWorkflowRuntime) (context.Context, runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("runtime ownership fixture requires its admitted source artifact")
+	}
+	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
+	return testAuthorActivityContextForBundle(context.Background(), fact.BundleHash()), fact
 }

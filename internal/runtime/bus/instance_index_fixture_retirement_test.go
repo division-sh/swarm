@@ -4,7 +4,51 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
+
+func (s *targetRouteMemoryStore) requireConstructionUnchanged(t testing.TB) {
+	t.Helper()
+	type header struct {
+		Owner    flowidentity.RunScopedFlowInstance
+		Instance pipeline.WorkflowInstance
+	}
+	snapshot := func() ([]header, map[flowidentity.RunScopedFlowInstance]pipeline.FlowConstructionPublicationEvidence) {
+		t.Helper()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		headers := make([]header, 0, len(s.instanceObservations))
+		for _, observed := range s.instanceObservations {
+			instance, err := observed.WorkflowInstance()
+			if err != nil {
+				t.Fatal(err)
+			}
+			headers = append(headers, header{Owner: observed.Owner(), Instance: instance})
+		}
+		receipts := make(map[flowidentity.RunScopedFlowInstance]pipeline.FlowConstructionPublicationEvidence, len(s.constructions))
+		for owner, receipt := range s.constructions {
+			if receipt.Fields != nil {
+				fields, err := canonicaljson.CloneRuntimeValue(receipt.Fields)
+				if err != nil {
+					t.Fatal(err)
+				}
+				receipt.Fields = fields.(map[string]any)
+			}
+			receipts[owner] = receipt
+		}
+		return headers, receipts
+	}
+	headers, receipts := snapshot()
+	t.Cleanup(func() {
+		afterHeaders, afterReceipts := snapshot()
+		if !reflect.DeepEqual(headers, afterHeaders) || !reflect.DeepEqual(receipts, afterReceipts) {
+			t.Error("publication changed exact native instance or immutable construction evidence")
+		}
+	})
+}
 
 func (s *targetRouteMemoryStore) refuseInstanceIndexReads(t testing.TB) {
 	t.Helper()
@@ -28,8 +72,13 @@ func TestFlowInstanceFixturesHaveNoRetiredDescriptorReader(t *testing.T) {
 		reflect.TypeOf((*connectRoutePlanConcurrentLifecycleStore)(nil)),
 		reflect.TypeOf((*finalFlowInstanceAuthoringLifecycleStore)(nil)),
 	} {
-		if _, present := owner.MethodByName("ListActiveFlowInstanceDescriptors"); present {
-			t.Errorf("%s retains the retired descriptor reader instead of the native index", owner)
+		for _, name := range []string{"ListActiveFlowInstanceDescriptors", "UpsertFlowInstanceRoute", "DeleteFlowInstanceRoute", "ListFlowInstanceRoutes"} {
+			if _, present := owner.MethodByName(name); present {
+				t.Errorf("%s retains the retired instance mirror API %s", owner, name)
+			}
+		}
+		if _, present := owner.Elem().FieldByName("flowRoutes"); present {
+			t.Errorf("%s retains a retired mutable route mirror beside its native index", owner)
 		}
 	}
 }

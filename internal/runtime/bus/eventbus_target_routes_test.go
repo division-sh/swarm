@@ -57,7 +57,6 @@ type targetRouteMemoryStore struct {
 	claims                  map[string]runtimepipelineobligation.Claim
 	scans                   map[string]runtimepipelineobligation.ScanRequest
 	active                  map[string]bool
-	flowRoutes              []FlowInstanceRouteRecord
 	targetOwners            []ActiveTargetDescriptor
 	workflowInstances       []runtimepipeline.WorkflowInstance
 	workflowStates          []runtimepipeline.WorkflowEntityStatePersistenceRecord
@@ -158,59 +157,6 @@ func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTarge
 	return ActiveTargetDescriptor{
 		ID: id, FlowInstance: flowInstance, EntityID: eventtest.UUID(entitySeed),
 	}.Normalized()
-}
-
-func targetRouteIdentity(identity runtimeflowidentity.RunScopedFlowInstance) runtimeflowidentity.RunScopedFlowInstance {
-	identity.Route = runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
-	return identity.Normalize()
-}
-
-func sameTargetRoute(left, right runtimeflowidentity.RunScopedFlowInstance) bool {
-	return targetRouteIdentity(left) == targetRouteIdentity(right)
-}
-
-func (s *targetRouteMemoryStore) UpsertFlowInstanceRoute(_ context.Context, route FlowInstanceRouteRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	route.Identity = targetRouteIdentity(route.Identity)
-	for i, existing := range s.flowRoutes {
-		if sameTargetRoute(existing.Identity, route.Identity) && existing.EventPattern == route.EventPattern && existing.SubscriberType == route.SubscriberType && existing.SubscriberID == route.SubscriberID {
-			s.flowRoutes[i] = route
-			return nil
-		}
-	}
-	s.flowRoutes = append(s.flowRoutes, route)
-	return nil
-}
-
-func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	retained := s.flowRoutes[:0]
-	for _, existing := range s.flowRoutes {
-		if !sameTargetRoute(existing.Identity, identity) {
-			retained = append(retained, existing)
-		}
-	}
-	s.flowRoutes = retained
-	return nil
-}
-
-func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(s.flowRoutes))
-	routes := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(s.flowRoutes))
-	for _, record := range s.flowRoutes {
-		identity := targetRouteIdentity(record.Identity)
-		if _, ok := seen[identity]; ok {
-			continue
-		}
-		seen[identity] = struct{}{}
-		routes = append(routes, identity)
-	}
-	return routes, nil
 }
 
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
@@ -2506,6 +2452,7 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, currentRoute.EntityID), currentRoute.FlowInstance),
 		routingSource, time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if plan, err := eb.CheckPublishRecipientPlan(ctx, evt); err != nil || len(plan.RoutedRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
 		t.Fatalf("descendant acquired undeclared recipient authority: plan=%+v err=%v", plan, err)
@@ -2513,9 +2460,9 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 	if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "does not identify a local declaration") {
 		t.Fatalf("Publish error = %v, want source-metadata refusal before descendant delivery", err)
 	}
-	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected descendant publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 {
+		t.Fatalf("rejected descendant publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2592,6 +2539,7 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			}
 			installConnectionSourceConstruction(t, eb, source, "validation")
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "thing.created", "", "", []byte("{}"), 0, busInternalTestRunID, "", envelope, time.Now().UTC())
+			store.requireConstructionUnchanged(t)
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
 				t.Fatalf("unconnected child received root input: %#v", plan)
@@ -2603,7 +2551,7 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			if !explicitTarget && publishErr != nil {
 				t.Fatal(publishErr)
 			}
-			if len(store.routes[evt.ID()]) != 0 || len(store.flowRoutes) != 0 {
+			if len(store.routes[evt.ID()]) != 0 {
 				t.Fatal("unconnected publication created child delivery or receiver")
 			}
 			if explicitTarget && (len(store.events) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0) {
@@ -2632,6 +2580,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceBeforePersistence(t 
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		runID, "", events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want root-input admission refusal", err)
@@ -2640,9 +2589,9 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceBeforePersistence(t 
 		t.Fatalf("Publish error = %v, want root-input admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected internal root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected internal root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2668,6 +2617,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceWithExplicitTarget(t
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		runID, "", envelope, eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want explicit-target root-input admission refusal", err)
@@ -2676,9 +2626,9 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceWithExplicitTarget(t
 		t.Fatalf("Publish error = %v, want explicit-target root-input admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected targeted root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected targeted root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2753,6 +2703,7 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 		uuid.NewString(), "validation/thing.created", "foreign-provider", "", []byte("{}"), 0,
 		uuid.NewString(), "", envelope, eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil {
 		t.Fatalf("duplicate-ID root-input preflight error = %v, want typed admission refusal", err)
@@ -2761,9 +2712,9 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 		t.Fatalf("duplicate-ID root-input publish error = %v, want typed admission refusal", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
-		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected duplicate-ID root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+		len(store.receipts) != 0 {
+		t.Fatalf("rejected duplicate-ID root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -2834,6 +2785,7 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			installConnectionSourceConstructionForRun(t, eb, source, "validation", runID)
 			installConnectionSourceConstructionForRun(t, eb, source, "audit", runID)
 			evt := eventtest.OperatorInjectedWithRoutingSource(eventID, "thing.created", "operator", "", []byte("{}"), 0, runID, nil, envelope, eventtest.RootRoutingSource(runID), time.Now().UTC())
+			store.requireConstructionUnchanged(t)
 			plan, err := eb.CheckAPIEventPublishRecipientPlan(context.Background(), evt, &endpoint)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
 				t.Fatalf("API admission manufactured private delivery: %#v", plan)
@@ -2847,7 +2799,7 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			if !explicitTarget && publishErr != nil {
 				t.Fatal(publishErr)
 			}
-			if len(store.routes[eventID]) != 0 || len(store.flowRoutes) != 0 {
+			if len(store.routes[eventID]) != 0 {
 				t.Fatal("API admission created child delivery or receiver")
 			}
 			if explicitTarget && (len(store.events) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || store.completion.ResourceID != "") {
@@ -3261,10 +3213,11 @@ func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstructio
 	})
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+		eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: currentRunID}}})
 		if err != nil {
 			t.Fatalf("attempt %d NewEventBusWithOptions: %v", attempt, err)
 		}
+		store.requireConstructionUnchanged(t)
 		if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
 			t.Fatalf("attempt %d preflight error = %v", attempt, err)
 		}
@@ -3273,8 +3226,8 @@ func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstructio
 		}
 		_, persisted := store.events[eventID]
 		_, settled := store.settlements[eventID]
-		if persisted || len(store.routes[eventID]) != 0 || settled || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-			t.Fatalf("attempt %d wrong-run root target mutated event store: event=%t routes=%#v settled=%t scopes=%#v receipts=%#v flow_routes=%#v", attempt, persisted, store.routes[eventID], settled, store.scopes, store.receipts, store.flowRoutes)
+		if persisted || len(store.routes[eventID]) != 0 || settled || len(store.scopes) != 0 || len(store.receipts) != 0 {
+			t.Fatalf("attempt %d wrong-run root target mutated event store: event=%t routes=%#v settled=%t scopes=%#v receipts=%#v", attempt, persisted, store.routes[eventID], settled, store.scopes, store.receipts)
 		}
 	}
 }
