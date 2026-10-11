@@ -195,27 +195,31 @@ func run(cfg config) error {
 		}
 		return testplanning.ValidatePublicationDiff(paths)
 	case cfg.assertExecution:
-		if cfg.planPath == "" || cfg.executionSHA == "" {
-			return fmt.Errorf("-plan and -execution-sha are required with -assert-execution-sha")
-		}
-		plan, err := readPlan(cfg.planPath)
-		if err != nil {
-			return err
-		}
-		if err := plan.ValidateExecutionSHA(cfg.executionSHA); err != nil {
-			return err
-		}
-		actual, err := testplanning.EffectiveBuildContext(context.Background(), ".")
-		if err != nil {
-			return err
-		}
-		if actual != plan.BuildContext {
-			return fmt.Errorf("effective Go build context differs from the executable plan")
-		}
-		return nil
+		return assertExecutablePlan(cfg)
 	default:
 		return writeTimingReport(cfg)
 	}
+}
+
+func assertExecutablePlan(cfg config) error {
+	if cfg.planPath == "" || cfg.executionSHA == "" {
+		return fmt.Errorf("-plan and -execution-sha are required with -assert-execution-sha")
+	}
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		return err
+	}
+	if err := plan.ValidateExecutionSHA(cfg.executionSHA); err != nil {
+		return err
+	}
+	actual, err := testplanning.EffectiveBuildContext(context.Background(), ".")
+	if err != nil {
+		return err
+	}
+	if actual != plan.BuildContext {
+		return fmt.Errorf("effective Go build context differs from the executable plan")
+	}
+	return nil
 }
 
 func reportCISelection(cfg config) error {
