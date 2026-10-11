@@ -491,8 +491,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			pg := storetest.StartPostgresRuntimeStore(t)
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
@@ -544,8 +543,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 
 			materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
 			before := selectedForkExecutableMutationSnapshotForTest(t, ctx, pg, materialized.ForkRunID)
-			var sourceStatusBefore string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
+			sourceStatusBefore, err := storetest.ReadRunStatusStorage(ctx, pg, sourceRunID)
+			if err != nil {
 				t.Fatalf("load source status before activation: %v", err)
 			}
 
@@ -571,8 +570,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("activation changed %s from %q to %q", fact, want, got)
 				}
 			}
-			var sourceStatusAfter string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusAfter); err != nil {
+			sourceStatusAfter, err := storetest.ReadRunStatusStorage(ctx, pg, sourceRunID)
+			if err != nil {
 				t.Fatalf("load source status after activation: %v", err)
 			}
 			if sourceStatusAfter != sourceStatusBefore {
@@ -916,8 +915,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 }
 
 func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterialization(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -1004,8 +1002,7 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 
 func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey)
@@ -1184,8 +1181,7 @@ func (m selectedContractTestWorkflowModule) GuardRegistry() runtimepipeline.Guar
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -1240,12 +1236,8 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		sourceEventID,
 		[]string{sourceEventID},
 	)
-	var forkBundleHash string
-	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, result.Materialization.ForkRunID).Scan(&forkBundleHash); err != nil {
+	forkBundleHash, err := storetest.ReadSelectedForkRunBundleHash(ctx, pg, result.Materialization.ForkRunID)
+	if err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
 	if forkBundleHash != bundleHash {
@@ -1254,8 +1246,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 }
 
 func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronology(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyForkChronologicalDispatch(t)
@@ -1311,8 +1302,8 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	if result.ForkEvents[0].SourceEventID != earlierEventID || result.ForkEvents[1].SourceEventID != laterEventID {
 		t.Fatalf("sequential fork execution order = %#v, want [%s %s]", result.ForkEvents, earlierEventID, laterEventID)
 	}
-	var outputs int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 2 {
+	outputs, err := storetest.CountRunNamedEventStorage(ctx, pg, result.Materialization.ForkRunID, "item.processed")
+	if err != nil || outputs != 2 {
 		t.Fatalf("chronological execution did not commit both handler outputs: count=%d err=%v", outputs, err)
 	}
 }

@@ -9,6 +9,14 @@ import (
 	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 )
 
+func ReadRunStatusStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadRunStatusStorageForTest(ctx, selected, runID)
+}
+
+func CountRunNamedEventStorage(ctx context.Context, selected any, runID, eventName string) (int, error) {
+	return private.CountRunNamedEventStorageForTest(ctx, selected, runID, eventName)
+}
+
 type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
 type SelectedForkControlStorage = private.SelectedForkControlStorage
 

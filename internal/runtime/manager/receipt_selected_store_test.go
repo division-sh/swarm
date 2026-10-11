@@ -13,8 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -39,11 +37,8 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 				runlifecycle.CandidateStore
 				runlifecycle.CandidateRegistrar
 			}
-			dialect := authoractivityfixture.DialectSQLite
 			if backend == "postgres" {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
-				dialect = authoractivityfixture.DialectPostgres
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
@@ -63,7 +58,7 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 						identity := agentidentitytest.RootRuntimeForRun(t, runID, "agent-a", "receipt-selected-store")
 						route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 						evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
-						storetest.InsertCanonicalEventRecord(t, ctx, storetest.Database(selected), dialect, evt)
+						storetest.CommitSemanticEvent(t, ctx, selected, evt)
 						storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, evt, []events.DeliveryRoute{route})
 						claimed, err := storetest.ClaimDelivery(ctx, selected, evt, route)
 						if err != nil {

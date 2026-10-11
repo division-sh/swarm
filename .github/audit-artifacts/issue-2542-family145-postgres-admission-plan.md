@@ -266,6 +266,53 @@ All evidence is local. No tier/server2 run, push, new PR, broad parent closure o
 fresh global census is claimed. Remaining selected-fork constructor callers,
 the other ordinary/private sibling chains, reopened peers, deliberate unadmitted
 schema roles and final retirement/ratchet proof remain mandatory family145 work.
+
+## Fork Scalar And Receipt Cohort
+
+Five further fork roots now construct natively: exact source-mode admission,
+synthetic dynamic-carry refusal, DB-loaded source identity, chronological dispatch,
+and deferred-work activation refusal. The last three consume existing exact
+bundle-hash or bounded status/named-event scalar ports rather than raw pool
+readback. Status remains the unnormalized physical column; named-event counts
+preserve duplicates and exact run/name equality, including empty, case and
+whitespace differences, without eligibility or event-decoding predicates.
+Native owner tests count all seven reads on the original coordinator, zero
+writes, and prove absent/cancelled/invalid/foreign/closed refusal on both stores.
+
+The shared activation-gate owner now constructs once through the native lifetime
+ledger instead of separately registering the sandbox's cleanup. Its seven live
+callers keep actual process admission and their existing stubbed planning/mutation
+roles; eight gate roots are executed without substituting fake process authority.
+The both-store manager receipt carrier now retains native selected construction
+and canonical semantic event persistence instead of recovering a raw pool for an
+event insert. Its separate delivery-obligation admission, actual fenced claim,
+candidate-sink registration/release and all sixteen settlement/failure cases
+remain unchanged. No production receipt or lifecycle policy is modified.
+
+Named Admit inventory: 165 -> 158 (202 initially); execution_test.go is 29 -> 24.
+Generic raw getter debt, remaining coupled fork observations/live faults and
+the private/schema/reopen sibling chains still remain in the parent/family map.
+The current corpus is 962 rows with 91 exact current transitions; the immutable
+893 historical records are preserved. Transition digest:
+faed9b91cb0240c4e75ebd3f693da97090f0da9792214003877427884776f7ce.
+
+New focused receipts on vemew, Go1.25.0 / race / count1 / GOMAXPROCS=2:
+- fork-native-admission-and-status.jsonl: all five affected roots passed with
+  source-mode and deferred-work cells, 37.410s.
+- fork-scalar-owner.jsonl: both-store exact scalar scope/cancellation/closed-owner
+  proof passed, 12.847s; duplicate count is two, sibling count one, exact-name
+  negative controls zero, and seven original read commits with no writes.
+- activation-gate-native.jsonl: all eight gate roots passed, 17.237s.
+- manager-receipt-native.jsonl: both backends and all sixteen settlement/failure
+  cells passed, 12.814s, with preserved candidate count and post-commit assertions.
+- fork-scalar-codemod.jsonl: the unchanged family controls passed at the scalar
+  cut; the final two constructor successors are qualified at this cohort head.
+- fork-scalars-unused.log: targeted native U1000 passed for the fork caller,
+  native bridge and affected scalar owners before the manager/gate additions.
+
+No broad tier, global census, baseline rewrite, push or PR was run. Whole-family
+retirement, zero-added downward ratchet and final supported-surface obligations
+remain open; these local receipts do not claim their completion.
 No fresh global census, zero additions, lowered baseline or final systematic
 consumption closure is asserted; those belong to the single whole-family
 checkpoint. The committed 10698/7754/67 census remains the last qualified global
