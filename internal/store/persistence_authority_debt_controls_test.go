@@ -502,6 +502,11 @@ func TestPersistenceAuthorityDebtExcludedTypedRefusalForwarder(t *testing.T) {
 		benign                bool
 	}{
 		{"literal-typed-refusal", helper, "func observe()(bool,error){_,err:=reject(\"\");return false,err}\n", true},
+		{"literal-nil-refusal", helper, "func observe()(any,error){_,err:=reject(\"\");return nil,err}\n", true},
+		{"non-nil-authority", helper, "func observe()(any,error){_,err:=reject(\"\");return &refusal{},err}\n", false},
+		{"successful-helper", "func reject(string)(any,error){return nil,nil}\n", "func observe()(any,error){_,err:=reject(\"\");return nil,err}\n", false},
+		{"successful-wrapper", helper, "func observe()(any,error){_,err:=reject(\"\");return nil,nil}\n", false},
+		{"unknown-argument", helper, "func observe(arg string)(any,error){_,err:=reject(arg);return nil,err}\n", false},
 		{"helper-performs-work", "func reject(string)(any,error){unknownWork();return nil,&refusal{message:\"unsupported\"}}\n", "func observe()(bool,error){_,err:=reject(\"\");return false,err}\n", false},
 		{"argument-performs-work", helper, "func observe()(bool,error){_,err:=reject(unknownArgument());return false,err}\n", false},
 		{"callback-shadows-helper", helper, "func observe(reject func(string)(any,error))(bool,error){_,err:=reject(\"\");return false,err}\n", false},

@@ -174,6 +174,7 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 		t.Fatalf("incomplete owned authority enumeration: sources=%d collected=%d", len(sources), len(seenFiles))
 	}
 	sort.Slice(findings, func(i, j int) bool { return debtAuthorityFindingLess(findings[i], findings[j]) })
+	debtClassifyProcessLeaseCustody(root, findings)
 	return findings
 }
 
@@ -1531,7 +1532,9 @@ func debtResolvedTypeString(valueType types.Type) string {
 }
 
 func debtRawSQLDispositionAllowed(finding authorityFinding, disposition string) bool {
-
+	if debtProcessLeaseCustodyFinding(finding) && finding.Disposition == "native-process-lease-custody:"+debtProcessLeaseCustodyPin && disposition == "fixture-2151" {
+		return true
+	}
 	path := finding.File
 	if finding.Kind == "inactive-raw-source" || finding.Kind == "raw-authority-export" {
 		return false
