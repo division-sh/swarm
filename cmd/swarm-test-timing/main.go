@@ -386,6 +386,15 @@ func evaluateBudget(cfg config) error {
 	if cfg.resultJSONPath == "" || cfg.markdownPath == "" || cfg.evidenceRoot == "" {
 		return fmt.Errorf("-result-json, -markdown, and -evidence-root are required with -evaluate-budget")
 	}
+	switch cfg.event {
+	case "pull_request", "push", "schedule", "workflow_dispatch":
+	default:
+		return writeBudgetResult(cfg, testtiming.BudgetResult{
+			Version:  testtiming.BudgetResultVersion,
+			Status:   testtiming.BudgetIncomplete,
+			Problems: []string{fmt.Sprintf("unsupported workflow event %q; exact trusted event required before timing policy selection", cfg.event)},
+		})
+	}
 	plan, err := readPlan(cfg.planPath)
 	if err != nil {
 		return err
@@ -437,6 +446,10 @@ func evaluateBudget(cfg config) error {
 		result.Status = testtiming.BudgetIncomplete
 	}
 	testtiming.AttachJobEvidence(&result, plan, cfg.workflowRunID, cfg.workflowAttempt, cfg.workflowHeadSHA, jobs)
+	return writeBudgetResult(cfg, result)
+}
+
+func writeBudgetResult(cfg config, result testtiming.BudgetResult) error {
 	if err := writeJSON(cfg.resultJSONPath, result); err != nil {
 		return err
 	}

@@ -101,8 +101,10 @@ complete aggregate growth as advisory under the user-ratified
 [LEAD ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-6110280108).
 The `strict_aggregate` mode keeps its name, full tier table, exhaustive retained
 deltas and strict counterfactual; excess aggregate cost produces `WARN`, not a
-failing summary. Missing or unknown events still require the same full-plan
-admission. PR added-cost bounds, placement admission, command ceilings and
+failing summary. Only exact `pull_request`, `push`, `schedule`, and
+`workflow_dispatch` events are admitted; missing, unknown or malformed events
+produce `INCOMPLETE` before either timing policy is selected. PR added-cost
+bounds, placement admission, command ceilings and
 invalid-evidence failures stay hard. The pinned reference, numbers, selection
 syntax, cadence and gate freshness are unchanged. Diffuse real creep below unit
 ceilings remains visible in nightly tables and every reviewed re-pin's growth
