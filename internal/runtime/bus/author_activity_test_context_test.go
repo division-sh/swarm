@@ -27,35 +27,6 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string, sources ...semanticview.Source) []ActiveFlowInstanceDescriptor {
-	if sourceFact.Validate() != nil {
-		sourceFact = authorActivityTestSourceArtifactFact
-	}
-	bundleHash := sourceFact.BundleHash()
-	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
-	for idx := range out {
-		if strings.TrimSpace(out[idx].RunID) == "" {
-			out[idx].RunID = strings.TrimSpace(runID)
-		}
-		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
-			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
-		}
-		if strings.TrimSpace(out[idx].BundleHash) == "" {
-			out[idx].BundleHash = bundleHash
-		}
-		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
-			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
-		}
-		if out[idx].Identity == (runtimeflowidentity.Instance{}) && len(sources) == 1 {
-			out[idx].Identity = ConstructedFlowInstanceIdentityFixture(sources[0], out[idx].FlowTemplate, runtimeflowidentity.LogicalInstanceID(out[idx].FlowInstance), out[idx].RunID)
-			if out[idx].EntityID == "" {
-				out[idx].EntityID = out[idx].Identity.EntityID
-			}
-		}
-	}
-	return out
-}
-
 var authorActivityTestDifferentEventTypes = strings.Fields(`
 account.ready child/child.start child/grandchild/micro.done child/grandchild/micro.started child/inst-1/micro.started
 child/output.done custom.bad custom.claimed custom.completion_failure custom.direct custom.direct.empty custom.emitted
@@ -117,19 +88,33 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 	if readiness.RunID == "" {
 		readiness.RunID = runtimecorrelation.RunIDFromContext(ctx)
 	}
+	if bundle, found := semanticview.Bundle(req.ContractBundle); found && bundle.SourceArtifact != nil {
+		readiness.BundleHash = bundle.SourceArtifact.BundleHash()
+	}
+	var key string
+	if schema, found := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); found && !schema.Instance.Empty() {
+		key, err = runtimepipeline.AdmitFlowInstanceKey(req.ContractBundle, req.Instance.TemplateID, req.ResolvedKey)
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+	}
 	instance := runtimepipeline.WorkflowInstance{
-		InstanceID:       req.Instance.InstanceID,
-		StorageRef:       req.Instance.InstancePath,
-		EntityID:         req.Instance.EntityID,
-		WorkflowName:     req.Instance.TemplateID,
-		WorkflowVersion:  req.ContractBundle.WorkflowVersion(),
-		CurrentState:     req.InitialState,
-		Fields:           fields,
-		Bookkeeping:      req.Bookkeeping,
-		EnteredStageAt:   req.OccurredAt,
-		CreatedAt:        req.OccurredAt,
-		RuntimeReadiness: &readiness,
-		EntityType:       "test_entity",
+		InstanceKey:        key,
+		ParentFlowID:       req.Instance.ParentRoute.FlowID,
+		ParentFlowInstance: req.Instance.ParentRoute.FlowInstance,
+		ParentEntityID:     req.Instance.ParentEntityID,
+		InstanceID:         req.Instance.InstanceID,
+		StorageRef:         req.Instance.InstancePath,
+		EntityID:           req.Instance.EntityID,
+		WorkflowName:       req.Instance.TemplateID,
+		WorkflowVersion:    req.ContractBundle.WorkflowVersion(),
+		CurrentState:       req.InitialState,
+		Fields:             fields,
+		Bookkeeping:        req.Bookkeeping,
+		EnteredStageAt:     req.OccurredAt,
+		CreatedAt:          req.OccurredAt,
+		RuntimeReadiness:   &readiness,
+		EntityType:         "test_entity",
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,
@@ -201,13 +186,21 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	runOwner := opts.Durable.RunLifecycle
+	instanceReader := opts.Durable.Instances
 	if opts.PipelineObligations != nil {
 		opts.Durable = ExactDurableTestDependencies(store)
+	}
+	if runOwner != nil {
+		opts.Durable.RunLifecycle = runOwner
+	}
+	if instanceReader != nil {
+		opts.Durable.Instances = instanceReader
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle != nil && bundle.SourceArtifact != nil {
+	if bundle, ok := semanticview.Bundle(opts.ContractBundle); opts.SourceArtifactFact.BundleHash() == "" && ok && bundle != nil && bundle.SourceArtifact != nil {
 		fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 		if err != nil {
 			return nil, err
@@ -227,15 +220,6 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		setTestConstructionSource(semanticview.Source)
 	}); ok {
 		receiver.setTestConstructionSource(opts.ContractBundle)
-	}
-	if receiver, ok := store.(interface {
-		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)
-	}); ok {
-		workflowVersion := "1.0.0"
-		if opts.ContractBundle != nil && strings.TrimSpace(opts.ContractBundle.WorkflowVersion()) != "" {
-			workflowVersion = opts.ContractBundle.WorkflowVersion()
-		}
-		receiver.setTestSemanticSource(opts.SourceArtifactFact, workflowVersion)
 	}
 	if opts.WorkOwner == nil {
 		processOwner := worklifetime.NewProcess()

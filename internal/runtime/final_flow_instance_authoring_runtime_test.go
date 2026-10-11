@@ -87,7 +87,6 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{

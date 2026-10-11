@@ -153,20 +153,14 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type scopedTestDurableStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	testAuthorActivityCatalogRegistrar
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -207,22 +201,18 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		opts.PipelineObligations = eventStore.PipelineObligations()
 	}
 	opts.Durable = runtimebus.DurableDependencies{
+		Instances:                eventStore,
 		ConstructionPublications: eventStore,
 		ReplyContext:             eventStore,
 		RunLifecycle:             eventStore,
 		DeliveryLifecycle:        eventStore,
-		FlowRoutes:               eventStore,
-		FlowRouteRecords:         eventStore,
-		FlowRouteSets:            eventStore,
-		FlowRouteTopology:        eventStore,
-		FlowRouteRollback:        eventStore,
-		ActiveAgents:             eventStore,
-		ActiveFlows:              eventStore,
-		TargetOwners:             eventStore,
-		PreparedEvents:           eventStore,
-		TargetFailureRecorder:    eventStore,
-		RunOrigins:               eventStore,
-		StandingRestarts:         eventStore,
+
+		ActiveAgents: eventStore,
+
+		PreparedEvents:        eventStore,
+		TargetFailureRecorder: eventStore,
+		RunOrigins:            eventStore,
+		StandingRestarts:      eventStore,
 	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {

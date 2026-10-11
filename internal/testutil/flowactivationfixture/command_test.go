@@ -35,7 +35,7 @@ func TestCommandCarriesPreparedInstanceAndLifecycleWithoutRepair(t *testing.T) {
 	if command.Plan.Instance.Fields["value"] != "prepared" || command.Plan.Instance.CurrentState != instance.CurrentState || !command.Plan.OccurredAt.Equal(at) {
 		t.Fatalf("command changed prepared state: %+v", command.Plan)
 	}
-	if !reflect.DeepEqual(before, instance) || len(command.RouteTopology) != 1 || command.RouteTopology[0].Identity.RunID != correlation.RunIDFromContext(ctx) {
+	if !reflect.DeepEqual(before, instance) || command.Plan.Readiness.RunID != correlation.RunIDFromContext(ctx) || command.Plan.Identity.Route().InstancePath != instance.StorageRef {
 		t.Fatal("command changed fixture input or lost exact route owner")
 	}
 	if _, err := Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{RequestCompletionCandidate: true}, at); err == nil {

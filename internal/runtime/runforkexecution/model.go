@@ -64,10 +64,6 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		})
 	}
 	for _, blocker := range routeAdmission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerFlowRouteHistoryUnproven &&
-			routeAdmission.SourceRouteFactsPresent && dynamicSupported {
-			continue
-		}
 		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
 	}
 
@@ -86,7 +82,6 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		StaticTopologySupported:        true,
 		DynamicTopologySupported:       dynamicSupported,
 		DynamicTopologyOwner:           selectedContractDynamicRouteTopologyOwner(dynamicFlowInstances),
-		SourceRouteFactsPresent:        routeAdmission.SourceRouteFactsPresent,
 		StaticRouteEvents:              staticEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
 		DynamicTopologyProofs:          dynamicProofs,
@@ -451,8 +446,8 @@ func selectedContractRouteTopologyBlockedSiblings() []runfork.RunForkSelectedCon
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
-			Reason:      "dynamic flow-instance route reconstruction needs fork-local topology evidence before route persistence",
+			Owner:       "internal/runtime/pipeline.FlowInstanceIndexReader",
+			Reason:      "dynamic flow-instance execution needs admitted fork-local instance evidence before recipient planning",
 		},
 		{
 			Concept:     "recipient_delivery_writes",

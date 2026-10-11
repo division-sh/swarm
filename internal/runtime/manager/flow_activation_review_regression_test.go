@@ -67,8 +67,8 @@ func TestFlowActivationFinalizerRefusesUnacknowledgedEvidence(t *testing.T) {
 	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, evidence); err == nil || !strings.Contains(err.Error(), "not acknowledged") {
 		t.Fatalf("unacknowledged evidence reached finalization: %v", err)
 	}
-	if instances.finalizations != 0 || instances.readinessLoads != 0 || len(bus.addedPaths) != 0 {
-		t.Fatalf("unacknowledged evidence acquired lifecycle/topology: finalizations=%d loads=%d routes=%v", instances.finalizations, instances.readinessLoads, bus.addedPaths)
+	if instances.finalizations != 0 || instances.readinessLoads != 0 || len(am.lifecycle.executionIdentities()) != 0 {
+		t.Fatalf("unacknowledged evidence acquired lifecycle/topology: finalizations=%d loads=%d executions=%v", instances.finalizations, instances.readinessLoads, am.lifecycle.executionIdentities())
 	}
 }
 
@@ -76,7 +76,7 @@ func TestFlowReadinessPassUsesAtMostTwoPublicLoads(t *testing.T) {
 	for _, path := range []string{"retry", "ensure", "committed_callback"} {
 		t.Run(path, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
-			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			bus := &flowActivationTestBus{}
 			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, "")
 			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -109,8 +109,8 @@ func TestFlowReadinessPassUsesAtMostTwoPublicLoads(t *testing.T) {
 			if loads != 2 {
 				t.Fatalf("%s used %d public readiness loads, want two bounded observations", path, loads)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatal("bounded pass did not retain the exact route")
+			if !flowActivationAttemptReadyForTest(am, ctx, req) {
+				t.Fatal("bounded pass did not retain the exact activation")
 			}
 		})
 	}
@@ -121,7 +121,7 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 		t.Run(predecessor, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
 			agents := &flowActivationTestStore{}
-			first := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+			first := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 			bundle := testFlowBundle(t, "")
 			setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -160,7 +160,7 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 			if err != nil || !found || item.AttemptState != predecessor {
 				t.Fatalf("preparation entry: found=%v state=%s err=%v", found, item.AttemptState, err)
 			}
-			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			bus := &flowActivationTestBus{}
 			restarted := newFlowActivationManager(t, bus, instances, agents)
 			setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 			source, err := restarted.dynamicFlowRuntimeReadinessSource(ctx)
@@ -196,8 +196,8 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 			if err != nil || !found || row.Pending() || row.AttemptOrdinal != prepared.Ordinal() || row.AttemptState != "accepted" {
 				t.Fatalf("finalized exact preparation: found=%v row=%#v err=%v", found, row, err)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.creates) != 1 {
-				t.Fatalf("handoff repeated construction or lost route: constructions=%d", len(instances.creates))
+			if !flowActivationAttemptReadyForTest(restarted, ctx, req) || len(instances.creates) != 1 {
+				t.Fatalf("handoff repeated construction or lost activation: constructions=%d", len(instances.creates))
 			}
 		})
 	}
@@ -207,7 +207,7 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 	for _, outcome := range []string{"error", "cancellation", "panic"} {
 		t.Run(outcome, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
-			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			bus := &flowActivationTestBus{}
 			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, "")
 			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -252,13 +252,13 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 				}
 			}
 			instances.readyAcknowledgementErr = nil
-			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatal("failed attempt retained a route")
+			if flowActivationAttemptReadyForTest(am, ctx, req) {
+				t.Fatal("failed attempt retained executable authority")
 			}
 			if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+			if !flowActivationAttemptReadyForTest(am, ctx, req) {
 				t.Fatal("retry omitted the abandoned topology")
 			}
 		})
@@ -267,7 +267,7 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 
 func TestFlowActivationShutdownPreservesFailedAttemptDisposition(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -314,7 +314,7 @@ func TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment(t *testing.T
 		}
 		t.Run(name, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{settleAttemptPostCommitErr: errors.New("acknowledged abandonment response lost")}
-			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			bus := &flowActivationTestBus{}
 			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, autoEmit)
 			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -348,7 +348,7 @@ func TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment(t *testing.T
 
 func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -390,7 +390,7 @@ func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testi
 
 func TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -446,14 +446,14 @@ func TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority(t *testing
 			bundle := testFlowBundleWithTwoAgents(t, "")
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 			ctx := testAuthorActivityContext(context.Background())
-			initial := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+			initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 			if err := activateFlowInstanceForTest(initial, ctx, req); err != nil {
 				t.Fatal(err)
 			}
 			if err := initial.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
-			restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+			restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 			setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 			if _, _, err := restarted.PrepareStandingFlowInstance(ctx, req); err != nil {
 				t.Fatal(err)
@@ -484,14 +484,14 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 	bundle := testFlowBundleWithTwoAgents(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	ctx := testAuthorActivityContext(context.Background())
-	initial := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	if err := activateFlowInstanceForTest(initial, ctx, req); err != nil {
 		t.Fatal(err)
 	}
 	if err := initial.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	interrupted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	interrupted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	setFlowActivationManagerSemanticSource(interrupted, semanticview.Wrap(bundle))
 	if _, _, err := interrupted.PrepareStandingFlowInstance(ctx, req); err != nil {
 		t.Fatal(err)
@@ -505,7 +505,7 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 	if err := interrupted.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 	if _, _, err := restarted.PrepareStandingFlowInstance(ctx, req); err != nil {
 		t.Fatal(err)
@@ -528,7 +528,7 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 
 func TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	ctx := testAuthorActivityContext(context.Background())
@@ -557,7 +557,7 @@ func TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction(t *testing.T)
 		t.Fatalf("post-snapshot construction bypassed its exact finalizer: %v", err)
 	}
 	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, plan.Readiness.RunID, unfinalized.Instance.Route())
-	if err != nil || !found || !reflect.DeepEqual(before, after) || bus.HasFlowInstanceRoute(testActivationFlowIdentity(unfinalized)) {
+	if err != nil || !found || !reflect.DeepEqual(before, after) || flowActivationAttemptReadyForTest(am, ctx, unfinalized) {
 		t.Fatalf("refusal changed unfinalized topology: before=%+v after=%+v found=%v err=%v", before, after, found, err)
 	}
 	if err := am.Shutdown(); err != nil {

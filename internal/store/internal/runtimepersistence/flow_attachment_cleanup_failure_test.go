@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -93,36 +92,18 @@ func (w *attachmentCleanupWorkflow) RetireInitialEntryTimerWakeups(ctx context.C
 	return w.PipelineCoordinator.RetireInitialEntryTimerWakeups(ctx, owner)
 }
 
-type attachmentCleanupRouteOwner struct {
-	*sqliteFlowActivationBus
-	fault *attachmentCleanupFault
-}
-
-type attachmentCleanupPublication struct {
-	bus.FlowRoutePublicationHandle
-	fault *attachmentCleanupFault
-}
-
-func (p attachmentCleanupPublication) Retire() error {
-	if err := p.fault.inject("route"); err != nil {
-		return err
-	}
-	return p.FlowRoutePublicationHandle.Retire()
-}
-
-func (r *attachmentCleanupRouteOwner) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Context, req bus.FlowInstanceRouteMaterializationRequest, attempt pipeline.DynamicFlowRuntimeActivationAttempt) (bus.FlowRoutePublicationHandle, error) {
-	publication, err := r.sqliteFlowActivationBus.PublishPersistedFlowInstanceRouteForAttempt(ctx, req, attempt)
-	if err != nil {
-		return nil, err
-	}
-	return attachmentCleanupPublication{FlowRoutePublicationHandle: publication, fault: r.fault}, nil
-}
-
 type attachmentCleanupAgentRoutes struct {
 	*attachmentAgentRouteProbe
 	fault    *attachmentCleanupFault
 	mu       sync.Mutex
 	removals map[effects.LifecycleToken]int
+}
+
+func (r *attachmentCleanupAgentRoutes) FenceAgentRoute(token effects.LifecycleToken) {
+	r.attachmentAgentRouteProbe.FenceAgentRoute(token)
+	if err := r.fault.inject("agent_fence"); err != nil {
+		panic(err)
+	}
 }
 
 func (r *attachmentCleanupAgentRoutes) RemoveAgentRoute(token effects.LifecycleToken) {
@@ -141,8 +122,14 @@ func (r *attachmentCleanupAgentRoutes) RemoveAgentRoute(token effects.LifecycleT
 
 func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, sink := range []string{"route", "agent_join", "timer", "abandonment", "abandonment_response_loss"} {
-			for _, persistent := range []bool{false, true} {
+		for _, sink := range []string{"agent_fence", "agent_join", "timer", "abandonment", "abandonment_response_loss"} {
+			modes := []bool{false, true}
+			if sink == "agent_fence" {
+				// Fencing already took effect before the response panic. Retry joins
+				// that exact set; it must not reacquire or repeat the fence operation.
+				modes = []bool{false}
+			}
+			for _, persistent := range modes {
 				mode := "fail_once"
 				if persistent {
 					mode = "persistent"
@@ -152,7 +139,6 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 					fault := &attachmentCleanupFault{sink: sink, persistent: persistent, err: errors.New("injected exact " + sink + " cleanup failure")}
 					workflow := &attachmentCleanupWorkflow{fault: fault, activationErr: errors.New("injected readiness completion failure"), retryRelease: make(chan struct{}), ready: make(chan pipeline.DynamicFlowRuntimeActivationAttempt, 4)}
 					workflow.activation.Store(true)
-					routeOwner := &attachmentCleanupRouteOwner{fault: fault}
 					probe := &attachmentAgentRouteProbe{prepared: make(map[effects.LifecycleToken]struct{}), fenced: make(map[effects.LifecycleToken]struct{}), removed: make(map[effects.LifecycleToken]struct{})}
 					agentRoutes := &attachmentCleanupAgentRoutes{attachmentAgentRouteProbe: probe, fault: fault, removals: make(map[effects.LifecycleToken]int)}
 					scheduler := pipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
@@ -177,10 +163,9 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 						workflow.PipelineCoordinator = options.WorkflowInstances.(*pipeline.PipelineCoordinator)
 						options.WorkflowInstances = workflow
 						probe.sqliteFlowActivationBus = options.PersistenceRoles.AgentRoutes.(*sqliteFlowActivationBus)
-						routeOwner.sqliteFlowActivationBus = probe.sqliteFlowActivationBus
 						options.PersistenceRoles.AgentRoutes = agentRoutes
-						options.PersistenceRoles.RouteRestorer = routeOwner
 					})
+					f.constructKeylessRoot(t)
 					binding, err := f.grant.ProcessExecutionBinding()
 					if err != nil {
 						t.Fatal(err)
@@ -243,7 +228,7 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 							if errors.Is(part, context.DeadlineExceeded) {
 								// The failed sink precedes timer retirement. Its exact timer
 								// remains owned; the accepted attachment work must be joined.
-								if (sink != "route" && sink != "agent_join" && sink != "timer") || part.Error() != "wait for 1 active work lease(s): context deadline exceeded" {
+								if (sink != "agent_fence" && sink != "agent_join" && sink != "timer") || part.Error() != "wait for 1 active work lease(s): context deadline exceeded" {
 									t.Fatalf("unexpected retained work: %v", joined)
 								}
 								cancelled, stop := context.WithCancel(f.ctx)
@@ -308,8 +293,8 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 						t.Fatal("joined predecessor did not admit a fresh ready successor")
 					}
 					probe.requireOwnedRoutes(t, 1, 1)
-					if len(f.bus.routePaths()) != 1 || len(f.manager.ListAgentConfigs()) != 1 {
-						t.Fatalf("successor topology is not exact: routes=%v agents=%v", f.bus.routePaths(), f.manager.ListAgentConfigs())
+					if len(f.manager.ListAgentConfigs()) != 1 {
+						t.Fatalf("successor agent resources are not exact: agents=%v", f.manager.ListAgentConfigs())
 					}
 					if err := f.workflows.VerifyDynamicFlowRuntimeActivationAttempt(f.ctx, predecessor); err == nil {
 						t.Fatal("settled predecessor retained attachment authority")

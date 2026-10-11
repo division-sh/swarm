@@ -3,8 +3,8 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +20,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -180,19 +179,12 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectexisting.TemplateInstanceBy)
 	}
 
-	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []runtimepinrouting.Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
+	material, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material=%#v failure=%s, want account_id acct-1", material, failure.Code())
 	}
-	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
-		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
+	if projected := runtimepinrouting.MaterializeConnectRoutePlan(plan); projected.Failure != runtimepinrouting.ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
 	}
 }
 
@@ -230,19 +222,12 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectorcreate.TemplateInstanceBy)
 	}
 
-	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []runtimepinrouting.Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
+	material, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material=%#v failure=%s, want account_id acct-1", material, failure.Code())
 	}
-	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
-		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
+	if projected := runtimepinrouting.MaterializeConnectRoutePlan(plan); projected.Failure != runtimepinrouting.ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
 	}
 }
 
@@ -386,24 +371,16 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatal(err)
 	}
 	receipts := conformanceConstructionReceipts{}
-	receipts.add(t, source, parent.RunID(), root)
-	receipts.add(t, source, parent.RunID(), portfolio)
-	accounts := map[string]runtimeflowidentity.Instance{}
+	receipts.add(t, source, parent.RunID(), root, "")
+	receipts.add(t, source, parent.RunID(), portfolio, "")
 	for _, key := range []string{"acct-a", "acct-b"} {
 		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
 		if err != nil {
 			t.Fatal(err)
 		}
-		accounts[key] = instance
-		receipts.add(t, source, parent.RunID(), instance)
+		receipts.add(t, source, parent.RunID(), instance, key)
 	}
 	store := &fanOutPinRouteMemoryStore{
-		sourceArtifactFact: sourceFact,
-		workflowVersion:    source.WorkflowVersion(),
-		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{RunID: parent.RunID(), InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			{RunID: parent.RunID(), InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
-		},
 		activeAgents: []runtimebus.ActiveAgentDescriptor{
 			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
 			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
@@ -413,13 +390,12 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
 		Durable: runtimebus.DurableDependencies{
+			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ActiveAgents:             store,
-			ActiveFlows:              store,
-			FlowRouteTopology:        store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
+			t.Fatal("admitted account instances should satisfy fan-out delivery")
 			return runtimepipeline.FlowInstanceActivationPlan{}, nil
 		}),
 	})
@@ -449,14 +425,15 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		return nil
 	}))
 	for _, instanceID := range []string{"acct-a", "acct-b"} {
-		if err := flowroutefixture.StageAndPublish(busCtx, eb, runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: parent.RunID(),
-				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
-			},
-			Instance: accounts[instanceID],
-		}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+		lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, sourceFact, runtimeflowidentity.RunScopedFlowInstance{
+			RunID: parent.RunID(), Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed, found, err := receipts.LookupFlowInstance(busCtx, lookup)
+		if err != nil || !found || observed.Identity().InstancePath != "account/"+instanceID {
+			t.Fatalf("account fixture index: found=%t err=%v identity=%+v", found, err, observed.Identity())
 		}
 	}
 	agentDeliveries := make(map[string]<-chan *runtimebus.LocalDelivery, len(store.activeAgents))
@@ -549,21 +526,19 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipts := conformanceConstructionReceipts{}
-	receipts.add(t, source, runID, root)
-	receipts.add(t, source, runID, portfolio)
+	receipts.add(t, source, runID, root, "")
+	receipts.add(t, source, runID, portfolio, "")
 	for index, key := range []string{"acct-a-one", "acct-a-two"} {
 		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
 		if err != nil {
 			t.Fatal(err)
 		}
 		instance.EntityID = runtimeflowidentity.EntityID(fmt.Sprintf("ent-a%d", index+1))
-		receipts.add(t, source, runID, instance)
+		receipts.add(t, source, runID, instance, "acct-a")
 	}
 	tests := []struct {
 		name               string
 		payload            json.RawMessage
-		flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
-		wantFailure        string
 		wantAdmissionError string
 	}{
 		{
@@ -574,28 +549,19 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 		{
 			name:    "ambiguous account key",
 			payload: json.RawMessage(`{"account_id":"acct-a","command":"refresh"}`),
-			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			},
-			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sourceFact := conformanceSourceArtifactFact(t, source)
-			store := &fanOutPinRouteMemoryStore{
-				sourceArtifactFact: sourceFact,
-				workflowVersion:    source.WorkflowVersion(),
-				flowInstances:      tc.flowInstances,
-			}
+			store := &fanOutPinRouteMemoryStore{}
 			eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle:     source,
 				SourceArtifactFact: sourceFact,
 				Durable: runtimebus.DurableDependencies{
+					Instances:                receipts,
 					ConstructionPublications: receipts,
 					ActiveAgents:             store,
-					ActiveFlows:              store,
 				},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")
@@ -629,11 +595,9 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("CheckPublishRecipientPlan: %v", err)
-			}
-			if preflight.TargetFailure != tc.wantFailure {
-				t.Fatalf("target failure = %q, want %q", preflight.TargetFailure, tc.wantFailure)
+			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
+			if !errors.As(err, &corruption) {
+				t.Fatalf("duplicate native selector was not construction corruption: %v", err)
 			}
 			if len(preflight.DeliveryRoutes) != 0 || len(preflight.Recipients) != 0 ||
 				len(preflight.RoutedRecipients) != 0 || len(preflight.SubscriptionRecipients) != 0 {
@@ -690,76 +654,8 @@ func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentit
 
 type fanOutPinRouteMemoryStore struct {
 	runtimebus.InMemoryEventStore
-	sourceArtifactFact runtimecorrelation.SourceArtifactFact
-	workflowVersion    string
-	flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
-	activeAgents       []runtimebus.ActiveAgentDescriptor
-	deliveryRoutes     map[string][]events.DeliveryRoute
-}
-
-func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	for _, set := range sets {
-		if err := set.Identity.Validate(); err != nil {
-			return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
-		}
-	}
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	sourceFact := s.sourceArtifactFact
-	if strings.TrimSpace(sourceFact.BundleHash()) == "" {
-		sourceFact = authorActivityTestSourceArtifactFact
-	}
-	bundleHash := sourceFact.BundleHash()
-	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
-	for i := range descriptors {
-		if descriptors[i].BundleHash == "" {
-			descriptors[i].BundleHash = bundleHash
-		}
-		if descriptors[i].WorkflowVersion == "" {
-			descriptors[i].WorkflowVersion = strings.TrimSpace(s.workflowVersion)
-		}
-	}
-	return descriptors, nil
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	templates := make(map[string]struct{}, len(templateIDs))
-	paths := make(map[string]struct{}, len(instancePaths))
-	for _, templateID := range templateIDs {
-		templates[templateID] = struct{}{}
-	}
-	for _, path := range instancePaths {
-		paths[path] = struct{}{}
-	}
-	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		_, templateMatch := templates[descriptor.FlowTemplate]
-		_, pathMatch := paths[descriptor.FlowInstance]
-		if descriptor.RunID == runID && (templateMatch || pathMatch) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected, nil
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.RunID == runID && descriptor.FlowTemplate == templateID && descriptor.AddressFields[keyField] == keyValue {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected, nil
+	activeAgents   []runtimebus.ActiveAgentDescriptor
+	deliveryRoutes map[string][]events.DeliveryRoute
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {

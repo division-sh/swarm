@@ -31,9 +31,9 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 			runID, entityID, foreignRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			if postgres {
-				requirePostgresStatementRuns(t, db, runID, foreignRunID)
+				materializePostgresStatementRuns(t, db, false, runID, foreignRunID)
 			} else {
-				requireSQLiteStatementRuns(t, db, runID, foreignRunID)
+				materializeSQLiteStatementRuns(t, db, false, runID, foreignRunID)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},

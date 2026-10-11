@@ -82,12 +82,18 @@ func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
 	for path, recipes := range grouped {
 		absolute := filepath.Join(root, path)
 		source, err := os.ReadFile(absolute)
+		if os.IsNotExist(err) && allRecipesRemoved(recipes) {
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		recipes, err = checkpointRecipes(source, recipes)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if len(recipes) == 0 {
+			continue
 		}
 		expected += len(recipes)
 		for _, row := range recipes {

@@ -54,11 +54,6 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{
 				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "record", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
 			}}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
-			for _, construction := range plan.ConstructionPlans() {
-				command.Activations[0].RouteTopology = append(command.Activations[0].RouteTopology, runtimebus.FlowInstanceRouteRecordSet{
-					Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-				})
-			}
 			result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command)
 			if err != nil || !result.Acknowledged {
 				t.Fatalf("native setup: %+v %v", result, err)

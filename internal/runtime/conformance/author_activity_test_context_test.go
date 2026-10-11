@@ -102,8 +102,8 @@ func ownConformanceTestAgentManager(t testing.TB, manager *runtimemanager.AgentM
 
 func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.PersistenceRoles {
 	roles := runtimemanager.PersistenceRoles{
-		AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus,
-		RouteRestorer: eventBus, FlowActivation: eventBus, FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
+		AgentRoutes:    eventBus,
+		FlowActivation: eventBus, FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
 	}
 	roles.LifecycleCensus, _ = selected.(runtimemanager.AgentLifecycleCellCensus)
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
@@ -114,7 +114,6 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
-	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
 	roles.StandingRestarts, _ = selected.(runtimerunlifecycle.StandingRestartDispositionReader)
 	return roles
 }
@@ -288,6 +287,7 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type conformanceDurableEventBusStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
@@ -298,14 +298,7 @@ type conformanceDurableEventBusStore interface {
 	decisioncard.HumanTaskStore
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimebus.PreparedPublishEventReader
@@ -323,10 +316,10 @@ func durableConformanceEventBusOptions(store conformanceDurableEventBusStore, op
 
 func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
+		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
-		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
+		ActiveAgents: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store, EmitFeedback: store,
 	}
 }

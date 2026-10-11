@@ -300,15 +300,19 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		RunID:           normalized.Readiness.RunID,
 		EntityID:        identity.RowID(),
 		FlowInstance:    identity.StorageRef,
+		InstanceKey:     instance.InstanceKey,
 		WorkflowName:    instance.WorkflowName,
 		WorkflowVersion: instance.WorkflowVersion,
 		InitialState:    instance.CurrentState,
 		OccurredAt:      canonicalWorkflowInstancePersistedTime(normalized.OccurredAt),
 		Persisted:       projection,
-		Readiness:       &normalized.Readiness,
+		Identity:        normalized.Identity,
+		BundleHash:      normalized.Readiness.BundleHash,
+		ExecutionMode:   normalized.Readiness.ExecutionMode,
+		CreationEvent:   normalized.Readiness.CreationEvent,
 		CreatingInput:   normalized.CreatingInput,
 	}
-	initialJSON, err := canonicaljson.MarshalPreservingNumberKinds(initial)
+	initialJSON, err := EncodeFlowConstructionReceipt(initial)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}

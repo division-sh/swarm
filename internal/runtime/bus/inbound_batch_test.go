@@ -104,7 +104,7 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
 	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-	store := &InMemoryEventStore{}
+	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, ProviderOutputVerifier: catalog,
 	})
@@ -300,7 +300,7 @@ func TestPrepareInboundDeliveryBatchRejectsChangedAuthenticatedPublicationBefore
 			if _, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch); err == nil {
 				t.Fatal("changed authenticated publication was accepted")
 			}
-			if len(store.events) != 0 || len(store.routes) != 0 || len(bus.RouteTable().instanceOwners) != 0 {
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.instanceObservations) != 0 || len(store.constructions) != 0 {
 				t.Fatal("refused authenticated publication changed event, delivery or construction state")
 			}
 		})

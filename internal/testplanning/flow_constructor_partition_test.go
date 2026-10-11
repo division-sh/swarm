@@ -62,15 +62,19 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
 			"TestFlowAttachmentTimerAcquisitionCutsBothStores",
 			"TestFlowAttachmentAgentAcquisitionCutsBothStores",
-			"TestFlowAttachmentRouteAcquisitionCutsBothStores",
+			"TestFlowAttachmentActivationVerificationCutsBothStores",
 			"TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
 		},
 		"store-runtime-full-03-i-l": {
 			"TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
 			"TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores",
 		},
-		"store-runtime-full-03":  {"TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores"},
-		"store-runtime-full-05":  {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
+		"store-runtime-full-03": {"TestGenericConstructedGateForkUsesFixedSnapshotBothStores"},
+		"store-runtime-full-05": {
+			"TestReceiverConfigActivationRaceAndRollbackBothStores",
+			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
+			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
+		},
 		"store-runtime-selected": {"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores"},
 		"store-runtime-s-z-rest": {
 			"TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
@@ -94,6 +98,20 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		}
 	}
 	for id, proofs := range map[string]map[string][]string{
+		"store-runtime-flow-lifecycle": {
+			"TestFlowAttachmentCleanupRetainsExactPredecessorBothStores": {
+				"postgres/abandonment/fail_once", "postgres/abandonment/persistent", "postgres/abandonment_response_loss/fail_once", "postgres/abandonment_response_loss/persistent",
+				"postgres/agent_fence/fail_once", "postgres/agent_join/fail_once", "postgres/agent_join/persistent", "postgres/timer/fail_once", "postgres/timer/persistent",
+				"sqlite/abandonment/fail_once", "sqlite/abandonment/persistent", "sqlite/abandonment_response_loss/fail_once", "sqlite/abandonment_response_loss/persistent",
+				"sqlite/agent_fence/fail_once", "sqlite/agent_join/fail_once", "sqlite/agent_join/persistent", "sqlite/timer/fail_once", "sqlite/timer/persistent",
+			},
+		},
+		"store-runtime-full-05": {
+			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores": {
+				"sqlite/unchanged", "sqlite/run_stopped", "sqlite/source_replaced", "sqlite/stored_winner", "sqlite/terminal_winner",
+				"postgres/unchanged", "postgres/run_stopped", "postgres/source_replaced", "postgres/stored_winner", "postgres/terminal_winner",
+			},
+		},
 		"store-runtime-full-02": {
 			"TestDeploymentConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 		},
@@ -108,13 +126,13 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			},
 		},
 		"local-serveapp-canaries": {
-			"TestReleaseReceiverInitializationBothStores":    {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"},
+			"TestReleaseReceiverInitializationBothStores":    {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "default_sqlite/connected_restart/before_restart", "default_sqlite/connected_restart/after_restart", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema", "explicit_postgres/connected_restart/before_restart", "explicit_postgres/connected_restart/after_restart"},
 			"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"},
 		},
 		"serveapp-other-late": {"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}},
 		"local-catalog-smoke": {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
 		"catalog-runtime":     {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
-		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"}},
+		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "default_sqlite/connected_restart/before_restart", "default_sqlite/connected_restart/after_restart", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema", "explicit_postgres/connected_restart/before_restart", "explicit_postgres/connected_restart/after_restart"}},
 	} {
 		unit := policy.Units[id]
 		pattern := regexp.MustCompile(unit.Run)

@@ -10,6 +10,7 @@ const (
 	RetiredPlatformAgentExternalEffectOperations RetiredPlatformTable = "agent_external_effect_operations"
 	RetiredPlatformAgentExternalEffectAttempts   RetiredPlatformTable = "agent_external_effect_attempts"
 	RetiredPlatformSchedules                     RetiredPlatformTable = "schedules"
+	RetiredPlatformRoutingRules                  RetiredPlatformTable = "routing_rules"
 )
 
 func RetiredPlatformTables() []RetiredPlatformTable {
@@ -19,5 +20,6 @@ func RetiredPlatformTables() []RetiredPlatformTable {
 		RetiredPlatformAgentExternalEffectOperations,
 		RetiredPlatformAgentExternalEffectAttempts,
 		RetiredPlatformSchedules,
+		RetiredPlatformRoutingRules,
 	}
 }
