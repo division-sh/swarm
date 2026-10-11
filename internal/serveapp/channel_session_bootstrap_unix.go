@@ -362,7 +362,8 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 	}
 	switch op.Phase {
 	case channelonboarding.PhaseFailed, channelonboarding.PhaseRetired:
-		return true, nil
+		pending, err := channelonboarding.RetainedSessionLogoutPending(ctx, store, op)
+		return !pending, err
 	case channelonboarding.PhaseSucceeded:
 		current, err := channelonboarding.RetainedSessionCurrent(ctx, store, op)
 		if ctx.Err() != nil {
