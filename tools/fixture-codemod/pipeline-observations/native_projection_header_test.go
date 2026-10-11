@@ -57,34 +57,83 @@ func TestNativeProjectionHeaderRecipePreservesListAndBothShadowDialects(t *testi
 	if len(queries) != 2 || queries[0] != queries[1] {
 		t.Fatal("shadow fault dialects no longer share exact payload and run scope")
 	}
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go"))
-	if err != nil {
-		t.Fatal(err)
+	if queries[0] != `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = $1` {
+		t.Fatal("frozen shadow fault changed original columns, values or run-only predicate")
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), "fault.go", source, parser.AllErrors)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestNativeProjectionHeaderQ10RetiresShadowOwnerAndKeepsLiveAssertions(t *testing.T) {
+	var liveProof, fixtureOwner string
+	businessInputs := map[string]string{
+		"current_state": `"business-stage"`, "gates": `"business-gates"`, "bookkeeping": `"business-bookkeeping"`,
+		"accumulator": `"business-accumulator"`, "revision": "int64(73)", "entered_state_at": `"business-clock"`,
 	}
-	found := false
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "SetWorkflowProjectionObsoleteFieldRowsForTest" {
-			continue
-		}
-		found = true
-		call := fn.Body.List[0].(*ast.ReturnStmt).Results[0].(*ast.CallExpr).Args[0].(*ast.CallExpr)
-		value, err := strconv.Unquote(call.Args[1].(*ast.BasicLit).Value)
+	for _, path := range []string{
+		"internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+		"internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+		"internal/store/storetest/workflow_projection_shape_fault.go",
+		"internal/runtime/pipeline/workflow_projection_header_native_fixture_test.go",
+		"internal/runtime/pipeline/workflow_projection_header_native_external_test.go",
+		"internal/runtime/pipeline/workflow_instance_store_projection_test.go",
+	} {
+		source, err := os.ReadFile(filepath.Join("..", "..", "..", path))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if value != queries[0] || formattedNativeReadNode(call.Fun) != "tx.ExecContext" || len(call.Args) != 3 || formattedNativeReadNode(call.Args[0]) != "ctx" || formattedNativeReadNode(call.Args[2]) != "run" {
-			t.Fatal("native shadow fault changed original columns, values or run-only predicate")
+		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			if ident, ok := node.(*ast.Ident); ok && (ident.Name == "SetWorkflowProjectionObsoleteFieldRowsForTest" || ident.Name == "SetWorkflowProjectionObsoleteFieldRows" || ident.Name == "ObsoleteFieldRows") {
+				t.Fatalf("retired shadow authority survives in %s", path)
+			}
+			return true
+		})
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				switch fn.Name.Name {
+				case "VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest":
+					liveProof = formattedNativeReadNode(fn)
+					ast.Inspect(fn, func(node ast.Node) bool {
+						if pair, ok := node.(*ast.KeyValueExpr); ok {
+							if key, ok := pair.Key.(*ast.BasicLit); ok && key.Kind == token.STRING {
+								name, err := strconv.Unquote(key.Value)
+								if err != nil {
+									t.Fatal(err)
+								}
+								if value, required := businessInputs[name]; required && formattedNativeReadNode(pair.Value) == value {
+									delete(businessInputs, name)
+								}
+							}
+						}
+						return true
+					})
+				case "workflowProjectionHeaderNativeFixture":
+					fixtureOwner = formattedNativeReadNode(fn)
+				}
+			}
 		}
 	}
-	if !found {
-		t.Fatal("missing native shadow fault owner")
+	if len(businessInputs) != 0 {
+		t.Fatalf("live Q10 header witness lost conflicting business operands: %+v", businessInputs)
+	}
+	if !strings.Contains(fixtureOwner, "workflowProjectionNativeFixtureWithWrites(t, selected, reopen, runID, 2)") || !strings.Contains(fixtureOwner, "selected.ListWorkflowInstances") {
+		t.Fatal("live list witness must retain exactly two native constructions and the canonical list owner")
+	}
+	for _, assertion := range []string{
+		"len(instances) != 2", "instance.EntityID != want.EntityID", "instance.WorkflowName != want.WorkflowName",
+		`instance.CurrentState != "active"`, "!instance.StageDefined", "instance.Revision != 1",
+		`!instance.Gates["ready"]`, `instance.Bookkeeping["authority"] != "header"`, `instance.StateBuckets["count"] != int64(1)`,
+		`instance.EntityType != "" || len(instance.Fields) != 0`, `instance.EntityType != "subject"`,
+		`instance.Fields["value"] != "business"`, "!reflect.DeepEqual(instance.Fields, want.Fields)", "len(expected) != 0",
+	} {
+		if !strings.Contains(liveProof, assertion) {
+			t.Fatalf("live Q10 header witness lost assertion %s", assertion)
+		}
 	}
 }
+
 func projectionHeaderWorkload(t *testing.T, source string, predecessor bool) string {
 	t.Helper()
 	fn := projectionShapeFunction(t, source)
