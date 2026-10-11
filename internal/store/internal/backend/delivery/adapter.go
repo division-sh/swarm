@@ -816,6 +816,15 @@ func (a *Adapter) ObserveContinuation(
 	if !record.Authority.Equal(authority) {
 		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimWrongAuthority}, nil
 	}
+	// Observation fences authority independently of first-claim ordering.
+	tx, _ := q.(*sql.Tx)
+	current, err := a.selectedExecutionCurrentRead(ctx, tx, authority)
+	if err != nil {
+		return ContinuationObservation{}, err
+	}
+	if !current {
+		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimWrongAuthority}, nil
+	}
 	now, err := a.databaseNow(ctx, q)
 	if err != nil {
 		return ContinuationObservation{}, err
