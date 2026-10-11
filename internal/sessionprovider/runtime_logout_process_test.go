@@ -82,7 +82,7 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 		return
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, phase := range []string{"authorized", "sdk_deleted_before_settlement"} {
+		for _, phase := range []string{"reserved", "authorized", "sdk_deleted_before_settlement"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
 				if err := f.state.close(f.ctx); err != nil {
@@ -102,7 +102,8 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 				if phase == "sdk_deleted_before_settlement" {
 					wantBefore, wantAfter = effects.StateLaunched, effects.StateOutcomeUncertain
 				}
-				if err != nil || !found || before.AttemptState != wantBefore {
+				reservedOnly := phase == "reserved"
+				if err != nil || found == reservedOnly || (!reservedOnly && before.AttemptState != wantBefore) {
 					t.Fatal("process death did not retain exact journal launch evidence", before, err)
 				}
 				for range 2 {
@@ -112,11 +113,15 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 					}
 				}
 				after, found, err := journal.GetExternalEffectOutcome(ctx, identity)
-				if err != nil || !found || after.AttemptState != wantAfter || after.OperationID != before.OperationID {
+				if err != nil || found == reservedOnly || (!reservedOnly && (after.AttemptState != wantAfter || after.OperationID != before.OperationID)) {
 					t.Fatal("process recovery fabricated or replaced the logout outcome", after, err)
 				}
 				retained, err := f.selected.GetChannelTeardown(ctx, id)
-				if err != nil || retained.Phase != channelonboarding.TeardownFailed || retained.Revision != original.Revision+1 ||
+				wantPhase, wantRevision := channelonboarding.TeardownFailed, original.Revision+1
+				if reservedOnly {
+					wantPhase, wantRevision = original.Phase, original.Revision
+				}
+				if err != nil || retained.Phase != wantPhase || retained.Revision != wantRevision ||
 					retained.Logout == nil || *retained.Logout != *original.Logout {
 					t.Fatal("process recovery lost or repeated frozen settlement", retained, err)
 				}
@@ -178,6 +183,18 @@ func runNativeLogoutDeathChild(t *testing.T, config logoutProcessFixture) {
 	c := openRuntimeConnectionFixture(t, f)
 	connectRuntimeConnectionFixture(t, f, c)
 	op := reserveRuntimeLogoutFixture(t, f, c)
+	if config.Phase == "reserved" {
+		original := c.state.currentOccurrence()
+		if original.client.Store.Deleted || !original.client.IsConnected() {
+			t.Fatal("reservation-only cut already deleted or disconnected the original SDK")
+		}
+		select {
+		case frame := <-f.peer.frames:
+			t.Fatal("SDK unlink preceded the reservation-only boundary", frame.node)
+		default:
+		}
+		logoutProcessDeathBoundary(op.TeardownID)
+	}
 	ctx := logoutJournalFixture(t, f, op)
 	owner := &logoutProcessDeathStore{Store: f.selected.(effects.Store), t: t, phase: config.Phase, original: c.state.currentOccurrence(), peer: f.peer}
 	ctx = effects.WithController(ctx, effects.NewController(owner).WithExecutionPosture(executionposture.Live))
