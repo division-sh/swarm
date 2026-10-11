@@ -57,7 +57,9 @@ func TestReporterWindowRequiresFinalReceiptAndPreservesSuccessor(t *testing.T) {
 			case "separate release":
 				bad.ByOperation[FanOutRelease] = Counts{WriteCommits: 1}
 			case "failed attempt":
-				bad.Total.Failed++
+				counts := bad.ByOperation[FanOutChunk]
+				counts.Failed++
+				bad.ByOperation[FanOutChunk] = counts
 			}
 			if err := ValidateReporterIssuance(bad, submitted, 1, delay); err == nil {
 				t.Fatal("counterexample admitted detachment")
@@ -66,6 +68,7 @@ func TestReporterWindowRequiresFinalReceiptAndPreservesSuccessor(t *testing.T) {
 	}
 	captured := slot.Begin(false, true)
 	captured.Begun()
+	Mark(WithAttempt(context.Background(), captured), FanOutChunk)
 	old.Stop()
 	successor, stopSuccessor, err := slot.Install(Options{})
 	if err != nil {
@@ -111,6 +114,12 @@ func TestReporterStressRejectsEarlyStopAndServingOnly(t *testing.T) {
 		t.Fatal("serving-only injection earned all-commit stress credit")
 	}
 	final.ByOperation[Other] = Counts{WriteCommits: 1, DelayedCommits: 1, InjectedDelay: delay}
+	if err := ValidateReporterStress(issuance, final, delay); err != nil {
+		t.Fatal(err)
+	}
+	// A rolled-back speculative read has no COMMIT attempt and must not become
+	// either an acknowledged write or a missing all-commit injection.
+	final.ByOperation[Other] = Counts{WriteCommits: 1, DelayedCommits: 1, InjectedDelay: delay, Failed: 1, RollbackAttempts: 1}
 	if err := ValidateReporterStress(issuance, final, delay); err != nil {
 		t.Fatal(err)
 	}
