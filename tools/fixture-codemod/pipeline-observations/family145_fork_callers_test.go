@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 182 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "14d6d74a47ad17dca032cd508cc55d638b4130a9896a4d90b11ce9e87d4d6d39" {
+	if err != nil || len(rows) != 192 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "a93274088ce87a66e540324938edde72c483e2a89c5341ec804d9ff14411747d" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "seedSelectedOperationSource" {
+		if err := family145OperationSourceCaptureError(beforeSource, afterSource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if family145ActivitySetupOwner(function) {
 		if err := family145ActivitySetupProofError(function, beforeSource, afterSource); err != nil {
 			t.Fatal(err)
@@ -197,6 +203,8 @@ func family145SemanticOwner(function string) bool {
 	case "seedSelectedExecutionSourceReplayScopeMarker", "seedSelectedExecutionPostForkSourceEvent":
 		return true
 	case "capture":
+		return true
+	case "seedSelectedOperationSource":
 		return true
 	}
 	return false

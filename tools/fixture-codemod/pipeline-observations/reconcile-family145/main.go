@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "14d6d74a47ad17dca032cd508cc55d638b4130a9896a4d90b11ce9e87d4d6d39"
+const targetDigest = "a93274088ce87a66e540324938edde72c483e2a89c5341ec804d9ff14411747d"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -72,6 +72,15 @@ var files = []string{
 	"internal/runtime/node_delivery_startup_recovery_test.go",
 	"internal/runtime/workflow_timer_startup_recovery_test.go",
 	"internal/runtime/runforkexecution/activity_fork_execution_test.go",
+	"internal/runtime/runforkexecution/operation_lifetime_parity_test.go",
+	"internal/runtime/runforkexecution/module_fork_w5_test.go",
+	"internal/runtime/runforkexecution/selected_input_execution_test.go",
+	"internal/runtime/runforkexecution/recovery_process_test.go",
+	"internal/runtime/runforkexecution/pack_platform_retained_proof_test.go",
+	"internal/runtime/runforkexecution/source_cleanup_test.go",
+	"internal/runtime/runforkexecution/preparation_process_parity_test.go",
+	"internal/runtime/runforkexecution/verify_pack_generation_test.go",
+	"internal/runtime/runforkexecution/control_lifetime_parity_test.go",
 	"internal/runtime/runforkexecution/activation_gate_test.go",
 	"internal/runtime/runforkexecution/constructed_source_fixture_test.go",
 	"internal/runtime/runforkexecution/execution_test.go",

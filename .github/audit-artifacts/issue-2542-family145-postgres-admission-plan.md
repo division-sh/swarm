@@ -1583,3 +1583,60 @@ census/ratchet, restart/flake/performance or parent-closure claim, push/PR/tier
 or server2 run. M01 and Docker remain qualification-open in #2353. Existing
 watchlist mapping and architectural disposition stand: use native construction
 and existing bounded row/revision owners, no new framework or compatibility.
+
+## Entire Operation-Source Capture Helper And Nine Callers
+
+seedSelectedOperationSource no longer accepts a backend label or caller pool.
+Its standalone BeginTx / CaptureSQLite-or-Capture / Commit / Rollback protocol
+is retired. Existing native run/artifact admission, exact default mock event,
+optional admitted input, source-only route and real structural-root construction
+are unchanged. Capture now invokes the existing CaptureSelectedRunForkRevision
+on the original selected store and original caller context at the same cut,
+after the constructed root and before preparation, execution, control or death.
+Omitting the optional family list retains AllFamilies through the existing owner;
+the receipt is the acknowledged finalizer result, not a later head query.
+No new owner/port, transaction abstraction or production admission change.
+
+All nine callers are propagated as one finite family: operation replacement,
+module-W5 execution, explicit selected input, crash-process setup, retained pack,
+source cleanup, process preparation, public retained verify, and control lifetime.
+The codemod removes only original backend/pool arguments. TestFamily145Operation
+SourceCaptureAndNineCallersStayClosed compares all retained argument tuples,
+including optional input, scans every package test declaration for additional
+live callers, and rejects changed context/owner/run/frontier. Existing complete
+native capture cancellation/rollback/receipt proofs carry without another run.
+Sibling pool-backed observers and constructors in these files remain explicit
+parent debt; this checkpoint closes the shared capture protocol, not those
+other row-family observations or every selected-fork fixture.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Shared handwritten snapshot transaction and backend dispatch | reproduced and fixed | Exact helper predecessor-to-native transformation guard; original context, source setup and AllFamilies cut retained; actual raw-owner injection refused on both stores |
+| Operation replacement, handoff and cleanup | execution-proven through the same corrected path | TestSelectedContractOperationReplacementBothStores, all original eleven cuts on both stores under race, with original persistence/process/lease assertions |
+| Process-authority refusal and successful preparation | execution-proven through the same corrected path | TestSelectedForkPreparationProcessBoundaryBothStores under race, missing/foreign acquisition/generation plus successful prepare-close, unchanged whole-store snapshot and active count |
+| Explicit admitted source input and optional module input | execution-proven through the same corrected path | SelectedInput control/foreign_input on both stores under race; W5 pinned real-module execution on both stores, original output and pinned bytes checks |
+| Actual process-death continuation using the migrated seed | execution-proven through the same corrected path | SelectedForkCommittedProcessDeath event_committed cut on both stores under race; actual killed child and original recovery/read-only/history assertions; not all-cut restart qualification |
+| Retained pack, public verify, source cleanup and control callers | execution-proven through the same corrected path | Retained-pack both-store root and actual public retained-verify root; source-cleanup fail_once/selected and control retained cuts both stores under race; complete nine-call inventory/exact tuples and original assertions; other unchanged cuts carry |
+
+Vemew focused native roots GREEN97.232s; explicit-input controls GREEN25.308s;
+actual process-death cut GREEN29.992s. Replacing the real helper's selected
+capture argument with its underlying pool gives expected RED10.571s on both
+stores, exact "selected store *sql.DB is not initialized"; restored focused
+control GREEN13.717s. Retained-pack/public-verify GREEN46.643s; source cleanup
+GREEN16.345s and retained control GREEN17.002s. Complete cheap family145 plus relevant
+native-run-setup/historical/finite/successor guards GREEN19.144s, no failures or
+waivers. Corpus1049/192 transitions, digest
+a93274088ce87a66e540324938edde72c483e2a89c5341ec804d9ff14411747d.
+Original893 tuples/24 historical receipts remain unchanged; the existing
+family144 semantic helper gains an exact Successor, not edited historical
+Before/After. Nine caller rows and the helper cut are finite source-pinned
+candidate transitions. Codemod Changes=[], affected U1000 and diff clean;
+committed-head complexity is checked separately.
+
+Efficiency: one shared-owner repair and nine mechanical caller propagations;
+three main affected roots, four explicit-input cells, one both-store killed
+process cut, retained pack/public verify and bounded cleanup/control cuts, no
+integrated/local tier or repeat of unchanged native-owner proofs.
+Named admissions remain130/131 excluding unqualified Docker; no new global
+census/ratchet or zero-additions claim. #2542/#2151 remain open; M01 and Docker
+remain qualification-open in #2353. No push, PR, server2 or parent closure.
