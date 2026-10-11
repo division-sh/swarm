@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -63,6 +64,74 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 
 func TestReceiverSelectedGrantRetirementFencesClaimBothStores(t *testing.T) {
 	proveReceiverGrantRetirementFencesClaimBothStores(t, true)
+}
+
+func TestReceiverEntityBearingActorRefusesEntitylessTargetBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithOptions(t, backend, true, false)
+			f.constructKeylessRoot(t)
+			req := f.request("business-key", "entity-owner", "original")
+			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+			if err != nil || len(plan.Readiness.Agents) != 1 {
+				t.Fatalf("prepare real entity-bearing actor: %+v %v", plan, err)
+			}
+			committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+			if err != nil || !committed.Acknowledged {
+				t.Fatalf("commit actor construction: %+v %v", committed, err)
+			}
+			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, committed); err != nil {
+				t.Fatal(err)
+			}
+			expected := plan.Readiness.Agents[0]
+			if expected.EntityID == "" || expected.EntityID != plan.Identity.EntityID {
+				t.Fatal("fixture did not retain the actual configured template entity")
+			}
+			evidence, err := f.grant.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := f.store.(interface {
+				deliverylifecycle.Store
+				ActivateDeliveryAuthority(context.Context, deliverylifecycle.ExecutionAuthority) error
+			})
+			for _, hostile := range []bool{false, true} {
+				target := events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: expected.EntityID}
+				dependency, err := events.AdmitStoredFlowReceiverInitialization(expected.Identity.RunID, plan.CreatingInput.EventID, events.MustExistingEntityTarget(target), expected.Identity.Route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(expected.Identity.AgentID()), AgentIdentity: expected.Identity, Target: events.MustExistingEntityTarget(target), Initialization: dependency}
+				if hostile {
+					target.EntityID = ""
+					route.Target = events.MustEntitylessReceiverTarget(target)
+				}
+				event := eventtest.ExistingRunRootIngress(uuid.NewString(), req.TriggerEvent.Type(), "constructor-fixture", "", req.TriggerEvent.Payload(), 0, expected.Identity.RunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()), req.OccurredAt)
+				if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.ActivateDeliveryAuthority(f.ctx, authority); err != nil {
+					t.Fatal(err)
+				}
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				claim, err := store.ClaimDelivery(f.ctx, authority, event, route)
+				want := deliverylifecycle.ClaimDeferred
+				if hostile {
+					want = deliverylifecycle.ClaimInvariantInvalid
+				}
+				if err != nil || claim.Disposition != want || hostile && (claim.Invariant == nil || !strings.Contains(claim.Invariant.Error(), "receiver lifecycle entity contradicts")) {
+					t.Fatalf("entity-bearing actor hostile=%t disposition=%s invariant=%v err=%v", hostile, claim.Disposition, claim.Invariant, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("registered receiver claim changed execution evidence")
+				}
+			}
+		})
+	}
 }
 
 func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFork bool) {
