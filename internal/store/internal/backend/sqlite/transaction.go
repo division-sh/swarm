@@ -284,6 +284,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
+			probe.OrderingRolledBack(rollbackErr)
 			releaseOrdering()
 			// ErrTxDone describes Go's handle, not the physical transaction. A
 			// concurrent cancellation may already be disposing this connection.
@@ -324,6 +325,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	}
 	probe.BeforeCommit()
 	err = tx.Commit()
+	if err == nil {
+		probe.OrderingCommitted()
+	}
 	releaseOrdering()
 	if err != nil {
 		probe.CommitFailed()

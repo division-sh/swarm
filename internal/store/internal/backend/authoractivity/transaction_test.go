@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 func orderingScopeFixture(t *testing.T, dialect Dialect, head int64) (context.Context, *sql.Tx, func(), func()) {
@@ -44,6 +45,14 @@ func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 	for _, dialect := range []Dialect{DialectPostgres, DialectSQLite} {
 		t.Run(string(dialect), func(t *testing.T) {
 			ctx, tx, _, _ := orderingScopeFixture(t, dialect, 17)
+			var slot transactiontest.Slot
+			collector, restore, err := slot.Install(transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			probe := slot.Begin(false, false)
+			ctx = transactiontest.WithAttempt(ctx, probe)
 			if err := FenceMutationOrder(ctx, tx, dialect); err != nil {
 				t.Fatal(err)
 			}
@@ -69,6 +78,12 @@ func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 			if err := FenceMutationOrder(ctx, new(sql.Tx), dialect); err == nil {
 				t.Fatal("foreign transaction borrowed possession")
 			}
+			probe.Finish(nil)
+			counts := collector.Snapshot().Total.Ordering
+			if counts.AcquisitionAttempts != 1 || counts.Acquired != 1 || counts.Reuses != 21 ||
+				counts.AcquisitionErrors != 0 || counts.UnresolvedHolders != 1 {
+				t.Fatalf("ordering possession receipt = %+v", counts)
+			}
 		})
 	}
 }
@@ -77,6 +92,14 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 	for _, dialect := range []Dialect{DialectPostgres, DialectSQLite} {
 		t.Run(string(dialect), func(t *testing.T) {
 			ctx, tx, cancel, release := orderingScopeFixture(t, dialect, 17)
+			var slot transactiontest.Slot
+			collector, restore, err := slot.Install(transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			first := slot.Begin(false, false)
+			ctx = transactiontest.WithAttempt(ctx, first)
 			if err := FenceMutationOrder(ctx, tx, dialect); err != nil {
 				t.Fatal(err)
 			}
@@ -89,6 +112,8 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 				t.Fatalf("ended native transaction retained possession: %v", err)
 			}
 			nextCtx, nextTx, _, _ := orderingScopeFixture(t, dialect, 23)
+			next := slot.Begin(false, false)
+			nextCtx = transactiontest.WithAttempt(nextCtx, next)
 			if err := FenceMutationOrder(ctx, nextTx, dialect); !errors.Is(err, sql.ErrTxDone) {
 				t.Fatalf("retired scope borrowed a successor transaction: %v", err)
 			}
@@ -98,6 +123,12 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 			story, err := Begin(nextCtx, nextTx, dialect)
 			if err != nil || story.last != 23 {
 				t.Fatalf("retry reused predecessor sequence: %+v %v", story, err)
+			}
+			first.Finish(context.Canceled)
+			next.Finish(nil)
+			counts := collector.Snapshot().Total.Ordering
+			if counts.AcquisitionAttempts != 2 || counts.Acquired != 2 || counts.Reuses != 1 || counts.UnresolvedHolders != 2 {
+				t.Fatalf("refused or ended scope changed receipt: %+v", counts)
 			}
 		})
 	}

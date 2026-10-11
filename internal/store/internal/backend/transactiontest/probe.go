@@ -74,6 +74,7 @@ type Counts struct {
 	CommitDuration   time.Duration
 	CleanupDuration  time.Duration
 	Mutation         MutationCounts
+	Ordering         OrderingCounts
 	Revision         RevisionCounts
 	JSONCopies       JSONCopyCounts
 	FirstCommitAt    time.Time
@@ -220,6 +221,8 @@ type Attempt struct {
 	revision                                                RevisionCounts
 	mutationMu                                              sync.Mutex
 	mutation                                                MutationCounts
+	orderingMu                                              sync.Mutex
+	ordering                                                orderingObservation
 	jsonMu                                                  sync.Mutex
 	jsonCopies                                              JSONCopyCounts
 	activeClass                                             ActiveClass
@@ -340,6 +343,7 @@ func (a *Attempt) Finish(finalErr error) {
 	a.mutationMu.Lock()
 	mutation := a.mutation
 	a.mutationMu.Unlock()
+	ordering := a.orderingCounts()
 	a.jsonMu.Lock()
 	jsonCopies := a.jsonCopies
 	a.jsonMu.Unlock()
@@ -347,6 +351,7 @@ func (a *Attempt) Finish(finalErr error) {
 	add := func(counts Counts) Counts {
 		counts.Revision.add(revision)
 		counts.Mutation.add(mutation)
+		counts.Ordering.add(ordering)
 		counts.JSONCopies.add(jsonCopies)
 		counts.CommitDuration += a.commitDuration
 		counts.DelayDuration += a.delayDuration
