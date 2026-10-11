@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -194,9 +193,9 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 		t.Fatalf("PublishStandingService = %d, %v", sequence, err)
 	}
 	if _, err := store.backend.ExecContext(ctx, `
-		INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, fields, gates, accumulator, entered_state_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'default', 'ready', '{"name":"preserved"}', '{}', '{}', ?, ?, ?)
-	`, created.RunID, entityID, "ingress/"+instanceID, time.Now().UTC(), time.Now().UTC(), time.Now().UTC()); err != nil {
+		INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at)
+		VALUES (?, ?, ?, 'default', '{"name":"preserved"}', ?, ?)
+	`, created.RunID, entityID, "ingress/"+instanceID, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 	if _, err := markRunTerminalStatusForTest(
@@ -580,18 +579,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 
 func seedStandingServiceGateRevisionFixture(t *testing.T, ctx context.Context, cards decisioncard.Store, db *sql.DB, postgres bool, runID, entityID, instanceID, bundleHash string, now time.Time) {
 	t.Helper()
-	query := `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`
-	if postgres {
-		query = `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
-	}
-	var flowInstance string
-	existing := true
-	if err := db.QueryRowContext(ctx, query, runID, entityID).Scan(&flowInstance); errors.Is(err, sql.ErrNoRows) {
-		existing = false
-		flowInstance = instanceID
-	} else if err != nil {
-		t.Fatalf("load standing gate entity: %v", err)
-	}
+	flowInstance := instanceID
 	activation, err := gateruntime.New(runID, flowInstance, entityID, "standing", "active", "standing_reset", bundleHash, testGateRoutes(t), "state:active", now)
 	if err != nil {
 		t.Fatal(err)
@@ -615,23 +603,19 @@ func seedStandingServiceGateRevisionFixture(t *testing.T, ctx context.Context, c
 	if err != nil {
 		t.Fatal(err)
 	}
-	var args []any
-	if existing {
-		query = `UPDATE entity_state SET accumulator = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
-		args = []any{string(accumulator), now, runID, entityID}
-		if postgres {
-			query = `UPDATE entity_state SET accumulator = $1::jsonb, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
-		}
-	} else {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'standing', 'active', '{}', '{}', ?, 1, ?, ?, ?)`
-		args = []any{runID, entityID, flowInstance, string(accumulator), now, now, now}
-		if postgres {
-			query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', 'active', '{}'::jsonb, '{}'::jsonb, $4::jsonb, 1, $5, $6, $7)`
-		}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'standing', '{}', ?, ?)`
+	args := []any{runID, entityID, flowInstance, now, now}
+	if postgres {
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', '{}'::jsonb, $4, $5)`
 	}
-	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+	result, err := db.ExecContext(ctx, query, args...)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		t.Fatalf("seed standing gate affected %d rows, want 1: %v", affected, err)
+	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, flowInstance, "standing", "standing", "active", string(accumulator), now)
 	publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
 }
 
