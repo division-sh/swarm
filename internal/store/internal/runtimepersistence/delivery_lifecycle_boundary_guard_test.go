@@ -18,6 +18,7 @@ var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|
 
 var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/delivery/adapter.go":                                            "private canonical executable-delivery lifecycle adapter",
+	"internal/store/internal/backend/delivery/creating_predecessor.go":                               "canonical creating-turn outcome admission under the original delivery transaction",
 	"internal/store/internal/backend/delivery/lifecycle.go":                                          "named delivery lifecycle owner resolving affected runs before mutation",
 	"internal/store/internal/backend/delivery/queued_cancellation.go":                                "canonical exact queued and claimed agent-origin cancellation in the owning mutation",
 	"internal/store/internal/backend/delivery/read_projections.go":                                   "private canonical bounded executable-delivery read projections",

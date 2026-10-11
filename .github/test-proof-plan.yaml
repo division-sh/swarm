@@ -1015,6 +1015,8 @@ units:
       TestPublicFeedOnlyCompletionUnloadRestartBothStores: [default_sqlite, explicit_postgres]
       TestPublicPublicationRetirementRecoveryBothStores: [default_sqlite, explicit_postgres]
       TestPublicPublicationSixHubOriginalDeadlineBothStores: [sqlite, postgres]
+      TestPublicPublicationCreatingTurnOrderBothStores: [sqlite, postgres]
+      TestPublicPublicationCreatingTurnRestartBothStores: [sqlite, postgres]
       TestPublicPublicationInvalidAcknowledgedResultBothStores: [default_sqlite/completion, default_sqlite/publication, explicit_postgres/completion, explicit_postgres/publication]
       TestPublicFeedOnlyInvalidAcknowledgedResultBothStores: [default_sqlite, explicit_postgres]
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
@@ -1193,6 +1195,9 @@ units:
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
     required_children:
+      TestCreatingPredecessorAdmissionBothStores: [sqlite/pending, sqlite/claimed, sqlite/retry, sqlite/delivered, sqlite/dead_letter, sqlite/no_delivery, sqlite/different_sender, postgres/pending, postgres/claimed, postgres/retry, postgres/delivered, postgres/dead_letter, postgres/no_delivery, postgres/different_sender]
+      TestCreatingPredecessorNoInputBothStores: [sqlite/fieldless, sqlite/fielded, postgres/fieldless, postgres/fielded]
+      TestCreatingPredecessorCanceledTurnBothStores: [sqlite, postgres]
       TestCanceledTurnPreservesCapturedProviderDrainBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
       TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores: [sqlite, postgres]
       TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]

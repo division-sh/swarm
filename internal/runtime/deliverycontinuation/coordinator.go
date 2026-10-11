@@ -412,8 +412,14 @@ func (c *Coordinator) Release(deliveryID string) error {
 		return errors.New("exact delivery continuation identity is required")
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.releaseTerminalLocked(deliveryID)
+	current, exists := c.entries[deliveryID]
+	changed := !exists || (current.state != ownershipTerminal && current.state != ownershipTerminalCarrier)
+	err := c.releaseTerminalLocked(deliveryID)
+	c.mu.Unlock()
+	if err == nil && changed {
+		c.Signal()
+	}
+	return err
 }
 
 func (c *Coordinator) releaseTerminalLocked(deliveryID string) error {
@@ -1016,9 +1022,7 @@ func (c *Coordinator) reconcileHeld(ctx context.Context, seen map[string]struct{
 }
 
 func (c *Coordinator) releaseTerminal(deliveryID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.releaseTerminalLocked(deliveryID)
+	return c.Release(deliveryID)
 }
 
 func earlierWake(current time.Duration, present bool, candidate time.Duration) (time.Duration, bool) {
