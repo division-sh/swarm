@@ -1131,10 +1131,10 @@ func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres boo
 func seedDecisionCardCompletionEntity(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string, now time.Time) {
 	t.Helper()
 	seedWorkflowHeaderProjectionFixture(t, context.Background(), db, runID, entityID, "launch/review", "launch", "default", state, "{}", now)
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', ?, '{}', '{}', '{}', 1, ?, ?, ?)`
-	args := []any{runID, entityID, state, now, now, now}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', '{}', ?, ?)`
+	args := []any{runID, entityID, now, now}
 	if postgres {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $5, $6)`
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', '{}'::jsonb, $3, $4)`
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatal(err)
@@ -1467,10 +1467,10 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 		t.Fatal(err)
 	}
 	seedWorkflowHeaderProjectionFixture(t, testAuthorActivityContext(), db, runID, entityID, "launch/review", "launch", "default", "awaiting_review", string(accumulator), now)
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}', '{}', ?, 1, ?, ?, ?)`
-	args := []any{runID, entityID, string(accumulator), now, now, now}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', '{}', ?, ?)`
+	args := []any{runID, entityID, now, now}
 	if postgres {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}'::jsonb, '{}'::jsonb, $3::jsonb, 1, $4, $5, $6)`
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', '{}'::jsonb, $3, $4)`
 	}
 	if _, err := db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
 		t.Fatal(err)

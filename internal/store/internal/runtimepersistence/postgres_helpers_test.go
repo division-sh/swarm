@@ -109,11 +109,10 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	seedWorkflowHeaderProjectionFixture(t, ctx, pg.backend, runID, entityID, "testco", "test", "default", "active", "{}", time.Now().UTC())
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo', 'active',
-			'{}'::jsonb, '{"users_total":10,"mrr":1234}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo',
+			'{"users_total":10,"mrr":1234}'::jsonb, now(), now()
 		)
 	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
