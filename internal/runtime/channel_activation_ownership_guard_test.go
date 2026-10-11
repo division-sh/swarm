@@ -18,13 +18,18 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	want := []string{
 		"internal/channelonboarding/model.go",
 		"internal/channelonboarding/publication.go",
+		"internal/channelonboarding/session_activity.go",
 		"internal/cliapp/verify_deployment.go",
 		"internal/runtime/channel_activation_admission.go",
 		"internal/runtime/channelactivation/owner.go",
 		"internal/runtime/context_manager.go",
+		"internal/runtime/decisioncard/proposed_effect.go",
 		"internal/runtime/engine/types.go",
 		"internal/runtime/pipeline/activity_engine.go",
+		"internal/runtime/pipeline/channel_native_activity.go",
+		"internal/runtime/pipeline/channel_session_activity.go",
 		"internal/runtime/pipeline/coordinator.go",
+		"internal/runtime/pipeline/workflow_gate_decision.go",
 		"internal/runtime/publicingress/readiness.go",
 		"internal/runtime/publicingress/registration.go",
 		"internal/runtime/runtime.go",
@@ -33,6 +38,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"internal/serveapp/channel_onboarding.go",
 		"internal/serveapp/main.go",
 		"internal/serveapp/public_ingress.go",
+		"internal/store/internal/backend/decisionpersistence/proposed_effect_cards.go",
 	}
 	got := map[string]struct{}{}
 	forbidden := map[string]struct{}{
@@ -159,18 +165,23 @@ func TestStructuralReadersDoNotConstructChannelActivation(t *testing.T) {
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
-		"internal/runtime/mcp/gateway.go":                      {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
-		"internal/runtime/mcp/context.go":                      {"BindPresentation", "revokePresentation", "Presentation.Close"},
-		"internal/runtime/tools/channel_runtime.go":            {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
-		"internal/runtime/pipeline/coordinator.go":             {"AcquireActivityOperation", "BorrowActivityOperation"},
-		"internal/runtime/pipeline/activity_engine.go":         {"ChannelActivationGeneration", "WithoutExecutionLease"},
-		"internal/runtime/pipeline/channel_native_activity.go": {"withNativeChannelActivityLaunch", "value.lease.ValidateAdmission", "ConsumeNativeChannelActivity", "AdmissionResponsibility", "MatchesBusinessBinding"},
-		"internal/runtime/channel_activation_admission.go":     {"validateLearnedChannelPublication(ctx, activation)", "binding.owner", "owner.ChannelExecution(ctx, op)"},
-		"internal/runtime/tools/executor.go":                   {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
-		"internal/runtime/context_manager.go":                  {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
-		"internal/serveapp/public_ingress.go":                  {"AcquireChannelActivationPublication"},
-		"internal/serveapp/channel_onboarding.go":              {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
-		"internal/serveapp/main.go":                            {"NewDeclaredOnlyChannelActivationPublication", "prepareServeRuntimeContexts", "releaseRuntimeContexts"},
+		"internal/channelonboarding/session_activity.go":                               {"CompileSessionActivityTarget", "PrivateTarget", "PublicationGeneration", "ResolveSessionActivitySite"},
+		"internal/runtime/decisioncard/proposed_effect.go":                             {"NativeSessionTarget", "PlanGeneration.Valid()", "ChannelActivationGeneration.Valid()"},
+		"internal/runtime/mcp/gateway.go":                                              {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
+		"internal/runtime/mcp/context.go":                                              {"BindPresentation", "revokePresentation", "Presentation.Close"},
+		"internal/runtime/tools/channel_runtime.go":                                    {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
+		"internal/runtime/pipeline/coordinator.go":                                     {"AcquireActivityOperation", "BorrowActivityOperation"},
+		"internal/runtime/pipeline/activity_engine.go":                                 {"ChannelActivationGeneration", "WithoutExecutionLease"},
+		"internal/runtime/pipeline/channel_native_activity.go":                         {"withNativeChannelActivityLaunch", "value.lease.ValidateAdmission", "ConsumeNativeChannelActivity", "AdmissionResponsibility", "MatchesBusinessBinding"},
+		"internal/runtime/pipeline/channel_session_activity.go":                        {"ResolveSessionActivitySite", "lease.ValidateAdmission", "NewChannelActivationPublication", "projection.PublicationGeneration()"},
+		"internal/runtime/pipeline/workflow_gate_decision.go":                          {"continuation.NativeSessionTarget", "continuation.PlanGeneration", "continuation.ChannelActivationGeneration"},
+		"internal/runtime/channel_activation_admission.go":                             {"validateLearnedChannelPublication(ctx, activation)", "binding.owner", "owner.ChannelExecution(ctx, op)"},
+		"internal/runtime/tools/executor.go":                                           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
+		"internal/runtime/context_manager.go":                                          {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
+		"internal/serveapp/public_ingress.go":                                          {"AcquireChannelActivationPublication"},
+		"internal/serveapp/channel_onboarding.go":                                      {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
+		"internal/serveapp/main.go":                                                    {"NewDeclaredOnlyChannelActivationPublication", "prepareServeRuntimeContexts", "releaseRuntimeContexts"},
+		"internal/store/internal/backend/decisionpersistence/proposed_effect_cards.go": {"out.NativeSessionTarget = dto.NativeSessionTarget", "out.PlanGeneration = dto.PlanGeneration", "out.ChannelActivationGeneration = dto.ChannelActivationGeneration"},
 	}
 	for relative, required := range checks {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relative)))
