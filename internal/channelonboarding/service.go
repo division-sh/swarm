@@ -27,6 +27,7 @@ type IdentityLifecycle interface {
 	GetOperation(context.Context, string) (operatorchannel.Operation, error)
 	ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error)
 	CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
+	RetainedCurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
 	CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error)
 	Readback(context.Context) ([]operatorchannel.Readback, error)
 }
@@ -1676,8 +1677,8 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	expectedRevision := int64(0)
 	boundCredentialRestart := op.Phase == PhaseAwaitingExternalIdentity && op.BindingRevision > 0
 	if boundCredentialRestart {
-		binding, _, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
-		if bindingErr != nil && !errors.Is(bindingErr, operatorchannel.ErrCredentialStale) {
+		binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+		if bindingErr != nil {
 			return op, false, bindingErr
 		}
 		if binding.Revision != op.BindingRevision {
@@ -1686,9 +1687,17 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
 	}
 	if !boundCredentialRestart && op.Verb == VerbReconnect {
-		binding, proofCurrent, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
-		if bindingErr == nil {
-			proofPostureCurrent := binding.ProviderAuthority.SameProvenance(providerAuthority) &&
+		binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+		if bindingErr != nil {
+			return op, false, bindingErr
+		}
+		identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
+		if binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthorityCredential && binding.ProviderAuthority.SameProvenance(providerAuthority) {
+			_, proofCurrent, currentErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
+			if currentErr != nil && !errors.Is(currentErr, operatorchannel.ErrCredentialStale) {
+				return op, false, currentErr
+			}
+			proofPostureCurrent := currentErr == nil &&
 				((op.SaveProof && strings.TrimSpace(binding.ProofID) != "" && proofCurrent) ||
 					(!op.SaveProof && strings.TrimSpace(binding.ProofID) == ""))
 			if proofPostureCurrent {
@@ -1698,19 +1707,12 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 				})
 				return next, false, err
 			}
-			identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
-		}
-		if bindingErr != nil && (!errors.Is(bindingErr, operatorchannel.ErrCredentialStale) || binding.Revision < 1) {
-			return op, false, bindingErr
-		}
-		if bindingErr != nil {
-			identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
 		}
 	}
 	if !boundCredentialRestart && op.Verb == VerbRebind {
 		identityKind = operatorchannel.OperationRebind
-		binding, err := s.identities.CurrentBinding(ctx, op.Interface)
-		if err != nil && !errors.Is(err, operatorchannel.ErrCredentialStale) {
+		binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+		if err != nil {
 			return op, false, err
 		}
 		expectedRevision = binding.Revision
@@ -1889,10 +1891,17 @@ func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (
 			return decision, nil
 		}
 	}
-	binding, err := s.identities.CurrentBinding(ctx, op.Interface)
-	stale := errors.Is(err, operatorchannel.ErrCredentialStale)
-	if err != nil && !stale {
+	binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+	if err != nil {
 		return decision, err
+	}
+	stale := false
+	if binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthorityCredential {
+		_, err = s.identities.CurrentBinding(ctx, op.Interface)
+		stale = errors.Is(err, operatorchannel.ErrCredentialStale)
+		if err != nil && !stale {
+			return decision, err
+		}
 	}
 	// The store validates the exact committed child/binding under the parent's
 	// revision fence even when confirmation preceded the parent checkpoint.
@@ -1943,11 +1952,19 @@ func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, e
 			return SlotOperationPending, nil
 		}
 	}
-	binding, bindingErr := s.identities.CurrentBinding(ctx, req.Interface)
+	binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, req.Interface)
 	bindingCurrent := bindingErr == nil && binding.Status == operatorchannel.BindingCurrent
-	bindingStale := errors.Is(bindingErr, operatorchannel.ErrCredentialStale) && binding.Status == operatorchannel.BindingCurrent
-	if bindingErr != nil && !errors.Is(bindingErr, operatorchannel.ErrNotFound) && !bindingStale {
+	bindingStale := false
+	if bindingErr != nil && !errors.Is(bindingErr, operatorchannel.ErrNotFound) {
 		return "", bindingErr
+	}
+	if bindingCurrent && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthorityCredential {
+		_, err := s.identities.CurrentBinding(ctx, req.Interface)
+		bindingStale = errors.Is(err, operatorchannel.ErrCredentialStale)
+		if err != nil && !bindingStale {
+			return "", err
+		}
+		bindingCurrent = err == nil
 	}
 	activation, activationErr := s.store.GetConnectedChannelActivation(ctx, req.SlotKey())
 	activationCurrent := activationErr == nil && activation.Status == ActivationCurrent
@@ -2080,8 +2097,10 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		identityOp = operatorchannel.ProjectOperationReadback(identityOp)
 		result.IdentityOperation = &identityOp
 	}
-	if binding, err := s.identities.CurrentBinding(ctx, op.Interface); err == nil {
+	if binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface); err == nil {
 		result.Binding = &binding
+	} else if !errors.Is(err, operatorchannel.ErrNotFound) {
+		return result, err
 	}
 	readinessCandidate := historicalCandidate(op)
 	if candidate != nil {

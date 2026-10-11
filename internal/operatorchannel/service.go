@@ -489,6 +489,9 @@ type retainedLifecycleProjection struct {
 }
 
 func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProjection, error) {
+	if err := ctx.Err(); err != nil {
+		return retainedLifecycleProjection{}, err
+	}
 	principal, err := s.Principal()
 	if err != nil {
 		return retainedLifecycleProjection{}, err
@@ -540,6 +543,11 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 		if binding.PrincipalID != principal.ID {
 			return retainedLifecycleProjection{}, fmt.Errorf("%w: retained operator channel binding belongs to another principal", ErrConflict)
 		}
+		if binding.Status == BindingCurrent {
+			if err := validateRetainedCurrentBinding(binding); err != nil {
+				return retainedLifecycleProjection{}, err
+			}
+		}
 		if err := addIdentity(binding.Interface); err != nil {
 			return retainedLifecycleProjection{}, err
 		}
@@ -576,6 +584,9 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 			(existing.RequestedAt.Equal(operation.RequestedAt) && existing.OperationID < operation.OperationID) {
 			projection.pending[key] = ProjectOperationReadback(operation)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return retainedLifecycleProjection{}, err
 	}
 	return projection, nil
 }
@@ -627,35 +638,21 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 	return Operation{}, fmt.Errorf("%w: operator channel operation %q was not found", ErrNotFound, operationID)
 }
 
-// CurrentBinding returns the unmasked selected-store identity fact to trusted
-// runtime composition. It never creates or recovers a binding.
+// CurrentBinding requires both retained identity and current live provider
+// authority. It never creates or recovers a binding.
 func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity) (Binding, error) {
-	principal, err := s.Principal()
+	binding, err := s.RetainedCurrentBinding(ctx, identity)
 	if err != nil {
 		return Binding{}, err
 	}
-	identity = identity.Normalized()
-	if err := identity.Validate(); err != nil {
-		return Binding{}, err
+	current, currentErr := binding.ProviderAuthority.Current(ctx, s.credentials)
+	if currentErr != nil {
+		return binding, errors.Join(ErrBindingUnavailable, currentErr)
 	}
-	bindings, err := s.store.ListOperatorChannelBindings(ctx, principal.ID)
-	if err != nil {
-		return Binding{}, err
+	if !current {
+		return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
 	}
-	for _, binding := range bindings {
-		if binding.Interface.Normalized().Key() != identity.Key() || binding.Status != BindingCurrent {
-			continue
-		}
-		current, currentErr := binding.ProviderAuthority.Current(ctx, s.credentials)
-		if currentErr != nil {
-			return binding, errors.Join(ErrBindingUnavailable, currentErr)
-		}
-		if !current {
-			return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
-		}
-		return binding, nil
-	}
-	return Binding{}, fmt.Errorf("%w: current operator channel binding %q was not found", ErrNotFound, identity.Selector)
+	return binding, nil
 }
 
 // CurrentBindingReadiness returns the exact current binding and whether its
@@ -722,12 +719,15 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			out = append(out, read)
 			continue
 		}
-		credentialCurrent, credentialErr := binding.ProviderAuthority.Current(ctx, s.credentials)
+		credentialCurrent, credentialErr := s.bindingReadbackCurrent(ctx, binding)
 		if credentialErr != nil {
 			return nil, fmt.Errorf("observe provider credential for channel readback: %w", credentialErr)
 		}
 		if !credentialCurrent {
 			read.Status, read.Reason = BindingStale, "provider credential changed; reconnect with fresh credentials"
+			if binding.ProviderAuthority.Kind == ProviderAuthoritySession {
+				read.Reason = "session connection unavailable; explicit reconnect and fresh pairing required"
+			}
 			out = append(out, read)
 			continue
 		}
