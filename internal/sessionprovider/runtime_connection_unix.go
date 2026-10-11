@@ -28,12 +28,13 @@ var errRuntimeConnection = errors.New("WhatsApp connection requires its retained
 var errRuntimeIngressUnavailable = errors.New("WhatsApp runtime incoming publication is not installed")
 
 type RuntimeConnectionOptions struct {
-	Directory   string
-	OperationID string
-	Store       channelonboarding.Store
-	Credentials operatorchannel.CredentialCurrentness
-	Plan        packs.SatisfactionPlan
-	Incoming    *RuntimeIncomingOptions
+	Directory       string
+	InvocationState *InvocationState
+	OperationID     string
+	Store           channelonboarding.Store
+	Credentials     operatorchannel.CredentialCurrentness
+	Plan            packs.SatisfactionPlan
+	Incoming        *RuntimeIncomingOptions
 }
 
 // RuntimeConnection owns the actual SDK state and socket, not a registration
@@ -88,6 +89,12 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 	if err != nil {
 		return nil, err
 	}
+	if opts.InvocationState != nil {
+		opts.Directory, err = opts.InvocationState.directory(work.Context())
+		if err != nil {
+			return nil, errors.Join(err, work.Done())
+		}
+	}
 	owned, cancel := context.WithCancel(work.Context())
 	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1),
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory}
@@ -101,7 +108,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 
 func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOptions) (*worklifetime.RuntimeOccurrence, channelonboarding.Operation, error) {
 	var empty channelonboarding.Operation
-	if ctx == nil || ctx.Err() != nil || opts.Store == nil || opts.Directory == "" || uuid.Validate(opts.OperationID) != nil {
+	if ctx == nil || ctx.Err() != nil || opts.Store == nil || (opts.Directory == "") == (opts.InvocationState == nil) || uuid.Validate(opts.OperationID) != nil {
 		return nil, empty, errRuntimeConnection
 	}
 	parent, ok := worklifetime.RuntimeOccurrenceFromContext(ctx)
