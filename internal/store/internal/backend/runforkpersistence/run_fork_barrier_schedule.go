@@ -94,7 +94,11 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 		if err != nil {
 			return nil, fmt.Errorf("fixed-revision barrier schedule %s: %w", id, err)
 		}
-		if err := genericschedule.ValidateFanOutBarrierScheduleRelation(*barrier, activation); err != nil {
+		if barrier.Status == fanoutbarrier.StatusClosedPending && activation.Status == genericschedule.StatusFired {
+			if _, _, err := runForkPublishedFanOutBarrierEvidence(snapshot, *barrier, activation); err != nil {
+				return nil, fmt.Errorf("fixed-revision published barrier %s: %w", id, err)
+			}
+		} else if err := genericschedule.ValidateFanOutBarrierScheduleRelation(*barrier, activation); err != nil {
 			return nil, fmt.Errorf("fixed-revision barrier schedule %s: %w", id, err)
 		}
 		owned[id] = struct{}{}

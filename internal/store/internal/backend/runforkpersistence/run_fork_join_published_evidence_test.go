@@ -57,7 +57,7 @@ func TestPublishedArrivalEvidenceRequiresExactFixedCutWithoutRearming(t *testing
 						snapshot.Events[0].Payload = []byte(`{"hostile":true}`)
 					}
 					before := activation.Canonical()
-					got, err := runForkPublishedArrivalEvidence(snapshot, activation)
+					got, err := runForkPublishedJoinEvidence(snapshot, activation)
 					if fault == "exact" {
 						if err != nil || got.Event().ID() != activation.CurrentEventID || got.Event().RunID() != activation.Command.RunID {
 							t.Fatalf("exact historical publication: event=%v err=%v", got, err)

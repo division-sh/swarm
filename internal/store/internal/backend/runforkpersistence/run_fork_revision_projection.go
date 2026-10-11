@@ -253,7 +253,7 @@ func requireRunForkArrivalSourceRecord(snapshot *runForkRevisionSnapshot, timer 
 		return fmt.Errorf("arrival inventory differs from its exact source row")
 	}
 	if arrival.Status == genericschedule.StatusFired {
-		_, err := runForkPublishedArrivalEvidence(snapshot, arrival)
+		_, err := runForkPublishedJoinEvidence(snapshot, arrival)
 		return err
 	}
 	return nil

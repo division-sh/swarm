@@ -31,7 +31,7 @@ func prepareRunForkPublishedArrivalTransfer(snapshot *runForkRevisionSnapshot, p
 		if continuation.Present() {
 			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
 		}
-		admitted, err := runForkPublishedArrivalEvidence(snapshot, row.source)
+		admitted, err := runForkPublishedJoinEvidence(snapshot, row.source)
 		if err != nil {
 			return genericschedule.PublishedJoinContinuation{}, err
 		}
@@ -132,7 +132,7 @@ func requireRunForkPublishedJoinDelivery(snapshot *runForkRevisionSnapshot, comm
 		if row.EventID != event.ID() {
 			continue
 		}
-		if err := validateRunForkPublishedArrivalDelivery(snapshot, delivery, event, ref, want, unfinished); err != nil {
+		if err := validateRunForkPublishedJoinDelivery(snapshot, delivery, event, ref, want, unfinished); err != nil {
 			return events.DeliveryRoute{}, err
 		}
 		if found {
@@ -147,28 +147,28 @@ func requireRunForkPublishedJoinDelivery(snapshot *runForkRevisionSnapshot, comm
 	return original, nil
 }
 
-func validateRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, delivery runForkRevisionDelivery, event events.Event, ref timeridentity.JoinRef, want events.RouteIdentity, unfinished bool) error {
+func validateRunForkPublishedJoinDelivery(snapshot *runForkRevisionSnapshot, delivery runForkRevisionDelivery, event events.Event, ref timeridentity.JoinRef, want events.RouteIdentity, unfinished bool) error {
 	row := delivery.Snapshot
 	if row.RunID != snapshot.RunID || row.DeliveryID == "" || delivery.FirstRevision <= 0 ||
 		delivery.Revision < delivery.FirstRevision || delivery.Revision > snapshot.Revision {
-		return fmt.Errorf("published arrival delivery contradicts its fixed cut")
+		return fmt.Errorf("published join delivery contradicts its fixed cut")
 	}
 	if unfinished && row.Status != deliverylifecycle.StatusPending && row.Status != deliverylifecycle.StatusInProgress && row.Status != deliverylifecycle.StatusFailed {
-		return fmt.Errorf("published arrival transfer requires unfinished source work")
+		return fmt.Errorf("published join transfer requires unfinished source work")
 	}
 	route := row.Route
 	node, exact := route.Recipient.Node()
 	if !exact || !node.Equal(ref.Node()) || !route.Target.ExistingEntity() ||
 		!events.SameRouteIdentity(route.Target.Route(), want) || !route.ConnectClaim.Empty() || !route.AgentIdentity.IsZero() {
-		return fmt.Errorf("published arrival delivery contradicts its original exact join owner")
+		return fmt.Errorf("published join delivery contradicts its original exact join owner")
 	}
 	identity, err := route.Identity()
 	if err != nil || identity != row.RouteIdentity || row.SubscriberClass != deliverylifecycle.SubscriberNode || row.SubscriberID != ref.Node().Key() {
-		return fmt.Errorf("published arrival delivery contradicts its retained identity")
+		return fmt.Errorf("published join delivery contradicts its retained identity")
 	}
 	id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 	if err != nil || id != row.DeliveryID {
-		return fmt.Errorf("published arrival delivery changed its exact obligation identity")
+		return fmt.Errorf("published join delivery changed its exact obligation identity")
 	}
 	return nil
 }

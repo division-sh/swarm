@@ -21251,7 +21251,14 @@ run_model:
         published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
         validates its exact captured source schedule before writes and retains the admitted absolute due rather
         than resetting it to child birth. An already published barrier occurrence requires its historical delivery
-        continuation and is never rearmed. Dynamic-flow and other unproved continuation capabilities remain gated by #642.'
+        continuation and is never rearmed. A closed-pending barrier with a fired source schedule must prove the
+        exact schema-admitted occurrence event and its unfinished outcome delivery at the retained revision. The
+        event must agree with the schedule''s immutable owner, handle, payload, due, mode and producer; the delivery
+        must agree with the barrier''s exact node, existing entity, flow instance and deterministic obligation
+        identity. Missing, duplicate, foreign, future or already-settled outcome evidence fails closed. Other
+        observers do not become the barrier''s outcome owner. This fixed-cut evidence is non-executable and never
+        replaces current selected authority or grants timer reconstruction. Dynamic-flow and other unproved
+        continuation capabilities remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
