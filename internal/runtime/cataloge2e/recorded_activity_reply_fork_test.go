@@ -10,11 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -41,7 +45,6 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 			step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "original-account", "request_id": "original-request"},
 				eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
 			h.publishAndWait(step, 20*time.Second)
-			h.waitForCatalogStoreQuiescence(20 * time.Second)
 			reader, err := h.catalogOperatorEventLister()
 			if err != nil {
 				t.Fatal(err)
@@ -53,10 +56,42 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 				pipeline.ActivityAttemptJournal
 				bus.PreparedPublishEventReader
 				replycontext.Store
+				decisioncard.Store
+				decisioncard.ProposedEffectStore
+				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			} = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
 			}
+			cards, cursor, err := selected.ListDecisionCards(h.ctx, decisioncard.ListOptions{RunID: catalogRuntimeRunID, Limit: 10})
+			if err != nil || cursor != "" || len(cards) != 1 || cards[0].Status != decisioncard.StatusPending || calls.Load() != 0 {
+				t.Fatalf("real approval did not hold the original effect: cards=%+v cursor=%q calls=%d error=%v", cards, cursor, calls.Load(), err)
+			}
+			card, err := selected.GetDecisionCard(h.ctx, cards[0].CardID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := selected.LoadProposedEffectContinuation(h.ctx, card.CardID)
+			incomingRows, rowsErr := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)
+			input, inputFound, inputErr := selected.LoadPreparedPublishEvent(h.ctx, pending.SourceEventID)
+			if err != nil || rowsErr != nil || inputErr != nil || !inputFound || len(incomingRows) != 1 || len(input.DeliveryRoutes) != 1 || pending.ReplyContextID != incomingRows[0].ID || input.DeliveryRoutes[0].Context.ReplyContextID() != incomingRows[0].ID {
+				t.Fatalf("pending effect lost its actual inbound reply before operator dispatch: continuation=%+v rows=%+v input=%+v errors=%v/%v/%v", pending, incomingRows, input, err, rowsErr, inputErr)
+			}
+			decisionID, decidedAt := uuid.NewString(), time.Now().UTC()
+			principal, err := selected.EnsureOperatorPrincipal(h.ctx, decidedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principal.ID), ResourceID: card.CardID,
+				RequestHash: "recorded-reply-" + decisionID, IdempotencyKey: uuid.NewString(), Now: decidedAt, TTL: time.Hour}
+			decision := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal.ID,
+				ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: decisionID, Now: decidedAt})
+			decisionCtx, cancelDecision := context.WithTimeout(correlation.WithRunID(h.ctx, catalogRuntimeRunID), 20*time.Second)
+			defer cancelDecision()
+			if _, replayed, err := h.rt.Pipeline.CommitDecisionCardMutation(decisionCtx, request, decision); err != nil || replayed {
+				t.Fatalf("commit and dispatch the original approval: replay=%t error=%v", replayed, err)
+			}
+			h.waitForCatalogStoreQuiescence(20 * time.Second)
 			cut, sourceFinished := "", 0
 			for _, event := range catalogEventsSince(t, reader, h.startedAt) {
 				if event.Name == "platform.activity_requested" {
@@ -71,6 +106,11 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 			}
 			original, found, err := selected.LoadActivityAttempt(h.ctx, cut)
 			if err != nil || !found || cut == "" || original.ReplyContextID == "" || original.Status != pipeline.ActivityAttemptStatusSucceeded || original.CompletedAt == nil || calls.Load() != 1 || sourceFinished != 1 {
+				for _, event := range activityLineageEvents(t, h.ctx, h, catalogRuntimeRunID) {
+					t.Logf("original publication phase: event=%s name=%s payload=%+v", event.EventID, event.EventName, event.Payload)
+				}
+				rows, _ := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)
+				t.Logf("original reply settlement phase: %+v", rows)
 				t.Fatalf("real source did not record one complete reply-bearing result: journal=%+v found=%t calls=%d finished=%d error=%v", original, found, calls.Load(), sourceFinished, err)
 			}
 			sourceRows, err := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)

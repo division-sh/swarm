@@ -4767,7 +4767,8 @@ handler_specification:
         fork: >-
           fan_out_obligations is a closed fixed-revision family. A child inherits frozen capsule data, source, cardinality,
           and the originating handler's exact reply-only continuation context. Capture consumes the admitted delivery
-          route and claim; native persistence compares it with the actual handler input. Deferred ordinals consume
+          route and claim; native persistence compares it with the actual handler input and its canonical settled
+          delivery route before commit, including when a caller omits both ambient and capsule references. Deferred ordinals consume
           that frozen context, not a pump worker's ambient context. Fork projection maps its opaque reply reference
           through the captured reply inventory to the child's own row, refusing missing or contradictory evidence.
           Return joins remain on that reply row; consumed input join-admission receipts are not copied into the
@@ -5658,7 +5659,11 @@ engine:
       continuation_carriers:
         ordinary_emit: EmitIntent.Context and route-aware EventBus publish preserve the ref.
         activity: ActivityIntent.Context and activity_attempts.reply_context_id preserve the ref across request, provider call,
-          journal readback, and result publication.
+          journal readback, and result publication. Decoding a platform activity request consumes the actual admitted
+          pipeline handoff's reply-only context before creating its attempt. Journaled result collection contributes
+          a typed EmitIntent with that recorded reference through the existing emission owner, not a bare event that
+          loses the continuation. A copied journal's own child reference remains authoritative for its recorded output;
+          neither a worker's ambient context nor source provenance grants reply or execution authority.
         timer: TimerIntent.Context and timers.reply_context_id preserve the ref for one-shot schedules; recurring schedules
           carrying an open reply context fail closed.
         child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
