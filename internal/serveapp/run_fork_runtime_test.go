@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
@@ -928,7 +927,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
-	seedRunForkCLIConstruction(t, selected.(*store.PostgresStore), runID, bundleHash, at)
+	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
 }
 
 func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash string, at time.Time) {
@@ -936,7 +935,7 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, enti
 	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, bundleHash, "item.received", "test-node", at)
 }
 
-func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) (string, storetest.RunFixtureStore) {
+func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) (string, runForkCLIConstructionOwner) {
 	t.Helper()
 	repo := repoRootForTest()
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, sourceRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
