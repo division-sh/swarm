@@ -21,12 +21,13 @@ import (
 // Connections belong to retained onboarding operations and the selected runtime,
 // not a provider-name registry or an independent process/retry supervisor.
 type serveSessionBootstrap struct {
-	mu            sync.Mutex
-	connections   map[string]*serveSessionBootstrapAttempt
-	selectRuntime serveSessionBootstrapRuntime
-	store         channelonboarding.Store
-	credentials   operatorchannel.CredentialCurrentness
-	directory     string
+	mu              sync.Mutex
+	connections     map[string]*serveSessionBootstrapAttempt
+	selectRuntime   serveSessionBootstrapRuntime
+	store           channelonboarding.Store
+	credentials     operatorchannel.CredentialCurrentness
+	directory       string
+	invocationState *sessionprovider.InvocationState
 }
 
 type serveSessionBootstrapAttempt struct {
@@ -72,14 +73,14 @@ func init() {
 }
 
 func newNativeServeSessionBootstrap(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
-	credentials operatorchannel.CredentialCurrentness, directory string,
+	credentials operatorchannel.CredentialCurrentness, directory string, invocationState *sessionprovider.InvocationState,
 ) (serveSessionBootstrapOwner, error) {
 	return &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
-		selectRuntime: selectRuntime, store: store, credentials: credentials, directory: directory}, nil
+		selectRuntime: selectRuntime, store: store, credentials: credentials, directory: directory, invocationState: invocationState}, nil
 }
 
 func (s *serveSessionBootstrap) QualifySessionPlan(candidate channelonboarding.Candidate) error {
-	if s == nil || s.selectRuntime == nil || s.store == nil || s.credentials == nil || s.directory == "" {
+	if s == nil || s.selectRuntime == nil || s.store == nil || s.credentials == nil || (s.directory == "") == (s.invocationState == nil) {
 		return fmt.Errorf("session bootstrap requires its serve runtime and selected owners")
 	}
 	if err := candidate.ValidateDeclaration(); err != nil {
@@ -414,7 +415,7 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
-	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, OperationID: op.OperationID,
+	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, InvocationState: s.invocationState, OperationID: op.OperationID,
 		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming}
 	var connection *sessionprovider.RuntimeConnection
 	if bootstrap {
