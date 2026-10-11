@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -16,7 +17,7 @@ func TestChannelLogoutCLIUsesExactRetainedOperation(t *testing.T) {
 			t.Run(output+"/"+map[bool]string{false: "fresh", true: "replay"}[alreadyReserved], func(t *testing.T) {
 				now := time.Now().UTC()
 				teardownID := uuid.NewString()
-				effectID, err := channelonboarding.SessionLogoutEffectOperationID(teardownID)
+				effectID, err := effects.ChannelLogoutOperationID(teardownID)
 				if err != nil {
 					t.Fatal(err)
 				}
