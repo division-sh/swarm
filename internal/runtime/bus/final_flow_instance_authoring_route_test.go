@@ -107,7 +107,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		EntityID:     activation.Instance.EntityID,
 	}),
 	}
-	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}

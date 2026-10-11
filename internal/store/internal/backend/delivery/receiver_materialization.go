@@ -33,8 +33,21 @@ func (a *Adapter) materializationEvent(ctx context.Context, q queryer, eventID s
 }
 
 func (a *Adapter) materializationReady(ctx context.Context, q queryer, record deliveryRecord, claimTx *sql.Tx) (bool, error) {
-	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() {
+	if !record.Route.Recipient.IsAgent() {
 		return true, nil
+	}
+	if record.Route.Initialization.Empty() {
+		if record.Route.Target.MaterializingEntity() {
+			return false, fmt.Errorf("receiver claim omitted its construction dependency")
+		}
+		if record.Route.Target.Empty() {
+			return true, nil
+		}
+		tx, ok := q.(*sql.Tx)
+		if !ok || a.receiverExecution == nil {
+			return false, fmt.Errorf("receiver execution admission requires its transactional owner")
+		}
+		return a.receiverExecution.ReceiverExecutionReadyTx(ctx, tx, record.Route, record.Authority, claimTx != nil)
 	}
 	if !record.Route.Initialization.FlowLifecycle() {
 		return false, fmt.Errorf("receiver claim requires a canonical flow construction receipt, not node completion")
@@ -86,7 +99,7 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 			return deliverylifecycle.ClaimParked, deliverylifecycle.ContinuationWake{}, nil
 		}
 	}
-	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() || disposition == deliverylifecycle.ClaimTerminal || disposition == deliverylifecycle.ClaimInvariantInvalid {
+	if !record.Route.Recipient.IsAgent() || record.Route.Initialization.Empty() && record.Route.Target.Empty() || disposition == deliverylifecycle.ClaimTerminal || disposition == deliverylifecycle.ClaimInvariantInvalid {
 		return disposition, wake, nil
 	}
 	ready, err := a.materializationReady(ctx, q, record, nil)

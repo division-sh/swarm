@@ -25,7 +25,11 @@ func receiverMaterializationFixture(t testing.TB) (Event, DeliveryRoute, []Deliv
 	}
 	node := identitytest.FlowNode(t, "consumer", "observer")
 	observer := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(node), Target: target}
-	observer.Initialization, err = AdmitFlowReceiverInitialization(event, target)
+	receiver, err := agentidentity.PresentRoute("consumer", "consumer", "consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer.Initialization, err = AdmitFlowReceiverInitialization(event, target, receiver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +125,7 @@ func TestReceiverInitializationSeparatesStaticActorFromConstruction(t *testing.T
 	if err != nil || !SameDeliveryRouteIdentity(agent, restored) {
 		t.Fatalf("independent construction roundtrip: %v", err)
 	}
-	for _, crossed := range []string{"instance", "flow", "run"} {
+	for _, crossed := range []string{"instance", "flow", "run", "scope", "logical_instance"} {
 		hostile := agent
 		switch crossed {
 		case "instance":
@@ -132,9 +136,19 @@ func TestReceiverInitializationSeparatesStaticActorFromConstruction(t *testing.T
 			hostile.Target, _ = NewEntitylessReceiverTarget(actor)
 		case "run":
 			hostile.Initialization.runID = uuid.NewString()
+		case "scope":
+			hostile.AgentIdentity.Route.ScopeKey = "foreign"
+		case "logical_instance":
+			hostile.AgentIdentity.Route.InstanceID = "foreign"
 		}
 		if err := ValidateReceiverMaterializations(event, []DeliveryRoute{hostile}); err == nil {
 			t.Fatalf("accepted crossed %s construction dependency", crossed)
+		}
+		if _, err := hostile.Identity(); err == nil {
+			t.Fatalf("accepted crossed %s durable identity", crossed)
+		}
+		if _, err := json.Marshal(hostile); err == nil {
+			t.Fatalf("serialized crossed %s receiver", crossed)
 		}
 		actor = construction
 		actor.EntityID = ""
@@ -179,7 +193,7 @@ func TestReceiverInitializationStoredStartupRetainsTypedAbsence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.Initialization, err = AdmitStoredFlowReceiverInitialization(event.RunID(), "", dependency)
+	agent.Initialization, err = AdmitStoredFlowReceiverInitialization(event.RunID(), "", dependency, agent.AgentIdentity.Route)
 	if err != nil || agent.Initialization.Empty() || agent.Initialization.CreatingEventID() != "" {
 		t.Fatalf("startup construction absence was erased or rejected: %v", err)
 	}
