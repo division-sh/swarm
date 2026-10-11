@@ -90,7 +90,11 @@ func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRev
 	node := identitytest.FlowNode(t, "receiver", "initialize")
 	initializer := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}
 	var err error
-	initializer.Initialization, err = events.AdmitFlowReceiverInitialization(event, target)
+	receiver, err := agentidentity.PresentRoute("receiver", "receiver", "receiver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initializer.Initialization, err = events.AdmitFlowReceiverInitialization(event, target, receiver)
 	if err != nil {
 		t.Fatal(err)
 	}

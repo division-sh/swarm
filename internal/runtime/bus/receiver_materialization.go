@@ -50,7 +50,11 @@ func flowReceiverInitialization(plan RoutePlan, target events.DeliveryTargetOwne
 		if activation.CreatingInput.EventID != plan.Event.ID() {
 			return events.ReceiverInitialization{}, false, fmt.Errorf("future receiver construction belongs to another creating event")
 		}
-		supplier, err := events.AdmitFlowReceiverInitialization(plan.Event, target)
+		receiver, err := identity.Route().AgentIdentityRoute()
+		if err != nil {
+			return events.ReceiverInitialization{}, false, err
+		}
+		supplier, err := events.AdmitFlowReceiverInitialization(plan.Event, target, receiver)
 		return supplier, err == nil, err
 	}
 	return events.ReceiverInitialization{}, false, nil

@@ -2090,24 +2090,34 @@ contract_formats:
             Pipeline consumes the persisted target variant
             directly; source-event identity, path text, descriptors, singleton fan-in, and missing-row fallback cannot repair
             or reinterpret it. Every explicitly
-            targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
-            an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. A same-flow
-            declaration-owned agent-policy route may consume a constructed receiver from the same admitted plan only
-            when the exact typed active-agent descriptor already carries that entity fact and the selected owner agrees;
-            runtime-created carriers remain targetless. Sharing only a flow instance, handler, recipient spelling, or
-            publication is not ownership evidence. Node intents are classified
+            targeted agent route consumes execution ownership derived once from its exact admitted agent configuration.
+            An entityless static actor retains entityless_receiver even when its selected receiving flow has an
+            entity-bearing header. Existing or materializing actor entity ownership requires that actor's exact entity
+            coordinate; selected flow/header construction cannot transfer state ownership to an agent. Explicit caller
+            target restrictions remain independent and cannot be scrubbed to admit a conflicting actor. Same-flow,
+            connected, active and cold agent producers consume this same projection. Independently runtime-created
+            targetless carriers retain their explicit absence of state ownership. Sharing only a flow instance, handler,
+            recipient spelling, or publication is not ownership evidence. Node intents are classified
             independently against the selected-run snapshot and exact canonical construction plans. Keyed and keyless
             construction, including recursive static children, finishes in the canonical constructor commit before any
             ordinary node or agent handler executes. Handler flags, field references, effects, route ordering, future IDs
-            and node completion cannot establish construction authority. A materializing receiver carries closed
-            ReceiverInitialization evidence with exactly kind=flow_lifecycle, run_id, event_id and target. Its exact
-            immutable creating-publication coordinate is committed by the constructor; current workflow progress is not
+            and node completion cannot establish construction authority. Flow-owned agent execution carries closed
+            ReceiverInitialization dependency evidence independently of the actor target, with exactly
+            kind=flow_lifecycle, run_id, event_id, target and receiver_route. The target is the selected constructed
+            flow/header; receiver_route captures the constructor's complete canonical root-or-present agent coordinate,
+            including declaration scope, logical instance and physical instance path, not a path-derived approximation.
+            Its exact immutable creating-publication coordinate is committed by the constructor; current workflow progress is not
             a substitute for that original evidence. The receipt belongs to durable route identity and the full route
             wire. The existing receiver_materialization_plan column carries only {initialization: receipt}; node_delivery,
             dependency records, retired node fields, missing or contradictory receipts fail closed with no compatibility
             reader. Ordinary observers remain ordinary deliveries and never become construction suppliers. Aggregate
-            validation binds every receipt to its own publication and target, independently of ordinary node settlement.
-            Claim admission additionally verifies actual constructed persistence and current attachment readiness.
+            validation binds every dependency to its exact run and selected construction, independently of actor entity
+            ownership or ordinary node settlement. A new materialization binds its causing publication; later distinct
+            publications retain the original stored constructor receipt rather than becoming new creating events. Startup
+            creating-event absence is explicit and verified against the original receipt, never inferred from an empty
+            carrier. Claim admission and continuation verify actual constructed persistence and current attachment readiness
+            whenever a dependency is present, including an entityless actor. Readiness observation and locked claim both
+            compare the actor's exact stored entity value; empty is exactly empty, never a wildcard for a header entity.
             Ordinary agent-only fork replay validates the complete source publication at the selected revision, requires
             exact reconstructed receiver ownership, and rechecks the child row in the selected activation transaction.
             Historical projection is not fresh construction: it admits existing_entity without copying source

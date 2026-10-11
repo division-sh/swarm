@@ -10,10 +10,20 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func flowReceiverRouteFixture(t testing.TB, route flowidentity.Route) agentidentity.Route {
+	t.Helper()
+	receiver, err := route.AgentIdentityRoute()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return receiver
+}
 
 func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 	for _, tc := range []struct {
