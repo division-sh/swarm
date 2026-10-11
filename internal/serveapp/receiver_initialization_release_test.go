@@ -23,11 +23,17 @@ func TestReleaseReceiverInitializationBothStores(t *testing.T) {
 			t.Run("connected_typed_creation", func(t *testing.T) {
 				root := canonicalrouting.CopyServedReceiverInitialization(t)
 				rt := startLifecycleReleaseProcess(t, binary, backend, root)
+				rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
+					waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
+				}
 				requireTypedReceiverInitializationCases(t, rt)
 			})
 			t.Run("direct_provider_schema", func(t *testing.T) {
 				root := canonicalrouting.CopyProviderReceiverInitialization(t)
 				rt := startLifecycleReleaseProcess(t, binary, backend, root)
+				rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
+					waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
+				}
 				requireReceiverInitializationPublicProviderIngressCases(t, rt)
 			})
 		})

@@ -1692,6 +1692,18 @@
     "body_sha256": "764c2ea2b778be82d935af3bc468a8739aa5760a40bbc78ea7b48f7c0cbecaf7"
   },
   {
+    "owner": "internal/runtime/runtime.go::*Runtime.drainAdmittedIngress",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "d3ef503b1dde6319c30eb054c1bfeaf802257c5e7ccc32fcd39629ea82d74243"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.drainIngressForContextWithdrawal",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "eeba8f903693f92538005bf06bac05e48773048e1e092af44083c13de1d77b05"
+  },
+  {
     "owner": "internal/runtime/runtime.go::*Runtime.emitBootProgress",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
@@ -1761,7 +1773,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "8c4c27b3aa4342028f25c8059264ee42ab366da17121e480c7e17e28d91081fb"
+    "body_sha256": "b0af245ed2f5426c5da6d7a26f3f4c27464accdc1c3d22646060585a7c46af00"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",

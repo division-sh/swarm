@@ -19,9 +19,11 @@ import (
 )
 
 type exactOriginDiagnosticHold struct {
-	logger  *runtimepkg.RuntimeLogger
-	entered chan string
-	release <-chan struct{}
+	logger    *runtimepkg.RuntimeLogger
+	eventType string
+	entered   chan string
+	release   <-chan struct{}
+	once      sync.Once
 }
 
 type exactOriginHandoffHold struct {
@@ -64,12 +66,18 @@ func (h *exactOriginDiagnosticHold) ProjectLifecycleDiagnostic(ctx context.Conte
 }
 
 func (h *exactOriginDiagnosticHold) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *failures.Envelope, durationUS int) error {
-	if component == "eventbus" && action == "published" && eventType == "parent.seeded" {
-		h.entered <- eventID
-		select {
-		case <-h.release:
-		case <-ctx.Done():
-			return ctx.Err()
+	if component == "eventbus" && action == "published" && eventType == h.eventType {
+		var err error
+		h.once.Do(func() {
+			h.entered <- eventID
+			select {
+			case <-h.release:
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return h.logger.Log(ctx, runtimepkg.RuntimeLogEntry{
@@ -161,7 +169,7 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 			defer unblock()
 			t.Cleanup(unblock)
 			entered := make(chan string, 1)
-			rt.Runtime.Bus.SetLoggerHook(&exactOriginDiagnosticHold{logger: rt.Runtime.Logger, entered: entered, release: release})
+			rt.Runtime.Bus.SetLoggerHook(&exactOriginDiagnosticHold{logger: rt.Runtime.Logger, eventType: "parent.seeded", entered: entered, release: release})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "exact-origin"}, "idempotency_key": "exact-origin-seed"})
 			cut, cancelCut := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
 			defer cancelCut()
