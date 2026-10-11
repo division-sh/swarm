@@ -21,6 +21,8 @@ type scenarioSetupAckSelectedStore interface {
 	APIIdempotencyStore
 	RunBundleContextStore
 	sourceartifactfixture.Writer
+	EntityReadStore
+	runtimepipeline.WorkflowInstancePersistenceReader
 }
 
 type scenarioSetupPostCommitFaultStore struct {
@@ -92,7 +94,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 					"bundle_hash":     bundle.SourceArtifact.BundleHash(),
 					"run_id":          runID,
 					"idempotency_key": "setup-ack-key",
-					"entities":        []any{validTestSetupEntity(entityID, "waiting", "seeded", true)},
+					"entities":        []any{validTestSetupEntity(entityID, "seeded")},
 				},
 			}
 
@@ -101,10 +103,11 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 				t.Fatalf("first setup error = %v, want postcommit diagnostic", err)
 			}
 			committed, ok := first.(testSetupEntitiesResult)
-			if !ok || committed.RunID != runID || len(committed.Entities) != 1 || committed.Entities[0].EntityID != entityID {
+			if !ok || committed.RunID != runID || len(committed.Entities) != 1 || committed.Entities[0].EntityID != entityID || committed.Entities[0].CurrentState != nil {
 				t.Fatalf("acknowledged setup result = %#v, want committed run/entity", first)
 			}
 			assertScenarioSetupAckRows(t, db, runID, entityID)
+			assertTestSetupImportedEntity(t, selected, runID, entityID, "seeded")
 			if setup.calls != 1 {
 				t.Fatalf("setup calls after acknowledged fault = %d, want 1", setup.calls)
 			}
@@ -121,6 +124,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 				t.Fatalf("setup calls after replay = %d, want no duplicate domain write", setup.calls)
 			}
 			assertScenarioSetupAckRows(t, db, runID, entityID)
+			assertTestSetupImportedEntity(t, selected, runID, entityID, "seeded")
 		})
 	}
 }
@@ -135,7 +139,8 @@ func assertScenarioSetupAckRows(t *testing.T, db *sql.DB, runID, entityID string
 	}{
 		{"run", `SELECT COUNT(*) FROM runs WHERE run_id = $1`, []any{runID}, 1},
 		{"entity", `SELECT COUNT(*) FROM entity_state WHERE run_id = $1 AND entity_id = $2`, []any{runID, entityID}, 1},
-		{"entity mutations", `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1 AND entity_id = $2 AND writer_id = 'test.setup_entities'`, []any{runID, entityID}, 3},
+		{"entity mutations", `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1 AND entity_id = $2 AND writer_id = 'test.setup_entities'`, []any{runID, entityID}, 1},
+		{"authored note mutation", `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1 AND entity_id = $2 AND writer_type = 'platform' AND writer_id = 'test.setup_entities' AND domain = 'authored_field' AND path = 'note'`, []any{runID, entityID}, 1},
 		{"idempotency completion", `SELECT COUNT(*) FROM api_idempotency WHERE resource_id = $1`, []any{runID}, 1},
 	} {
 		var got int
@@ -154,7 +159,16 @@ func assertScenarioSetupAckRows(t *testing.T, db *sql.DB, runID, entityID string
 	if err := json.Unmarshal([]byte(response), &completed); err != nil {
 		t.Fatalf("decode idempotency completion: %v", err)
 	}
-	if completed.RunID != runID || len(completed.Entities) != 1 || completed.Entities[0].EntityID != entityID {
+	if completed.RunID != runID || len(completed.Entities) != 1 || completed.Entities[0].EntityID != entityID || completed.Entities[0].CurrentState != nil {
 		t.Fatalf("stored idempotency completion = %#v, want committed run/entity", completed)
+	}
+	var wire struct {
+		Entities []map[string]json.RawMessage `json:"entities"`
+	}
+	if err := json.Unmarshal([]byte(response), &wire); err != nil {
+		t.Fatalf("decode idempotency completion wire shape: %v", err)
+	}
+	if len(wire.Entities) != 1 || string(wire.Entities[0]["current_state"]) != "null" {
+		t.Fatalf("stored idempotency completion must retain explicit null current_state: %s", response)
 	}
 }
