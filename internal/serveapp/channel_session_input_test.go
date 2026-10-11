@@ -85,6 +85,8 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 			peer.reply("Skip field", "NATIVE_INPUT_FINAL_SKIP", optional)
 			decided := waitServedNativeInputDecision(t, endpoint, cardID)
 			peer.reply("Skip field", "NATIVE_INPUT_FINAL_REPEAT", optional)
+			query.MessageReference = "NATIVE_INPUT_FINAL_REPEAT"
+			waitTextReplyIntent(t, reader, query, "teaching")
 			peer.reply("reject", "NATIVE_INPUT_OLD_ACTION", card)
 			query.MessageReference = "NATIVE_INPUT_OLD_ACTION"
 			waitTextReplyIntent(t, reader, query, "control")
