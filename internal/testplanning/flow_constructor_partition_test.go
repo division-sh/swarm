@@ -73,6 +73,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		"store-runtime-full-05": {
 			"TestReceiverConfigActivationRaceAndRollbackBothStores",
 			"TestReceiverEntitylessPendingAttachmentExecutesBothStores",
+			"TestReceiverPublicationCommitUncertaintyBothStores",
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
 			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
 		},
