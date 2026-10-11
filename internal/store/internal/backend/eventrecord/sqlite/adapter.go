@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,6 +32,39 @@ type Execer interface {
 }
 
 func HydrationBatchSize() int { return hydrationBatchSize }
+
+func ReadFanOutOutcomePayloadBytesStorage(ctx context.Context, q Queryer, eventIDs []string) (map[string][]byte, error) {
+	ids, err := normalizeIDs(eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(ids))
+	for start := 0; start < len(ids); start += hydrationBatchSize {
+		end := min(start+hydrationBatchSize, len(ids))
+		args, slots := make([]any, end-start), make([]string, end-start)
+		for i, id := range ids[start:end] {
+			args[i], slots[i] = id, fmt.Sprintf("$%d", i+1)
+		}
+		rows, err := q.QueryContext(ctx, `SELECT event_id,payload_bytes FROM events WHERE event_id IN (`+strings.Join(slots, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			var payload []byte
+			if err := rows.Scan(&id, &payload); err != nil {
+				return nil, errors.Join(err, rows.Close())
+			}
+			out[id] = append([]byte(nil), payload...)
+		}
+		err = rows.Err()
+		closeErr := rows.Close()
+		if err != nil || closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
+	}
+	return out, nil
+}
 
 func ReadActivityForkPayloadBytesStorage(ctx context.Context, q RowQueryer, runID, eventID string) ([]byte, error) {
 	var raw []byte

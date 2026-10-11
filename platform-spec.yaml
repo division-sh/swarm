@@ -6895,6 +6895,25 @@ engine:
                 routing, history and clocks; cancellation or storage failure returns no deletion evidence. Existing
                 runtime reconstruction, exact settled identity, no-redispatch, public readback and joined teardown
                 assertions remain mandatory and are not relabeled as process-restart qualification.
+              fan_out_semantic_fixture_observation: >-
+                Shared semantic fan-out fixtures retain their original native selected owner instead of propagating
+                a pool into probes or consumers. Source progress, outcomes, eager counts and blocked-state evidence
+                consume the closed delivery join owner, preserving exact outcome-run/trigger-event predicates,
+                all declaration families, ordinal ordering and ties, left-joined event absence, raw failure bytes
+                and the original source-independent event identity. Authoritative payload bytes are hydrated only
+                by the existing event-record dialect adapters within that same native read snapshot; PostgreSQL
+                repeatable-read and SQLite read transactions retain the first observation cut across the bounded
+                hydration queries. Event-run equality, admission decoding, eligibility or payload normalization
+                must not narrow these physical witnesses. Missing intent progress is explicit absence only after
+                successful read completion; cancellation, closure and storage failure return no provisional progress.
+                The safe-aggregate rollback witness retains its one-statement sum of exact intent-key/ordinal-range
+                outcome residue and exact run/event-ID membership, not two independently timed counts. Run COUNT
+                plus SUM retains strict SQL NULL, and leased-intent, delivered-trigger, portfolio-field and authored
+                account-list mutation-source reads retain their original filters and independent cuts under their
+                existing row-family owners. Diagnostics preserve their original status/failure row and last three
+                runtime-log payloads by descending insertion sequence. Real native insert faults, immutable captured
+                sources, partition equivalence, retry/blocked isolation, receiver drain and joined cleanup remain
+                mandatory execution proofs; source-spelling migration alone is not their qualification.
               fork_receiver_execution_faults: The active fork-receiver header fault changes only current_state from active to done for the exact run and entity, requiring exactly one row without adding a path filter or workflow transition. The exact delivery-claim age fault consumes the actual held opaque claim and changes only the original UTC now-minus-two-hours started/created and now-minus-one-hour updated/expiry cuts. Its obligation predicate retains delivery, run, version and in-progress status; its attempt predicate retains delivery, version, token and open-marker. Both statements require one row in a single original unrevisioned native write transaction, and any mismatch rolls back the complete fault. Neither operation changes business fields, revisions, companions, status, history or claim identity; real ClaimDelivery alone mints a successor. Public fixture bridges are SQL-free error-only operations, not selectors, raw getters, reconstructed coordinators or mutation-admission overrides.
               selected_fork_predecessor_setup: Selected-fork predecessor fixtures consume the original selected native coordinator for their exact source/run/event/entity and historical time. The fixed headerless entity setup preserves its pending lifecycle mutation, physical field defaults, revision and clocks without manufacturing a flow header or readiness; both rows commit together or neither survives a failed seed. Source availability consumes the existing run-source admission owner's presence check, not an earlier artifact decoder or a repair. Historical snapshot capture uses the existing revision fixture adapter within one selected mutation attempt and returns only its acknowledged exact revision receipt, including explicitly requested canonical fact families; failure yields no provisional receipt. No raw pool, transaction, callback, reconstructed coordinator or execution authority crosses these public fixture ports.
               selected_fork_component_runtime_authority: >-

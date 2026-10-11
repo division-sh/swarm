@@ -104,3 +104,14 @@ func RemoveScenarioSetupReplayReceiptsForTest(ctx context.Context, selected any)
 		})
 	})
 }
+func ReadFanOutPortfolioFieldsStorageForTest(ctx context.Context, selected any, run string) ([]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+		return entitystore.ReadFanOutPortfolioFieldsStorageTx(ctx, tx, run)
+	})
+}
+
+func ReadFanOutAccountIDsMutationSourceStorageForTest(ctx context.Context, selected any, run, mutation, entity string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, mutation, entity}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return mutationlog.ReadFanOutAccountIDsMutationSourceStorageTx(ctx, tx, run, mutation, entity)
+	})
+}

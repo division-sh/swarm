@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 213 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "8582e4cc89ebae87af4e4ea8d5c090e71560381c48b3b730d09358c0ddde157a" {
+	if err != nil || len(rows) != 219 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b3a7982f273954af5b748d3beb4bd5fc7030f5c1bd9a22ecedbd68f9992fe2b5" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -59,6 +59,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if _, ok := family145FanInHelperCalls[row.Function]; ok {
 			if err := family145FanInHelperProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145SemanticReadHelperCalls[row.Function]; ok {
+			if err := family145SemanticReadHelperProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

@@ -26,6 +26,103 @@ type FanInDiagnosticDeliveryStorage struct {
 	EventID, SubscriberID, Status, Reason, Failure string
 }
 
+type FanOutSemanticOutcomeStorage struct {
+	Ordinal          int
+	Kind, EventID    string
+	EventIDPresent   bool
+	Payload, Failure []byte
+}
+
+type FanOutBlockedSourceStorage struct {
+	Outcomes, Leased int
+	Failure          string
+}
+
+type FanOutSourceProgressStorage struct {
+	Cursor  int
+	Status  string
+	Present bool
+}
+
+type FanOutTriggerDeliveryStorage struct {
+	Status  string
+	Failure []byte
+}
+
+func ReadFanOutSourceProgressStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutSourceProgressStorage, error) {
+	var out FanOutSourceProgressStorage
+	err := tx.QueryRowContext(ctx, `SELECT i.cursor,i.status FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&out.Cursor, &out.Status)
+	if err == sql.ErrNoRows {
+		return FanOutSourceProgressStorage{}, nil
+	}
+	if err != nil {
+		return FanOutSourceProgressStorage{}, err
+	}
+	out.Present = true
+	return out, nil
+}
+
+func ReadFanOutSourceOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (out []FanOutSemanticOutcomeStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT o.ordinal,o.outcome_kind,e.event_id,o.failure FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id LEFT JOIN events e ON e.event_id=o.event_id WHERE o.run_id=$1 AND d.event_id=$2 ORDER BY o.ordinal`, runID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row FanOutSemanticOutcomeStorage
+		var id sql.NullString
+		if err := rows.Scan(&row.Ordinal, &row.Kind, &id, &row.Failure); err != nil {
+			return nil, err
+		}
+		row.EventID, row.EventIDPresent = id.String, id.Valid
+		row.Failure = append([]byte(nil), row.Failure...)
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountFanOutSourceOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id WHERE o.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadFanOutBlockedSourceStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutBlockedSourceStorage, error) {
+	var out FanOutBlockedSourceStorage
+	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id),CASE WHEN i.claim_owner IS NULL THEN 0 ELSE 1 END,i.blocked_reason FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&out.Outcomes, &out.Leased, &out.Failure)
+	if err != nil {
+		return FanOutBlockedSourceStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadFanOutTriggerDeliveryDiagnosticStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutTriggerDeliveryStorage, error) {
+	var out FanOutTriggerDeliveryStorage
+	err := tx.QueryRowContext(ctx, `SELECT status,failure FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&out.Status, &out.Failure)
+	if err != nil {
+		return FanOutTriggerDeliveryStorage{}, err
+	}
+	out.Failure = append([]byte(nil), out.Failure...)
+	return out, nil
+}
+
+func CountFanOutDeliveredTriggerStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND status='delivered'`, runID, eventID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func ReadFanInDiagnosticDeliveriesTx(ctx context.Context, tx *sql.Tx) (out []FanInDiagnosticDeliveryStorage, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT), subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries ORDER BY created_at, delivery_id`)
 	if err != nil {

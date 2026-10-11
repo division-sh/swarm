@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"reflect"
 	"testing"
 	"time"
@@ -36,8 +37,8 @@ func TestVolumeFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores
 						f.probe.mu.Lock()
 						f.probe.policies[trigger] = semanticProofPolicy{maxCommit: limit}
 						f.probe.mu.Unlock()
-						var eager int
-						if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id WHERE o.run_id=$1 AND d.event_id=$2`, f.runID, trigger).Scan(&eager); err != nil || eager != 0 {
+						eager, err := storetest.CountFanOutSourceOutcomesStorage(f.ctx, f.selected, f.runID, trigger)
+						if err != nil || eager != 0 {
 							t.Fatalf("N%d emitted before serving: %d %v", count, eager, err)
 						}
 						release()

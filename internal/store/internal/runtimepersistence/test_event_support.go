@@ -402,6 +402,47 @@ type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
 
 type FanInDiagnosticEventStorage = eventrecord.FanInDiagnosticEventStorage
 
+func hydrateFanOutOutcomePayloadBytesForTest(ctx context.Context, tx *sql.Tx, selected any, rows []FanOutSemanticOutcomeStorage) ([]FanOutSemanticOutcomeStorage, error) {
+	var ids []string
+	seen := make(map[string]struct{})
+	for _, row := range rows {
+		if row.EventIDPresent {
+			if _, present := seen[row.EventID]; present {
+				continue
+			}
+			seen[row.EventID] = struct{}{}
+			ids = append(ids, row.EventID)
+		}
+	}
+	var payloads map[string][]byte
+	var err error
+	if _, postgres := selected.(*PostgresStore); postgres {
+		payloads, err = eventrecordpostgres.ReadFanOutOutcomePayloadBytesStorage(ctx, tx, ids)
+	} else {
+		payloads, err = eventrecordsqlite.ReadFanOutOutcomePayloadBytesStorage(ctx, tx, ids)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if !rows[i].EventIDPresent {
+			continue
+		}
+		payload, found := payloads[rows[i].EventID]
+		if !found {
+			return nil, fmt.Errorf("fan-out outcome lost its event within the same native read snapshot: %s", rows[i].EventID)
+		}
+		rows[i].Payload = append([]byte(nil), payload...)
+	}
+	return rows, nil
+}
+
+func ReadLastThreeFanOutRuntimeLogPayloadsForTest(ctx context.Context, selected any, run string) ([][]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([][]byte, error) {
+		return eventrecord.ReadLastThreeFanOutRuntimeLogPayloadsTx(ctx, tx, run)
+	})
+}
+
 func ReadFanInPeriodReportedEventIDsForTest(ctx context.Context, selected any) ([]string, error) {
 	return readFanInReportedEventIDsForTest(ctx, selected, false)
 }

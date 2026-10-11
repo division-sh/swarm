@@ -2101,7 +2101,8 @@ now name their original owners and proofs: two separate unrevisioned activity cu
 one enclosing RevisionOnly diagnostic pair, and unrevisioned exact replay clocks.
 Unchanged both-store owner receipts carry. Finite snapshot references preserve the
 12 recipe and6 family145 lines by exact source/field/function, with family144
-unchanged. The competition match is buildErr, correcting earlier audit wording.
+unchanged. The competition match is its error-variable spelling, not its runtime
+factory field, correcting earlier audit wording exactly as ruling6110140502.
 An injected changed-source control exposed an older broad competition fallback;
 that fallback is removed, not replaced with another allowance. RED and GREEN
 receipts are both retained. The diagnostic F1 move and inline scenario SQL loan
@@ -2177,9 +2178,60 @@ Four changes extend already-reviewed recipe rows; five add current rows, so coun
 is1065, not1069. All893 historical tuples and24 historical receipts remain.
 One candidate overlay GREEN165.772s; affected event/delivery/revision/loan guards
 GREEN4.277s, U1000 clean; the complete80-root sweep and complexity are checkpoint
-receipts, not per-scalar qualification. Native scope controls restored GREEN16.021s.
+receipts, not per-scalar qualification. The80-root sweep found one extra prohibited
+token introduced only by this audit's literal variable spelling; prose now refers
+to the exact ruling instead, without a guard or source-snapshot change. Its repaired
+root receipt is required; the other79 roots passed. Native scope controls restored
+GREEN16.021s.
 Live source-spelling count129 =114 outside plus15 private; M0/D92/S37 remain,
 and Docker's unqualified debit is separate. This is not a fresh global census or
 zero-debt/closure/restart claim. No raw fault query, allowance, selector or callback
 crosses storetest. Next conformance fixture chains and their S exceptions remain
 in this family; no new issue, review-per-reader, push, PR or local tier.
+
+### Semantic fan-out fixture/probe carrier: migrated, qualification open
+
+The complete semanticProofFixture/probe DB transport is removed across the
+helper, cardinality and source-failure consumers. Ordinary PostgreSQL opens at
+the existing native location owner; SQLite no longer exports a database. Probe
+policies, real insert faults, manager topology, source admission, runtime work
+and joined cleanup are unchanged. The custom SQL-fault constructor is still an
+explicit dependent tail, not renamed or credited as retired.
+
+Physical observations consume the existing delivery, pipeline, entity, mutation
+and event-record owners through fixed detached-data ports. Preserve the original
+run/event JOINs, nullable event identity, every ordinal and duplicate, strict
+COUNT/SUM NULL, unscoped event-byte lookup, diagnostic insertion order/LIMIT3 and
+one-statement failed-attempt residue count. The absent cursor row is represented
+only after a successful original native read; cancellation/rollback/close errors
+cannot become absence. Event bytes are hydrated by their dialect adapters inside
+that SAME native transaction; PostgreSQL repeatable-read and SQLite snapshot
+controls remain authoritative. Deduplicating lookup keys must not deduplicate
+output rows or share their mutable buffers.
+
+| Obligation | Receipt / disposition |
+| --- | --- |
+| Original affected workloads | Four-root race run: admitted-producer, mixed isolation and rollback/retry pass both stores; payload/entity PostgreSQL passes, SQLite drain RED |
+| Original cardinality workload | Run once, RED425.777s: SQLite N31/N32/N33/N64 and PostgreSQL N64 drain failures; no limit, workload or assertion change |
+| Exact absence, strict NULL, original transaction and refusal | reset-semantic-owner-controls.jsonl GREEN13.877s, all eleven operations; raw/foreign/invalid/cancelled/closed controls return no partial evidence |
+| Physical bytes / foreign-run / duplicate ordinal / nullable identity | reset-semantic-byte-hydration-green.jsonl GREEN11.419s both-store race; one original read/zero writes, detached duplicate buffers, missing event refuses |
+| Existing native snapshot semantics | reset-semantic-native-snapshot-controls.jsonl: original PostgreSQL repeatable snapshot and SQLite snapshot/cancellation roots GREEN |
+| Finite consumer conservation and hostile source changes | reset-semantic-family-guards.jsonl GREEN14.021s and finite-hostile controls GREEN1.092s; original business predicates/refusals retained |
+| Candidate source/type proof | One complete overlay GREEN115.420s; no repeated whole-package codemod or broad tier |
+
+One bounded serial comparison on signed pre-cohort d2b86bc8b and this candidate
+reproduces the payload/entity SQLite drain (RED19.354s /21.951s) and cardinality
+SQLite/N32 drain (RED51.247s /51.525s). This proves pre-cohort attribution only,
+not clean-master inheritance, pressure causality, the remaining cells' attribution
+or a repair. Exact signatures and all receipt hashes are appended to #2353's
+single issue-body ledger. M01, Docker and these semantic drain cells remain
+qualification-open; no runtime redesign or waiver is inferred.
+
+Corpus1071/219 current transitions, digest
+b3a7982f273954af5b748d3beb4bd5fc7030f5c1bd9a22ecedbd68f9992fe2b5.
+All893 historical tuples/24 receipts retained. Source-spelling inventory128
+=113 outside plus15 private, M0/D91/S37. Six removals in the delivery-reset batch
+are qualified (M2 plus fan-in4); the semantic constructor debit is provisional,
+as is the separately recorded Docker debit. This is not a fresh global census,
+downward ratchet, restart qualification or full-family closure claim. Remaining
+conformance nested/serving/supplemental carriers are the next authorized D groups.

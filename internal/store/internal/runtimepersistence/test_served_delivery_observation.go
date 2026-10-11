@@ -8,12 +8,101 @@ import (
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
+
+type FanOutSourceProgressStorage = delivery.FanOutSourceProgressStorage
+type FanOutSemanticOutcomeStorage = delivery.FanOutSemanticOutcomeStorage
+type FanOutBlockedSourceStorage = delivery.FanOutBlockedSourceStorage
+type FanOutTriggerDeliveryStorage = delivery.FanOutTriggerDeliveryStorage
+type FanOutRunProgressStorage = pipelinepersistence.FanOutRunProgressStorage
+
+func readFanOutSemanticStorage[T any](ctx context.Context, selected any, ids []string, query func(context.Context, *sql.Tx) (T, error)) (T, error) {
+	var empty, out T
+	for _, id := range ids {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return empty, err
+		}
+	}
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = query(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return empty, err
+	}
+	return out, nil
+}
+
+func ReadFanOutSourceProgressStorageForTest(ctx context.Context, selected any, run, event string) (FanOutSourceProgressStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (FanOutSourceProgressStorage, error) {
+		return delivery.ReadFanOutSourceProgressStorageTx(ctx, tx, run, event)
+	})
+}
+
+func ReadFanOutSourceOutcomesStorageForTest(ctx context.Context, selected any, run, event string) ([]FanOutSemanticOutcomeStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) ([]FanOutSemanticOutcomeStorage, error) {
+		rows, err := delivery.ReadFanOutSourceOutcomesStorageTx(ctx, tx, run, event)
+		if err != nil {
+			return nil, err
+		}
+		return hydrateFanOutOutcomePayloadBytesForTest(ctx, tx, selected, rows)
+	})
+}
+
+func CountFanOutSourceOutcomesStorageForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountFanOutSourceOutcomesStorageTx(ctx, tx, run, event)
+	})
+}
+
+func ReadFanOutBlockedSourceStorageForTest(ctx context.Context, selected any, run, event string) (FanOutBlockedSourceStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (FanOutBlockedSourceStorage, error) {
+		return delivery.ReadFanOutBlockedSourceStorageTx(ctx, tx, run, event)
+	})
+}
+
+func ReadFanOutTriggerDeliveryDiagnosticStorageForTest(ctx context.Context, selected any, run, event string) (FanOutTriggerDeliveryStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (FanOutTriggerDeliveryStorage, error) {
+		return delivery.ReadFanOutTriggerDeliveryDiagnosticStorageTx(ctx, tx, run, event)
+	})
+}
+
+func CountFanOutDeliveredTriggerStorageForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountFanOutDeliveredTriggerStorageTx(ctx, tx, run, event)
+	})
+}
+
+func ReadRunFanOutProgressStorageForTest(ctx context.Context, selected any, run string) (FanOutRunProgressStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (FanOutRunProgressStorage, error) {
+		return pipelinepersistence.ReadRunFanOutProgressStorageTx(ctx, tx, run)
+	})
+}
+
+func CountLeasedRunFanOutStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountLeasedRunFanOutStorageTx(ctx, tx, run)
+	})
+}
+
+func CountFanOutAttemptResidueStorageForTest(ctx context.Context, selected any, command pipeline.FanOutChunkCommand) (int, error) {
+	if err := command.Claim.Key.Validate(); err != nil {
+		return 0, err
+	}
+	if len(command.Outcomes) == 0 || command.Outcomes[0].Ordinal < 0 || command.Outcomes[len(command.Outcomes)-1].Ordinal < command.Outcomes[0].Ordinal {
+		return 0, fmt.Errorf("attempt residue observation requires its exact nonempty ordinal range")
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{command.Claim.Key.RunID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountFanOutAttemptResidueStorageTx(ctx, tx, command)
+	})
+}
 
 type FanInDiagnosticDeliveryStorage = delivery.FanInDiagnosticDeliveryStorage
 
