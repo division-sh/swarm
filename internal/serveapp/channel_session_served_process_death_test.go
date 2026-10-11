@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
@@ -226,6 +227,13 @@ func requireServedNativeProcessPairing(t *testing.T, endpoint string, peer *serv
 
 func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key, claimMessageID string, saveProof bool) channelonboarding.Result {
 	t.Helper()
+	return requireServedNativeProcessPairingClaim(t, endpoint, peer, verb, key, saveProof, func(challenge string) types.JID {
+		return peer.claimMessage(challenge, claimMessageID)
+	})
+}
+
+func requireServedNativeProcessPairingClaim(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key string, saveProof bool, claim func(string) types.JID) channelonboarding.Result {
+	t.Helper()
 	var result channelonboarding.Result
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 		"provider": "whatsapp", "verb": string(verb), "save_proof": saveProof, "idempotency_key": key}, &result)
@@ -244,7 +252,7 @@ func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, pee
 	if result.IdentityOperation == nil || result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 		t.Fatal("pairing was substituted for principal claim", result)
 	}
-	from := peer.claimMessage(result.IdentityOperation.Challenge, claimMessageID)
+	from := claim(result.IdentityOperation.Challenge)
 	deadline = time.Now().Add(5 * time.Second)
 	for result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation {
 		if time.Now().After(deadline) {
