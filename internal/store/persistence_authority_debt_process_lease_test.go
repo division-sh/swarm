@@ -160,7 +160,7 @@ func debtProcessLeaseCustodyFinding(finding authorityFinding) bool {
 	}
 	const owner = "github.com/division-sh/swarm/internal/store/internal/startupownership.StartupPostgresOwner"
 	return finding.Enclosing == "StartupPostgresOwner" && finding.Member == "exported-type" && finding.Resolved == owner ||
-		finding.Enclosing == "NewPostgres" && finding.Member == "result:" && finding.Resolved == "*"+owner
+		finding.Enclosing == "NewPostgres" && finding.Member == "result:#1" && finding.Resolved == "*"+owner
 }
 
 func debtClassifyProcessLeaseCustody(root string, findings []authorityFinding) {
