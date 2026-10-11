@@ -11,6 +11,27 @@ type PublicationEventProjection struct {
 	Payload                                                    json.RawMessage
 }
 
+func ReadActivityForkRequestPayloadStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) ([]byte, error) {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+type ActivityForkResultStorage struct {
+	EventName string
+	Payload   []byte
+}
+
+func ReadActivityForkResultStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (ActivityForkResultStorage, error) {
+	var out ActivityForkResultStorage
+	if err := tx.QueryRowContext(ctx, `SELECT event_name,payload FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&out.EventName, &out.Payload); err != nil {
+		return ActivityForkResultStorage{}, err
+	}
+	return out, nil
+}
+
 // This physical projection does not admit or decode a complete event. Preserve
 // the original scalar NULL defaults and payload bytes for caller assertions.
 func ReadPublicationEventProjectionTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (PublicationEventProjection, error) {

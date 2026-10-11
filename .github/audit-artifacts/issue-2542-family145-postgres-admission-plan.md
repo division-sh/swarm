@@ -1424,8 +1424,9 @@ receipt is separate from the unchanged full ten-cell receipt.
 Complete cheap TestFamily145 prefix and historical/finite/successor controls
 are GREEN in activity-snapshot-family-controls. Corpus1028/169 transitions;
 digest eb8ad3ae9f1a552154373a8822d1a336a28740aea27ad0e5a0f3cb4513793bbb.
-The existing capture row receives only its exact Successor; one constructor
-record accounts for removal of the dead SQLite selector. Original893 tuples
+The existing family145 capture row receives its exact candidate After mapping,
+not a Successor field; one constructor record accounts for removal of the dead
+SQLite selector. Original893 tuples
 and24 historical receipts remain unchanged. Codemod dry run Changes=[],
 three-package U1000 and diff clean; committed-head complexity qualifies the
 checkpoint. The authoritative spec records this exact historical cut.
@@ -1437,3 +1438,78 @@ writers and storage readers, which remain explicit upcoming migration tail.
 No fresh global census, restart/parent closure or measured flake/performance
 claim. M01/Docker remain qualification-open under #2353. Local signed checkpoint
 only, no push/PR/tier/server2 use; unaffected owner/guard receipts carry.
+
+## Entire Activity-Fork Read Helper And Caller Chain
+
+The complete four-helper read chain and both inline attempt-count calls now
+consume their original selected instance. All nine caller sites are accounted
+for: source evidence3, request2, attempt detail1, result1, count2. The handwritten
+activityForkFixtureDB.QueryRowContext adapter is deleted; no reader SQL, raw
+query call or decoded-event substitute remains in this fixture. Its embedded
+pool, write/dialect shim and three historical seeding helpers remain explicit
+next construction/write debt, not declared closed or newly authorized.
+
+Real canonical owners are workflow projection for the five entity columns,
+eventrecord's closed PostgreSQL/SQLite adapters for authoritative payload bytes,
+its existing publication projection for native JSON payload/name, and
+activityjournal for physical attempt rows/status/cardinality. The source bridge
+retains three separate native read cuts in the original order, not a new atomic
+snapshot. Missing final status retains the original empty string. Request/result
+retain run/event equality; attempt detail/count remain request-only, not newly
+filtered by expected fork run, generation, status or eligibility. JSON decoding,
+full generation/identity/failure/type, connector counts, source immutability and
+no-redispatch remain consumer assertions. One added exact predecessor status
+assertion prevents an empty source observer from satisfying equality. Public
+ports return detached facts only and discard compound data on any failure.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Manual refusal, read-only reexecution, recorded success/failure/uncertainty | execution-proven through the same corrected path | All five activity cases on SQLite/PostgreSQL under race; original runtime, connector, identity, result and failure assertions |
+| Source evidence retains exact physical fields/bytes/status and three cuts | execution-proven through the same corrected path | TestActivityForkStoragePreservesExactFactsAndSeparateCutsBothStores, native predecessor/event/entity and real started/completed journal, three read commits/no writes |
+| Second/third read failure yields no provisional source facts | execution-proven through the same corrected path | Same root, absent event after successful entity read and existing native journal-table-unavailability cut after successful entity/event reads; exact restored facts and no active work |
+| JSON projection remains distinct from authoritative bytes | execution-proven through the same corrected path | Same root, exact bytes against existing independent physical publication projection; canonical source bytes independently compared to original event payload |
+| Request-only journal scope and raw generation/null failure retained | execution-proven through the same corrected path | Same root, real journal completion, exact stored run/status/result/generation/null failure, physical count1 and absent request0, original consumer foreign-identity assertions |
+| Invalid/raw/cancelled/closed and foreign-run reads fail without evidence | execution-proven through the same corrected path | TestActivityForkStorageRejectsUnavailableAndForeignOwnersBothStores plus exact foreign-run request/result absence in positive root |
+| Entire reader/caller inventory and original assertions stay finite | execution-proven through the same corrected path | TestFamily145ActivityReadChainRetiresRawReadersAndKeepsCompleteCallers and hostile ownership/coordinate/assertion controls, entire cheap family145 prefix |
+
+Vemew count1/race: initial complete ten-cell consumer receipt GREEN20.738s;
+restored final complete ten-cell receipt GREEN25.064s. Native storage controls
+and closed event-byte boundary guard GREEN23.975s. Earlier other affected event,
+delivery, revision and fixture-consumer guard passes carry; only the exposed
+byte-owner finding was rerun after its repair. New controls seed/complete the
+actual selected journal rather than a fake transaction or direct journal insert.
+The table-unavailability cut uses the existing private native transaction owner
+and restoration pattern; no public fault selector/callback or framework is added.
+
+The real activityjournal status query's run equality was inverted. Both recorded
+success cells fail the new exact status assertion (empty versus succeeded) in
+activity-read-chain-scope-counterexample-valid-spec, expected RED10.669s. Held
+through command completion, restored, and final ten-cell receipt GREEN. The
+earlier counterexample attempt and subsequent restore run stopped at a YAML
+parse error in the added spec prose; the folded scalar was fixed before the
+execution counterexample. Those setup failures are not used as proof. Also
+disclosed: the initial native JSON comparison incorrectly expected canonical
+compact bytes instead of PostgreSQL's physical JSON rendering; it now compares
+exact physical bytes through the unchanged projection owner. A test-only probe
+type typo was repaired. No tolerance, timeout, retry, skip or failed assertion
+is waived.
+
+The first structural sweep caught authoritative payload_bytes in the ordinary
+publication projection. That read now consumes the existing closed canonical
+event-record dialect adapters, retaining the exact physical column/predicates
+without full-event decoding, guard exception, file allowance or role change.
+No production admission, payload normalization or activity state policy changed.
+
+Complete cheap family145/historical/finite/successor controls GREEN5.257s;
+corpus1034/175 transitions, digest
+a427ff0c1f238b661ade53a692a5b0d8e25bb2c5dc00b9adfd43f29e45e6f7a9.
+Original893 tuples/24 receipts remain unchanged. Exact finite reader retirement
+and candidate source mappings are recorded, not a blanket disappearance rule.
+Codemod Changes=[], U1000 affected owner/caller packages and diff clean;
+committed-head complexity qualifies the checkpoint. The prior8477 audit wording
+is corrected: the in-progress capture mapping updated After, not Successor.
+
+Named supplied-pool admissions remain131/132 excluding unqualified Docker.
+No fresh global census/ratchet, entire activity fixture or parent closure,
+restart/flake/performance claim, push/PR/tier/server2 run. M01/Docker remain open
+under #2353; existing #2542/#2151/watchlist mapping and unchanged receipts carry.

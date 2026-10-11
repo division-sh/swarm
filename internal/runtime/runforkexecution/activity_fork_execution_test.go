@@ -49,6 +49,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 
 func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixture) {
 	db := fixture.db
+	selected := fixture.owner.ports.fork
 	ctx := runForkTestContext(t)
 
 	var connectorCalls atomic.Int64
@@ -145,7 +146,10 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if tt.sourceAttemptStatus != "" {
 				seedSelectedContractActivityAttempt(t, db, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
-			sourceBefore := readActivityForkSourceEvidence(t, db, sourceRunID, entityID, sourceRequestEventID)
+			sourceBefore := readActivityForkSourceEvidence(t, selected, sourceRunID, entityID, sourceRequestEventID)
+			if sourceBefore.AttemptStatus != tt.sourceAttemptStatus {
+				t.Fatalf("source journal observation status=%q want=%q", sourceBefore.AttemptStatus, tt.sourceAttemptStatus)
+			}
 
 			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loaded.Source)
 			if err != nil {
@@ -164,7 +168,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) || connectorCalls.Load() != beforeCalls || result.Activation.Activated {
 					t.Fatalf("unsupported root executed: calls=%d result=%+v err=%v", connectorCalls.Load()-beforeCalls, result, err)
 				}
-				if after := readActivityForkSourceEvidence(t, db, sourceRunID, entityID, sourceRequestEventID); !reflect.DeepEqual(sourceBefore, after) {
+				if after := readActivityForkSourceEvidence(t, selected, sourceRunID, entityID, sourceRequestEventID); !reflect.DeepEqual(sourceBefore, after) {
 					t.Fatal("refused fork changed source state, request or activity evidence")
 				}
 				return
@@ -179,7 +183,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("selected execution result = %#v", result)
 			}
 
-			forkRequest := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
+			forkRequest := loadSelectedContractActivityRequest(t, selected, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
 			wantGeneration, err := loopruntime.ForkGeneration(sourceGeneration, result.Materialization.ForkRunID, entityID)
 			if err != nil || !forkRequest.Generation.Equal(wantGeneration) {
 				t.Fatalf("full child generation=%#v want=%#v err=%v", forkRequest.Generation, wantGeneration, err)
@@ -200,8 +204,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("fork activity reused source identity: request=%s result=%s", forkRequestEventID, forkResultEventID)
 			}
 
-			var forkAttemptCount int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE request_event_id = $1::uuid`, forkRequestEventID).Scan(&forkAttemptCount); err != nil {
+			forkAttemptCount, err := storetest.CountActivityForkAttemptStorage(ctx, selected, forkRequestEventID)
+			if err != nil {
 				t.Fatalf("count fork attempts: %v", err)
 			}
 			if tt.wantForkAttemptStatus == "" {
@@ -212,10 +216,10 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				if forkAttemptCount != 1 {
 					t.Fatalf("fork activity attempts = %d, want 1", forkAttemptCount)
 				}
-				assertSelectedContractForkActivityAttempt(t, db, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
+				assertSelectedContractForkActivityAttempt(t, selected, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
 			}
 
-			published := loadSelectedContractActivityResult(t, db, result.Materialization.ForkRunID, forkResultEventID, tt.resultEventType)
+			published := loadSelectedContractActivityResult(t, selected, result.Materialization.ForkRunID, forkResultEventID, tt.resultEventType)
 			if published["revision_id"] != forkRequest.Generation.RevisionID {
 				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkRequest.Generation.RevisionID)
 			}
@@ -236,15 +240,15 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if err == nil || !strings.Contains(err.Error(), "source event preparation state forked is unsupported") || len(reloaded) != 0 {
 				t.Fatalf("post-activation preparation must refuse: count=%d err=%v", len(reloaded), err)
 			}
-			repeated := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
+			repeated := loadSelectedContractActivityRequest(t, selected, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
 			if !reflect.DeepEqual(forkRequest, repeated) {
 				t.Fatalf("repeat persisted request read changed correspondence: %#v want=%#v", repeated, forkRequest)
 			}
-			if after := readActivityForkSourceEvidence(t, db, sourceRunID, entityID, sourceRequestEventID); !reflect.DeepEqual(sourceBefore, after) {
+			if after := readActivityForkSourceEvidence(t, selected, sourceRunID, entityID, sourceRequestEventID); !reflect.DeepEqual(sourceBefore, after) {
 				t.Fatalf("child execution/preparation changed source evidence\nbefore=%#v\nafter=%#v", sourceBefore, after)
 			}
-			var repeatedAttempts int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE request_event_id=$1::uuid`, forkRequestEventID).Scan(&repeatedAttempts); err != nil || repeatedAttempts != forkAttemptCount || connectorCalls.Load()-beforeCalls != tt.wantConnectorCalls {
+			repeatedAttempts, err := storetest.CountActivityForkAttemptStorage(ctx, selected, forkRequestEventID)
+			if err != nil || repeatedAttempts != forkAttemptCount || connectorCalls.Load()-beforeCalls != tt.wantConnectorCalls {
 				t.Fatalf("repeat preparation duplicated activity effects: attempts=%d calls=%d err=%v", repeatedAttempts, connectorCalls.Load()-beforeCalls, err)
 			}
 		})
@@ -263,21 +267,12 @@ type activityForkFixtureDB struct {
 	sqlite bool
 }
 
-type activityForkSourceEvidence struct {
-	Flow, EntityType, Stage, AttemptStatus string
-	Fields, Accumulator, Payload           []byte
-}
+type activityForkSourceEvidence = storetest.ActivityForkSourceStorage
 
-func readActivityForkSourceEvidence(t *testing.T, db activityForkFixtureDB, runID, entityID, requestID string) activityForkSourceEvidence {
+func readActivityForkSourceEvidence(t *testing.T, selected any, runID, entityID, requestID string) activityForkSourceEvidence {
 	t.Helper()
-	var out activityForkSourceEvidence
-	if err := db.QueryRowContext(context.Background(), `SELECT flow_instance,entity_type,current_state,fields,accumulator FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID).Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(context.Background(), `SELECT payload_bytes FROM events WHERE event_id=$1::uuid AND run_id=$2::uuid`, requestID, runID).Scan(&out.Payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE((SELECT status FROM activity_attempts WHERE request_event_id=$1::uuid AND run_id=$2::uuid),'')`, requestID, runID).Scan(&out.AttemptStatus); err != nil {
+	out, err := storetest.ReadActivityForkSourceStorage(context.Background(), selected, runID, entityID, requestID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return out
@@ -296,10 +291,6 @@ func (db activityForkFixtureDB) query(query string) string {
 
 func (db activityForkFixtureDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return db.DB.ExecContext(ctx, db.query(query), args...)
-}
-
-func (db activityForkFixtureDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return db.DB.QueryRowContext(ctx, db.query(query), args...)
 }
 
 func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
@@ -586,10 +577,10 @@ func seedSelectedContractActivityAttempt(t *testing.T, db activityForkFixtureDB,
 	}
 }
 
-func loadSelectedContractActivityRequest(t *testing.T, db activityForkFixtureDB, runID, eventID string) selectedContractActivityRequestPayload {
+func loadSelectedContractActivityRequest(t *testing.T, selected any, runID, eventID string) selectedContractActivityRequestPayload {
 	t.Helper()
-	var raw []byte
-	if err := db.QueryRowContext(context.Background(), `SELECT payload FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadActivityForkRequestPayloadStorage(context.Background(), selected, runID, eventID)
+	if err != nil {
 		t.Fatalf("load fork activity request: %v", err)
 	}
 	var payload selectedContractActivityRequestPayload
@@ -599,16 +590,14 @@ func loadSelectedContractActivityRequest(t *testing.T, db activityForkFixtureDB,
 	return payload
 }
 
-func assertSelectedContractForkActivityAttempt(t *testing.T, db activityForkFixtureDB, requestEventID, forkRunID, resultEventID string, generation attemptgeneration.Generation, tt selectedContractActivityForkCase) {
+func assertSelectedContractForkActivityAttempt(t *testing.T, selected any, requestEventID, forkRunID, resultEventID string, generation attemptgeneration.Generation, tt selectedContractActivityForkCase) {
 	t.Helper()
-	var gotRunID, gotStatus, gotResultID string
-	var rawGeneration, rawFailure []byte
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT run_id::text, status, result_event_id::text, loop_generation, COALESCE(failure, 'null'::jsonb)
-		FROM activity_attempts WHERE request_event_id = $1::uuid
-	`, requestEventID).Scan(&gotRunID, &gotStatus, &gotResultID, &rawGeneration, &rawFailure); err != nil {
+	row, err := storetest.ReadActivityForkAttemptStorage(context.Background(), selected, requestEventID)
+	if err != nil {
 		t.Fatalf("load fork activity attempt: %v", err)
 	}
+	gotRunID, gotStatus, gotResultID := row.RunID, row.Status, row.ResultID
+	rawGeneration, rawFailure := row.Generation, row.Failure
 	var gotGeneration attemptgeneration.Generation
 	if err := json.Unmarshal(rawGeneration, &gotGeneration); err != nil {
 		t.Fatalf("decode fork activity generation: %v", err)
@@ -628,13 +617,13 @@ func assertSelectedContractForkActivityAttempt(t *testing.T, db activityForkFixt
 	}
 }
 
-func loadSelectedContractActivityResult(t *testing.T, db activityForkFixtureDB, runID, eventID, eventType string) map[string]any {
+func loadSelectedContractActivityResult(t *testing.T, selected any, runID, eventID, eventType string) map[string]any {
 	t.Helper()
-	var gotType string
-	var raw []byte
-	if err := db.QueryRowContext(context.Background(), `SELECT event_name, payload FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, eventID).Scan(&gotType, &raw); err != nil {
+	row, err := storetest.ReadActivityForkResultStorage(context.Background(), selected, runID, eventID)
+	if err != nil {
 		t.Fatalf("load fork activity result %s/%s: %v", eventID, eventType, err)
 	}
+	gotType, raw := row.EventName, row.Payload
 	if gotType != eventType {
 		t.Fatalf("fork result event type = %s, want %s", gotType, eventType)
 	}

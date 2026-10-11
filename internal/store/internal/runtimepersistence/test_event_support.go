@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -31,6 +32,123 @@ import (
 type SelectedCausalDiagnosticStorage struct {
 	Events     []eventrecord.LifecycleDiagnosticEventLineage
 	Projection []byte
+}
+
+type ActivityForkSourceStorage struct {
+	Flow, EntityType, Stage, AttemptStatus string
+	Fields, Accumulator, Payload           []byte
+}
+
+type ActivityForkResultStorage = eventrecord.ActivityForkResultStorage
+
+type ActivityForkAttemptStorage = activityjournal.ActivityForkAttemptStorage
+
+// Preserve the three independent source observations, including the original
+// missing-attempt empty status. This is not a new atomic source snapshot.
+func ReadActivityForkSourceStorageForTest(ctx context.Context, selected any, runID, entityID, requestID string) (ActivityForkSourceStorage, error) {
+	var out ActivityForkSourceStorage
+	for _, id := range []string{runID, entityID, requestID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return ActivityForkSourceStorage{}, err
+		}
+	}
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		row, err := pipelinepersistence.ReadActivityForkEntityStorageTx(ctx, tx, runID, entityID)
+		out.Flow, out.EntityType, out.Stage = row.Flow, row.EntityType, row.Stage
+		out.Fields, out.Accumulator = row.Fields, row.Accumulator
+		return err
+	})
+	if err == nil {
+		err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			if _, postgres := selected.(*PostgresStore); postgres {
+				out.Payload, err = eventrecordpostgres.ReadActivityForkPayloadBytesStorage(ctx, tx, runID, requestID)
+			} else {
+				out.Payload, err = eventrecordsqlite.ReadActivityForkPayloadBytesStorage(ctx, tx, runID, requestID)
+			}
+			return err
+		})
+	}
+	if err == nil {
+		err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			out.AttemptStatus, err = activityjournal.ReadActivityForkAttemptStatusStorageTx(ctx, tx, runID, requestID)
+			return err
+		})
+	}
+	if err != nil {
+		return ActivityForkSourceStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadActivityForkRequestPayloadStorageForTest(ctx context.Context, selected any, runID, eventID string) ([]byte, error) {
+	for _, id := range []string{runID, eventID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return nil, err
+		}
+	}
+	var out []byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadActivityForkRequestPayloadStorageTx(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadActivityForkResultStorageForTest(ctx context.Context, selected any, runID, eventID string) (ActivityForkResultStorage, error) {
+	for _, id := range []string{runID, eventID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return ActivityForkResultStorage{}, err
+		}
+	}
+	var out ActivityForkResultStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadActivityForkResultStorageTx(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return ActivityForkResultStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadActivityForkAttemptStorageForTest(ctx context.Context, selected any, requestID string) (ActivityForkAttemptStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, requestID); err != nil {
+		return ActivityForkAttemptStorage{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out ActivityForkAttemptStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = activityjournal.ReadActivityForkAttemptStorageTx(ctx, tx, postgres, requestID)
+		return err
+	})
+	if err != nil {
+		return ActivityForkAttemptStorage{}, err
+	}
+	return out, nil
+}
+
+func CountActivityForkAttemptStorageForTest(ctx context.Context, selected any, requestID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, requestID); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = activityjournal.CountActivityForkAttemptStorageTx(ctx, tx, requestID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func StampHistoricalReplayScopeForTest(ctx context.Context, selected any, runID, eventID string, scope runtimepipelineobligation.CommittedScope, at time.Time) error {

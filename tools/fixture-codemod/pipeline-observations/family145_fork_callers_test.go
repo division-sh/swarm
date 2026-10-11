@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 169 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "eb8ad3ae9f1a552154373a8822d1a336a28740aea27ad0e5a0f3cb4513793bbb" {
+	if err != nil || len(rows) != 175 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "a427ff0c1f238b661ade53a692a5b0d8e25bb2c5dc00b9adfd43f29e45e6f7a9" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if family145ActivityReadOwner(function) {
+		if err := family145ActivityReadChainProofError(function, beforeSource, afterSource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if function == "capture" {
 		if !strings.Contains(beforeSource, "runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...)") {
 			t.Fatal("activity capture lost its original complete historical family set")
@@ -163,6 +169,9 @@ func family145PanicLifecycleCalls(source string) []string {
 }
 
 func family145SemanticOwner(function string) bool {
+	if family145ActivityReadOwner(function) {
+		return true
+	}
 	switch function {
 	case "captureSelectedExecutionSourceRevision", "admitSelectedExecutionSourceArtifact",
 		"seedSelectedExecutionStateOnlySourceRun", "seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource",
