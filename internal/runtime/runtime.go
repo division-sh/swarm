@@ -2115,7 +2115,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
-	if sqlite2353.Enabled() {
+	if sqlite2353.ShutdownEnabled() {
 		sqlite2353.Record("runtime.shutdown.enter", map[string]any{"grace_ns": grace.Nanoseconds(), "runtime_active": rt.workOccurrence.ActiveCount(), "process_active": rt.Options.ProcessWorkOwner.ActiveCount()})
 		defer sqlite2353.Window(drainCtx, "runtime.shutdown", []time.Duration{grace / 8, grace / 2, grace * 7 / 8})()
 		defer func() {

@@ -61,6 +61,8 @@ func Record(phase string, facts any) {
 	}
 }
 
+func ShutdownEnabled() bool { return Enabled() && os.Getenv("TEST_2353_ROW") == "S04" }
+
 func joinWriteError(first, second error) error {
 	if first != nil {
 		return first
