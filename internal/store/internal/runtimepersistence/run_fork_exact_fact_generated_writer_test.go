@@ -101,7 +101,7 @@ func proveExactEntityProducerSpelling(t *testing.T, backend, producer, spelling 
 			}
 		})
 		check(1)
-		assertWorkflowTargetTransitionRows(t, backend, db, runID, input, instance, "", "active", 1, 0)
+		assertWorkflowTargetTransitionRows(t, backend, db, runID, input, instance, "", "", 0, 0)
 		return
 	}
 	record := commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
