@@ -137,7 +137,7 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				probe := installPublicationCompletionAudit(t, fault == "completion")
 				probe.resultFault, probe.holdRelease = fault, fault == "publication"
 				defer probe.releaseOnce.Do(func() { close(probe.release) })
-				h, _, hash := startChannelAnchorJourney(t, backend, "invalid-publication-result-test", false)
+				h, hash := startChannelAnchorJourneyRuntime(t, backend, "invalid-publication-result-test", false)
 				params := publicationAuditParams(hash, "invalid-acknowledged-result")
 				first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
 				if first.err != nil || len(first.rpcError) == 0 || len(first.result) != 0 {

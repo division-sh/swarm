@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -31,7 +30,7 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, _, hash := startChannelAnchorJourney(t, backend, "completion-boundary-test", false)
+			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-boundary-test", false)
 			endpoint := h.rpcEndpoint()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -173,7 +172,7 @@ func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, false)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, _, hash := startChannelAnchorJourney(t, backend, "completion-bytes-test", false)
+			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-bytes-test", false)
 			endpoint := h.rpcEndpoint()
 			params := publicationAuditParams(hash, "audit1930-bytes")
 			first := publicationAuditHTTP(t.Context(), endpoint, params)
@@ -214,7 +213,7 @@ func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, _, hash := startChannelAnchorJourney(t, backend, "completion-retirement-test", false)
+			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-retirement-test", false)
 			params := publicationAuditParams(hash, "completion-retirement")
 			first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
 			if first.err != nil || first.rpcError != nil {
@@ -327,24 +326,19 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 	previous := projectRuntimePersistenceForServe
 	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 		projected := previous(owner)
-		var workflows pipeline.WorkflowPersistenceOwner
-		switch native := projected.deps.EventStore.(type) {
-		case *store.SQLiteRuntimeStore:
-			p.native, workflows = native, native
-			projected.deps.EventStore = &publicationAuditSQLite{SQLiteRuntimeStore: native, probe: p}
-		case *store.PostgresStore:
-			p.native, workflows = native, native
-			projected.deps.EventStore = &publicationAuditPostgres{PostgresStore: native, probe: p}
-		default:
-			panic(fmt.Sprintf("audit requires native selected owner, got %T", native))
+		native, ok := projected.deps.EventStore.(publicationAuditStore)
+		if !ok {
+			panic(fmt.Sprintf("audit requires the complete native publication roles, got %T", projected.deps.EventStore))
 		}
-		projected.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(&publicationAuditReadiness{WorkflowPersistenceOwner: workflows, probe: p})
+		p.native = native
+		projected.deps.EventStore = &publicationAuditPublication{publicationAuditStore: native, probe: p}
+		projected.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(&publicationAuditReadiness{WorkflowPersistenceOwner: native, probe: p})
 		preflight, ok := projected.deps.PipelineObligations.(pipelineobligation.ResumeAdmissionPreflighter)
 		if !ok {
 			panic("audit requires the native pending-work preflight owner")
 		}
 		projected.deps.PipelineObligations = &publicationAuditPipelineRelease{Store: projected.deps.PipelineObligations, ResumeAdmissionPreflighter: preflight, probe: p}
-		p.workflow = workflows
+		p.workflow = native
 		return projected
 	}
 	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
@@ -366,32 +360,29 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	return corruptPublicationAuditResult(result, err, fault)
 }
 
-type publicationAuditSQLite struct {
-	*store.SQLiteRuntimeStore
+type publicationAuditStore interface {
+	runtimebus.EventStore
+	runtimebus.CommitPublicationOwner
+	runtimebus.APIEventPublicationCommitOwner
+	runtimebus.DeploymentRunCreationCommitOwner
+	runtimebus.FlowInstanceActivationCommitOwner
+	runtimebus.PreparedPublishEventReader
+	pipeline.WorkflowTargetPersistenceReader
+	pipeline.WorkflowPersistenceOwner
+	RequirePublicationRunActive(context.Context, string) error
+}
+
+type publicationAuditPublication struct {
+	publicationAuditStore
 	probe *publicationCompletionAudit
 }
 
-func (s *publicationAuditSQLite) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
-	return s.probe.commit(ctx, s.SQLiteRuntimeStore, command)
+func (s *publicationAuditPublication) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
+	return s.probe.commit(ctx, s.publicationAuditStore, command)
 }
 
-func (s *publicationAuditSQLite) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
-	result, err := s.SQLiteRuntimeStore.CommitDeploymentRunCreation(ctx, command)
-	s.probe.observeDeployment(ctx, command, result)
-	return s.probe.corruptDeployment(result, err)
-}
-
-type publicationAuditPostgres struct {
-	*store.PostgresStore
-	probe *publicationCompletionAudit
-}
-
-func (s *publicationAuditPostgres) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
-	return s.probe.commit(ctx, s.PostgresStore, command)
-}
-
-func (s *publicationAuditPostgres) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
-	result, err := s.PostgresStore.CommitDeploymentRunCreation(ctx, command)
+func (s *publicationAuditPublication) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
+	result, err := s.publicationAuditStore.CommitDeploymentRunCreation(ctx, command)
 	s.probe.observeDeployment(ctx, command, result)
 	return s.probe.corruptDeployment(result, err)
 }
