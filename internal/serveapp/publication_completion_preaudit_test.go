@@ -17,6 +17,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -369,6 +370,7 @@ type publicationAuditStore interface {
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.PreparedPublishEventReader
+	runtimemanager.SelectedContractRouteRecoveryReader
 	pipeline.WorkflowTargetPersistenceReader
 	pipeline.WorkflowPersistenceOwner
 	RequirePublicationRunActive(context.Context, string) error
