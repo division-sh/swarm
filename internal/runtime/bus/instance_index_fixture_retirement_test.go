@@ -68,7 +68,7 @@ func (s *targetRouteMemoryStore) refuseInstanceIndexReads(t testing.TB) {
 func TestFlowInstanceFixturesHaveNoRetiredDescriptorReader(t *testing.T) {
 	for _, owner := range []reflect.Type{
 		reflect.TypeOf((*targetRouteMemoryStore)(nil)),
-		reflect.TypeOf((*connectRoutePlanDescriptorStore)(nil)),
+		reflect.TypeOf((*connectRoutePlanLifecycleStore)(nil)),
 		reflect.TypeOf((*connectRoutePlanConcurrentLifecycleStore)(nil)),
 		reflect.TypeOf((*finalFlowInstanceAuthoringLifecycleStore)(nil)),
 	} {
@@ -77,8 +77,10 @@ func TestFlowInstanceFixturesHaveNoRetiredDescriptorReader(t *testing.T) {
 				t.Errorf("%s retains the retired instance mirror API %s", owner, name)
 			}
 		}
-		if _, present := owner.Elem().FieldByName("flowRoutes"); present {
-			t.Errorf("%s retains a retired mutable route mirror beside its native index", owner)
+		for _, name := range []string{"flowRoutes", "flowInstances"} {
+			if _, present := owner.Elem().FieldByName(name); present {
+				t.Errorf("%s retains retired mirror %s beside its native index", owner, name)
+			}
 		}
 	}
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -536,41 +535,6 @@ func (d ActiveAgentDescriptor) TargetDescriptor() ActiveTargetDescriptor {
 // planning. PostgresStore implements this; InMemoryEventStore does not.
 type ActiveAgentDescriptorLister interface {
 	ListActiveAgentDescriptors(ctx context.Context, runID string) ([]ActiveAgentDescriptor, error)
-}
-
-type ActiveFlowInstanceDescriptor struct {
-	Identity        runtimeflowidentity.Instance
-	RunID           string
-	InstanceID      string
-	EntityID        string
-	FlowInstance    string
-	FlowTemplate    string
-	BundleHash      string
-	WorkflowVersion string
-	AddressFields   map[string]string
-}
-
-func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor {
-	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
-	instanceID := strings.TrimSpace(d.InstanceID)
-	if flowInstance == "" {
-		flowInstance = strings.Trim(strings.TrimSpace(instanceID), "/")
-	}
-	if instanceID == "" && flowInstance != "" {
-		instanceID = runtimeflowidentity.LogicalInstanceID(flowInstance)
-	}
-	entityID := strings.TrimSpace(d.EntityID)
-	return ActiveFlowInstanceDescriptor{
-		Identity:        d.Identity,
-		RunID:           strings.TrimSpace(d.RunID),
-		InstanceID:      instanceID,
-		EntityID:        entityID,
-		FlowInstance:    flowInstance,
-		FlowTemplate:    strings.TrimSpace(d.FlowTemplate),
-		BundleHash:      strings.TrimSpace(d.BundleHash),
-		WorkflowVersion: strings.TrimSpace(d.WorkflowVersion),
-		AddressFields:   normalizeDescriptorAddressFields(d.AddressFields),
-	}
 }
 
 type ActiveTargetDescriptor struct {

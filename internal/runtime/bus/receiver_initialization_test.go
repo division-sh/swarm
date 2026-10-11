@@ -48,7 +48,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+			store := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 			owner := newTestFlowInstanceActivationOwner(store.Activate)
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source, TemplateInstancePlanner: owner,
