@@ -117,3 +117,42 @@ unit budgets, matched measurement, fresh master-nightly and strict nightly
 blocking attestation remain outstanding. No review-ready PR or failure-class
 closure is claimed. #2535/#2394/#2353/#2250 remain open; the existing native
 proof/harness watchlist mapping remains the parent, with no new issue/node.
+
+## Ready-Head CI Adjudication
+
+Ready lifecycle run38121124186 at96c353dc6 failed the debt census. Its complete
+error, not just its count summary, rejects the new pre-handoff invocation of
+`issue2394ReporterRPC` with a DB-bearing `servedControlProofRuntime`. The repair
+uses the existing endpoint-only HTTP request owner for this new public diagnosis,
+retaining the exact method, parameters, transport timeout, RPC refusal and JSON
+decode checks. It does not rename or move a raw helper, add a store port, weaken
+the collector, or allow one debt addition to be paid for by other removals.
+The existing downward-only refresh must derive the exact surviving baseline and
+its checksum-bound sidecar after this consumer correction; no editable count,
+permission increase, collector change or exemption is authorized.
+
+The canonical downward refresh passed:10698 ->10688, ten removed occurrences
+across eight identities, zero additions. All eight retired rows belong to the
+already-migrated `TestChannelDeliveryRealAnchorProducersPublicJourney`; its
+source is unchanged by this PR. The96c actual10689 included the new carrier call,
+so retaining10689 after removing that call would be stale rather than exact.
+The TSV changes are deletions only; collector identity and historical header
+are unchanged, and the existing sidecar binds the resulting TSV checksum.
+
+Codex discussion4240445717 describes the older early-only stress oracle. Both
+current stress fixtures already register `ValidateReporterStressJoined` before
+runtime/store construction so LIFO cleanup invokes it after teardown, regardless
+of `servingWindow`. After all original stress assertions, both consume
+`JoinReporterTransactions` / `StopAndJoin` before runtime cancellation. The
+joined validator refuses nonzero Active and reruns the strict native outcome
+and all-commit injection checks. The deterministic
+`TestReporterStressJoinedRejectsHeldCleanupError` exercises unfinished, joined
+success and genuine late failure; it passes fresh race x3. No join or runtime
+semantic change is required by this finding.
+
+The timing job on38121124186 is INCOMPLETE because fail-fast cancelled proof
+units, not evidence of an attributed timing overrun. Existing96c local receipts
+remain bound to that source; a later correction head must receive fresh affected
+proof and hosted lifecycle plus both named stress units. The nightly/strict-marker
+hold is unchanged. The final PR audit6106610759 records the completed96c local
+proof; these implementation checkpoints do not replace its exact-head addendum.
