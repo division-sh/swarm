@@ -40,7 +40,7 @@ func TestCIUnitsTimingAddsFrozenFullWithoutReprojectingLowerTiers(t *testing.T) 
 		{"retained", true, 10, BudgetPass},
 		{"retained-growth-advisory", true, 170, BudgetWarn},
 		{"new-small", false, 20, BudgetPass},
-		{"new-over-placement", false, 31, BudgetFail},
+		{"new-over-placement", false, 31, BudgetWarn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ref := reference
@@ -163,9 +163,9 @@ func TestCIUnitsTimingCanonicalSupplementCannotEscapeCost(t *testing.T) {
 				got := EvaluateTestTime(reference, policy, plan, 1, 1, receipts, TestTimePR)
 				want := BudgetPass
 				if cost > 5 {
-					want = BudgetFail
+					want = BudgetWarn
 				}
-				if got.Status != want || got.Tiers[len(got.Tiers)-1].Tier != "full" || got.Tiers[len(got.Tiers)-1].AddedSeconds != cost {
+				if got.Status != want || len(got.Problems) != 0 || got.Tiers[len(got.Tiers)-1].Tier != "full" || got.Tiers[len(got.Tiers)-1].AddedSeconds != cost || (got.Tiers[len(got.Tiers)-1].StrictStatus == BudgetFail) != (cost > 5) {
 					t.Fatalf("supplement bypassed full comparison: %+v", got)
 				}
 			}

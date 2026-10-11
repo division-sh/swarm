@@ -25,14 +25,15 @@ func TestTestTimePRStrictVerdictMatrix(t *testing.T) {
 	}{
 		{"historical-core-totals", 2569.890, 2648.340, 0, splitTimingCost(99.360, 171), BudgetWarn, BudgetFail, BudgetWarn},
 		{"retained-only", 100, 110, 0, nil, BudgetWarn, BudgetFail, BudgetWarn},
+		{"invalid-zero-reference", 0, 0, 0, nil, BudgetFail, BudgetFail, BudgetFail},
 		{"added-boundary", 100, 100, 0, []float64{5}, BudgetPass, BudgetPass, BudgetPass},
-		{"added-over-limit", 100, 100, 0, []float64{5.001}, BudgetFail, BudgetFail, BudgetWarn},
-		{"speedup-cannot-subsidize", 100, 80, 0, []float64{8}, BudgetFail, BudgetPass, BudgetPass},
-		{"removed-neutral", 100, 100, 3000, splitTimingCost(160, 8), BudgetFail, BudgetFail, BudgetWarn},
-		{"placement-within-total", 2000, 2000, 0, []float64{30.001}, BudgetFail, BudgetFail, BudgetFail},
+		{"added-over-limit", 100, 100, 0, []float64{5.001}, BudgetWarn, BudgetFail, BudgetWarn},
+		{"speedup-cannot-subsidize", 100, 80, 0, []float64{8}, BudgetWarn, BudgetPass, BudgetPass},
+		{"removed-neutral", 100, 100, 3000, splitTimingCost(160, 8), BudgetWarn, BudgetFail, BudgetWarn},
+		{"placement-within-total", 2000, 2000, 0, []float64{30.001}, BudgetWarn, BudgetFail, BudgetWarn},
 		{"placement-boundary", 2000, 2000, 0, []float64{30}, BudgetPass, BudgetPass, BudgetPass},
 		{"600-boundary", 20000, 20000, 0, splitTimingCost(600, 20), BudgetPass, BudgetPass, BudgetPass},
-		{"600-over-limit", 20000, 20000, 0, splitTimingCost(600.001, 21), BudgetFail, BudgetFail, BudgetWarn},
+		{"600-over-limit", 20000, 20000, 0, splitTimingCost(600.001, 21), BudgetWarn, BudgetFail, BudgetWarn},
 	} {
 		for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
 			t.Run(tc.name+"/"+string(mode), func(t *testing.T) {
@@ -113,6 +114,29 @@ func splitTimingCost(total float64, cells int) []float64 {
 		parts[i] = total / float64(cells)
 	}
 	return parts
+}
+
+func TestSnapshotAdvisoryChargesFullOnlyCells(t *testing.T) {
+	policy := timingTierChangePolicy(false, true)
+	reference := timingReferenceRoots(t, []RootTime{timingRoot("TestFast", 100)}, policy)
+	candidate := []RootTime{timingRoot("TestFast", 100), timingRoot("TestSlow", 700)}
+	for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
+		for _, tier := range []string{"core", "lifecycle", "full"} {
+			t.Run(string(mode)+"/"+tier, func(t *testing.T) {
+				row, problems := compareTimingTier(reference, candidate, policy, tier, mode)
+				if len(problems) != 0 || row.Baseline != 100 || row.Allowance != 5 || row.Retained != 1 {
+					t.Fatalf("comparison validity or pinned cost changed: %+v / %v", row, problems)
+				}
+				if tier == "full" {
+					if row.AddedSeconds != 700 || row.Growth != 700 || row.Candidate != 800 || len(row.Added) != 1 || row.StrictStatus != BudgetFail || len(row.Warnings) < 2 {
+						t.Fatalf("full-only cost or historical refusal hidden: %+v", row)
+					}
+				} else if row.AddedSeconds != 0 || row.Candidate != 100 || len(row.Added) != 0 || len(row.Warnings) != 0 || row.StrictStatus != BudgetPass {
+					t.Fatalf("full-only work charged to a lower tier: %+v", row)
+				}
+			})
+		}
+	}
 }
 
 func TestTestTimeModeAdmissionAndHostileProofs(t *testing.T) {
