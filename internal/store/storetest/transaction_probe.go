@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -72,6 +73,17 @@ func ReplaceTransactions(t testing.TB, previous *TransactionCollector, options T
 	}
 	t.Cleanup(collector.Stop)
 	return collector
+}
+
+// JoinReporterTransactions ends only the completed reporter's fault window,
+// before fixture cancellation can interrupt an already-captured delayed read.
+func JoinReporterTransactions(t testing.TB, collector *TransactionCollector) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := collector.StopAndJoin(ctx); err != nil {
+		t.Fatalf("join completed reporter fault window: %v; receipt=%+v", err, collector.Snapshot())
+	}
 }
 
 func ValidateReporterIssuance(receipt TransactionSnapshot, submitted time.Time, chunks uint64, delay time.Duration) error {

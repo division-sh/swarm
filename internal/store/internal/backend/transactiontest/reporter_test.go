@@ -250,6 +250,11 @@ func TestReporterStressJoinedRejectsHeldCleanupError(t *testing.T) {
 				finalErr = errors.New("held all-commit cleanup error")
 			}
 			held.Finish(finalErr)
+			joinCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := collector.StopAndJoin(joinCtx); err != nil {
+				t.Fatal(err)
+			}
 			err = ValidateReporterStressJoined(issuance, collector.Snapshot(), delay)
 			if (err != nil) != fail {
 				t.Fatalf("all-commit joined outcome lost: fail=%t err=%v receipt=%+v", fail, err, collector.Snapshot())

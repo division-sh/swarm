@@ -889,6 +889,8 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 					t.Logf("reporter serving window: issuance=%s drain_mixed_readback=%s detached=%+v successor=%+v", issuanceElapsed, time.Since(drainStarted), transactions.Snapshot(), continuation.Snapshot())
 				} else if err := storetest.ValidateReporterStress(receipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
 					t.Fatal(err)
+				} else {
+					storetest.JoinReporterTransactions(t, transactions)
 				}
 			}
 		})
