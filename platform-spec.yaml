@@ -24238,8 +24238,11 @@ test_specification:
         counterfactual. Human summaries label any bounded drift display and point to the exhaustive JSON.
         Command, ratchet and actual-job statuses compose monotonically: PASS < WARN < FAIL < INCOMPLETE. Advisory timing
         cannot downgrade missing, failed, cancelled, corrupt, duplicate or foreign proof or actual-job evidence.
-        Current plan-to-receipt build, environment and count identity remains exact and hard. A valid current
-        build context or declared environment/count scope differing from the historical snapshot is advisory,
+        Current plan-to-receipt build, environment and count identity remains exact and hard. A current
+        executable plan must be bound before canonical command-evidence admission; pre-bind plans may validate
+        as planning outputs but cannot qualify via successful package-only receipts or gain timing credit.
+        Current build presence, workload and selected-root validation cannot be skipped for an empty context.
+        A valid current build context or declared environment/count scope differing from the historical snapshot is advisory,
         not incomplete proof. Changed build contexts and new scopes are charged as added/uncomparable cells,
         never as retained timing or speedup credit; historical cells remain removal-neutral. Reference byte/digest
         and policy integrity, malformed or zero populations remain hard validity failures.

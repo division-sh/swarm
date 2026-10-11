@@ -222,6 +222,9 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 // Failed or incomplete execution may be observed, but never earns proof credit.
 func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	var problems []string
+	if plan.BuildContext.GOOS == "" || plan.BuildContext.GOARCH == "" || plan.BuildContext.CGOEnabled == "" {
+		problems = append(problems, "command evidence requires a bound plan with a complete current Go build context")
+	}
 	if evidence.WorkflowRunID <= 0 || evidence.WorkflowAttempt <= 0 {
 		problems = append(problems, "workflow run ID and attempt must be positive")
 	}
@@ -247,13 +250,11 @@ func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan
 		if evidence.EnvironmentID != unit.EnvironmentID {
 			problems = append(problems, fmt.Sprintf("environment_id %q does not match unit %q", evidence.EnvironmentID, unit.EnvironmentID))
 		}
-		if plan.BuildContext.GOOS != "" {
-			if evidence.BuildContext != plan.BuildContext {
-				problems = append(problems, "effective Go build context does not match the planned context")
-			}
-			if evidence.WorkloadProfile != unit.WorkloadProfile || evidence.ExecutionTier != unit.ExecutionTier {
-				problems = append(problems, "workload profile or execution tier does not match the planned unit")
-			}
+		if evidence.BuildContext != plan.BuildContext {
+			problems = append(problems, "effective Go build context does not match the planned context")
+		}
+		if evidence.WorkloadProfile != unit.WorkloadProfile || evidence.ExecutionTier != unit.ExecutionTier {
+			problems = append(problems, "workload profile or execution tier does not match the planned unit")
 		}
 		if evidence.Attempt == AttemptPrimary && evidence.CountMode != unit.CountMode {
 			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
@@ -288,7 +289,7 @@ func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan
 
 func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	problems := ValidateCommandIdentity(evidence, plan)
-	if unit, err := plan.Unit(evidence.UnitID); err == nil && plan.BuildContext.GOOS != "" {
+	if unit, err := plan.Unit(evidence.UnitID); err == nil {
 		problems = append(problems, requiredExecutionProblems(unit, evidence.Report)...)
 	}
 	declared, _ := canonicalPackageList(evidence.Packages)
