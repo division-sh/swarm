@@ -54,18 +54,19 @@ type WorkflowDuplicateProjectionStorage struct {
 }
 
 type WorkflowStateObservationRow struct {
-	EntityID, FlowInstance string
+	RunID, EntityID, FlowInstance string
+	Fields                        json.RawMessage
 	// Optional internal header posture, not public named-stage metadata.
 	CurrentState *string
 }
 
 func ReadWorkflowStateObservationRows(ctx context.Context, tx *sql.Tx, postgres bool) ([]WorkflowStateObservationRow, error) {
-	query := `SELECT es.entity_id::text, COALESCE(es.flow_instance, ''), fi.current_state
+	query := `SELECT es.run_id::text, es.entity_id::text, COALESCE(es.flow_instance, ''), fi.current_state, es.fields
 		FROM entity_state es LEFT JOIN flow_instances fi
 		ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
 		ORDER BY es.created_at ASC`
 	if !postgres {
-		query = `SELECT es.entity_id, COALESCE(es.flow_instance, ''), fi.current_state
+		query = `SELECT es.run_id, es.entity_id, COALESCE(es.flow_instance, ''), fi.current_state, es.fields
 			FROM entity_state es LEFT JOIN flow_instances fi
 			ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
 			ORDER BY es.created_at ASC`
@@ -78,9 +79,11 @@ func ReadWorkflowStateObservationRows(ctx context.Context, tx *sql.Tx, postgres 
 	out := []WorkflowStateObservationRow{}
 	for rows.Next() {
 		var row WorkflowStateObservationRow
-		if err := rows.Scan(&row.EntityID, &row.FlowInstance, &row.CurrentState); err != nil {
+		var fields []byte
+		if err := rows.Scan(&row.RunID, &row.EntityID, &row.FlowInstance, &row.CurrentState, &fields); err != nil {
 			return nil, err
 		}
+		row.Fields = append(json.RawMessage(nil), fields...)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {

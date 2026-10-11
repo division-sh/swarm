@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				parts = append(parts, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, state))
 				if row.EntityID == catalogRuntimeRunID {
 					foundRoot = true
-					if row.FlowInstance != catalogRuntimeRunID || row.CurrentState == nil || *row.CurrentState != "waiting" {
+					if row.RunID != catalogRuntimeRunID || row.FlowInstance != catalogRuntimeRunID || row.CurrentState == nil || *row.CurrentState != "waiting" || len(row.Fields) == 0 {
 						t.Fatalf("root physical diagnostic changed: %+v", row)
 					}
 				}
@@ -99,6 +100,10 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				if err != nil || len(rows) != 1 || rows[0].EntityID != catalogRuntimeRunID || rows[0].FlowInstance != catalogRuntimeRunID || rows[0].CurrentState == nil || *rows[0].CurrentState != tc.stage {
 					t.Fatalf("exact constructed diagnostic row=%+v err=%v", rows, err)
 				}
+				fieldsBefore := append([]byte(nil), rows[0].Fields...)
+				if rows[0].RunID != catalogRuntimeRunID || len(fieldsBefore) == 0 {
+					t.Fatalf("physical diagnostic omitted actual data ownership/fields: %+v", rows[0])
+				}
 				probe := storetest.CollectTransactions(t, reader, storetest.TransactionProbeOptions{})
 				prefix := "[{entity_id:" + catalogRuntimeRunID + " flow_instance:" + catalogRuntimeRunID + " "
 				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+tc.want+"}]" {
@@ -113,7 +118,11 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+"state:null}]" {
 					t.Fatalf("absent header diagnostic=%q want=%q err=%v", dump, prefix+"state:null}]", err)
 				}
-				if proof := probe.Snapshot(); proof.Total.ReadCommits != 2 || proof.Total.WriteCommits != 1 || proof.Active != 0 {
+				physical, err := storetest.ReadWorkflowStateObservationRows(ctx, reader)
+				if err != nil || len(physical) != 1 || physical[0].RunID != catalogRuntimeRunID || physical[0].EntityID != catalogRuntimeRunID || physical[0].CurrentState != nil || !bytes.Equal(physical[0].Fields, fieldsBefore) {
+					t.Fatalf("missing header hid or changed its independent field row: %+v err=%v", physical, err)
+				}
+				if proof := probe.Snapshot(); proof.Total.ReadCommits != 3 || proof.Total.WriteCommits != 1 || proof.Active != 0 {
 					t.Fatalf("diagnostic reads or exact header fault escaped original owners: %+v", proof)
 				}
 			})

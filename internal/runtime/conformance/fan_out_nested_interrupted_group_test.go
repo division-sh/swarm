@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -179,21 +180,16 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 			}
 		}
 	}
-	rows, err := db.QueryContext(ctx, `SELECT fi.current_state,es.fields
-		FROM entity_state es LEFT JOIN flow_instances fi
-		ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-		WHERE es.run_id=$1`, runID)
+	rows, err := storetest.ReadWorkflowStateObservationRows(ctx, rt.selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	seen := make(map[string]bool)
-	for rows.Next() {
-		var state sql.NullString
-		var raw []byte
-		if err := rows.Scan(&state, &raw); err != nil {
-			t.Fatal(err)
+	for _, row := range rows {
+		if row.RunID != runID {
+			continue
 		}
+		state, raw := row.CurrentState, row.Fields
 		var fields map[string]any
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatal(err)
@@ -201,14 +197,11 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 		if task, ok := fields["task"].(string); ok {
 			account, _ := fields["account_id"].(string)
 			key := account + ":" + task
-			if !state.Valid || state.String != "completed" || seen[key] || fields["task_key"] != key {
+			if state == nil || *state != "completed" || seen[key] || fields["task_key"] != key {
 				t.Fatalf("recovered task state=%+v fields=%v duplicate=%v", state, fields, seen[key])
 			}
 			seen[key] = true
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(seen) != 6 {
 		t.Fatalf("recovered task states=%v", seen)
