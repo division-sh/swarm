@@ -188,7 +188,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
 				t.Fatalf("load source status before rejection: %v", err)
 			}
-			runtimeTopologyBefore := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
+			runtimeTopologyBefore := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, pg)
 
 			owner := selectedContractExecutionOwnerForTest(t, pg)
 			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork, t: t, resolve: pg.ResolveAuthorActivityEventDescriptor}
@@ -229,8 +229,8 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				}
 			}
 
-			assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
-			runtimeTopologyAfter := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
+			assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, pg, sourceRunID)
+			runtimeTopologyAfter := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, pg)
 			for fact, want := range runtimeTopologyBefore {
 				if got := runtimeTopologyAfter[fact]; got != want {
 					t.Fatalf("deferred-work rejection changed global %s from %d to %d", fact, want, got)
@@ -543,7 +543,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			}
 
 			materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-			before := selectedForkExecutableMutationSnapshotForTest(t, ctx, db, materialized.ForkRunID)
+			before := selectedForkExecutableMutationSnapshotForTest(t, ctx, pg, materialized.ForkRunID)
 			var sourceStatusBefore string
 			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
 				t.Fatalf("load source status before activation: %v", err)
@@ -565,7 +565,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			if !ok || !slices.Contains(capabilities, test.wantCapability) {
 				t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], test.wantCapability)
 			}
-			after := selectedForkExecutableMutationSnapshotForTest(t, ctx, db, materialized.ForkRunID)
+			after := selectedForkExecutableMutationSnapshotForTest(t, ctx, pg, materialized.ForkRunID)
 			for fact, want := range before {
 				if got := after[fact]; got != want {
 					t.Fatalf("activation changed %s from %q to %q", fact, want, got)
@@ -582,79 +582,33 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 	}
 }
 
-func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Context, db *sql.DB, forkRunID string) map[string]string {
+func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Context, selected *store.PostgresStore, forkRunID string) map[string]string {
 	t.Helper()
-	snapshot := map[string]string{}
-	var runStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&runStatus); err != nil {
+	snapshot, err := storetest.ReadSelectedForkExecutableCardinality(ctx, selected, forkRunID)
+	if err != nil {
 		t.Fatalf("load selected fork status: %v", err)
-	}
-	snapshot["run_status"] = runStatus
-	for _, probe := range []struct {
-		name  string
-		query string
-	}{
-		{name: "events", query: `SELECT COUNT(*)::text FROM events WHERE run_id = $1::uuid`},
-		{name: "deliveries", query: `SELECT COUNT(*)::text FROM event_deliveries WHERE run_id = $1::uuid`},
-		{name: "entity_state", query: `SELECT COUNT(*)::text FROM entity_state WHERE run_id = $1::uuid`},
-		{name: "timers", query: `SELECT COUNT(*)::text FROM timers WHERE run_id = $1::uuid`},
-		{name: "readiness", query: `SELECT COUNT(*)::text FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid`},
-		{name: "agents", query: `SELECT COUNT(*)::text FROM agents WHERE $1::uuid IS NOT NULL`},
-		{name: "routes", query: `SELECT COUNT(*)::text FROM routing_rules WHERE $1::uuid IS NOT NULL`},
-		{name: "flow_instances", query: `SELECT COUNT(*)::text FROM flow_instances WHERE $1::uuid IS NOT NULL`},
-		{name: "execution_lineage", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`},
-		{name: "runtime_executions", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1::uuid`},
-	} {
-		var value string
-		if err := db.QueryRowContext(ctx, probe.query, forkRunID).Scan(&value); err != nil {
-			t.Fatalf("load selected fork %s snapshot: %v", probe.name, err)
-		}
-		snapshot[probe.name] = value
 	}
 	return snapshot
 }
 
-func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Context, db *sql.DB) map[string]int {
+func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Context, selected *store.PostgresStore) map[string]int {
 	t.Helper()
-	out := map[string]int{}
-	for _, table := range []string{
-		"agents",
-		"routing_rules",
-		"flow_instances",
-		"flow_instance_runtime_readiness",
-		"timers",
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
-			t.Fatalf("count selected-contract dynamic runtime %s: %v", table, err)
-		}
-		out[table] = count
+	out, err := storetest.ReadSelectedForkGlobalCardinality(ctx, selected)
+	if err != nil {
+		t.Fatalf("count selected-contract dynamic runtime: %v", err)
 	}
 	return out
 }
 
-func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, ctx context.Context, db *sql.DB, sourceRunID string) {
+func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, ctx context.Context, selected *store.PostgresStore, sourceRunID string) {
 	t.Helper()
-	for _, probe := range []struct {
-		name  string
-		query string
-	}{
-		{name: "runs", query: `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`},
-		{name: "bindings", query: `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE source_run_id = $1::uuid`},
-		{name: "route recoveries", query: `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE source_run_id = $1::uuid`},
-		{name: "branch divergences", query: `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE source_run_id = $1::uuid`},
-		{name: "execution lineage", query: `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id = $1::uuid`},
-		{name: "runtime executions", query: `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id = $1::uuid`},
-		{name: "events", query: `SELECT COUNT(*) FROM events WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id = $1::uuid)`},
-		{name: "deliveries", query: `SELECT COUNT(*) FROM event_deliveries WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id = $1::uuid)`},
-		{name: "timers", query: `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`},
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, probe.query, sourceRunID).Scan(&count); err != nil {
-			t.Fatalf("count rejected fork %s: %v", probe.name, err)
-		}
+	counts, err := storetest.ReadSelectedForkDescendantCardinality(ctx, selected, sourceRunID)
+	if err != nil {
+		t.Fatalf("count rejected fork: %v", err)
+	}
+	for name, count := range counts {
 		if count != 0 {
-			t.Fatalf("deferred-work rejection created %d fork %s row(s)", count, probe.name)
+			t.Fatalf("deferred-work rejection created %d fork %s row(s)", count, name)
 		}
 	}
 }
@@ -1021,7 +975,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 	if result.Materialization.ForkRunID != "" {
 		t.Fatalf("rejected result materialization = %#v, want none", result.Materialization)
 	}
-	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
+	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, pg, sourceRunID)
 }
 
 func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *testing.T) {
@@ -1208,7 +1162,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	if !ok || !slices.Contains(capabilities, selectedContractDeferredWorkDynamicFlowCreation) {
 		t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], selectedContractDeferredWorkDynamicFlowCreation)
 	}
-	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
+	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, pg, sourceRunID)
 }
 
 type selectedContractTestWorkflowModule struct {

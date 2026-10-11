@@ -55,6 +55,32 @@ func TestSelectedForkSourceEntityFixtureUsesOriginalCoordinatorBothStores(t *tes
 			if err != nil || len(recovered["flow_instances"].Rows) != 0 || len(recovered["flow_instance_runtime_readiness"].Rows) != 0 {
 				t.Fatalf("headerless source acquired construction or readiness: %+v %v", recovered, err)
 			}
+			beforeCounts := probe.Snapshot()
+			executable, err := ReadSelectedForkExecutableCardinalityForTest(ctx, opened.store, fixture.RunID)
+			if err != nil || !reflect.DeepEqual(executable, map[string]string{
+				"run_status": "running", "events": "1", "deliveries": "0", "entity_state": "1",
+				"timers": "0", "readiness": "0", "agents": "0", "routes": "0",
+				"flow_instances": "0", "execution_lineage": "0", "runtime_executions": "0",
+			}) {
+				t.Fatalf("exact executable cardinality lost physical scope: %+v %v", executable, err)
+			}
+			global, err := ReadSelectedForkGlobalCardinalityForTest(ctx, opened.store)
+			if err != nil || !reflect.DeepEqual(global, map[string]int{
+				"agents": 0, "routing_rules": 0, "flow_instances": 0, "flow_instance_runtime_readiness": 0, "timers": 0,
+			}) {
+				t.Fatalf("global cardinality added a run or eligibility filter: %+v %v", global, err)
+			}
+			descendants, err := ReadSelectedForkDescendantCardinalityForTest(ctx, opened.store, fixture.RunID)
+			if err != nil || !reflect.DeepEqual(descendants, map[string]int{
+				"runs": 0, "bindings": 0, "route recoveries": 0, "branch divergences": 0,
+				"execution lineage": 0, "runtime executions": 0, "events": 0, "deliveries": 0, "timers": 0,
+			}) {
+				t.Fatalf("source descendants leaked source business rows: %+v %v", descendants, err)
+			}
+			afterCounts := probe.Snapshot()
+			if afterCounts.Total.Begun != beforeCounts.Total.Begun+3 || afterCounts.Total.ReadCommits != beforeCounts.Total.ReadCommits+3 || afterCounts.Total.WriteCommits != beforeCounts.Total.WriteCommits || afterCounts.Active != 0 {
+				t.Fatalf("cardinality reads bypassed or mutated the original coordinator: before=%+v after=%+v", beforeCounts, afterCounts)
+			}
 		})
 	}
 }
@@ -105,11 +131,31 @@ func TestSelectedForkSourceEntityFixtureRefusalsAndRollbackBothStores(t *testing
 					}
 				})
 			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if got, err := ReadSelectedForkExecutableCardinalityForTest(cancelled, opened.store, fixture.RunID); !errors.Is(err, context.Canceled) || got != nil {
+				t.Fatalf("cancelled executable read yielded evidence: %+v %v", got, err)
+			}
+			if got, err := ReadSelectedForkGlobalCardinalityForTest(cancelled, opened.store); !errors.Is(err, context.Canceled) || got != nil {
+				t.Fatalf("cancelled global read yielded evidence: %+v %v", got, err)
+			}
+			if got, err := ReadSelectedForkDescendantCardinalityForTest(cancelled, opened.store, fixture.RunID); !errors.Is(err, context.Canceled) || got != nil {
+				t.Fatalf("cancelled descendant read yielded evidence: %+v %v", got, err)
+			}
 			if err := opened.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}
 			if err := SeedSelectedSourceEntityForTest(ctx, opened.store, fixture); err == nil {
 				t.Fatal("closed native owner accepted a source seed")
+			}
+			if got, err := ReadSelectedForkExecutableCardinalityForTest(ctx, opened.store, fixture.RunID); err == nil || got != nil {
+				t.Fatalf("closed native owner yielded executable evidence: %+v %v", got, err)
+			}
+			if got, err := ReadSelectedForkGlobalCardinalityForTest(ctx, opened.store); err == nil || got != nil {
+				t.Fatalf("closed native owner yielded global evidence: %+v %v", got, err)
+			}
+			if got, err := ReadSelectedForkDescendantCardinalityForTest(ctx, opened.store, fixture.RunID); err == nil || got != nil {
+				t.Fatalf("closed native owner yielded descendant evidence: %+v %v", got, err)
 			}
 		})
 	}

@@ -12,6 +12,18 @@ import (
 type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
 type SelectedForkControlStorage = private.SelectedForkControlStorage
 
+func ReadSelectedForkExecutableCardinality(ctx context.Context, selected any, runID string) (map[string]string, error) {
+	return private.ReadSelectedForkExecutableCardinalityForTest(ctx, selected, runID)
+}
+
+func ReadSelectedForkGlobalCardinality(ctx context.Context, selected any) (map[string]int, error) {
+	return private.ReadSelectedForkGlobalCardinalityForTest(ctx, selected)
+}
+
+func ReadSelectedForkDescendantCardinality(ctx context.Context, selected any, runID string) (map[string]int, error) {
+	return private.ReadSelectedForkDescendantCardinalityForTest(ctx, selected, runID)
+}
+
 func ReadSelectedForkControlStorage(ctx context.Context, selected any, runID, loadedBundleHash, agentID string) (SelectedForkControlStorage, error) {
 	return private.ReadSelectedForkControlStorageForTest(ctx, selected, runID, loadedBundleHash, agentID)
 }

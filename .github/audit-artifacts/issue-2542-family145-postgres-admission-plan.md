@@ -168,11 +168,11 @@ artifact corruption remains after canonical admission at the same test cut;
 schema/boot repair, the absence of readiness and retained history assertions
 have not been weakened or pre-empted by eager bootstrap.
 
-The existing recipe owner has 54 exact current transitions, 44 new rows and ten
+The existing recipe owner has 57 exact current transitions, 47 new rows and ten
 extensions of historical rows. The 893 original Before/After/Mechanical records
 remain unchanged. Reconciliation is pinned to c96e20aa7 and a fixed source list;
 its current transition digest is
-0683560527c0dc54545cee2e42dc48c29273bae1f5e356cac86cbc844a641a11.
+e0d8cf4859c9e4edfcbab552509100177905f79a7176027f2cf3bf5fe9e43eb4.
 This is a local intermediate record; the whole-family record will include the
 remaining callers, classifications and retirement controls before publication.
 
@@ -204,3 +204,36 @@ checkpoint. The committed 10698/7754/67 census remains the last qualified global
 measurement. The remaining ordinary API observability constructor/session chain,
 fork/served seeds and counts, original live faults/capacity, private constructor
 roles, peers/reopen and final generic-capability retirement remain open here.
+
+### Fork Refusal Observation Dependency
+
+The executable, global topology and source-descendant witnesses now consume the
+original selected read coordinator rather than the pool. Their public ports
+return only the fixed count maps. All eleven executable keys, five global keys
+and nine descendant keys retain their original physical scopes. Delivery counts
+delegate to backend/delivery/read_projections.go, deliberately counting every
+status without route decoding or admission filtering. The three concrete helper
+signatures and all seven observer/assertion call sites now receive the existing
+selected store; no constructor opening was yet removed by this dependency step.
+
+The existing both-store source-entity proofs additionally assert complete key
+sets/values, three exact original-coordinator read commits and zero extra writes,
+and closed/cancelled reads returning no partial map. This is not yet exhaustive
+nonzero/late-fault cardinality coverage; it remains an explicit whole-family
+checkpoint obligation. All existing entity/history assertions remain unchanged.
+
+Focused race/count1 receipts on vemew:
+- fork-cardinality-owner.jsonl: source/entity original-coordinator and rollback
+  roots plus closed executable-delivery guard, 25.615s, no failures/skips.
+- fork-cardinality-consumers.jsonl: four affected fork refusal/source-mode roots,
+  32.959s, no failures/skips; preserves every refusal code, before/after snapshot,
+  no-descendant and no-readiness assertion.
+- fork-cardinality-refusal-final.jsonl: closed/cancelled reads, original seed
+  rollback, delivery boundary and revision-accessor inventory, no failures/skips.
+
+Signed local propagation checkpoint 1df48c7d8 also passed the independent
+master-to-head complexity comparison with no hotspot increase. Targeted native
+U1000 passed, including the served delta; no cross-platform union is claimed.
+No intermediate checkpoint was pushed or submitted for review. The additional
+counter-owner delta still requires final complexity/unused evidence and the
+whole-family census at the final checkpoint.

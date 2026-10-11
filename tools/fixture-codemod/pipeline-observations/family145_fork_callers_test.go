@@ -23,7 +23,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 54 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "0683560527c0dc54545cee2e42dc48c29273bae1f5e356cac86cbc844a641a11" {
+	if err != nil || len(rows) != 57 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e0d8cf4859c9e4edfcbab552509100177905f79a7176027f2cf3bf5fe9e43eb4" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -54,7 +54,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 func family145SemanticOwner(function string) bool {
 	switch function {
 	case "captureSelectedExecutionSourceRevision", "admitSelectedExecutionSourceArtifact",
-		"seedSelectedExecutionStateOnlySourceRun", "seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource":
+		"seedSelectedExecutionStateOnlySourceRun", "seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource",
+		"selectedForkExecutableMutationSnapshotForTest", "selectedContractDynamicRuntimeGlobalSnapshot",
+		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation":
 		return true
 	}
 	return false
