@@ -2106,6 +2106,10 @@ contract_formats:
             kind=flow_lifecycle, run_id, event_id, target and receiver_route. The target is the selected constructed
             flow/header; receiver_route captures the constructor's complete canonical root-or-present agent coordinate,
             including declaration scope, logical instance and physical instance path, not a path-derived approximation.
+            The receiver_route wire requires presence, scope_key, instance_id and instance_path exactly, including
+            explicit empty strings for the root representation; missing, null, alternate-case and unknown keys refuse.
+            The construction target's FlowID must agree with both the durable header's declaration and the original
+            immutable constructor Identity.TemplateID; agreement with the actor target alone is insufficient.
             Its exact immutable creating-publication coordinate is committed by the constructor; current workflow progress is not
             a substitute for that original evidence. The receipt belongs to durable route identity and the full route
             wire. The existing receiver_materialization_plan column carries only {initialization: receipt}; node_delivery,

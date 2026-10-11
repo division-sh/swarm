@@ -18,7 +18,7 @@ func (intent RoutePlanDeliveryIntent) deliveryRoute() events.DeliveryRoute {
 func (p selectedRunTargetOwnerProjection) bindReceiverMaterializations(plan *RoutePlan) error {
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
-		if !intent.TargetOwnership.MaterializingEntity() {
+		if !intent.TargetOwnership.MaterializingEntity() || !intent.Initialization.Empty() {
 			continue
 		}
 		initialization, found, err := flowReceiverInitialization(*plan, intent.TargetOwnership)
