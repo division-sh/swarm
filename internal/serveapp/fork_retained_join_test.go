@@ -82,7 +82,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if joins[0].Generation() != first.Generation() {
 				t.Fatal("first join borrowed another loop generation")
 			}
-			waitRetainedJoinOutcomes(t, rt, started.RunID, []timeridentity.JoinRef{firstRef})
+			waitRetainedJoinOutcomes(t, rt.Endpoint, started.RunID, []timeridentity.JoinRef{firstRef})
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
@@ -105,7 +105,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if !currentRef.Valid() || !currentRef.Declaration().Equal(firstRef.Declaration()) {
 				t.Fatal("repeat lost the declared join in its exact loop generation")
 			}
-			sourceJoins = waitRetainedJoinOutcomes(t, rt, started.RunID, []timeridentity.JoinRef{firstRef, currentRef})
+			sourceJoins = waitRetainedJoinOutcomes(t, rt.Endpoint, started.RunID, []timeridentity.JoinRef{firstRef, currentRef})
 			for _, join := range sourceJoins {
 				if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || len(join.Outputs) != 1 || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
@@ -225,13 +225,13 @@ func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID str
 	return loop, joins
 }
 
-func waitRetainedJoinOutcomes(t *testing.T, rt servedControlProofRuntime, runID string, expected []timeridentity.JoinRef) []joinruntime.Activation {
+func waitRetainedJoinOutcomes(t *testing.T, endpoint, runID string, expected []timeridentity.JoinRef) []joinruntime.Activation {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var joins []joinruntime.Activation
 	for time.Now().Before(deadline) {
 		var raw json.RawMessage
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
+		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
 		var entity operatorread.OperatorEntityFull
 		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
 			t.Fatal(err)
@@ -268,6 +268,11 @@ func waitRetainedJoinOutcomes(t *testing.T, rt servedControlProofRuntime, runID 
 func retainedJoinOutcomesComplete(joins []joinruntime.Activation, expected []timeridentity.JoinRef) (bool, error) {
 	if len(expected) == 0 || len(joins) != len(expected) {
 		return false, fmt.Errorf("retained join catalog has %d entries, want %d exact generations", len(joins), len(expected))
+	}
+	for _, join := range joins {
+		if err := join.Validate(); err != nil {
+			return false, err
+		}
 	}
 	complete := true
 	for index, ref := range expected {
@@ -317,7 +322,12 @@ func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending.Status, pending.CloseReason, pending.OutcomePending = joinruntime.StatusClosed, joinruntime.CloseReasonComplete, true
+	if disposition, err := pending.Add("member-one", "member-one"); err != nil || disposition != joinruntime.AddAccepted {
+		t.Fatalf("seed genuine pending outcome: disposition=%s err=%v", disposition, err)
+	}
+	if !pending.Close(joinruntime.CloseReasonComplete, true, false) || !pending.FireAt.After(at) {
+		t.Fatal("control must be a complete join with a future pending publication")
+	}
 	ready := operatorread.RunTestQuiescence{Ready: true}
 	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{pending}, []timeridentity.JoinRef{ref}); !ready.Ready || err != nil || complete {
 		t.Fatalf("ready-but-future-pending observation released the fence: ready=%+v complete=%t err=%v", ready, complete, err)
@@ -349,7 +359,12 @@ func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second.Status, second.CloseReason, second.OutcomePending = joinruntime.StatusClosed, joinruntime.CloseReasonComplete, true
+	if disposition, err := second.Add("member-one", "member-one"); err != nil || disposition != joinruntime.AddAccepted {
+		t.Fatalf("seed second pending outcome: disposition=%s err=%v", disposition, err)
+	}
+	if !second.Close(joinruntime.CloseReasonComplete, true, false) {
+		t.Fatal("second control must have a genuine pending completion")
+	}
 	expected := []timeridentity.JoinRef{ref, secondRef}
 	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed, second}, expected); err != nil || complete {
 		t.Fatalf("one completed generation released a two-generation fence: complete=%t err=%v", complete, err)
