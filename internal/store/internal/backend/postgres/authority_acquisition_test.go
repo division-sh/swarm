@@ -244,3 +244,105 @@ func TestAuthorityAcquisitionWaitsForTransactionAndRechecksAdmission(t *testing.
 		t.Errorf("parent did not survive: %v", err)
 	}
 }
+
+func TestBlockingAuthorityAcquisitionWaitsAndJoinsCancellation(t *testing.T) {
+	for _, scenario := range []string{"holder_releases", "cancel_before", "cancel_blocked", "cancel_after_acquisition"} {
+		t.Run(scenario, func(t *testing.T) {
+			b, original := newExitProbe(t)
+			key := "blocking-process-lease"
+			holder, held, err := AcquireAdvisoryLockLease(context.Background(), b.db, key)
+			if err != nil || !held {
+				t.Fatalf("holder acquired=%t: %v", held, err)
+			}
+			defer holder.Release(context.Background())
+			probe := &exitProbeConnector{
+				driver: original.driver, dsn: original.dsn,
+				closedSignal: make(chan struct{}), rollbackDone: make(chan struct{}),
+			}
+			waiterDB := sql.OpenDB(probe)
+			defer waiterDB.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if scenario == "cancel_before" {
+				cancel()
+			}
+			if scenario == "cancel_after_acquisition" {
+				probe.afterExec = func(execCtx context.Context, query string) {
+					if query == blockingAdvisoryLockSQL {
+						if execCtx != ctx {
+							t.Error("blocking acquisition detached cancellation")
+						}
+						cancel()
+					}
+				}
+			}
+			type acquisition struct {
+				lease *AdvisoryLockLease
+				err   error
+			}
+			done := make(chan acquisition, 1)
+			go func() {
+				lease, err := AcquireBlockingAdvisoryLockLease(ctx, waiterDB, key)
+				done <- acquisition{lease, err}
+			}()
+			if scenario != "cancel_before" {
+				observeCtx, stopObserve := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stopObserve()
+				for {
+					var waiting bool
+					err := holder.Session().queryRowContext(observeCtx, `SELECT EXISTS (
+						SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted
+						AND classid::bigint=CASE WHEN hashtext($1)<0 THEN 4294967295::bigint ELSE 0::bigint END
+						AND objid::bigint=(hashtext($1)::bigint & 4294967295::bigint) AND objsubid=1)`, key).Scan(&waiting)
+					if err != nil {
+						t.Fatalf("observe actual kernel lock wait: %v", err)
+					}
+					if waiting {
+						break
+					}
+					select {
+					case result := <-done:
+						t.Fatalf("waiter returned while holder retained possession: %v", result.err)
+					case <-observeCtx.Done():
+						t.Fatal("blocking lock wait was not observed")
+					case <-time.After(time.Millisecond):
+					}
+				}
+				if scenario == "cancel_blocked" {
+					cancel()
+				} else if err := holder.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var result acquisition
+			select {
+			case result = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("blocking acquisition did not join")
+			}
+			if scenario == "holder_releases" {
+				if result.err != nil || result.lease == nil {
+					t.Fatalf("successor acquisition: %v", result.err)
+				}
+				if err := result.lease.ProveCurrent(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if err := result.lease.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			} else if result.lease != nil || !errors.Is(result.err, context.Canceled) {
+				t.Fatalf("cancellation published lease=%v err=%v", result.lease, result.err)
+			}
+			if err := holder.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			competitor, acquired, err := AcquireAdvisoryLockLease(context.Background(), b.db, key)
+			if err != nil || !acquired {
+				t.Fatalf("waiter leaked lock after joined disposition: acquired=%t err=%v", acquired, err)
+			}
+			if err := competitor.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
