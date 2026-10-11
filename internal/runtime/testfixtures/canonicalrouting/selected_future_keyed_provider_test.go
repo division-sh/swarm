@@ -19,6 +19,11 @@ func TestSelectedFutureMintedProviderFixturePassesCompleteBoot(t *testing.T) {
 	requireSelectedFutureProviderCompleteBoot(t, root, repo)
 }
 
+func TestSelectedFutureReusedProviderFixturePassesCompleteBoot(t *testing.T) {
+	root, repo := CopySelectedFutureReusedProviderInput(t), RepoRoot(t)
+	requireSelectedFutureProviderCompleteBoot(t, root, repo)
+}
+
 func requireSelectedFutureProviderCompleteBoot(t *testing.T, root, repo string) {
 	t.Helper()
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
