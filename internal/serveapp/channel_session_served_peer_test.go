@@ -34,6 +34,7 @@ type serveNativeProtocolPeer struct {
 	lid            types.JID
 	mu             sync.Mutex
 	wire           *whatsappfixture.Transport
+	postLoginWire  *whatsappfixture.Transport
 	registration   *waWa6.ClientPayload_DevicePairingRegistrationData
 	prekeys        []waBinary.Node
 	prekeyUploads  int
@@ -154,6 +155,9 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	defer func() {
 		p.mu.Lock()
 		p.disconnected++
+		if p.postLoginWire == wire {
+			p.postLoginWire = nil
+		}
 		p.mu.Unlock()
 	}()
 	payload := wire.ClientPayload()
@@ -292,6 +296,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			if _, active := node.GetOptionalChildByTag("active"); active {
 				p.mu.Lock()
 				p.postLogins++
+				p.postLoginWire = wire
 				p.mu.Unlock()
 			}
 		}
@@ -303,9 +308,10 @@ func (p *serveNativeProtocolPeer) awaitPostLogin() (int, int) {
 	deadline := time.Now().Add(serveRuntimeReadyTimeout)
 	for time.Now().Before(deadline) {
 		p.mu.Lock()
-		connected, uploads, completed := p.connections, p.prekeyUploads, p.postLogins
+		uploads, completed := p.prekeyUploads, p.postLogins
+		currentCompleted := p.wire != nil && p.postLoginWire == p.wire
 		p.mu.Unlock()
-		if completed == connected && connected > 0 && uploads > 0 {
+		if currentCompleted && uploads > 0 {
 			return completed, uploads
 		}
 		time.Sleep(10 * time.Millisecond)
