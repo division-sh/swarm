@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -46,7 +47,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if state, present := entityResult["current_state"]; !present || state != nil || entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" {
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
-	assertTestSetupPersistence(t, db, pg, bundleHash, runID, entityID, "seeded")
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -55,7 +56,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if replay.Error != nil {
 		t.Fatalf("test.setup_entities replay error = %#v", replay.Error)
 	}
-	assertTestSetupPersistence(t, db, pg, bundleHash, runID, entityID, "seeded")
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
@@ -67,7 +68,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("test.setup_entities conflict data = %#v", data)
 	}
-	assertTestSetupPersistence(t, db, pg, bundleHash, runID, entityID, "seeded")
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 
 	if _, err := db.Exec(`DELETE FROM api_idempotency`); err != nil {
 		t.Fatalf("delete setup api idempotency rows: %v", err)
@@ -76,7 +77,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if expiredReplay.Error != nil {
 		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
 	}
-	assertTestSetupPersistence(t, db, pg, bundleHash, runID, entityID, "seeded")
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
 	}
@@ -366,53 +367,45 @@ func validTestSetupEntity(entityID, note string) map[string]any {
 	}
 }
 
-func assertTestSetupPersistence(t *testing.T, db *sql.DB, selected *store.PostgresStore, expectedBundleHash, runID, entityID, note string) {
+func assertTestSetupPersistence(t *testing.T, selected interface {
+	operatorread.RunReader
+	EntityReadStore
+	runtimepipeline.WorkflowInstancePersistenceReader
+}, expectedBundleHash, runID, entityID, note string) {
 	t.Helper()
-	var runStatus, originKind, bundleHash string
-	if err := db.QueryRow(`
-		SELECT status, origin_kind, bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &originKind, &bundleHash); err != nil {
+	run, err := selected.LoadRunHeader(context.Background(), runID)
+	if err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
-	if runStatus != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) {
-		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", runStatus, originKind)
+	if run.Status != "running" || run.Origin.Kind() != storerunlifecycle.OriginScenarioSetup {
+		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", run.Status, run.Origin.Kind())
 	}
-	if bundleHash != expectedBundleHash {
-		t.Fatalf("setup run row source artifact hash = %q, want %q", bundleHash, expectedBundleHash)
+	if run.BundleHash != expectedBundleHash {
+		t.Fatalf("setup run row source artifact hash = %q, want %q", run.BundleHash, expectedBundleHash)
 	}
 
 	assertTestSetupImportedEntity(t, selected, runID, entityID, note)
 
-	var mutations int
-	if err := db.QueryRow(`
-		SELECT CASE
-		  WHEN COUNT(*) FILTER (WHERE domain = 'authored_field' AND path = 'note') = COUNT(*)
-		  THEN COUNT(*) ELSE -1
-		END
-		FROM entity_mutations
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND writer_type = 'platform'
-		  AND writer_id = 'test.setup_entities'
-	`, runID, entityID).Scan(&mutations); err != nil {
-		t.Fatalf("count setup mutations: %v", err)
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(context.Background(), selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read setup mutation and field storage: %v", err)
+	}
+	mutations := 0
+	for _, mutation := range projection.Mutations {
+		if mutation.WriterType != "platform" || mutation.WriterID != "test.setup_entities" {
+			continue
+		}
+		if mutation.Domain != "authored_field" || mutation.Path != "note" {
+			t.Fatalf("setup wrote another mutation domain/path: %+v", mutation)
+		}
+		mutations++
 	}
 	if mutations != 1 {
 		t.Fatalf("setup authored note mutation rows = %d, want one and no other mutation domain/path", mutations)
 	}
 
-	var payload json.RawMessage
-	if err := db.QueryRow(`
-		SELECT fields
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&payload); err != nil {
-		t.Fatalf("reload setup fields: %v", err)
-	}
 	decoded := map[string]any{}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
+	if err := json.Unmarshal(projection.Fields, &decoded); err != nil {
 		t.Fatalf("decode setup fields: %v", err)
 	}
 	if decoded["note"] != note {

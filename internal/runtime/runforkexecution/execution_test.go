@@ -954,9 +954,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`, result.Materialization.ForkRunID, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
+	forkOwner, err := flowidentity.NewRunScopedFlowInstance(result.Materialization.ForkRunID, flowidentity.StoredRoute(semanticview.RootExecutionFlowID(loaded.Source), result.Materialization.ForkRunID, result.Materialization.ForkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, found, err := runtimepipeline.NewWorkflowPersistence(pg).LoadWorkflowInstance(ctx, forkOwner)
+	if err != nil || !found {
 		t.Fatalf("load fork entity state: %v", err)
 	}
+	forkEntityState = instance.CurrentState
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}

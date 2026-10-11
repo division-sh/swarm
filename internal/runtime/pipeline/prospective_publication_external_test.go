@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -129,27 +130,21 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
 				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
-				var initialFields string
-				var initialRevision int64
-				if err := selected.db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
-FROM entity_state es JOIN flow_instances fi
-ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
-WHERE es.run_id=$1 AND es.flow_instance=$2`, runID, runID).Scan(&initialFields, &initialRevision); err != nil {
+				initial, err := storetest.ReadWorkflowDuplicateProjectionStorage(ctx, selected.events, runID, runID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				initialFields, initialRevision := string(initial.Fields), int64(initial.Revision)
 				if initialRevision != 1 {
 					t.Fatalf("construction header revision=%d, want 1", initialRevision)
 				}
 				assertUnchangedConstruction := func() {
 					t.Helper()
-					var fields string
-					var headerRevision int64
-					if err := selected.db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
-FROM entity_state es JOIN flow_instances fi
-ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
-WHERE es.run_id=$1 AND es.flow_instance=$2`, runID, runID).Scan(&fields, &headerRevision); err != nil {
+					current, err := storetest.ReadWorkflowDuplicateProjectionStorage(ctx, selected.events, runID, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
+					fields, headerRevision := string(current.Fields), int64(current.Revision)
 					if fields != initialFields || headerRevision != initialRevision {
 						t.Fatalf("failed handler changed construction: fields=%s header revision=%d; want %s at %d", fields, headerRevision, initialFields, initialRevision)
 					}
