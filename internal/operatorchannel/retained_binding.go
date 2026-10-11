@@ -36,9 +36,9 @@ func (s *Service) RetainedCurrentBinding(ctx context.Context, identity Interface
 	var selected Binding
 	seen := false
 	for _, binding := range bindings {
-		binding.Interface = binding.Interface.Normalized()
-		if binding.PrincipalID != principal.ID || binding.Interface.Validate() != nil || binding.Interface.InterfaceRef != InterfaceHITLChannelV2 {
-			return Binding{}, fmt.Errorf("%w: retained binding has contradictory principal or interface", ErrConflict)
+		binding, err = normalizeRetainedBinding(principal.ID, binding)
+		if err != nil {
+			return Binding{}, err
 		}
 		if binding.Interface != identity {
 			continue
@@ -51,22 +51,29 @@ func (s *Service) RetainedCurrentBinding(ctx context.Context, identity Interface
 	if err := ctx.Err(); err != nil {
 		return Binding{}, err
 	}
-	if seen {
-		switch selected.Status {
-		case BindingCurrent, BindingUnbound, BindingStale, BindingRevoked:
-		default:
-			return Binding{}, fmt.Errorf("%w: retained binding has unknown status", ErrConflict)
-		}
-	}
 	if !seen || selected.Status != BindingCurrent {
 		return Binding{}, fmt.Errorf("%w: current retained binding %q was not found", ErrNotFound, identity.Selector)
 	}
-	if err := validateRetainedCurrentBinding(selected); err != nil {
-		return Binding{}, err
-	}
-	selected.ProviderAuthority = ProviderAuthority{Kind: selected.ProviderAuthority.Kind,
-		Credential: selected.ProviderAuthority.Credential, Session: selected.ProviderAuthority.Session}
 	return selected, nil
+}
+
+func normalizeRetainedBinding(principalID string, binding Binding) (Binding, error) {
+	binding.Interface = binding.Interface.Normalized()
+	if binding.PrincipalID != principalID || binding.Interface.Validate() != nil || binding.Interface.InterfaceRef != InterfaceHITLChannelV2 {
+		return Binding{}, fmt.Errorf("%w: retained binding has contradictory principal or interface", ErrConflict)
+	}
+	switch binding.Status {
+	case BindingCurrent:
+		if err := validateRetainedCurrentBinding(binding); err != nil {
+			return Binding{}, err
+		}
+	case BindingUnbound, BindingStale, BindingRevoked:
+	default:
+		return Binding{}, fmt.Errorf("%w: retained binding has unknown status", ErrConflict)
+	}
+	binding.ProviderAuthority = ProviderAuthority{Kind: binding.ProviderAuthority.Kind,
+		Credential: binding.ProviderAuthority.Credential, Session: binding.ProviderAuthority.Session}
+	return binding, nil
 }
 
 func validateRetainedCurrentBinding(binding Binding) error {
