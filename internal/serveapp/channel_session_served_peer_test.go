@@ -394,11 +394,20 @@ func (p *serveNativeProtocolPeer) customerReply(text, id string, original served
 
 func (p *serveNativeProtocolPeer) customerSender() (*whatsappfixture.SignalSender, types.JID, types.JID) {
 	p.t.Helper()
+	return p.senderFrom(types.NewJID("15551234571", types.DefaultUserServer), types.NewJID("100000000003", types.HiddenUserServer))
+}
+
+func (p *serveNativeProtocolPeer) replyFrom(text, id string, original servedNativeMessage, from, lid types.JID) {
+	p.t.Helper()
+	sender, _, _ := p.senderFrom(from, lid)
+	p.sendEncrypted(sender.EncryptReply(p.t, text, id, original.ID, original.Body.GetConversation()), id)
+}
+
+func (p *serveNativeProtocolPeer) senderFrom(from, lid types.JID) (*whatsappfixture.SignalSender, types.JID, types.JID) {
+	p.t.Helper()
 	p.mu.Lock()
 	registration := p.registration
 	p.mu.Unlock()
-	from := types.NewJID("15551234571", types.DefaultUserServer)
-	lid := types.NewJID("100000000003", types.HiddenUserServer)
 	from.Device, lid.Device = 1, 1
 	sender := whatsappfixture.NewPairingSender(p.t, registration, p.account, from, lid)
 	p.mu.Lock()
