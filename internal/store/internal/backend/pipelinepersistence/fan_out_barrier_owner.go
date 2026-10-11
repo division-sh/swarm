@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -168,8 +169,8 @@ func foldFanOutIntentTerminalDispositions(
 		batch := facts[start:min(start+128, len(facts))]
 		var eventIDs []string
 		for _, fact := range batch {
-			if fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind)) == fanoutobligation.OutcomeCommitted &&
-				!fact.sourceEventID.Valid && fact.eventID.Valid {
+			kind := fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind))
+			if fact.eventID.Valid && ((kind == fanoutobligation.OutcomeCommitted && !fact.sourceEventID.Valid) || kind == fanoutobligation.OutcomeContinued) {
 				eventIDs = append(eventIDs, fact.eventID.String)
 			}
 		}
@@ -212,8 +213,15 @@ func foldFanOutIntentTerminalDispositions(
 					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s rejected ordinal %d carries settlement identity", key.String(), ordinal)
 				}
 				fold.Summary.SemanticRejected++
-			case fanoutobligation.OutcomeCommitted:
-				if fact.sourceEventID.Valid {
+			case fanoutobligation.OutcomeCommitted, fanoutobligation.OutcomeContinued:
+				continued := fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind)) == fanoutobligation.OutcomeContinued
+				if continued && (!fact.eventID.Valid || !fact.sourceEventID.Valid || strings.TrimSpace(fact.eventID.String) == "" ||
+					strings.TrimSpace(fact.sourceEventID.String) == "" || fact.eventID.String == fact.sourceEventID.String ||
+					(fact.disposition.Valid && (!fanoutobligation.InheritedTerminalDisposition(fact.disposition.String).Valid() ||
+						fanoutobligation.InheritedTerminalDisposition(fact.disposition.String) == fanoutobligation.InheritedNoRoute))) {
+					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s continued ordinal %d has contradictory settlement evidence", key.String(), ordinal)
+				}
+				if fact.sourceEventID.Valid && !continued {
 					if fact.eventID.Valid || !fact.disposition.Valid {
 						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s inherited ordinal %d has contradictory settlement evidence", key.String(), ordinal)
 					}
@@ -231,7 +239,7 @@ func foldFanOutIntentTerminalDispositions(
 					}
 					continue
 				}
-				if !fact.eventID.Valid || fact.disposition.Valid {
+				if !fact.eventID.Valid || (fact.disposition.Valid && !continued) {
 					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s owned ordinal %d has contradictory settlement evidence", key.String(), ordinal)
 				}
 				admitted := settlements[fact.eventID.String]
@@ -243,10 +251,17 @@ func foldFanOutIntentTerminalDispositions(
 					}
 				}
 				switch {
-				case settlement.NoDelivery() && len(deliveries) == 0:
+				case settlement.NoDelivery() && len(deliveries) == 0 && !continued:
 					fold.Summary.NoRoute++
 				case settlement.Delivered() && len(deliveries) > 0:
-					disposition, terminal, err := fanoutbarrier.RecipientDisposition(deliveries)
+					var disposition fanoutobligation.InheritedTerminalDisposition
+					var terminal bool
+					var err error
+					if continued {
+						disposition, terminal, err = continuedFanOutRecipientDisposition(key.RunID, fact.sourceEventID.String, admitted, deliveries, fanoutobligation.InheritedTerminalDisposition(fact.disposition.String))
+					} else {
+						disposition, terminal, err = fanoutbarrier.RecipientDisposition(deliveries)
+					}
 					if err != nil {
 						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out ordinal %d recipient disposition: %w", ordinal, err)
 					}
@@ -271,6 +286,31 @@ func foldFanOutIntentTerminalDispositions(
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s: %w", key.String(), err)
 	}
 	return fold, nil
+}
+
+func continuedFanOutRecipientDisposition(runID, sourceEventID string, publication eventrecord.AdmittedRecord, deliveries []runtimedelivery.Snapshot, retained fanoutobligation.InheritedTerminalDisposition) (fanoutobligation.InheritedTerminalDisposition, bool, error) {
+	event := publication.Event.Event()
+	lineage, found := event.SelectedForkLineage()
+	if !found || event.RunID() != runID || lineage.DestinationRunID() != runID || lineage.SourceEventID() != sourceEventID {
+		return "", false, fmt.Errorf("continued fan-out event contradicts its exact source publication")
+	}
+	routes := make([]events.DeliveryRoute, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		if delivery.RunID != runID || delivery.EventID != event.ID() {
+			return "", false, fmt.Errorf("continued fan-out delivery belongs to another run or event")
+		}
+		routes = append(routes, delivery.Route)
+	}
+	if err := publication.Settlement.Validate(routes); err != nil {
+		return "", false, fmt.Errorf("continued fan-out recipient settlement: %w", err)
+	}
+	if !publication.Settlement.Delivered() {
+		return "", false, fmt.Errorf("continued fan-out requires its child recipient partition")
+	}
+	if retained != "" {
+		return fanoutbarrier.RecipientDispositionWithRetained(deliveries, retained)
+	}
+	return fanoutbarrier.RecipientDisposition(deliveries)
 }
 
 func loadFanOutBarriersByStatus(

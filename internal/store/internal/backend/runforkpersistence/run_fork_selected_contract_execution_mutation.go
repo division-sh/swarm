@@ -805,10 +805,6 @@ func insertPostgresSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func (s *RunForkPostgresOwner) InsertSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage) error {
-	return insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage)
-}
-
 func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage) error {
 	lineage, err := normalizeSelectedForkExecutionLineage(lineage)
 	if err != nil {
@@ -835,10 +831,6 @@ func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx,
 		return fmt.Errorf("selected-contract source event %s does not belong to source run %s", lineage.SourceEventID, lineage.SourceRunID)
 	}
 	return nil
-}
-
-func (s *RunForkSQLiteOwner) InsertSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage) error {
-	return insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage)
 }
 
 func runForkSelectedContractBranchSourceStatusSupported(status string) bool {

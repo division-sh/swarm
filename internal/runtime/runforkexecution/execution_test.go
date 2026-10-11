@@ -520,9 +520,11 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
-			replayAdmission := runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(
-				runfork.RunForkSelectedContractReplayResumeAdmission(plan),
-			)
+			replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 			if test.stateOnly {
 				if !replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady {
 					t.Fatalf("state-only replay admission = %#v", replayAdmission)

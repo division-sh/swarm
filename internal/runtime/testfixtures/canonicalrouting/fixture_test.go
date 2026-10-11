@@ -67,6 +67,18 @@ func TestNumericFeedFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestFiniteSelectedDeploymentReceiverFixtureLoadsAndVerifies(t *testing.T) {
+	root := CopySelectedDeploymentResourceFiniteSingleton(t)
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("finite selected deployment receiver hard invalidities: %#v", findings)
+	}
+}
+
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, MapScatterGather, ArtifactID("examples/routing/policy-rules"))
 	for _, name := range canonicalExampleNames() {

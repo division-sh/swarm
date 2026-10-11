@@ -205,6 +205,11 @@ func TestSelectedForkInputPublishedStrictBothDialects(t *testing.T) {
 					mock.ExpectQuery(`FROM events e`).WithArgs(activityidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).
 						WillReturnRows(selectedInputRecordRows(f.record, sqlite, test.eventFound))
 				}
+				if test.name == "exact_old_publication" {
+					mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM fan_out_intents WHERE run_id=`).
+						WithArgs(f.attachment.evidence.binding.ForkRunID).
+						WillReturnRows(sqlmock.NewRows([]string{"has_fan_out"}).AddRow(false))
+				}
 				published, err := readSelectedForkInputPublishedTx(context.Background(), tx, f.attachment.evidence.binding, f.source, f.schema, sqlite)
 				if test.corrupt {
 					if published || !errors.Is(err, eventrecord.ErrCorrupt) {

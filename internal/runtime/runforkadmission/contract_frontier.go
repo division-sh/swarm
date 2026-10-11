@@ -118,13 +118,23 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
+		fanOut, continuingFanOut, err := req.Plan.FanOutPendingRecipientPartition(frontier[i].SourceEventID)
+		if err != nil {
+			return runfork.RunForkContractFrontierAdmission{}, err
+		}
+		if continuingFanOut {
+			frontier[i].DerivedRecipients, err = continuingFanOutRecipients(req.Plan, fanOut, frontier[i].DerivedRecipients)
+			if err != nil {
+				return runfork.RunForkContractFrontierAdmission{}, err
+			}
+		}
 		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
 			pendingRecipients := frontier[i].DerivedRecipients[:0]
 			for _, recipient := range frontier[i].DerivedRecipients {
 				completed := false
 				for _, item := range req.Plan.PendingWork {
 					if item.EventID == frontier[i].SourceEventID && item.Classification == runfork.RunForkPendingClassificationDeliveredCompleted &&
-						completedInputRecipient(req.Plan.SourceRunID, item.DeliveryRoute, recipient) {
+						matchesHistoricalRecipient(req.Plan.SourceRunID, item.DeliveryRoute, recipient) {
 						completed = true
 					}
 				}
@@ -134,7 +144,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			}
 			frontier[i].DerivedRecipients = pendingRecipients
 		}
-		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
+		_, inputPublication := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID)
+		if inputPublication || continuingFanOut {
 			for _, recipient := range frontier[i].DerivedRecipients {
 				if recipient.Recipient.IsNode() {
 					frontier[i].WorkflowNodeSubscribers = append(frontier[i].WorkflowNodeSubscribers, recipient.HandlerNode().Key())
@@ -190,9 +201,9 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	}, nil
 }
 
-// Completion excludes the exact historical execution slot; it grants no
-// selected route authority. Source entity IDs are never copied into a fork.
-func completedInputRecipient(sourceRun string, route events.DeliveryRoute, recipient forkrecipient.Evidence) bool {
+// Historical slots narrow selected recipients; they grant no route authority.
+// Source entity IDs are never copied into a fork.
+func matchesHistoricalRecipient(sourceRun string, route events.DeliveryRoute, recipient forkrecipient.Evidence) bool {
 	if route.Recipient != recipient.Recipient {
 		return false
 	}
@@ -214,6 +225,37 @@ func completedInputRecipient(sourceRun string, route events.DeliveryRoute, recip
 	}
 	_, _, connected := recipient.Connect()
 	return !connected
+}
+
+func continuingFanOutRecipients(plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, selected []forkrecipient.Evidence) ([]forkrecipient.Evidence, error) {
+	owed := make(map[string]events.DeliveryRoute, len(replay.SourceDeliveryIDs))
+	for _, id := range replay.SourceDeliveryIDs {
+		for _, pending := range plan.PendingWork {
+			if pending.EventID == replay.SourceEventID && pending.DeliveryID == id {
+				owed[id] = pending.DeliveryRoute
+			}
+		}
+	}
+	matched := make(map[string]bool, len(owed))
+	out := make([]forkrecipient.Evidence, 0, len(owed))
+	for _, recipient := range selected {
+		candidateMatched := false
+		for id, route := range owed {
+			if !matchesHistoricalRecipient(plan.SourceRunID, route, recipient) {
+				continue
+			}
+			if matched[id] || candidateMatched {
+				return nil, fmt.Errorf("selected fan-out event %s resolves an unfinished slot more than once", replay.SourceEventID)
+			}
+			matched[id] = true
+			candidateMatched = true
+			out = append(out, recipient)
+		}
+	}
+	if len(out) != len(replay.SourceDeliveryIDs) || len(matched) != len(owed) {
+		return nil, fmt.Errorf("selected fan-out event %s cannot resolve its complete unfinished partition", replay.SourceEventID)
+	}
+	return forkrecipient.CanonicalSet(out)
 }
 
 func completeContractFrontierFlowInstances(runID string, source semanticview.Source, pending []runfork.RunForkPendingWork, frontier []runfork.RunForkContractFrontierEvent) error {

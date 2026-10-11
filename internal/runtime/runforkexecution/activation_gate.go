@@ -174,7 +174,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{Owner: runfork.RunForkSelectedContractExecutionActivationGateOwner}, err
 	}
-	replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
 	if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
@@ -290,6 +293,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 				Admission:             historicalReplayAdmission,
 				ReplayResumeAdmission: plan.ReplayResumeAdmission,
 				PendingWork:           plan.PendingWork,
+				SourcePlan:            &fixedPlan,
 			})
 			if err != nil {
 				return result, err

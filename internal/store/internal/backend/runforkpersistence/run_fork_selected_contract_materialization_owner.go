@@ -160,7 +160,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil || sourceFingerprint != req.Preparation.Coordinates.SourceFingerprint {
 			return fmt.Errorf("selected preparation differs from transaction's effective source")
 		}
-		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		if err != nil {
+			return err
+		}
 		forkRunID := requiredForkRunID
 		if mode == runForkSelectedContractMaterialize {
 			forkRunID, err = selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, req.ForkOperation)
