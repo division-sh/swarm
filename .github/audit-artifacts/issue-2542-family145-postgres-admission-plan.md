@@ -2912,3 +2912,46 @@ with the receipts. One bus supplied-pool opening plus its undeclared-child
 diagnostic/read chain remains pending. This closes the whole ancestor witness,
 not the bus/parent class. Existing semantic holds and architecture/watchlist
 tracking remain unwaived; no new framework, issue, push, PR, tier or server2.
+
+## Whole remaining bus refusal, mutation and diagnostic chain
+
+The last supplied-pool bus construction and all its physical readers are retired.
+All three original supplied-pool roots in eventbus_publish_test.go now consume
+native selected construction and existing source-aware lifecycle owners. The
+complete file has no supplied-pool call, raw getter, SQL/DB/transaction carrier
+or raw query; the obsolete testutil import is deleted. Compilation, source,
+initial entry, activation/finalization, real publish and quiescence stay native.
+
+| Canonical owner | Exhaustive changed consumption / precise original contract |
+| --- | --- |
+| Native selected construction, bus and pipeline source/lifecycle owners | Complete undeclared-descendant fixture; original input body, rejection gate, clock, activation and pending-root/no-child-mutation assertions retained. |
+| Closed delivery projection | Exact validate.requested event join, node type, requested node and dead_letter count. Separate global five-column event-left-delivery trace retains flow/status/target defaults and created_at/event_id/subscriber order. Absent subscriber is an explicit detached presence fact; consumer omission mirrors the old NULL-to-string scan refusal, without synthesizing a subscriber or dropping valid rows. |
+| eventrecord | Separate global physical count of the two original child event names, and global four-column event diagnostic with original native payload rendering, NULL defaults and created_at/event_id order. Event bridges stay in test_event_support.go. |
+| entity-runtime | Fixed global physical count of exact child or child-prefix projections, including foreign runs, headerless imports and all states. No execution/readiness predicate is introduced. |
+| Original selected read coordinator | All five original independent read cuts remain separate. Invalid/raw/cancelled/closed ownership and query/scan/iteration/close errors yield no partial rows or counts; diagnostics cannot replace or suppress the original failure verdict. |
+| Finite codemod and whole-family guards | Exact three-root bus scope, complete original behavioral assertions, actual construction/publication/settlement and each physical predicate/column/NULL/order remain source-pinned and hostile-controlled. Whole file rejects restored raw authority. Existing historical inputs remain immutable; corpus330 / recipes1153. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Undeclared descendant output must refuse before child mutation and preserve the pending root | reproduced and fixed: TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutation, original PostgreSQL surface under race PASS6.290s; original dead-letter and zero-mutation assertions preserved |
+| NULL left-join and all fixed counts/diagnostics preserve real global physical evidence | execution-proven through the same corrected path: TestBusRoutingStorageObservationsRefuseForeignCancelledAndClosedOwnersBothStores, both stores under race PASS9.980s; genuine native event/routes, read-only scenario import and native terminalization prove nonzero counts, cross-run inclusion, exact node/status refusal, bare-event presence and precise backend payload bytes, without raw seeds or fabricated leases |
+| Invalid/raw/cancelled/closed owners and empty storage | execution-proven through the same corrected path: same both-store race root exercises every fixed port, with no successful/provisional evidence on refusal |
+| Complete original assertion, construction, lifecycle and query consumption | execution-proven through the same corrected path: all family145/finite/historical/idempotency guards PASS9.065s, including complete bus inventory and every immutable original SQL predicate; AST hostile assertion mutations cannot silently miss function-literal conditions |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/native-bus-undeclared-*.
+Boundary/revision/writer guards PASS3.953s, retirement guards PASS9.190s,
+dry-run Changes=[], affected U1000 clean. The only initial build error was the
+now-unused testutil import; it was removed, not masked. Positive controls use
+existing domain operations, never a raw seed, reconstructed store or fake
+transaction. Wider unchanged overlay/backend receipts carry; no local tier/full.
+
+Ratchet PASS170.620s:9000 ->8980,20 removals,0 additions; confirmed raw-operation
+debt6494 ->6478, excluded uncertainty67 unchanged. Broader collector54751/39047
+includes legitimate owners, not debt. Supplied pools93 ->92 =90 external +2
+private, M0/D55/S37; qualified openings42. Whole three-root bus family now totals
+41 debt removals /31 raw-operation removals and three qualified pool retirements.
+Collector/policy and one-way transitions unchanged; signed-head complexity is
+recorded with the receipts. This closes this whole bus construction/observation
+family, not the parent. Parent/M01/Docker/drain/D3/M07/rollback qualifications
+remain open and unwaived; no process-restart claim or new architecture framework,
+tracking issue, watchlist node, push, PR, tier, budget or server2 use.

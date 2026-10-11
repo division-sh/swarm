@@ -131,6 +131,41 @@ func ReadBusRoutingEventNamesForTest(ctx context.Context, selected any) ([]strin
 	return out, nil
 }
 
+type BusRoutingEventDiagnostic = eventrecord.BusRoutingEventDiagnostic
+
+func CountUndeclaredBusChildEventsForTest(ctx context.Context, selected any) (int, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = eventrecord.CountUndeclaredBusChildEventsTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadBusRoutingEventDiagnosticsForTest(ctx context.Context, selected any) ([]BusRoutingEventDiagnostic, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return nil, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out []BusRoutingEventDiagnostic
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadBusRoutingEventDiagnosticsTx(ctx, tx, postgres)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadChannelFirstActivitySourceRouteForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
 		return nil, err

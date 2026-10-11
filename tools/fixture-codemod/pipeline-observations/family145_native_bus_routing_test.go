@@ -13,8 +13,9 @@ import (
 )
 
 var family145NativeBusRoutingCalls = map[string][]string{
-	"TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects": {"storetest.StartPostgresRuntimeStore(t)", "exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle),", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "workflowStore.PrepareInitialEntryLifecycle(", "CommitFlowInstanceActivation(", "workflowStore.FinalizeInitialEntryLifecycle(", "eb.WaitForQuiescence(ctx)", "storetest.ReadBusRoutingEventNames(context.Background(), pg)", "storetest.ReadBusAncestorDeliveryDiagnostics(context.Background(), pg)"},
-	"TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode":             {"storetest.StartPostgresRuntimeStore(t)", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "seedComponentFlowConstruction(t, ctx, pg, source,", "pg.CommitFlowInstanceActivation(constructionCtx, command)", "pc.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle)", "runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission.CarrierOnly())", "defer runtimebustest.Unsubscribe(eb, agentID)", "delivered.Complete()", "storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), \"account-setup-node-one\")"},
+	"TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutation": {"storetest.StartPostgresRuntimeStore(t)", "exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle),", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "workflowStore.PrepareInitialEntryLifecycle(", "CommitFlowInstanceActivation(", "workflowStore.FinalizeInitialEntryLifecycle(", "eb.WaitForQuiescence(ctx)", "storetest.CountBusValidationDeadLetterNode(ctx, pg, routerNode.Key())", "storetest.CountUndeclaredBusChildEvents(ctx, pg)", "storetest.CountUndeclaredBusChildEntities(ctx, pg)", "storetest.ReadBusRoutingDeliveryDiagnostics(ctx, pg)", "storetest.ReadBusRoutingEventDiagnostics(context.Background(), pg)", "if row.HasSubscriber"},
+	"TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects":  {"storetest.StartPostgresRuntimeStore(t)", "exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle),", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "workflowStore.PrepareInitialEntryLifecycle(", "CommitFlowInstanceActivation(", "workflowStore.FinalizeInitialEntryLifecycle(", "eb.WaitForQuiescence(ctx)", "storetest.ReadBusRoutingEventNames(context.Background(), pg)", "storetest.ReadBusAncestorDeliveryDiagnostics(context.Background(), pg)"},
+	"TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode":              {"storetest.StartPostgresRuntimeStore(t)", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "seedComponentFlowConstruction(t, ctx, pg, source,", "pg.CommitFlowInstanceActivation(constructionCtx, command)", "pc.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle)", "runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission.CarrierOnly())", "defer runtimebustest.Unsubscribe(eb, agentID)", "delivered.Complete()", "storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), \"account-setup-node-one\")"},
 }
 
 func family145NativeBusRoutingProofError(function, before, after string) error {
@@ -65,12 +66,65 @@ func TestFamily145NativeBusRoutingRetainsConstructionPublicationAndNodeExclusion
 		}
 		if row.Function == "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" {
 			assertFamily145NativeBusNodeQuery(t, row.Before)
-		} else {
+		} else if row.Function == "TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects" {
 			assertFamily145BusAncestorQueries(t, row.Before)
+		} else {
+			assertFamily145BusRefusalQueries(t, row.Before)
 		}
 	}
 	if seen != len(family145NativeBusRoutingCalls) {
 		t.Fatalf("finite bus routing inventory incomplete: %d", seen)
+	}
+}
+
+func assertFamily145BusRefusalQueries(t *testing.T, before string) {
+	t.Helper()
+	original := family145ConnectorSQL(t, "package proof\n"+before)
+	for _, owner := range []struct {
+		file, function string
+		index, variant int
+	}{
+		{"delivery/read_projections.go", "CountBusValidationDeadLetterNodeTx", 0, 0},
+		{"delivery/read_projections.go", "ReadBusRoutingDeliveryDiagnosticsTx", 1, 1},
+		{"eventrecord/bus_routing_observation.go", "CountUndeclaredBusChildEventsTx", 2, 0},
+		{"entityruntime/template_storage_observation.go", "CountUndeclaredBusChildEntitiesTx", 3, 0},
+		{"eventrecord/bus_routing_observation.go", "ReadBusRoutingEventDiagnosticsTx", 4, 1},
+	} {
+		path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, data, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != owner.function {
+				continue
+			}
+			found = true
+			queries := family145ConnectorSQL(t, "package proof\n"+family145NodeString(fn))
+			if len(original) != 5 || len(queries) <= owner.variant || queries[owner.variant] != original[owner.index] {
+				t.Fatalf("refusal observation changed scope/columns/NULL/join/order: %s", owner.function)
+			}
+		}
+		if !found {
+			t.Fatalf("refusal original owner is missing: %s", owner.function)
+		}
+	}
+}
+
+func TestFamily145NativeBusWholeSuppliedPoolInventoryIsRetired(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "internal", "runtime", "bus", "eventbus_publish_test.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := family145DescriptorReadinessEscape(data); err != nil {
+		t.Fatal(err)
 	}
 }
 

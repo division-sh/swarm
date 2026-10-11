@@ -26,6 +26,55 @@ type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Sta
 
 type BusAncestorDeliveryDiagnostic struct{ Name, SubscriberID, Status, Target string }
 
+type BusRoutingDeliveryDiagnostic struct {
+	Name, FlowInstance, SubscriberID, Status, Target string
+	HasSubscriber                                    bool
+}
+
+func CountBusValidationDeadLetterNodeTx(ctx context.Context, tx *sql.Tx, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d
+	JOIN events e ON e.event_id = d.event_id
+	WHERE e.event_name = 'validate.requested' AND d.subscriber_type = 'node'
+	AND d.subscriber_id = $1 AND d.status = 'dead_letter'`, node).Scan(&count)
+	return count, err
+}
+
+func ReadBusRoutingDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]BusRoutingDeliveryDiagnostic, error) {
+	query := `SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
+	COALESCE(d.status, ''), COALESCE(CAST(d.delivery_target_route AS TEXT), '')
+	FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+	ORDER BY e.created_at, e.event_id, d.subscriber_id`
+	if postgres {
+		query = `SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
+		COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
+		FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		ORDER BY e.created_at, e.event_id, d.subscriber_id`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BusRoutingDeliveryDiagnostic
+	for rows.Next() {
+		var row BusRoutingDeliveryDiagnostic
+		var subscriber sql.NullString
+		if err := rows.Scan(&row.Name, &row.FlowInstance, &subscriber, &row.Status, &row.Target); err != nil {
+			return nil, err
+		}
+		row.SubscriberID, row.HasSubscriber = subscriber.String, subscriber.Valid
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadBusAncestorDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]BusAncestorDeliveryDiagnostic, error) {
 	query := `SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(CAST(d.delivery_target_route AS TEXT), '')
 	FROM event_deliveries d JOIN events e ON e.event_id = d.event_id

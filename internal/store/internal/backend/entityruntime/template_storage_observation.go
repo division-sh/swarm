@@ -10,6 +10,12 @@ type TemplateAccountIdentityStorage struct{ Path, EntityID string }
 
 type TemplateAccountDiagnosticStorage struct{ EntityID, Path, State, Fields string }
 
+func CountUndeclaredBusChildEntitiesTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE flow_instance = 'child' OR flow_instance LIKE 'child/%'`).Scan(&count)
+	return count, err
+}
+
 func ReadTemplateAccountDiagnosticsTx(ctx context.Context, tx *sql.Tx) (out []TemplateAccountDiagnosticStorage, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(entity_id AS TEXT),flow_instance,current_state,CAST(fields AS TEXT) FROM entity_state WHERE flow_instance LIKE 'account/%' ORDER BY created_at`)
 	if err != nil {
