@@ -7286,11 +7286,16 @@ engine:
           One serving process owns each selected store. Bind the API alive/not-ready probe before waiting for
           the native process lease. PostgreSQL waits on its retained session's advisory lock; SQLite waits on
           the persistent engine-disjoint possession coordinate's flock. Standby is that blocking wait, not a
-          database row, announced waiter, replica classification or takeover protocol. No bootstrap, domain,
-          generation, registration or descriptor write is admitted before possession. The same API listener
+          database row, announced waiter, replica classification or takeover protocol. Ordinary serving standby
+          performs no selected-store bootstrap/domain/generation/registration writes. Final served descriptor and
+          provider publication require serving authority. Existing dev scratch epoch reconciliation and destructive
+          preparation remain separately authorized by the dev epoch owner before serving possession; that dev-only
+          authority neither permits ordinary standby writes nor grants serving permission. The same API listener
           exposes executable endpoints only after process and runtime admission; standby has no runtime grant.
           A successor never steals possession. Stop withdraws intake and drains accepted work under the
-          existing owners; the actual serving process exits no later than its shutdown grace even if a native
+          existing owners. The outer exit owner receives the actual composition stop, including internal listener,
+          runtime and ownership failures as well as external signals; it does not watch only a live CLI parent.
+          The actual serving process exits no later than its shutdown grace even if a native
           wait or internal join remains stuck. Deadline expiry does not acknowledge a join or release a lease
           in a surviving process. SQLite's blocking syscall stays owned and joined; cancellation observed when
           it returns disposes possession without publishing a grant. Process death releases its local flock.
@@ -15481,6 +15486,7 @@ platform_tables:
         - agent_lifecycle_operations
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
+        - runtime_process_generation
         - runtime_startup_authority_facts
         - runtime_startup_authority_repairs
         - runtime_generation_grants
@@ -18135,6 +18141,28 @@ platform_tables:
       status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are
         termination reasons. superseded is represented by successor_session_id IS NOT NULL. Terminated
         rows are historical lineage and are never resurrected into live ownership.'
+    runtime_process_generation:
+      description: >-
+        One current process-generation stamp for the selected store. Native retained advisory-lock/flock
+        possession is required before bootstrap or advancement; this row is not possession, a waiter
+        announcement, process history or selected-execution provenance. Fresh bootstrap inserts exactly
+        singleton_id=1, generation=0 with every identity field NULL in its acknowledged schema transaction.
+        Initialized missing, partial or malformed state fails closed, never reseeds. Generation advances
+        through the existing mutation fence only after possession and before capability publication.
+        Exact same-lease replay preserves generation; conflicting identity fails. No capability is published
+        from an unacknowledged commit. Process release leaves the last stamp intact; actual possession,
+        not a persisted active flag or lower counter, governs current serving permission. Reset preserves it.
+      ddl: |
+        CREATE TABLE runtime_process_generation (
+            singleton_id        INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            generation          BIGINT NOT NULL CHECK (generation >= 0),
+            lease_id            UUID,
+            owner_id            TEXT,
+            boot_id             UUID,
+            runtime_instance_id UUID,
+            backend             TEXT CHECK (backend IN ('postgres_retained_session', 'sqlite_retained_owner')),
+            CHECK ((generation = 0 AND lease_id IS NULL AND owner_id IS NULL AND boot_id IS NULL AND runtime_instance_id IS NULL AND backend IS NULL) OR (generation > 0 AND lease_id IS NOT NULL AND owner_id IS NOT NULL AND boot_id IS NOT NULL AND runtime_instance_id IS NOT NULL AND backend IS NOT NULL))
+        );
     runtime_startup_authority_facts:
       description: >-
         Append-only typed evidence for the one process-composition-owned retained selected-store

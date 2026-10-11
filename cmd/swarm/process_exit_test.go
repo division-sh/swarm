@@ -13,9 +13,9 @@ import (
 
 func TestServingStopDeadlineExitsProcessWithoutFakingJoin(t *testing.T) {
 	if mode := os.Getenv("SWARM_TEST_PROCESS_STOP_MODE"); mode != "" {
-		ctx, cancel := context.WithCancel(context.Background())
-		code := withServingExitDeadline(ctx, 50*time.Millisecond, func() int {
-			cancel()
+		stopped := make(chan struct{})
+		code := withServingExitDeadline(stopped, 50*time.Millisecond, func() int {
+			close(stopped)
 			fmt.Println("draining")
 			if mode == "stuck" {
 				select {}
