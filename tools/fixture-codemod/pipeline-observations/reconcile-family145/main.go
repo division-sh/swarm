@@ -175,19 +175,23 @@ func main() {
 	}
 }
 
+var renamedHelpers = map[string]map[string]string{
+	"internal/runtime/template_instance_delivery_test.go": {
+		"waitRuntimeDBCount":   "waitRuntimeStorageCount",
+		"waitRuntimeEventID":   "waitRuntimeStoredEventID",
+		"assertRuntimeDBCount": "assertRuntimeStorageCount",
+	},
+	"internal/runtime/artifact_action_result_delivery_test.go": {
+		"waitArtifactActionResultDBCount": "waitArtifactActionResultSettledCount",
+	},
+}
+
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
 	if replacement := after[key]; replacement != "" {
 		return replacement, false
 	}
-	if path == "internal/runtime/template_instance_delivery_test.go" {
-		for previous, successor := range map[string]string{"waitRuntimeDBCount": "waitRuntimeStorageCount", "waitRuntimeEventID": "waitRuntimeStoredEventID", "assertRuntimeDBCount": "assertRuntimeStorageCount"} {
-			if key == previous && after[successor] != "" {
-				return after[successor], false
-			}
-		}
-	}
-	if path == "internal/runtime/artifact_action_result_delivery_test.go" && key == "waitArtifactActionResultDBCount" && after["waitArtifactActionResultSettledCount"] != "" {
-		return after["waitArtifactActionResultSettledCount"], false
+	if replacement := after[renamedHelpers[path][key]]; replacement != "" {
+		return replacement, false
 	}
 	if path == "internal/runtime/runforkadmission/revision_source_route_test.go" && key == "captureRunForkRevision" {
 		return "", true

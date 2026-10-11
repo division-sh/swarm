@@ -3000,7 +3000,11 @@ Ratchet PASS287.550s:8980 ->8944,36 removals,0 additions; confirmed raw-operatio
 debt6478 ->6450, excluded uncertainty67 unchanged. Broader collector54751/39048
 includes legitimate owners and is not debt. Supplied pools92 ->90 =88 external
 +2 private, M0/D53/S37; cumulative qualified openings44. Collector, policy and
-one-way transitions unchanged. Signed-head complexity is recorded with receipts.
+one-way transitions unchanged. Signed-head complexity caught the added exact
+rename branch reaching cognitive30; replacing repeated path/name branches with
+one finite path/name table preserves the inspected corpus/digest and removes
+that new hotspot. The repaired signed-head check is recorded with receipts;
+storage, original query and lifecycle receipts are unchanged and carry.
 This closes the complete callback dependency, not the parent class or process
 restart qualification. Existing watchlist/architecture disposition remains
 original owners and narrow detached evidence; parent and M01/Docker/drain/D3/
