@@ -51,7 +51,7 @@ func TestVerifyRunRequiredBackendEvidenceFailsClosed(t *testing.T) {
 			if len(proof.Children) == 0 {
 				t.Fatal("backend obligations are empty")
 			}
-			unit := testplanning.ProofUnit{RequiredTests: []testplanning.RequiredTest{proof}, TestBearingPackages: []string{proof.Package}}
+			unit := testplanning.ProofUnit{SelectedRoots: []testplanning.TestRoot{proof.TestRoot}, RequiredTests: []testplanning.RequiredTest{proof}, TestBearingPackages: []string{proof.Package}}
 			report := Report{Tests: []TestTiming{{Package: proof.Package, Test: proof.Name, Result: "pass"}}}
 			postgres := -1
 			for _, child := range proof.Children {

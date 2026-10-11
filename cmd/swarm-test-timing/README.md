@@ -119,7 +119,9 @@ effective compiler identity remains a separate proof-validity obligation.
 
 Current plan and receipt build/environment/count identity must match exactly.
 Pure pre-bind plans remain valid planning outputs, but command evidence requires
-a complete bound current build context and selected-root validation. Successful
+a complete bound current build context and nonempty selected/required roots in
+every executable unit, with exact classification/package/child binding and no
+duplicate execution cells. Receipt roots outside that manifest refuse. Successful
 package receipts alone cannot qualify an unbound plan or gain timing credit.
 A valid current build or scope need not match the historical reference: divergence
 is an advisory warning, not `INCOMPLETE`. Changed build contexts and new scope

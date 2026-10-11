@@ -221,10 +221,7 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 // ValidateCommandIdentity admits provenance/selection independently of success.
 // Failed or incomplete execution may be observed, but never earns proof credit.
 func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan) []string {
-	var problems []string
-	if plan.BuildContext.GOOS == "" || plan.BuildContext.GOARCH == "" || plan.BuildContext.CGOEnabled == "" {
-		problems = append(problems, "command evidence requires a bound plan with a complete current Go build context")
-	}
+	problems := commandPlanProblems(plan)
 	if evidence.WorkflowRunID <= 0 || evidence.WorkflowAttempt <= 0 {
 		problems = append(problems, "workflow run ID and attempt must be positive")
 	}
@@ -312,7 +309,7 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 }
 
 func requiredExecutionProblems(unit testplanning.ProofUnit, report Report) []string {
-	var problems []string
+	problems := reportSelectionProblems(unit, report)
 	actual := make(map[string]string, len(report.Tests))
 	for _, test := range report.Tests {
 		actual[test.Package+"\x00"+test.Test] = test.Result
