@@ -131,9 +131,6 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance(), EntityID: entityID}),
 				}
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-				if selectedFork {
-					event = eventtest.TargetRouted(event, route.Target.Route())
-				}
 				req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
 				if !selectedFork {
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
@@ -167,6 +164,9 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					actor := route.Target.Route()
 					actor.EntityID = ""
 					route.Target = events.MustEntitylessReceiverTarget(actor)
+				}
+				if selectedFork {
+					event = eventtest.TargetRouted(event, route.Target.Route())
 				}
 				authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
 				if selectedFork {
