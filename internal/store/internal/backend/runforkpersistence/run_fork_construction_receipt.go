@@ -92,10 +92,11 @@ func projectRunForkConstructionContext(plan runfork.RunForkPlan, forkRunID strin
 	}
 	child := events.DeliveryContext{Joins: append([]events.JoinAdmissionReceipt(nil), source.Joins...)}
 	if source.Reply != nil {
-		if err := requireConstructionReplyAtCut(plan, source.Reply.ID); err != nil {
+		id, err := projectRunForkReplyReference(plan.SourceRunID, forkRunID, plan.ReplyContexts, source.Reply.ID)
+		if err != nil {
 			return events.DeliveryContext{}, err
 		}
-		child.Reply = &events.ReplyContextRef{ID: deterministicRunForkReplyContextID(forkRunID, source.Reply.ID)}
+		child.Reply = &events.ReplyContextRef{ID: id}
 	}
 	for index, receipt := range source.Joins {
 		if receipt.Disposition == events.JoinAdmissionEarly {
@@ -108,23 +109,6 @@ func projectRunForkConstructionContext(plan runfork.RunForkPlan, forkRunID strin
 		}
 	}
 	return child, child.Validate()
-}
-
-func requireConstructionReplyAtCut(plan runfork.RunForkPlan, replyID string) error {
-	found := false
-	for _, record := range plan.ReplyContexts {
-		if record.ID != replyID {
-			continue
-		}
-		if found || record.RunID != plan.SourceRunID || record.Validate() != nil {
-			return fmt.Errorf("construction occurrence has contradictory reply evidence")
-		}
-		found = true
-	}
-	if !found {
-		return fmt.Errorf("construction occurrence has no fixed-cut reply evidence")
-	}
-	return nil
 }
 
 func projectConstructionReturnAtCut(plan runfork.RunForkPlan, forkRunID string, ref timeridentity.JoinRef) (timeridentity.JoinRef, error) {

@@ -983,7 +983,13 @@ contract_formats:
         Repeated recorded-result materialization confirms the complete child
         attempt against the projected source evidence: exact owner and request
         coordinates, generation, status and execution mode, result identity and
-        payload, failure, input hash, detached reply authority and copied times.
+        payload, failure, input hash, exact child reply reference and copied times.
+        Recorded activity reuse retains the journal's captured incoming reply reference,
+        projected through the immediate cut's complete context inventory into the child's
+        own row. The same reference is read back on repeat and restored by ordinary
+        journaled-result publication. Missing, foreign or contradictory captured reply
+        evidence fails closed; a projected reference never reopens a terminal context or
+        grants execution authority.
         Matching request/result IDs alone do not establish agreement. Conflicting
         evidence fails without overwriting the row or appending a lifecycle story;
         an unchanged repeat is a no-op. JSON evidence uses the canonical semantic

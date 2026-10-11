@@ -20,6 +20,31 @@ type runForkReplyContextOwner interface {
 	LoadWithinTransaction(context.Context, *sql.Tx, string) (replycontext.Record, error)
 }
 
+// Only an exact captured row can name a child continuation. The reference is
+// projection evidence, not permission to reply or execute against that row.
+func projectRunForkReplyReference(sourceRunID, childRunID string, captured []replycontext.Record, replyID string) (string, error) {
+	if replyID == "" {
+		return "", nil
+	}
+	if sourceRunID == "" || childRunID == "" || sourceRunID == childRunID {
+		return "", fmt.Errorf("reply carrier requires distinct captured source and child ownership")
+	}
+	found := false
+	for _, record := range captured {
+		if record.ID != replyID {
+			continue
+		}
+		if found || record.RunID != sourceRunID || validateRunForkReplyCanonicalRecord(record) != nil {
+			return "", fmt.Errorf("reply carrier has contradictory captured reply evidence")
+		}
+		found = true
+	}
+	if !found {
+		return "", fmt.Errorf("reply carrier has no fixed-cut reply evidence")
+	}
+	return deterministicRunForkReplyContextID(childRunID, replyID), nil
+}
+
 // Reply authority is projected from the captured semantic record. In particular,
 // old return entries and carried correlation are not selected again at child birth.
 func projectRunForkReplyContext(plan runfork.RunForkPlan, childRunID string, source replycontext.Record) (replycontext.Record, error) {

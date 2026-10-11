@@ -144,6 +144,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 					return err
 				}
+				if _, err := requireMaterializedRunForkReplyContexts(ctx, tx, s.replies, plan, forkRunID, true, plan.ReplayResumeAdmission); err != nil {
+					return err
+				}
 				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 				if err != nil {
 					return err
@@ -188,6 +191,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 
 			forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 			if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
+				return err
+			}
+			if _, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, true, plan.ReplayResumeAdmission); err != nil {
 				return err
 			}
 			for _, entity := range plan.Entities {
@@ -321,6 +327,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				if err := requireExactSQLiteRunForkScenarioProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 					return err
 				}
+				if _, err := requireMaterializedRunForkReplyContexts(txctx, tx, s.replies, plan, forkRunID, false, plan.ReplayResumeAdmission); err != nil {
+					return err
+				}
 				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 				if err != nil {
 					return err
@@ -364,6 +373,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			}
 			forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
 			if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
+				return err
+			}
+			if _, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, false, plan.ReplayResumeAdmission); err != nil {
 				return err
 			}
 			for _, entity := range plan.Entities {
