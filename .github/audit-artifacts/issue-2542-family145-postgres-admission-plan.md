@@ -1710,3 +1710,58 @@ closure. Existing watchlist mapping/architecture disposition stand; prefer
 existing native construction and closed physical/revision owners, no framework,
 legacy compatibility, getter substitute or automatic tier. M01/Docker remain
 qualification-open in #2353. No push, PR, server2 or integrated qualification.
+
+## Component runtime-authority construction cohort
+
+The complete selectedContractTestRuntimeAuthority family (two original callers)
+no longer borrows a pool, constructs its fork/binding independently or supplies
+fabricated fingerprint values. The original selected semantic event owner
+persists the same external selected-proof producer, selected.proof event, empty
+payload and global envelope. After actual source revision capture, the existing
+MaterializeRunFork owner creates the paused fork and binding together. Agent
+records and topology consume that returned fork ID rather than an unrelated
+random ID. These identities were incidental setup, not authored proof constants.
+
+The runtime fixture retains preparation and genuinely issued/claimed execution.
+The existing fingerprint owner hashes the actual component materialization,
+records and config. This is a component input fingerprint, not a fabricated
+full runtime-container convergence proof. The missing semantic source remains
+missing for the registration-failure caller, and still reaches its exact original
+derived-prompt refusal. All original failure, grant retention, retry, cancellation
+and environment assertions remain byte-for-byte in the finite caller comparison.
+Both ordinary PostgreSQL constructors now open through StartPostgresRuntimeStore.
+No new binding writer, SQL allowance, callback, generic fixture facade or raw getter
+is added. Native binding normalization and clocks remain with the materializer.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Independent component event/run/binding setup and fake fingerprints | reproduced and fixed | Native materialization/readback and exact input-fingerprint proof; finite helper/caller snapshots; hostile foreign-fork/records/config/claim/preparation guards |
+| Post-adoption grant retirement retention | execution-proven through the same corrected path | TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption under race; same initiating cancellation, injected retirement error, retained runtime, unreleased grant and successful Close retry |
+| Registration failure and gateway cleanup | execution-proven through the same corrected path | TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure under race; exact missing-semantic-source error, same failed-cleanup grant retention, successful owner retry and unchanged ambient URLs |
+| Native durable binding and component input readback | execution-proven through the same corrected path | TestSelectedComponentRuntimeAuthorityUsesAdmittedInputs under race checks the complete native binding plus claimed source/fork/point and all three fingerprints; TestSelectedBindingPersistsDisjointForkPointsBothStores under race checks existing binding owner on both stores |
+
+Vemew: original two roots GREEN8.837s. New readback initially RED6.931s only
+because the test tried to close a running execution; repaired to quiesce then
+close through the existing lifecycle owner, GREEN7.870s. Real helper mutation
+hashing only sourceRunID instead of the full materialization is RED6.658s at the
+exact container-input assertion, with normal cleanup. Restore GREEN9.503s;
+both-backend native binding root GREEN9.462s. Cheap family145/historical/finite/
+successor/native-run-setup set GREEN17.394s. An earlier guard receipt was RED
+while the deliberate fingerprint mutant was still installed; the final restored
+source is green. No receipt is relabeled, and no timeout/retry/assertion is weakened.
+
+Receipts under ~/.cache/swarm-2542-family145/component-authority-*:
+original roots SHA2563485b24e55eac13db2af152a207a0b16d54af62671cb4f34163d6431eb871a23;
+real mutant776e5fba27457413e30b9142626c67ecb7504e32e65e8a4a72f0c39f36650b8b;
+restored control/binding688e17deec094453b9cc3695db0a0ae886b47d6e2eddee471e48e4d94b33cd58;
+final guards7875ab7b81d3e5d23167ed9a60e9cfc6385b6817bdfe0c3843d0ef7ef4caa1c4.
+
+Corpus1055/199 transitions, digest
+5bf1ab93883e4baf3129eea5187aa888d6ecb3218020fa4cedee02cb125db08a.
+Original893 tuples/24 receipts remain unchanged. Codemod Changes=[], affected
+U1000 clean; committed-head complexity is checked separately. Named admissions
+128 ->126 (127 excluding unqualified Docker). No fresh global census/ratchet or
+zero-additions claim. Other same-class helpers remain explicit #2542/#2151 debt;
+M01/Docker remain qualification-open in #2353. Existing watchlist/architecture
+disposition stands, with native owners rather than another framework. No push,
+PR, server2, tier run or parent-closure claim.
