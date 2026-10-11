@@ -24,6 +24,9 @@ packs:
   - id: provider.typeform
     type: trigger
     path: provider-triggers/typeform
+  - id: provider.whatsapp
+    type: trigger
+    path: provider-triggers/whatsapp
   - id: provider.github.connector
     type: connector
     path: provider-connectors/github
@@ -39,6 +42,12 @@ packs:
   - id: provider.telegram.connector
     type: connector
     path: provider-connectors/telegram
+  - id: provider.whatsapp.connector
+    type: connector
+    path: provider-connectors/whatsapp
   - id: provider.telegram.hitl_channel
     type: channel
     path: channels/telegram
+  - id: provider.whatsapp.hitl_channel
+    type: channel
+    path: channels/whatsapp

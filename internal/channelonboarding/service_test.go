@@ -1975,6 +1975,10 @@ type cancellationTestStore struct {
 	events             *[]string
 }
 
+func (s *cancellationTestStore) SessionStandingBindingCurrent(context.Context, Operation) (bool, error) {
+	return false, errors.New("webhook fixture cannot admit a session standing binding")
+}
+
 func (s *cancellationTestStore) observe(ctx context.Context) {
 	if ctx.Err() != nil {
 		s.sawCanceledContext = true
@@ -1992,6 +1996,7 @@ func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, re
 		Interface: req.Interface, Coordinate: req.Coordinate, TargetSelector: req.TargetSelector,
 		Posture: req.Posture, Ceremony: req.Ceremony, Phase: PhasePreparing, Revision: 1,
 		SaveProof: req.SaveProof, ClientLanguage: req.ClientLanguage, ClientLocaleRevision: 1,
+		ConnectFenceRevision:   req.ConnectFenceRevision,
 		CredentialReservations: append([]CredentialReservation(nil), req.CredentialReservations...),
 		RequestedAt:            req.RequestedAt, UpdatedAt: req.RequestedAt,
 	}
@@ -2004,10 +2009,15 @@ func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, re
 
 func (s *cancellationTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {
 	s.observe(ctx)
-	if s.op.OperationID != operationID {
-		return Operation{}, ErrNotFound
+	if s.op.OperationID == operationID {
+		return s.op, nil
 	}
-	return s.op, nil
+	for _, operation := range s.history {
+		if operation.OperationID == operationID {
+			return operation, nil
+		}
+	}
+	return Operation{}, ErrNotFound
 }
 
 func (s *cancellationTestStore) SetChannelClientLocale(ctx context.Context, req SetClientLocaleRequest) (Operation, error) {
@@ -2196,6 +2206,11 @@ func (s *cancellationTestStore) CompleteChannelTeardown(ctx context.Context, _ C
 	return TeardownOperation{}, ErrNotFound
 }
 
+func (s *cancellationTestStore) RecoverUnlaunchedChannelLogout(ctx context.Context, _ string, _ int64, _ time.Time) (TeardownOperation, error) {
+	s.observe(ctx)
+	return TeardownOperation{}, ErrNotFound
+}
+
 type cancellationTestIdentities struct {
 	operation             operatorchannel.Operation
 	binding               operatorchannel.Binding
@@ -2319,6 +2334,26 @@ func (i *cancellationTestIdentities) CurrentBinding(ctx context.Context, _ opera
 		return i.binding, i.bindingErr
 	}
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+
+func (i *cancellationTestIdentities) RetainedCurrentBinding(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+	binding, err := i.CurrentBinding(ctx, identity)
+	if errors.Is(err, operatorchannel.ErrCredentialStale) {
+		return binding, nil
+	}
+	return binding, err
+}
+
+func (i *cancellationTestIdentities) RetainedBindingFence(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.BindingFence, error) {
+	if i.binding.Status == operatorchannel.BindingUnbound {
+		i.observe(ctx)
+		return operatorchannel.BindingFence{Revision: i.binding.Revision}, i.bindingErr
+	}
+	binding, err := i.RetainedCurrentBinding(ctx, identity)
+	if errors.Is(err, operatorchannel.ErrNotFound) {
+		return operatorchannel.BindingFence{}, nil
+	}
+	return operatorchannel.BindingFence{Revision: binding.Revision, CurrentIdentity: binding}, err
 }
 
 func (i *cancellationTestIdentities) CurrentBindingReadiness(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
@@ -2491,6 +2526,10 @@ type readbackTestStore struct {
 	*cancellationTestStore
 	operations  []Operation
 	activations []ConnectedChannelActivation
+}
+
+func (s *readbackTestStore) SessionStandingBindingCurrent(context.Context, Operation) (bool, error) {
+	return false, errors.New("readback fixture cannot admit a session standing binding")
 }
 
 func (s *readbackTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {

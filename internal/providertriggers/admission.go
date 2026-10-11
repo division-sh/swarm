@@ -1,6 +1,8 @@
 package providertriggers
 
 import (
+	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,9 +15,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 type AdmissionKind string
@@ -40,6 +44,7 @@ const (
 	RequestAuthenticationHMACSHA256    RequestAuthentication = "HMAC_SHA256"
 	RequestAuthenticationHMACSHA1      RequestAuthentication = "HMAC_SHA1"
 	RequestAuthenticationNone          RequestAuthentication = "UNAUTHENTICATED"
+	RequestAuthenticationSession       RequestAuthentication = "SESSION_ACCOUNT"
 )
 
 const UnsignedWebhookAcknowledgement = "unsigned_webhook"
@@ -83,6 +88,7 @@ type RawAdmissionPolicy struct {
 
 type InboundAdmissionPlan struct {
 	generation            triggergeneration.Generation
+	transport             packs.ChannelTransport
 	provider              string
 	policySource          PolicySource
 	requestAuthentication RequestAuthentication
@@ -97,18 +103,49 @@ type InboundAdmissionPlan struct {
 // AdmittedRequest is the authenticated, retry-stable request identity. Its
 // private projection state can only be consumed by the plan that admitted it.
 type AdmittedRequest struct {
-	ProviderEventID           string
-	ProviderEventType         string
-	SemanticContentDigest     string
-	Response                  *Response
-	AcknowledgeBeforeDispatch bool
+	semanticContentDigest   string
+	projectionContentDigest string
+	generation              triggergeneration.Generation
+	provider                string
+	manifestOwner           *Manifest
+	rawOwner                *RawAdmissionPolicy
+	manifestAdmission       *manifestAdmission
+	rawAdmission            *rawRequestAdmission
+	sessionInput            *nativeinput.Admission
+}
 
-	generation        triggergeneration.Generation
-	provider          string
-	manifestOwner     *Manifest
-	rawOwner          *RawAdmissionPolicy
-	manifestAdmission *manifestAdmission
-	rawAdmission      *rawRequestAdmission
+func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
+
+func (a AdmittedRequest) ProviderEventID() string {
+	if a.manifestAdmission != nil {
+		return a.manifestAdmission.deliveryID
+	}
+	if a.rawAdmission != nil {
+		return a.rawAdmission.deliveryID
+	}
+	return ""
+}
+
+func (a AdmittedRequest) ProviderEventType() string {
+	if a.manifestAdmission != nil {
+		return a.manifestAdmission.eventType
+	}
+	if a.rawAdmission != nil {
+		return a.rawAdmission.eventType
+	}
+	return ""
+}
+
+func (a AdmittedRequest) Response() *Response {
+	if a.manifestAdmission == nil {
+		return nil
+	}
+	return cloneAdmissionResponse(a.manifestAdmission.response)
+}
+
+func (a AdmittedRequest) AcknowledgeBeforeDispatch() bool {
+	return a.manifestOwner != nil && a.manifestOwner.value != nil &&
+		a.manifestOwner.value.definition.Ack.Mode == "durable_before_dispatch"
 }
 
 type rawRequestAdmission struct {
@@ -178,10 +215,16 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		return InboundAdmissionPlan{}, err
 	}
 	ack := strings.TrimSpace(declaration.Acknowledge)
-	if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
-		return InboundAdmissionPlan{}, err
+	if auth == RequestAuthenticationSession {
+		if signingSecret != "" || ack != "" {
+			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret and webhook acknowledgement", alias, provider)
+		}
+	} else {
+		if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
+			return InboundAdmissionPlan{}, err
+		}
 	}
-	requiresSecret := auth != RequestAuthenticationNone
+	requiresSecret := auth != RequestAuthenticationNone && auth != RequestAuthenticationSession
 	if requiresSecret && signingSecret == "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q requires signing_secret for %s request authentication", alias, provider, auth)
 	}
@@ -192,6 +235,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	identity := entry.identity
 	return InboundAdmissionPlan{
 		generation: s.Generation(), provider: provider, policySource: PolicySourceVerifiedPack,
+		transport:             manifest.Transport(),
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
 		requiresSecret: requiresSecret, outputs: manifest.OutputManifest(),
 		acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
@@ -228,6 +272,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	}
 	return InboundAdmissionPlan{
 		generation: generation, provider: provider, policySource: PolicySourceRawDeclaration,
+		transport:             packs.ChannelTransportWebhook,
 		requestAuthentication: auth, raw: &policy, requiresSecret: requiresSecret,
 		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
@@ -244,6 +289,9 @@ func hasRawFields(declaration AdmissionDeclaration) bool {
 func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, error) {
 	if err := manifest.Validate(); err != nil {
 		return "", err
+	}
+	if manifest.Transport() == packs.ChannelTransportSession {
+		return RequestAuthenticationSession, nil
 	}
 	switch manifest.value.definition.Signature.Type {
 	case signatureTypeTokenEquality:
@@ -340,14 +388,17 @@ func compileRawPolicy(alias, provider string, declaration AdmissionDeclaration) 
 }
 
 func (p InboundAdmissionPlan) Valid() bool {
-	return p.provider != "" && p.generation.Valid() && (p.manifest != nil || p.raw != nil)
+	return p.provider != "" && p.generation.Valid() &&
+		(p.Transport() == packs.ChannelTransportWebhook || p.Transport() == packs.ChannelTransportSession) &&
+		(p.manifest != nil || p.raw != nil)
 }
 
 func (p InboundAdmissionPlan) Generation() triggergeneration.Generation {
 	return p.generation
 }
-func (p InboundAdmissionPlan) Provider() string           { return p.provider }
-func (p InboundAdmissionPlan) PolicySource() PolicySource { return p.policySource }
+func (p InboundAdmissionPlan) Transport() packs.ChannelTransport { return p.transport }
+func (p InboundAdmissionPlan) Provider() string                  { return p.provider }
+func (p InboundAdmissionPlan) PolicySource() PolicySource        { return p.policySource }
 func (p InboundAdmissionPlan) RequestAuthentication() RequestAuthentication {
 	return p.requestAuthentication
 }
@@ -423,6 +474,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	provenance := "project"
 	admission := &packs.TriggerAdmission{
 		BundleHash: bundleHash, FlowPath: req.FlowPath, Alias: alias, CatalogGeneration: p.generation.Diagnostic(),
+		Transport:    p.transport,
 		PolicySource: string(p.policySource), RequestAuthentication: string(p.requestAuthentication), Event: eventName,
 	}
 	if p.manifest != nil {
@@ -430,7 +482,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 		provenance = p.packIdentity.Source().Provenance()
 		admission.SignedPayload = p.manifest.value.definition.Signature.SignedPayload
 		admission.DigestEncoding = p.manifest.value.definition.Signature.digestEncoding()
-		if p.manifest.value.definition.Signature.Type == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone {
+		if p.manifest.value.definition.Signature.Type == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone || p.Transport() == packs.ChannelTransportSession {
 			admission.DigestEncoding = ""
 		}
 		admission.Pack = &packs.TriggerPackIdentity{
@@ -441,13 +493,18 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 		admission.SignedPayload = "raw_body"
 		admission.DigestEncoding = p.raw.Authentication.Encoding
 	}
+	receive := packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + p.provider}
+	if p.Transport() == packs.ChannelTransportSession {
+		receive = packs.Capability{Code: packs.CapabilityReceiveSessionEvents, Target: p.provider}
+		admission.BindingEnabled = new(bool)
+	}
 	subject := packs.Subject{
 		ID:   id,
 		Kind: packs.SubjectProviderTrigger, Provider: p.provider, Source: source,
 		Provenance: provenance, SourcePath: strings.TrimSpace(req.SourcePath), Applicability: "effective",
 		TriggerAdmission: admission,
 		Capabilities: []packs.Capability{
-			{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + p.provider},
+			receive,
 			{Code: packs.CapabilityEmitEvent, Target: eventName},
 			{Code: packs.CapabilityPersistDedupeMarkers},
 		},
@@ -502,6 +559,9 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 	if !p.Valid() {
 		return AdmittedRequest{}, badRequest("compiled inbound admission plan is required")
 	}
+	if p.Transport() != packs.ChannelTransportWebhook {
+		return AdmittedRequest{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")
+	}
 	provider := NormalizeProviderName(req.Provider)
 	if provider == "" {
 		provider = p.provider
@@ -518,27 +578,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		if err != nil {
 			return AdmittedRequest{}, err
 		}
-		if p.packIdentity == nil {
-			return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
-		}
-		admitted := AdmittedRequest{
-			ProviderEventID: manifestAdmission.deliveryID, ProviderEventType: manifestAdmission.eventType,
-			Response:                  manifestAdmission.response,
-			AcknowledgeBeforeDispatch: p.manifest.value.definition.Ack.Mode == "durable_before_dispatch",
-			generation:                p.generation, provider: p.provider, manifestOwner: p.manifest,
-			manifestAdmission: &manifestAdmission,
-		}
-		if admitted.Response == nil {
-			semanticContent := req.Payload
-			if p.manifest.value.definition.PayloadSource == "form" {
-				semanticContent = formValuesPayload(req.Form)
-			}
-			admitted.SemanticContentDigest, err = semanticContentDigest(semanticContent)
-			if err != nil {
-				return AdmittedRequest{}, err
-			}
-		}
-		return admitted, nil
+		return p.admitManifestProjection(req, manifestAdmission)
 	}
 	rawAdmission, err := p.admitExplicitRaw(req)
 	if err != nil {
@@ -549,10 +589,59 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		return AdmittedRequest{}, err
 	}
 	return AdmittedRequest{
-		ProviderEventID: rawAdmission.deliveryID, ProviderEventType: rawAdmission.eventType,
-		SemanticContentDigest: digest, generation: p.generation, provider: p.provider,
+		semanticContentDigest: digest, generation: p.generation, provider: p.provider,
 		rawOwner: p.raw, rawAdmission: &rawAdmission,
 	}, nil
+}
+
+// AdmitSessionInput consumes an owner-issued native input, not caller payload,
+// a session descriptor, or a connected flag. HTTP authentication stays separate.
+func (p InboundAdmissionPlan) AdmitSessionInput(ctx context.Context, input nativeinput.Admission) (AdmittedRequest, error) {
+	if !p.Valid() || p.Transport() != packs.ChannelTransportSession || p.manifest == nil {
+		return AdmittedRequest{}, unauthorized("compiled session admission plan is required")
+	}
+	if err := input.Validate(ctx, p.provider, p.generation); err != nil {
+		return AdmittedRequest{}, err
+	}
+	body := input.Body()
+	var payload any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		return AdmittedRequest{}, err
+	}
+	req := Request{Provider: p.provider, Payload: payload, Body: body, Received: input.ReceivedAt()}
+	manifestAdmission, err := p.manifest.value.definition.admitAuthenticatedPayload(req)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted, err := p.admitManifestProjection(req, manifestAdmission)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted.sessionInput = &input
+	return admitted, nil
+}
+
+func (p InboundAdmissionPlan) admitManifestProjection(req Request, original manifestAdmission) (AdmittedRequest, error) {
+	if p.packIdentity == nil {
+		return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
+	}
+	admitted := AdmittedRequest{generation: p.generation, provider: p.provider, manifestOwner: p.manifest, manifestAdmission: &original}
+	if original.response != nil {
+		return admitted, nil
+	}
+	digest, err := semanticContentDigest(req.Payload)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted.projectionContentDigest, admitted.semanticContentDigest = digest, digest
+	if p.manifest.value.definition.PayloadSource == "form" {
+		// Form owns retry identity; Payload independently owns normalization.
+		admitted.semanticContentDigest, err = semanticContentDigest(formValuesPayload(req.Form))
+		if err != nil {
+			return AdmittedRequest{}, err
+		}
+	}
+	return admitted, nil
 }
 
 // ProjectDelivery constructs the raw and optional normalized executable
@@ -561,13 +650,10 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 	if !admitted.generation.Equal(p.generation) || admitted.provider != p.provider {
 		return Delivery{}, badRequest("admitted request belongs to a different compiled admission plan")
 	}
-	if admitted.Response != nil {
-		return Delivery{Response: admitted.Response}, nil
+	if err := p.validateProjectionEvidence(admitted); err != nil {
+		return Delivery{}, err
 	}
 	if p.manifest != nil {
-		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {
-			return Delivery{}, badRequest("admitted request does not belong to the compiled pack admission plan")
-		}
 		delivery, err := p.manifest.projectAdmission(*admitted.manifestAdmission)
 		if err != nil {
 			var normalizationErr NormalizationError
@@ -576,6 +662,7 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			}
 			return Delivery{}, err
 		}
+		delivery.Response = cloneAdmissionResponse(delivery.Response)
 		for index := range delivery.Events {
 			if delivery.Events[index].Kind != OutputKindNormalized {
 				continue
@@ -595,9 +682,6 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 		}
 		return delivery, nil
 	}
-	if admitted.rawOwner != p.raw || admitted.rawAdmission == nil {
-		return Delivery{}, badRequest("admitted request does not belong to the compiled raw admission plan")
-	}
 	raw := admitted.rawAdmission
 	return Delivery{
 		ProviderEventID: raw.deliveryID, ProviderEventType: raw.eventType,
@@ -606,6 +690,66 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			"provider_event_type": raw.eventType, "data": raw.payload,
 		}}},
 	}, nil
+}
+
+func (p InboundAdmissionPlan) validateProjectionEvidence(admitted AdmittedRequest) error {
+	if p.Transport() == packs.ChannelTransportSession {
+		if admitted.sessionInput == nil {
+			return unauthorized("session projection requires its owner-issued input admission")
+		}
+		if err := admitted.sessionInput.Validate(admitted.sessionInput.Context(), p.provider, p.generation); err != nil {
+			return err
+		}
+	} else if admitted.sessionInput != nil {
+		return unauthorized("webhook projection cannot consume session authority")
+	}
+	var payload any
+	if p.manifest != nil {
+		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {
+			return badRequest("admitted request does not belong to the compiled pack admission plan")
+		}
+		original := admitted.manifestAdmission
+		if original.response != nil {
+			if admitted.semanticContentDigest != "" || admitted.projectionContentDigest != "" {
+				return badRequest("admitted challenge carries semantic delivery content")
+			}
+			return nil
+		}
+		payload = original.request.Payload
+		projectionDigest, err := semanticContentDigest(payload)
+		if err != nil {
+			return err
+		}
+		if projectionDigest != admitted.projectionContentDigest {
+			return badRequest("admitted request projection content changed")
+		}
+		if p.manifest.value.definition.PayloadSource == "form" {
+			payload = formValuesPayload(original.request.Form)
+		}
+	} else {
+		if p.raw == nil || admitted.rawOwner != p.raw || admitted.rawAdmission == nil {
+			return badRequest("admitted request does not belong to the compiled raw admission plan")
+		}
+		original := admitted.rawAdmission
+		payload = original.payload
+	}
+	digest, err := semanticContentDigest(payload)
+	if err != nil {
+		return err
+	}
+	if digest != admitted.semanticContentDigest {
+		return badRequest("admitted request semantic content changed")
+	}
+	return nil
+}
+
+func cloneAdmissionResponse(response *Response) *Response {
+	if response == nil {
+		return nil
+	}
+	copy := *response
+	copy.Body = bytes.Clone(response.Body)
+	return &copy
 }
 
 func (p InboundAdmissionPlan) admitExplicitRaw(req Request) (rawRequestAdmission, error) {

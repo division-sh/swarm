@@ -73,17 +73,27 @@ func (s *Service) ReplaceInterfaces(admittedInterfaces []InterfaceIdentity) erro
 	return nil
 }
 
-func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Binding, error) {
+// PreparePrincipal establishes local human authority without admitting retained
+// provider proofs. Native sessions must be restored before Bootstrap uses them.
+func (s *Service) PreparePrincipal(ctx context.Context, now time.Time) (Principal, error) {
 	if s == nil {
-		return Principal{}, nil, fmt.Errorf("operator channel service is required")
+		return Principal{}, fmt.Errorf("operator channel service is required")
 	}
 	principal, err := s.store.EnsureOperatorPrincipal(ctx, now)
 	if err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
 	s.mu.Lock()
 	s.principal = principal
 	s.mu.Unlock()
+	return principal, nil
+}
+
+func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Binding, error) {
+	principal, err := s.PreparePrincipal(ctx, now)
+	if err != nil {
+		return Principal{}, nil, err
+	}
 	if err := s.RecoverProofResponsibilities(ctx, now); err != nil {
 		return Principal{}, nil, err
 	}
@@ -107,14 +117,22 @@ func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Bi
 		if !ok {
 			continue
 		}
-		current, err := proof.ProviderAuthority.Current(ctx, s.credentials)
+		admitted, current, err := proof.ProviderAuthority.AdmitExecution(ctx, s.credentials)
 		if err != nil {
+			if ctx.Err() != nil {
+				return Principal{}, nil, errors.Join(err, ctx.Err())
+			}
+			if knownUnavailableSession(proof.ProviderAuthority, err) {
+				continue
+			}
 			return Principal{}, nil, fmt.Errorf("observe provider credential for retained proof: %w", err)
 		}
 		if !current {
 			continue
 		}
+		proof.ProviderAuthority = admitted
 		binding, err := s.store.BindOperatorChannelFromProof(ctx, BootBindRequest{PrincipalID: principal.ID, Interface: identity, Proof: proof, RequestedAt: now})
+		admitted.CloseExecution()
 		if err != nil {
 			if errors.Is(err, ErrConflict) {
 				continue
@@ -163,7 +181,7 @@ func (s *Service) ResolveInterface(selector string) (InterfaceIdentity, error) {
 }
 
 func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, authority ProviderAuthority, saveProof bool, now time.Time) (Operation, error) {
-	if err := authority.RequireExecutable(); err != nil {
+	if err := authority.Validate(); err != nil {
 		return Operation{}, err
 	}
 	principal, err := s.Principal()
@@ -178,7 +196,8 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 	} else if found {
 		return replayed, nil
 	}
-	current, err := authority.Current(ctx, s.credentials)
+	admitted, current, err := authority.AdmitExecution(ctx, s.credentials)
+	defer admitted.CloseExecution()
 	if err != nil {
 		gateErr := fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
 		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
@@ -187,6 +206,7 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 		gateErr := fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
 		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
 	}
+	authority = admitted
 	identity, err := s.ResolveInterface(selector)
 	if err != nil {
 		return Operation{}, err
@@ -238,8 +258,11 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		return Operation{}, Binding{}, err
 	}
 	providerCredentialCurrent := false
+	var admitted ProviderAuthority
 	if approve && !operation.State.Terminal() {
-		current, err := operation.ProviderAuthority.Current(ctx, s.credentials)
+		var current bool
+		admitted, current, err = operation.ProviderAuthority.AdmitExecution(ctx, s.credentials)
+		defer admitted.CloseExecution()
 		if err != nil {
 			return operation, Binding{}, fmt.Errorf("observe provider credential before identity confirmation: %w", err)
 		}
@@ -249,6 +272,7 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
 		ExpectedRevision: expectedRevision, Approve: approve,
 		ProviderAuthorityCurrent: providerCredentialCurrent, ConfirmedAt: now,
+		ProviderAuthorityAdmission: admitted,
 	})
 	if err != nil {
 		if operation.Kind == OperationReconnect && errors.Is(err, ErrConflict) && strings.Contains(err.Error(), "reconnect claimant differs") {
@@ -398,7 +422,7 @@ func validatedResponsibilityProof(responsibility ProofResponsibility) (VerifiedP
 		binding.PrincipalID != operation.PrincipalID || binding.Interface.Normalized() != operation.Interface.Normalized() ||
 		binding.ExternalAccountRef != operation.ExternalAccountRef || binding.ConversationRef != operation.ConversationRef ||
 		binding.ConversationScope != operation.ConversationScope || binding.AccountPresentation != operation.AccountPresentation ||
-		binding.ProviderAuthority != operation.ProviderAuthority ||
+		!binding.ProviderAuthority.SameProvenance(operation.ProviderAuthority) ||
 		binding.Revision != operation.BindingRevision || binding.OperationID != operation.OperationID ||
 		binding.ProofID != operation.ProofID || binding.ProofRevision != operation.ProofRevision ||
 		!binding.UpdatedAt.Equal(operation.CompletedAt) {
@@ -432,7 +456,7 @@ func immutableProofFactsMatch(existing, responsibility VerifiedProof) bool {
 		existing.Challenge == responsibility.Challenge &&
 		existing.OriginalOperationID == responsibility.OriginalOperationID &&
 		existing.MintingStoreID == responsibility.MintingStoreID &&
-		existing.ProviderAuthority == responsibility.ProviderAuthority &&
+		existing.ProviderAuthority.SameProvenance(responsibility.ProviderAuthority) &&
 		existing.VerifiedAt.Equal(responsibility.VerifiedAt) &&
 		existing.OperatorConfirmed == responsibility.OperatorConfirmed &&
 		equalConsentScopes(existing.ConsentScopes, responsibility.ConsentScopes)
@@ -471,6 +495,9 @@ type retainedLifecycleProjection struct {
 }
 
 func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProjection, error) {
+	if err := ctx.Err(); err != nil {
+		return retainedLifecycleProjection{}, err
+	}
 	principal, err := s.Principal()
 	if err != nil {
 		return retainedLifecycleProjection{}, err
@@ -518,9 +545,9 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 		projection.active[identity.Key()] = identity
 	}
 	for _, binding := range bindings {
-		binding.Interface = binding.Interface.Normalized()
-		if binding.PrincipalID != principal.ID {
-			return retainedLifecycleProjection{}, fmt.Errorf("%w: retained operator channel binding belongs to another principal", ErrConflict)
+		binding, err = normalizeRetainedBinding(principal.ID, binding)
+		if err != nil {
+			return retainedLifecycleProjection{}, err
 		}
 		if err := addIdentity(binding.Interface); err != nil {
 			return retainedLifecycleProjection{}, err
@@ -558,6 +585,9 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 			(existing.RequestedAt.Equal(operation.RequestedAt) && existing.OperationID < operation.OperationID) {
 			projection.pending[key] = ProjectOperationReadback(operation)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return retainedLifecycleProjection{}, err
 	}
 	return projection, nil
 }
@@ -609,35 +639,21 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 	return Operation{}, fmt.Errorf("%w: operator channel operation %q was not found", ErrNotFound, operationID)
 }
 
-// CurrentBinding returns the unmasked selected-store identity fact to trusted
-// runtime composition. It never creates or recovers a binding.
+// CurrentBinding requires both retained identity and current live provider
+// authority. It never creates or recovers a binding.
 func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity) (Binding, error) {
-	principal, err := s.Principal()
+	binding, err := s.RetainedCurrentBinding(ctx, identity)
 	if err != nil {
 		return Binding{}, err
 	}
-	identity = identity.Normalized()
-	if err := identity.Validate(); err != nil {
-		return Binding{}, err
+	current, currentErr := binding.ProviderAuthority.Current(ctx, s.credentials)
+	if currentErr != nil {
+		return binding, errors.Join(ErrBindingUnavailable, currentErr)
 	}
-	bindings, err := s.store.ListOperatorChannelBindings(ctx, principal.ID)
-	if err != nil {
-		return Binding{}, err
+	if !current {
+		return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
 	}
-	for _, binding := range bindings {
-		if binding.Interface.Normalized().Key() != identity.Key() || binding.Status != BindingCurrent {
-			continue
-		}
-		current, currentErr := binding.ProviderAuthority.Current(ctx, s.credentials)
-		if currentErr != nil {
-			return binding, errors.Join(ErrBindingUnavailable, currentErr)
-		}
-		if !current {
-			return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
-		}
-		return binding, nil
-	}
-	return Binding{}, fmt.Errorf("%w: current operator channel binding %q was not found", ErrNotFound, identity.Selector)
+	return binding, nil
 }
 
 // CurrentBindingReadiness returns the exact current binding and whether its
@@ -656,7 +672,7 @@ func (s *Service) CurrentBindingReadiness(ctx context.Context, identity Interfac
 		return Binding{}, false, err
 	}
 	current := found && proof.Status == ProofActive && proof.ProofID == binding.ProofID && proof.Revision == binding.ProofRevision &&
-		proof.Interface.Normalized() == binding.Interface.Normalized() && proof.ProviderAuthority == binding.ProviderAuthority
+		proof.Interface.Normalized() == binding.Interface.Normalized() && proof.ProviderAuthority.SameProvenance(binding.ProviderAuthority)
 	return binding, current, nil
 }
 
@@ -704,12 +720,15 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			out = append(out, read)
 			continue
 		}
-		credentialCurrent, credentialErr := binding.ProviderAuthority.Current(ctx, s.credentials)
+		credentialCurrent, credentialErr := s.bindingReadbackCurrent(ctx, binding)
 		if credentialErr != nil {
 			return nil, fmt.Errorf("observe provider credential for channel readback: %w", credentialErr)
 		}
 		if !credentialCurrent {
 			read.Status, read.Reason = BindingStale, "provider credential changed; reconnect with fresh credentials"
+			if binding.ProviderAuthority.Kind == ProviderAuthoritySession {
+				read.Reason = "session connection unavailable; explicit reconnect and fresh pairing required"
+			}
 			out = append(out, read)
 			continue
 		}
@@ -720,7 +739,7 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			continue
 		}
 		if binding.ProofID != "" {
-			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision || proof.ProviderAuthority != binding.ProviderAuthority {
+			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision || !proof.ProviderAuthority.SameProvenance(binding.ProviderAuthority) {
 				read.Status, read.Reason, read.ProofStatus = BindingRevoked, "machine-local verified account proof is missing, revoked, or superseded", ProofRevoked
 				out = append(out, read)
 				continue

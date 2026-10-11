@@ -599,6 +599,57 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	if _, err := fixture.store.BindOperatorChannelFromProof(ctx, operatorchannel.BootBindRequest{PrincipalID: principal.ID, Interface: identity, Proof: proof, RequestedAt: now.Add(10 * time.Second)}); !errors.Is(err, operatorchannel.ErrConflict) {
 		t.Fatalf("proof bypassed unbind fence: %v", err)
 	}
+	freshConnect := operatorchannel.BeginRequest{ProviderAuthority: operatorChannelProviderAuthority(),
+		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
+		Interface: identity, ExpectedRevision: 0, RequestKeyHash: "fresh-connect-key", RequestHash: "fresh-connect-body",
+		RequestedAt: now.Add(10 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+	}
+	if _, err := fixture.store.BeginChannelBinding(ctx, freshConnect); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+		t.Fatalf("explicit connect erased retained unbind revision: %v", err)
+	}
+	freshConnect.ExpectedRevision = unbound.Revision
+	freshOp, err := fixture.store.BeginChannelBinding(ctx, freshConnect)
+	if err != nil || freshOp.ExpectedBindingRevision != unbound.Revision || freshOp.BindingRevision != 0 || freshOp.State != operatorchannel.StateAwaitingClaim {
+		t.Fatalf("fresh connect confused predecessor fence with confirmed identity: %#v, %v", freshOp, err)
+	}
+	competingConnect := freshConnect
+	competingConnect.OperationID, competingConnect.RequestKeyHash, competingConnect.RequestHash = uuid.NewString(), "competing-connect-key", "competing-connect-body"
+	competingOp, err := fixture.store.BeginChannelBinding(ctx, competingConnect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settledFresh, err := fixture.settle(ctx, operatorChannelContractClaim(freshOp, operatorchannel.ConversationScopeDirect, "fresh-account", "fresh-conversation", uuid.NewString()), now.Add(11*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settledCompeting, err := fixture.settle(ctx, operatorChannelContractClaim(competingOp, operatorchannel.ConversationScopeDirect, "competing-account", "competing-conversation", uuid.NewString()), now.Add(11*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, freshBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: freshOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: settledFresh.Operation.Revision,
+		Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(12 * time.Second),
+	})
+	if err != nil || freshBinding.Revision != unbound.Revision+1 || freshBinding.ExternalAccountRef != "fresh-account" {
+		t.Fatalf("fresh confirmation lost exact unbind fence: %#v, %v", freshBinding, err)
+	}
+	if _, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: competingOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: settledCompeting.Operation.Revision,
+		Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(13 * time.Second),
+	}); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+		t.Fatalf("changed fence overwrote the newly confirmed identity: %v", err)
+	}
+	if replay, err := fixture.store.BeginChannelBinding(ctx, freshConnect); err != nil || replay.OperationID != freshOp.OperationID || replay.BindingRevision != freshBinding.Revision {
+		t.Fatalf("exact child replay reran changed mutable preconditions: %#v, %v", replay, err)
+	}
+	if _, err := fixture.store.BeginChannelBinding(ctx, competingConnect); err != nil {
+		t.Fatalf("existing competing child did not replay before changed fence: %v", err)
+	}
+	newRequest := freshConnect
+	newRequest.OperationID, newRequest.RequestKeyHash, newRequest.RequestHash = uuid.NewString(), "changed-fence-key", "changed-fence-body"
+	if _, err := fixture.store.BeginChannelBinding(ctx, newRequest); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+		t.Fatalf("new connect opportunistically adopted changed fence: %v", err)
+	}
 
 	expiredBegin := operatorchannel.BeginRequest{ProviderAuthority: operatorChannelProviderAuthority(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,

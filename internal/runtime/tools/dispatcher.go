@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)
@@ -51,10 +52,13 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	if d == nil {
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
-	name = normalizeNativeToolName(name)
 	if err := hitlIdentityExecutionError(name); err != nil {
 		return nil, err
 	}
+	if err := d.admitRoutingName(ctx, actor, name); err != nil {
+		return nil, err
+	}
+	name = normalizeNativeToolName(name)
 	if toolKindPolicy(name) == toolcapabilities.KindEmit {
 		if d.emitHandler == nil {
 			return nil, fmt.Errorf("emit tool handler is not configured")
@@ -102,4 +106,20 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	default:
 		return nil, fmt.Errorf("unsupported tool handler type for %s: %s", name, tool.Handler())
 	}
+}
+
+func (d *ToolDispatcher) admitRoutingName(ctx context.Context, actor models.AgentConfig, name string) error {
+	if d == nil || d.resolver == nil {
+		return nil
+	}
+	for _, declaration := range toolidentity.DeclarationNames(name) {
+		tool, found, err := d.resolver(ctx, actor, declaration)
+		if err != nil {
+			return err
+		}
+		if found && !tool.Handler().AgentExposable() {
+			return fmt.Errorf("private tool %s cannot route to an agent handler", declaration)
+		}
+	}
+	return nil
 }

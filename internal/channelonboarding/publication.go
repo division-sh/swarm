@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 )
@@ -223,7 +224,7 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 				"receipt": admission.Receipt, "value_seal": admission.ValueSeal.String(),
 			})
 		}
-		values = append(values, map[string]any{
+		value := map[string]any{
 			"source":                  activation.Source,
 			"onboarding_operation_id": activation.OnboardingOperationID,
 			"onboarding_revision":     activation.OnboardingRevision,
@@ -231,7 +232,11 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 			"activation_revision":     activation.ActivationRevision,
 			"plan":                    planValue,
 			"credential_admissions":   admissionValues,
-		})
+		}
+		if activation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
+			value["session_account"] = activation.SessionAccount
+		}
+		values = append(values, value)
 	}
 	return canonicalPublication{activations: ordered, value: []any{string(ChannelActivationPublicationExecutable), values}}, nil
 }

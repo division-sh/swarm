@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/google/uuid"
 )
 
@@ -44,6 +45,7 @@ type serveChannelDeliveryDispatcher struct {
 	posture           executionposture.Posture
 	runtimeInstanceID string
 	httpClient        *http.Client
+	sessions          serveSessionBootstrapOwner
 	now               func() time.Time
 }
 
@@ -496,13 +498,30 @@ func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Con
 	return selected, compiled.Plan, lease, nil
 }
 
+func (d *serveChannelDeliveryDispatcher) channelWriteExecutor(ctx context.Context, selected channelonboarding.ConnectedChannelActivation,
+	plan packs.OutboundBindingPlan,
+) (sessionexecution.Channel, error) {
+	if plan.Transport() != packs.ChannelTransportSession {
+		return sessionexecution.Channel{}, plan.RequireExecutableProvider()
+	}
+	op, err := d.activations.GetChannelOnboarding(ctx, selected.OperationID)
+	if err != nil {
+		return sessionexecution.Channel{}, err
+	}
+	if op.ActivationRevision != selected.Revision || op.BindingRevision != selected.BindingRevision ||
+		!op.Coordinate.Matches(selected.Coordinate) || op.SessionAccount != selected.SessionAccount || op.PrincipalID != selected.PrincipalID {
+		return sessionexecution.Channel{}, channelonboarding.ErrRevisionConflict
+	}
+	return selectServeChannelWrite(ctx, d.sessions, op, plan)
+}
+
 func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
-	_, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
+	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	defer lease.Release()
-	if err := plan.RequireExecutableProvider(); err != nil {
+	if _, err := d.channelWriteExecutor(ctx, selected, plan); err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	bounds, err := plan.PresentationBounds()
@@ -535,7 +554,8 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		return err
 	}
 	defer lease.Release()
-	if err := plan.RequireExecutableProvider(); err != nil {
+	nativeExecutor, err := d.channelWriteExecutor(ctx, selected, plan)
+	if err != nil {
 		return err
 	}
 	if err := plan.RequireOperation(operation); err != nil {
@@ -560,7 +580,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
-	projection, ok := tool.CompiledResultExecution()
+	_, ok := tool.CompiledResultExecution()
 	if !ok {
 		return fmt.Errorf("channel delivery connector has no compiled receipt projection")
 	}
@@ -600,11 +620,36 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, selected.Coordinate.BundleHash))
-	_, err = channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool).DeliverChannelMessage(
-		effectCtx, toolID, tool, input, credentials,
-		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID}, projection.Project,
+	_, err = executeChannelWrite(
+		effectCtx, selected.OperationID, operation, toolID, tool, input, credentials,
+		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID},
+		nativeExecutor,
+		channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool),
 	)
 	return err
+}
+
+func executeChannelWrite(ctx context.Context, operationID, operation, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, nativeExecutor sessionexecution.Channel, httpExecutor runtimeregistration.HTTPExecutor) (runtimeregistration.DeliveryResult, error) {
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok || !authority.Valid() || (authority.Kind != runtimeeffects.AuthorityChannelConfirmation && authority.Kind != runtimeeffects.AuthorityChannelDelivery) {
+		return runtimeregistration.DeliveryResult{}, fmt.Errorf("channel write dispatch requires its selected effect authority")
+	}
+	if _, native := tool.InProcess(); native {
+		if len(credentials) != 0 {
+			return runtimeregistration.DeliveryResult{}, fmt.Errorf("native channel write cannot substitute credentials for its owned connection")
+		}
+		if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
+			return nativeExecutor.DeliverChannelConfirmation(ctx, operationID, operation, toolID, tool, input, lineage)
+		}
+		return nativeExecutor.DeliverChannelMessage(ctx, operationID, operation, toolID, tool, input, lineage)
+	}
+	if tool.Handler() != runtimecontracts.ToolHandlerHTTP {
+		return runtimeregistration.DeliveryResult{}, fmt.Errorf("unsupported channel write transport")
+	}
+	if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
+		return httpExecutor.DeliverChannelConfirmation(ctx, toolID, tool, input, credentials, lineage)
+	}
+	return httpExecutor.DeliverChannelMessage(ctx, toolID, tool, input, credentials, lineage)
 }
 
 func channelDeliverySemanticInput(plan packs.OutboundBindingPlan, prepared runtimechanneldelivery.PreparedRender,

@@ -24,6 +24,7 @@ type CompiledActivation struct {
 	ActivationRevision    int64
 	Plan                  packs.OutboundBindingPlan
 	CredentialAdmissions  []CredentialAdmission
+	SessionAccount        operatorchannel.SessionAccountAdmission `json:"-"`
 }
 
 func (a CompiledActivation) Validate() error {
@@ -52,6 +53,9 @@ func (a CompiledActivation) Validate() error {
 	if a.Source == ActivationSourceDeclared && strings.TrimSpace(a.OnboardingOperationID) != "" {
 		return fmt.Errorf("declared channel activation cannot claim an onboarding operation")
 	}
+	if err := a.validateProviderAuthority(); err != nil {
+		return err
+	}
 	credentialKeys := a.Plan.CredentialStoreKeys()
 	admitted := make(map[string]string, len(a.CredentialAdmissions))
 	for _, admission := range a.CredentialAdmissions {
@@ -75,6 +79,36 @@ func (a CompiledActivation) Validate() error {
 	return nil
 }
 
+func (a CompiledActivation) validateProviderAuthority() error {
+	posture, err := a.Plan.Transport().ActivationPosture()
+	if err != nil {
+		return err
+	}
+	provider := ""
+	if posture == packs.ChannelActivationSessionConnection {
+		profile, found := a.Plan.OnboardingProfile()
+		if a.Source != ActivationSourceLearned || !found || profile.ActivationPosture() != posture {
+			return fmt.Errorf("session activation requires its selected learned responsibility")
+		}
+		provider = profile.Provider()
+	}
+	return validateSessionAccount(ActivationPosture(posture), provider, a.SessionAccount, posture == packs.ChannelActivationSessionConnection)
+}
+
+// This projects durable provenance only, never native execution permission.
+func (a CompiledActivation) AdmissionResponsibility() (AdmissionResponsibility, error) {
+	if err := a.Validate(); err != nil {
+		return AdmissionResponsibility{}, err
+	}
+	profile, found := a.Plan.OnboardingProfile()
+	if a.Source != ActivationSourceLearned || !found {
+		return AdmissionResponsibility{}, fmt.Errorf("learned activation responsibility requires its onboarding profile")
+	}
+	return AdmissionResponsibility{OperationID: a.OnboardingOperationID, OperationRevision: a.OnboardingRevision,
+		ActivationRevision: a.ActivationRevision, Coordinate: a.Coordinate, TargetSelector: a.Plan.RegistrationTarget(),
+		Provider: profile.Provider(), Credentials: append([]CredentialAdmission(nil), a.CredentialAdmissions...), SessionAccount: a.SessionAccount}, nil
+}
+
 func LearnedBindingID(slotKey string) string {
 	return "learned_" + operatorchannel.Hash("connected-channel-binding-v1", strings.TrimSpace(slotKey))
 }
@@ -88,6 +122,9 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 	}
 	if activation.BindingRevision < 1 || strings.TrimSpace(activation.ConversationRef) == "" {
 		return CompiledActivation{}, fmt.Errorf("learned activation has no exact bound conversation destination")
+	}
+	if err := activation.ValidateSessionAccount(); err != nil {
+		return CompiledActivation{}, err
 	}
 	credentialKeys := make(map[string]string, len(activation.CredentialAdmissions))
 	for _, admission := range activation.CredentialAdmissions {
@@ -119,6 +156,7 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 		Source: ActivationSourceLearned, OnboardingOperationID: activation.OperationID, OnboardingRevision: activation.OperationRevision, Coordinate: activation.Coordinate,
 		ActivationRevision: activation.Revision, Plan: plan,
 		CredentialAdmissions: append([]CredentialAdmission(nil), activation.CredentialAdmissions...),
+		SessionAccount:       activation.SessionAccount,
 	}
 	return compiled, compiled.Validate()
 }
