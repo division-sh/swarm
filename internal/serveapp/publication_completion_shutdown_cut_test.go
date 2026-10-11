@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -145,6 +146,13 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	probe.mu.Unlock()
 	h.start(t)
 	restarted := <-runtimes
+	probe.mu.Lock()
+	replayOwner := probe.native
+	probe.mu.Unlock()
+	beforeReplay, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), replayOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
 	replay := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), method, params)
 	if replay.err != nil || replay.rpcError != nil || !bytes.Equal(replay.result, stored.Response) {
 		t.Fatalf("recovery changed the exact ACK: %+v stored=%s", replay, stored.Response)
@@ -155,6 +163,18 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	probe.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("restart/replay repeated native creation/publication: %d", calls)
+	}
+	afterReplay, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), native)
+	if err != nil || beforeReplay != afterReplay {
+		t.Fatalf("recorded replay repeated a consequence: before=%+v after=%+v err=%v", beforeReplay, afterReplay, err)
+	}
+	inspection, err := restarted.WorkOccurrence().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedProcess, ok := worklifetime.ProcessFromContext(inspection.Context())
+	if err := inspection.Done(); err != nil || !ok || restartedProcess.PublicCompletionCount() != 0 {
+		t.Fatalf("restarted process retained public capacity: found=%t err=%v", ok, err)
 	}
 	after, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, plan.Identity.EntityID)
 	if err != nil || !reflect.DeepEqual(before, after) {
