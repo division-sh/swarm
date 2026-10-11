@@ -619,10 +619,11 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	for _, target := range targets {
 		selectionTargets = append(selectionTargets, target.Normalized())
 	}
-	evaluation, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, selectionTargets)
+	registrations, err := r.selectedReceiverRegistrations(ctx, runID, plan, selectionTargets)
 	if err != nil {
 		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 	}
+	evaluation := r.graph.EvaluateMaterializedRecipients(plan, selectionTargets, registrations)
 	ledger, err := evaluation.Ledger()
 	if err != nil {
 		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
@@ -636,7 +637,9 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	subscribers := make([]Subscriber, 0, len(targets))
 	for _, target := range targets {
 		target = target.Normalized()
-		matchedSubscribers, err := r.resolveSelectedReceiverCarriers(ctx, runID, plan, target)
+		// The ledger and carriers consume the same admitted observation boundary.
+		selected := r.graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, registrations)
+		matchedSubscribers, err := r.admitSelectedReceiverCarriers(selected)
 		if err != nil {
 			return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 		}
@@ -821,6 +824,13 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
+	return r.admitSelectedReceiverCarriers(evaluation)
+}
+
+func (r connectRoutePlanResolver) admitSelectedReceiverCarriers(evaluation runtimepinrouting.ConnectRecipientEvaluation) ([]Subscriber, error) {
+	if _, err := evaluation.Ledger(); err != nil {
+		return nil, err
+	}
 	subscribers := connectRecipientSubscribers(evaluation)
 	for index := range subscribers {
 		subscriber := &subscribers[index]
@@ -839,8 +849,16 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 }
 
 func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) (runtimepinrouting.ConnectRecipientEvaluation, error) {
+	registrations, err := r.selectedReceiverRegistrations(ctx, runID, plan, targets)
+	if err != nil {
+		return runtimepinrouting.ConnectRecipientEvaluation{}, err
+	}
+	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations), nil
+}
+
+func (r connectRoutePlanResolver) selectedReceiverRegistrations(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
 	if len(targets) == 0 {
-		return r.graph.EvaluateMaterializedRecipients(plan, nil, nil), nil
+		return nil, nil
 	}
 	orderedTargets := append([]events.RouteIdentity(nil), targets...)
 	sort.Slice(orderedTargets, func(i, j int) bool {
@@ -857,22 +875,22 @@ func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.C
 	for _, target := range orderedTargets {
 		available, err := r.replyOriginAvailable(ctx, runID, plan, target)
 		if err != nil {
-			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+			return nil, err
 		}
 		if !available {
 			continue
 		}
 		instance, err := r.indexedConnectIdentity(ctx, runID, target)
 		if err != nil {
-			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+			return nil, err
 		}
 		bound, err := r.routeTable.ConnectReceiverDefinitions(runID, instance)
 		if err != nil {
-			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+			return nil, err
 		}
 		registrations = append(registrations, bound...)
 	}
-	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations), nil
+	return registrations, nil
 }
 
 func (r connectRoutePlanResolver) appendMaterializedPlanEvaluation(ctx context.Context, runID string, out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
