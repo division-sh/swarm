@@ -73,11 +73,8 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 		if barrier == nil {
 			continue
 		}
-		if barrier.Registration.PlanRef != obligation.Intent.Request.PlanRef || barrier.Registration.IntentKey != obligation.Intent.Request.Key {
-			return nil, fmt.Errorf("fixed-revision barrier contradicts its fan-out intent")
-		}
-		if barrier.Summary != nil && barrier.Summary.Total != obligation.Intent.Request.Cardinality {
-			return nil, fmt.Errorf("fixed-revision barrier summary contradicts its fan-out cardinality")
+		if err := validateRunForkBarrierIntent(*barrier, obligation); err != nil {
+			return nil, err
 		}
 		if barrier.TransferredOccurrence != nil {
 			if err := requireRunForkTransferredBarrierHistory(snapshot, *barrier, timers); err != nil {
@@ -110,6 +107,16 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 		owned[id] = struct{}{}
 	}
 	return owned, nil
+}
+
+func validateRunForkBarrierIntent(barrier fanoutbarrier.Barrier, obligation runfork.RunForkFanOutObligation) error {
+	if barrier.Registration.PlanRef != obligation.Intent.Request.PlanRef || barrier.Registration.IntentKey != obligation.Intent.Request.Key {
+		return fmt.Errorf("fixed-revision barrier contradicts its fan-out intent")
+	}
+	if barrier.Summary != nil && barrier.Summary.Total != obligation.Intent.Request.Cardinality {
+		return fmt.Errorf("fixed-revision barrier summary contradicts its fan-out cardinality")
+	}
+	return nil
 }
 
 func requireRunForkTransferredBarrierHistory(snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, timers map[string]runForkRevisionTimer) error {

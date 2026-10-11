@@ -311,6 +311,23 @@ func continuedFanOutRecipientDisposition(runID, sourceEventID string, publicatio
 	return fanoutbarrier.RecipientDisposition(deliveries)
 }
 
+type persistedFanOutBarrier struct {
+	barrier            fanoutbarrier.Barrier
+	bundleHash         string
+	digest             string
+	targetFlowPath     string
+	targetNode         string
+	handlerEvent       string
+	joinID             string
+	routingRaw         []byte
+	handleRaw          []byte
+	summaryRaw         []byte
+	transferredRaw     []byte
+	execution          string
+	scheduleKey        sql.NullString
+	scheduleActivation sql.NullString
+}
+
 func loadFanOutBarriers(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -352,25 +369,9 @@ func loadFanOutBarriers(
 		return nil, err
 	}
 	defer rows.Close()
-	type persisted struct {
-		barrier            fanoutbarrier.Barrier
-		bundleHash         string
-		digest             string
-		targetFlowPath     string
-		targetNode         string
-		handlerEvent       string
-		joinID             string
-		routingRaw         []byte
-		handleRaw          []byte
-		summaryRaw         []byte
-		transferredRaw     []byte
-		execution          string
-		scheduleKey        sql.NullString
-		scheduleActivation sql.NullString
-	}
-	persistedRows := make([]persisted, 0)
+	persistedRows := make([]persistedFanOutBarrier, 0)
 	for rows.Next() {
-		var item persisted
+		var item persistedFanOutBarrier
 		item.barrier.Registration.IntentKey.RunID = runID
 		var persistedStatus string
 		var routingRaw, handleRaw, summaryRaw, createdAtRaw, updatedAtRaw, transferredRaw any
@@ -412,50 +413,58 @@ func loadFanOutBarriers(
 	}
 	out := make([]fanoutbarrier.Barrier, 0, len(persistedRows))
 	for _, item := range persistedRows {
-		item.barrier.Registration.PlanRef = runtimecontracts.FanOutPlanRef{
-			BundleHash: item.bundleHash, ElementRef: item.barrier.Registration.IntentKey.ElementRef, SemanticDigest: item.digest,
-		}
-		if err := json.Unmarshal(item.routingRaw, &item.barrier.Registration.RoutingSource); err != nil {
-			return nil, fmt.Errorf("decode fan-out barrier routing source: %w", err)
-		}
-		if err := json.Unmarshal(item.handleRaw, &item.barrier.Registration.Handle); err != nil {
-			return nil, fmt.Errorf("decode fan-out barrier timer handle: %w", err)
-		}
-		if len(item.summaryRaw) != 0 && string(item.summaryRaw) != "null" {
-			var summary fanoutbarrier.Summary
-			if err := json.Unmarshal(item.summaryRaw, &summary); err != nil {
-				return nil, fmt.Errorf("decode fan-out barrier summary: %w", err)
-			}
-			item.barrier.Summary = &summary
-		}
-		item.barrier.ScheduleKey = strings.TrimSpace(item.scheduleKey.String)
-		item.barrier.ScheduleActivationID = strings.TrimSpace(item.scheduleActivation.String)
-		mode, ok := executionmode.Parse(item.execution)
-		if !ok {
-			return nil, fmt.Errorf("fan-out barrier execution mode %q is invalid", item.execution)
-		}
-		item.barrier.Registration.ExecutionMode = mode
-		var err error
-		item.barrier.TransferredOccurrence, err = fanoutbarrier.DecodeTransferredOccurrence(item.transferredRaw)
+		barrier, err := decodePersistedFanOutBarrier(item)
 		if err != nil {
-			return nil, fmt.Errorf("decode transferred barrier occurrence: %w", err)
-		}
-		if err := item.barrier.Validate(); err != nil {
 			return nil, err
 		}
-		ref, _ := item.barrier.Registration.Handle.JoinRef()
-		fanOut, _ := ref.FanOutDelivery()
-		intentDeclaration, identityErr := item.barrier.Registration.IntentKey.ElementRef.DeclarationIdentity()
-		if identityErr != nil || !fanOut.DeclarationIdentity().Equal(intentDeclaration) ||
-			fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
-			ref.FlowPath() != strings.TrimSpace(item.targetFlowPath) ||
-			ref.NodeID() != strings.TrimSpace(item.targetNode) || ref.HandlerEvent() != strings.TrimSpace(item.handlerEvent) ||
-			ref.JoinID() != strings.TrimSpace(item.joinID) {
-			return nil, fmt.Errorf("fan-out barrier persisted identity contradicts its typed handle")
-		}
-		out = append(out, item.barrier)
+		out = append(out, barrier)
 	}
 	return out, nil
+}
+
+func decodePersistedFanOutBarrier(item persistedFanOutBarrier) (fanoutbarrier.Barrier, error) {
+	item.barrier.Registration.PlanRef = runtimecontracts.FanOutPlanRef{
+		BundleHash: item.bundleHash, ElementRef: item.barrier.Registration.IntentKey.ElementRef, SemanticDigest: item.digest,
+	}
+	if err := json.Unmarshal(item.routingRaw, &item.barrier.Registration.RoutingSource); err != nil {
+		return fanoutbarrier.Barrier{}, fmt.Errorf("decode fan-out barrier routing source: %w", err)
+	}
+	if err := json.Unmarshal(item.handleRaw, &item.barrier.Registration.Handle); err != nil {
+		return fanoutbarrier.Barrier{}, fmt.Errorf("decode fan-out barrier timer handle: %w", err)
+	}
+	if len(item.summaryRaw) != 0 && string(item.summaryRaw) != "null" {
+		var summary fanoutbarrier.Summary
+		if err := json.Unmarshal(item.summaryRaw, &summary); err != nil {
+			return fanoutbarrier.Barrier{}, fmt.Errorf("decode fan-out barrier summary: %w", err)
+		}
+		item.barrier.Summary = &summary
+	}
+	item.barrier.ScheduleKey = strings.TrimSpace(item.scheduleKey.String)
+	item.barrier.ScheduleActivationID = strings.TrimSpace(item.scheduleActivation.String)
+	mode, ok := executionmode.Parse(item.execution)
+	if !ok {
+		return fanoutbarrier.Barrier{}, fmt.Errorf("fan-out barrier execution mode %q is invalid", item.execution)
+	}
+	item.barrier.Registration.ExecutionMode = mode
+	var err error
+	item.barrier.TransferredOccurrence, err = fanoutbarrier.DecodeTransferredOccurrence(item.transferredRaw)
+	if err != nil {
+		return fanoutbarrier.Barrier{}, fmt.Errorf("decode transferred barrier occurrence: %w", err)
+	}
+	if err := item.barrier.Validate(); err != nil {
+		return fanoutbarrier.Barrier{}, err
+	}
+	ref, _ := item.barrier.Registration.Handle.JoinRef()
+	fanOut, _ := ref.FanOutDelivery()
+	intentDeclaration, identityErr := item.barrier.Registration.IntentKey.ElementRef.DeclarationIdentity()
+	if identityErr != nil || !fanOut.DeclarationIdentity().Equal(intentDeclaration) ||
+		fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
+		ref.FlowPath() != strings.TrimSpace(item.targetFlowPath) ||
+		ref.NodeID() != strings.TrimSpace(item.targetNode) || ref.HandlerEvent() != strings.TrimSpace(item.handlerEvent) ||
+		ref.JoinID() != strings.TrimSpace(item.joinID) {
+		return fanoutbarrier.Barrier{}, fmt.Errorf("fan-out barrier persisted identity contradicts its typed handle")
+	}
+	return item.barrier, nil
 }
 
 func loadArmedFanOutBarriers(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]fanoutbarrier.Registration, error) {
@@ -788,33 +797,12 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		if err != nil {
 			return err
 		}
-		deadLettered := settlement.NoDelivery() && len(deliveries) == 0
-		if settlement.Delivered() {
-			ref, _ := item.Registration.Handle.JoinRef()
-			target := events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: item.Registration.Route.InstancePath, EntityID: item.Registration.EntityID}
-			var owner *runtimedelivery.Snapshot
-			for index := range deliveries {
-				row := &deliveries[index]
-				if row.Route.Recipient != events.MustNodeDeliveryRecipient(ref.Node()) || !events.SameRouteIdentity(row.Route.Target.Route(), target) {
-					continue
-				}
-				if owner != nil {
-					return fmt.Errorf("fan-out barrier completion repeats its exact owner delivery")
-				}
-				owner = row
-			}
-			if owner == nil {
-				return fmt.Errorf("fan-out barrier completion lacks its exact owner delivery")
-			}
-			if !owner.Terminal() {
-				continue
-			}
-			deadLettered = owner.Status == runtimedelivery.StatusDeadLetter
-		} else if !deadLettered {
-			return fmt.Errorf("fan-out barrier completion route settlement is contradictory")
+		deadLettered, err := fanOutBarrierOutcomeDeadLettered(item, settlement, deliveries)
+		if err != nil {
+			return err
 		}
 		if !deadLettered {
-			return fmt.Errorf("delivered fan-out barrier completion %s remained closed_pending", occurrenceEventID.String)
+			continue
 		}
 		update := `
 			UPDATE fan_out_obligation_barriers
@@ -838,6 +826,38 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		}
 	}
 	return nil
+}
+
+func fanOutBarrierOutcomeDeadLettered(barrier fanoutbarrier.Barrier, settlement events.RouteSettlement, deliveries []runtimedelivery.Snapshot) (bool, error) {
+	if settlement.NoDelivery() && len(deliveries) == 0 {
+		return true, nil
+	}
+	if !settlement.Delivered() {
+		return false, fmt.Errorf("fan-out barrier completion route settlement is contradictory")
+	}
+	ref, _ := barrier.Registration.Handle.JoinRef()
+	target := events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: barrier.Registration.Route.InstancePath, EntityID: barrier.Registration.EntityID}
+	var owner *runtimedelivery.Snapshot
+	for index := range deliveries {
+		row := &deliveries[index]
+		if row.Route.Recipient != events.MustNodeDeliveryRecipient(ref.Node()) || !events.SameRouteIdentity(row.Route.Target.Route(), target) {
+			continue
+		}
+		if owner != nil {
+			return false, fmt.Errorf("fan-out barrier completion repeats its exact owner delivery")
+		}
+		owner = row
+	}
+	if owner == nil {
+		return false, fmt.Errorf("fan-out barrier completion lacks its exact owner delivery")
+	}
+	if !owner.Terminal() {
+		return false, nil
+	}
+	if owner.Status != runtimedelivery.StatusDeadLetter {
+		return false, fmt.Errorf("delivered fan-out barrier completion %s remained closed_pending", owner.EventID)
+	}
+	return true, nil
 }
 
 func suppressRunTerminalFanOutBarriersTx(
@@ -1061,32 +1081,9 @@ func materializeRunForkFanOutBarrierTx(
 		}
 		summaryRaw = string(raw)
 	}
-	var scheduleKey any
-	var scheduleActivationID any
-	var transferredRaw any
-	if source.Status == fanoutbarrier.StatusClosedPending {
-		if transferred != nil {
-			raw, err := json.Marshal(transferred)
-			if err != nil {
-				return err
-			}
-			transferredRaw, scheduleKey = string(raw), registration.Handle.TaskID()
-		} else if genericSchedules == nil || source.Summary == nil {
-			return fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
-		} else {
-			command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, due)
-			if err != nil {
-				return err
-			}
-			admitted, err := genericSchedules.AdmitTx(ctx, attempt, command)
-			if err != nil {
-				return fmt.Errorf("admit fork fan-out barrier completion: %w", err)
-			}
-			scheduleKey = command.ScheduleKey
-			scheduleActivationID = admitted.Activation.ID
-		}
-	} else if source.Status == fanoutbarrier.StatusFired || source.Status == fanoutbarrier.StatusOutcomeDeadLettered {
-		scheduleKey = registration.Handle.TaskID()
+	scheduleKey, scheduleActivationID, transferredRaw, err := materializeForkBarrierOccurrence(ctx, attempt, genericSchedules, registration, source, transferred, due)
+	if err != nil {
+		return err
 	}
 	query := `
 		UPDATE fan_out_obligation_barriers
@@ -1109,6 +1106,31 @@ func materializeRunForkFanOutBarrierTx(
 		return fmt.Errorf("fork fan-out barrier materialization lost exact armed owner")
 	}
 	return addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)
+}
+
+func materializeForkBarrierOccurrence(ctx context.Context, attempt *mutationprotocol.Attempt, schedules GenericScheduleTxOwner, registration fanoutbarrier.Registration, source fanoutbarrier.Barrier, transferred *fanoutbarrier.TransferredOccurrence, due time.Time) (any, any, any, error) {
+	if source.Status != fanoutbarrier.StatusClosedPending {
+		if source.Status == fanoutbarrier.StatusFired || source.Status == fanoutbarrier.StatusOutcomeDeadLettered {
+			return registration.Handle.TaskID(), nil, nil, nil
+		}
+		return nil, nil, nil, nil
+	}
+	if transferred != nil {
+		raw, err := json.Marshal(transferred)
+		return registration.Handle.TaskID(), nil, string(raw), err
+	}
+	if schedules == nil || source.Summary == nil {
+		return nil, nil, nil, fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
+	}
+	command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, due)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	admitted, err := schedules.AdmitTx(ctx, attempt, command)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("admit fork fan-out barrier completion: %w", err)
+	}
+	return command.ScheduleKey, admitted.Activation.ID, nil, nil
 }
 
 func runForkFanOutBarrierDue(source fanoutbarrier.Barrier, schedule *runtimegenericschedule.Activation) (time.Time, error) {

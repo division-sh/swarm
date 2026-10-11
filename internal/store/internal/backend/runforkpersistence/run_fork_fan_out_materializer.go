@@ -332,19 +332,7 @@ func materializeRunForkFanOutObligations(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return 0, err
 	}
-	var snapshot *runForkRevisionSnapshot
-	for _, obligation := range plan.FanOutObligations {
-		if obligation.Barrier == nil || obligation.Barrier.Status != fanoutbarrier.StatusClosedPending {
-			continue
-		}
-		var err error
-		snapshot, err = loadRunForkPointSnapshot(ctx, tx, plan.SourceRunID, plan.ForkPoint)
-		if err != nil {
-			return 0, err
-		}
-		break
-	}
-	barrierSchedules, err := loadRunForkPendingBarrierSchedules(snapshot, plan)
+	snapshot, barrierSchedules, err := loadRunForkBarrierMaterializationEvidence(ctx, tx, plan)
 	if err != nil {
 		return 0, err
 	}
@@ -447,25 +435,8 @@ func materializeRunForkFanOutObligations(
 				return 0, err
 			}
 		}
-		if obligation.Barrier != nil {
-			if barriers == nil {
-				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
-			}
-			var schedule *genericschedule.Activation
-			if captured, found := barrierSchedules[obligation.Barrier.ScheduleActivationID]; found {
-				schedule = &captured
-			}
-			var published *genericschedule.PublishedJoinContinuation
-			if obligation.Barrier.Status == fanoutbarrier.StatusClosedPending && (obligation.Barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
-				continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, *obligation.Barrier, forkRunID, planRef, generation, now)
-				if err != nil {
-					return 0, err
-				}
-				published = &continuation
-			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, schedule, published, planRef, generation, now); err != nil {
-				return 0, err
-			}
+		if err := materializeRunForkObligationBarrier(ctx, attempt, barriers, forkRunID, snapshot, barrierSchedules, obligation.Barrier, planRef, generation, now); err != nil {
+			return 0, err
 		}
 	}
 	count, err := materializeRunForkDeploymentFeeds(ctx, tx, postgres, attempt, barriers, data, forkRunID, targetBundleHash, plan, pins, now)
@@ -473,6 +444,43 @@ func materializeRunForkFanOutObligations(
 		return 0, err
 	}
 	return len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + count, nil
+}
+
+func loadRunForkBarrierMaterializationEvidence(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan) (*runForkRevisionSnapshot, map[string]genericschedule.Activation, error) {
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Barrier == nil || obligation.Barrier.Status != fanoutbarrier.StatusClosedPending {
+			continue
+		}
+		snapshot, err := loadRunForkPointSnapshot(ctx, tx, plan.SourceRunID, plan.ForkPoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		schedules, err := loadRunForkPendingBarrierSchedules(snapshot, plan)
+		return snapshot, schedules, err
+	}
+	return nil, nil, nil
+}
+
+func materializeRunForkObligationBarrier(ctx context.Context, attempt *mutationprotocol.Attempt, owner runForkFanOutBarrierOwner, childRun string, snapshot *runForkRevisionSnapshot, schedules map[string]genericschedule.Activation, barrier *fanoutbarrier.Barrier, selected runtimecontracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) error {
+	if barrier == nil {
+		return nil
+	}
+	if owner == nil {
+		return fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
+	}
+	var schedule *genericschedule.Activation
+	if captured, found := schedules[barrier.ScheduleActivationID]; found {
+		schedule = &captured
+	}
+	var published *genericschedule.PublishedJoinContinuation
+	if barrier.Status == fanoutbarrier.StatusClosedPending && (barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
+		continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, *barrier, childRun, selected, generation, at)
+		if err != nil {
+			return err
+		}
+		published = &continuation
+	}
+	return owner.MaterializeRunForkFanOutBarrierTx(ctx, attempt, childRun, *barrier, schedule, published, selected, generation, at)
 }
 
 func countRunForkSourceDeploymentFeeds(plan runfork.RunForkPlan) int {

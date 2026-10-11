@@ -106,7 +106,17 @@ func (p RunForkPlan) WithHistoricalJoinPublications(revision int64, publications
 		}
 		delete(byActivation, activation.ID)
 	}
-	for _, obligation := range p.FanOutObligations {
+	if err := requireHistoricalFanOutPublications(p.SourceRunID, p.FanOutObligations, byActivation, members); err != nil {
+		return RunForkPlan{}, err
+	}
+	if len(byActivation) != 0 {
+		return RunForkPlan{}, fmt.Errorf("join history contains an unowned accepted occurrence")
+	}
+	return p, nil
+}
+
+func requireHistoricalFanOutPublications(sourceRunID string, obligations []RunForkFanOutObligation, byActivation map[string]PublishedJoinOccurrence, members map[string]bool) error {
+	for _, obligation := range obligations {
 		barrier := obligation.Barrier
 		if barrier == nil || barrier.Status != fanoutbarrier.StatusClosedPending {
 			continue
@@ -114,10 +124,10 @@ func (p RunForkPlan) WithHistoricalJoinPublications(revision int64, publications
 		if barrier.TransferredOccurrence != nil {
 			source, err := genericschedule.NewTransferredFanOutBarrierOccurrence(*barrier)
 			if err != nil {
-				return RunForkPlan{}, err
+				return err
 			}
-			if err := requireTransferredJoinPublication(p.SourceRunID, source, byActivation, members); err != nil {
-				return RunForkPlan{}, err
+			if err := requireTransferredJoinPublication(sourceRunID, source, byActivation, members); err != nil {
+				return err
 			}
 			delete(byActivation, source.Publication.EventID)
 			continue
@@ -127,14 +137,11 @@ func (p RunForkPlan) WithHistoricalJoinPublications(revision int64, publications
 			continue
 		}
 		if err := genericschedule.ValidateFanOutBarrierScheduleRelation(*barrier, publication.activation); err != nil {
-			return RunForkPlan{}, err
+			return err
 		}
 		delete(byActivation, barrier.ScheduleActivationID)
 	}
-	if len(byActivation) != 0 {
-		return RunForkPlan{}, fmt.Errorf("join history contains an unowned accepted occurrence")
-	}
-	return p, nil
+	return nil
 }
 
 func (p PublishedJoinOccurrence) validatedIdentity() (string, error) {
