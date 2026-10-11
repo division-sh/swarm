@@ -524,3 +524,43 @@ The immutable 893 historical records and repaired 24-receipt pin remain intact.
 Named live Admit inventory: 153 -> 151 (202 initially). The single unqualified
 Docker removal remains distinguished, so the proven-cohort count is 152. No
 fresh global census, baseline edit, push, PR, tier or whole-family closure.
+
+## Authorized Three-Cell Docker Diagnostic
+
+Reviewer-b Q1 authorized one bounded phase/deadline/subprocess diagnostic of the
+three previously failed cells, including SQLite lost-ack. Vemew load was 3.48
+before preparation, with no other active reset-projection containers observed.
+The test still starts its same one-minute context before setup and retains the
+same cleanup context, image, commands, resource cuts and assertions. Added logs
+capture the original deadline, remaining time, ctx.Err, returned Docker output,
+wrapped subprocess error/exit code, and capability/admission/settlement phases.
+No context restart, time limit, retry, skip or production behavior changed.
+
+The one diagnostic pass used two serial focused race/count1 commands to select
+exactly the three failed cells; there was no repeat of a diagnostic cell:
+
+| Cell | Containers / store ready | Settlement start / returned | Actual result |
+| --- | --- | --- | --- |
+| SQLite ordinary | 6.587s / 10.849s | 11.076s / 11.554s | PASS11.87s |
+| SQLite lost-ack | 1.266s / 3.138s | 3.372s / 3.890s | PASS4.23s |
+| PostgreSQL ordinary | 2.085s / 8.371s | 8.378s / 8.897s | PASS9.21s |
+
+Every settlement returned nil with the original context still live and at least
+48.446s remaining; original exact-disposal and successor-survival assertions
+passed. reset-projection-bounded-diagnostic-sqlite.jsonl passed17.149s and the
+PostgreSQL receipt passed10.263s. docker ps -a --filter name=swarm-reset-projection
+shows no remaining test-created container. Existing foreign/other-agent resources
+were untouched. The real lost-ack reconciliation is executed, not simulated away.
+
+These passes establish the three named executions under the measured host
+conditions, not the cause or resolution of the initial pressure RED. The initial
+red aggregate and #2353's unclassified manifestation remain explicit. Q1 proof
+disposition is still reviewer-owned; do not yet count the Docker candidate as a
+proven removal or claim family closure. No further diagnostic rerun is planned.
+
+reset-projection-phase-controls.jsonl: all affected family/current/historical
+controls PASS13.841s, with original assertions source-compared intact. Targeted
+native serveapp U1000 passed. Finite corpus remains975 rows /109 transitions,
+digest ebd7d7cb10179f11b95d1ce62ccf4a5dbd538bf199351affd9b9f44d9e3cf5ef.
+Named Admit inventory stays151, or152 excluding the still-unqualified candidate.
+No global census/ratchet, tier, push, PR or closure claim.
