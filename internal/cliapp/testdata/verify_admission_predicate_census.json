@@ -267,7 +267,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "b916e23365a1dfb35559326656967b688bafbe6431fb010be7d620adb65c7344"
+    "body_sha256": "c34f15bb1d6a2997dffee1da21c279fbb4447a5d28f55156063a631abc8e4ea3"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireContext",
