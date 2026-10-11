@@ -334,6 +334,11 @@ func (p *serveNativeProtocolPeer) pair(qr string) {
 
 func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 	p.t.Helper()
+	return p.claimMessage(challenge, "SERVED_CLAIM")
+}
+
+func (p *serveNativeProtocolPeer) claimMessage(challenge, messageID string) types.JID {
+	p.t.Helper()
 	p.mu.Lock()
 	registration := p.registration
 	p.mu.Unlock()
@@ -348,7 +353,7 @@ func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 	p.receivers[fromLID.ToNonAD()] = servedNativeReceiver{sender: sender, lid: fromLID.ToNonAD()}
 	p.ownedSenders = append(p.ownedSenders, sender)
 	p.mu.Unlock()
-	p.text(challenge, "SERVED_CLAIM")
+	p.text(challenge, messageID)
 	return from.ToNonAD()
 }
 
