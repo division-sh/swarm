@@ -31,8 +31,9 @@ type AdvisoryLockLease struct {
 }
 
 const (
-	tryAdvisoryLockSQL    = "SELECT pg_try_advisory_lock(hashtext($1))"
-	unlockAdvisoryLockSQL = "SELECT pg_advisory_unlock(hashtext($1))"
+	tryAdvisoryLockSQL      = "SELECT pg_try_advisory_lock(hashtext($1))"
+	blockingAdvisoryLockSQL = "SELECT pg_advisory_lock(hashtext($1))"
+	unlockAdvisoryLockSQL   = "SELECT pg_advisory_unlock(hashtext($1))"
 )
 
 type SessionAuthority struct {
@@ -624,6 +625,20 @@ func (l *AdvisoryLockLease) current() bool {
 
 func AcquireAdvisoryLockLease(ctx context.Context, db ConnectionOwner, lockKey string) (*AdvisoryLockLease, bool, error) {
 	return AcquireAdvisoryLockLeaseWith(ctx, db, lockKey, nil)
+}
+
+func AcquireBlockingAdvisoryLockLease(ctx context.Context, db ConnectionOwner, lockKey string) (*AdvisoryLockLease, error) {
+	lease, acquired, err := AcquireAdvisoryLockLeaseWith(ctx, db, lockKey, func(waitCtx context.Context, session *SessionAuthority, key string) (bool, error) {
+		_, err := session.ExecContext(waitCtx, blockingAdvisoryLockSQL, key)
+		return err == nil, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !acquired || lease == nil {
+		return nil, errors.New("blocking advisory acquisition returned no retained lease")
+	}
+	return lease, nil
 }
 
 type AdvisoryLockAcquire func(context.Context, *SessionAuthority, string) (bool, error)
