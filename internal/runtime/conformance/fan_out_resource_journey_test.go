@@ -148,7 +148,7 @@ type deploymentRunStartDiagnostic struct {
 	t *testing.T
 }
 
-func (d deploymentRunStartDiagnostic) StartDeploymentRunAcknowledged(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
+func (d deploymentRunStartDiagnostic) StartDeploymentRunAcknowledged(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request) (bus.CommittedDeploymentRunCreation, error) {
 	record, err := d.EventBus.StartDeploymentRunAcknowledged(ctx, command, request)
 	if err != nil {
 		d.t.Logf("deployment run-start owner: %v", err)
