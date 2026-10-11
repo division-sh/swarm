@@ -185,10 +185,14 @@ func lockSQLitePossessionCoordinate(ctx context.Context, path string, create, wa
 		identityErr := proveSQLitePossessionIdentity(path, info, true, "SQLite possession coordinate changed during observation")
 		closeErr := coordinate.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
-			return nil, nil, errors.Join(&runtimestartupownership.AcquisitionError{
+			occupied := &runtimestartupownership.AcquisitionError{
 				Failure: runtimestartupownership.AcquisitionTakeoverRequired,
 				Detail:  "selected store is held by another process",
-			}, identityErr, closeErr)
+			}
+			if identityErr == nil && closeErr == nil {
+				return nil, nil, occupied
+			}
+			return nil, nil, errors.Join(occupied, identityErr, closeErr)
 		}
 		return nil, nil, errors.Join(fmt.Errorf("acquire SQLite selected-store possession: %w", err), identityErr, closeErr)
 	}
@@ -306,6 +310,12 @@ func probeSQLitePossession(ctx context.Context, selectedPath string, identity *S
 	}
 	coordinate, coordinateInfo, err := openSQLitePossessionCoordinate(path+sqlitePossessionSuffix, false)
 	if err != nil {
+		if occupied, ok := err.(*runtimestartupownership.AcquisitionError); ok && occupied.Failure == runtimestartupownership.AcquisitionTakeoverRequired {
+			return false, errors.Join(
+				proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"),
+				proveSQLitePossessionIdentity(path+sqlitePossessionSuffix, reference.coordinateInfo, true, "SQLite possession coordinate changed after inspection opened"),
+			)
+		}
 		return false, errors.Join(err, proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"))
 	}
 	defer func() { resultErr = errors.Join(resultErr, releaseSQLitePossessionCoordinate(coordinate)) }()

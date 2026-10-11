@@ -51,16 +51,16 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				Close() error
 			}
 			var db *sql.DB
-			var openBootStore func() (startupownership.Store, func() error, error)
+			var openBootStore func(context.Context) (startupownership.Store, func() error, error)
 			if backend == backendselection.BackendSQLite {
 				path := filepath.Join(t.TempDir(), "runtime.db")
-				selected, handle, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, path)
 				if err != nil {
 					t.Fatal(err)
 				}
 				owner, db = selected, handle
-				openBootStore = func() (startupownership.Store, func() error, error) {
-					selected, _, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+				openBootStore = func(ctx context.Context) (startupownership.Store, func() error, error) {
+					selected, _, err := construction.OpenSQLiteRuntimeForServing(ctx, path)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -69,13 +69,13 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				configText += fmt.Sprintf("store: {backend: sqlite, sqlite: {path: %q}}\n", path)
 			} else {
 				dsn, _, _ := testutil.StartEmptyPostgres(t)
-				selected, handle, err := construction.OpenPostgres(dsn)
+				selected, handle, err := construction.OpenPostgresRuntime(ctx, dsn)
 				if err != nil {
 					t.Fatal(err)
 				}
 				owner, db = selected, handle
-				openBootStore = func() (startupownership.Store, func() error, error) {
-					selected, _, err := construction.OpenPostgres(dsn)
+				openBootStore = func(ctx context.Context) (startupownership.Store, func() error, error) {
+					selected, _, err := construction.OpenPostgresRuntime(ctx, dsn)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -116,7 +116,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				}
 			})
 			var before int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
 			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
@@ -165,7 +165,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				}
 			}
 			var after int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
 				t.Fatalf("public observation changed/released the owner: %d -> %d %v", before, after, err)
 			}
 			if _, err := capability.Evidence(); err != nil {
@@ -175,7 +175,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			released = true
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
 			for _, mode := range []string{"json", "text", "quiet"} {
@@ -211,7 +211,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Fatal("complete admission omitted retained connected-channel reads")
 				}
 			}
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
 				t.Fatalf("successful public observation acquired authority: %d -> %d %v", before, after, err)
 			}
 			t.Run("retained_channel", func(t *testing.T) {
@@ -228,33 +228,61 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
-			bootStore, closeBootStore, err := openBootStore()
-			if err == nil {
-				t.Cleanup(func() {
-					if err := closeBootStore(); err != nil {
-						t.Error(err)
+			waitCtx, cancelWait := context.WithCancel(ctx)
+			defer cancelWait()
+			joined := make(chan error, 1)
+			waitJoined := false
+			t.Cleanup(func() {
+				cancelWait()
+				if err := contender.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+				if !waitJoined {
+					select {
+					case <-joined:
+					case <-time.After(3 * time.Second):
+						t.Error("standby did not join during cleanup")
 					}
-				})
-				var unexpected startupownership.ProcessCapability
-				unexpected, err = bootStore.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+				}
+			})
+			go func() {
+				bootStore, closeBootStore, err := openBootStore(waitCtx)
+				if err != nil {
+					joined <- err
+					return
+				}
+				unexpected, err := bootStore.AcquireProcessCapability(waitCtx, startupownership.AcquireRequest{
 					OwnerID: "real-boot-must-reacquire", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 				})
-				if err == nil {
-					if err := unexpected.Release(ctx); err != nil {
-						t.Error(err)
-					}
-					t.Fatal("the real boot owner accepted a previous free observation over current contention")
+				if unexpected != nil {
+					err = errors.Join(errors.New("previous free observation admitted current contention"), unexpected.Release(context.Background()))
 				}
+				joined <- errors.Join(err, closeBootStore())
+			}()
+			select {
+			case err := <-joined:
+				waitJoined = true
+				t.Fatalf("actual boot did not wait for current possession: %v", err)
+			case <-time.After(30 * time.Millisecond):
 			}
-			var refusal *startupownership.AcquisitionError
-			if !errors.As(err, &refusal) || refusal.Failure != startupownership.AcquisitionTakeoverRequired {
-				t.Fatalf("actual boot refused for something other than current possession: %v", err)
-			}
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
 				t.Fatalf("refused boot wrote authority after verification: %d -> %d %v", before, after, err)
+			}
+			cancelWait()
+			if err := contender.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-joined:
+				waitJoined = true
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled standby published or lost its cause: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancelled standby did not join after incumbent release")
 			}
 		})
 	}

@@ -10,6 +10,7 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
@@ -22,31 +23,38 @@ func (*retainedSessionProbe) InspectRunExecutionOwnership(context.Context, Grant
 	return 0, errors.New("run execution ownership is not implemented by this session probe")
 }
 
-func TestAuthorityValidateRecomputesAcquisitionBinding(t *testing.T) {
-	req := AcquireRequest{OwnerID: "owner-a", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
-	valid, err := NewColdAuthority(req, "sqlite_retained_owner")
-	if err != nil {
-		t.Fatalf("NewColdAuthority: %v", err)
+func TestAuthorityProjectsCanonicalLeaseWithoutIssuingPossession(t *testing.T) {
+	stamp := processbinding.LeaseStamp{LeaseIdentity: processbinding.LeaseIdentity{
+		LeaseID: uuid.NewString(), OwnerID: "owner-a", BootID: uuid.NewString(),
+		RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+	}, Generation: 1}
+	valid := AuthorityFromLease(stamp)
+	if err := valid.Validate(); err != nil || valid.LeaseStamp() != stamp {
+		t.Fatalf("lease projection = %#v, err=%v", valid, err)
 	}
 	tests := []struct {
 		name   string
 		mutate func(*Authority)
 	}{
-		{name: "acquisition id", mutate: func(a *Authority) { a.AcquisitionID = uuid.NewString() }},
-		{name: "request hash", mutate: func(a *Authority) { a.AcquisitionRequestHash = strings.Repeat("f", 64) }},
-		{name: "authority id", mutate: func(a *Authority) { a.AuthorityID = uuid.NewString() }},
-		{name: "owner", mutate: func(a *Authority) { a.OwnerID = "owner-b" }},
-		{name: "runtime instance", mutate: func(a *Authority) { a.RuntimeInstanceID = uuid.NewString() }},
-		{name: "backend", mutate: func(a *Authority) { a.Backend = "postgres_retained_session" }},
+		{name: "authority id", mutate: func(a *Authority) { a.AuthorityID = "12345678-ABCD-4ABC-8ABC-123456789ABC" }},
+		{name: "generation", mutate: func(a *Authority) { a.AuthorityGeneration = 0 }},
+		{name: "owner", mutate: func(a *Authority) { a.OwnerID = " owner-a" }},
+		{name: "runtime instance", mutate: func(a *Authority) { a.RuntimeInstanceID = uuid.Nil.String() }},
+		{name: "backend", mutate: func(a *Authority) { a.Backend = "sqlite" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			forged := valid
 			tc.mutate(&forged)
-			if err := forged.Validate(); err == nil || !strings.Contains(err.Error(), "acquisition binding is invalid") {
-				t.Fatalf("Validate() error = %v, want acquisition-binding rejection", err)
+			if err := forged.Validate(); err == nil {
+				t.Fatalf("Validate() accepted malformed stamp: %#v", forged)
 			}
 		})
+	}
+	crossed := valid
+	crossed.AuthorityID = uuid.NewString()
+	if err := crossed.Validate(); err != nil || crossed == valid {
+		t.Fatalf("shape validation must not interpret a different valid stamp as current possession: %#v, %v", crossed, err)
 	}
 }
 
@@ -179,20 +187,20 @@ func testRetainedSession(t *testing.T) (*retainedSessionProbe, runtimeagenttopol
 	if err != nil {
 		t.Fatal(err)
 	}
-	authority, err := NewColdAuthority(AcquireRequest{OwnerID: "owner-a", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	authority := AuthorityFromLease(processbinding.LeaseStamp{LeaseIdentity: processbinding.LeaseIdentity{
+		LeaseID: uuid.NewString(), OwnerID: "owner-a", BootID: uuid.NewString(),
+		RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+	}, Generation: 1})
 	session := &retainedSessionProbe{authority: authority, plan: plan}
 	return session, plan
 }
 
 func TestAcquireRequestRequiresTypedProcessIdentity(t *testing.T) {
-	if _, err := NewColdAuthority(AcquireRequest{OwnerID: "owner", BootID: uuid.NewString()}, "test"); err == nil {
-		t.Fatal("NewColdAuthority accepted a missing runtime instance")
+	if err := (AcquireRequest{OwnerID: "owner", BootID: uuid.NewString()}).Validate(); err == nil {
+		t.Fatal("AcquireRequest accepted a missing runtime instance")
 	}
-	if _, err := NewColdAuthority(AcquireRequest{OwnerID: "owner", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}, "test"); err != nil {
-		t.Fatalf("NewColdAuthority: %v", err)
+	if err := (AcquireRequest{OwnerID: "owner", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}).Validate(); err != nil {
+		t.Fatalf("AcquireRequest: %v", err)
 	}
 }
 

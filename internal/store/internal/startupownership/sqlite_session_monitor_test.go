@@ -14,6 +14,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/division-sh/swarm/internal/store/platformschema"
@@ -73,7 +74,7 @@ func TestTerminalAuthorityReadbackUsesBoundedDeadline(t *testing.T) {
 	}
 }
 
-func TestSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(t *testing.T) {
+func TestSQLiteSessionMonitorCancellationPreservesPossessionUntilJoinedRelease(t *testing.T) {
 	for _, phase := range []string{"before proof", "os proof", "sql proof"} {
 		t.Run(phase, func(t *testing.T) {
 			proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t, phase, true)
@@ -81,7 +82,7 @@ func TestSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(
 	}
 }
 
-func TestSQLiteSessionOrdinaryCancellationPreservesPossessionUntilDurableRelease(t *testing.T) {
+func TestSQLiteSessionOrdinaryCancellationPreservesPossessionUntilJoinedRelease(t *testing.T) {
 	for _, phase := range []string{"before proof", "os proof", "sql proof"} {
 		t.Run(phase, func(t *testing.T) {
 			proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t, phase, false)
@@ -144,12 +145,9 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 	if err := session.Release(context.Background()); err != nil {
 		t.Fatalf("release SQLite session: %v", err)
 	}
-	var durableState string
-	if err := db.QueryRow(`SELECT state FROM runtime_startup_authority_facts WHERE authority_id=? ORDER BY transition_ordinal DESC LIMIT 1`, session.authority.AuthorityID).Scan(&durableState); err != nil {
-		t.Fatalf("read durable release: %v", err)
-	}
-	if durableState != string(runtimestartupownership.StateReleased) {
-		t.Fatalf("durable authority state=%q, want released", durableState)
+	stamp, err := generationauthority.ReadProcessGeneration(context.Background(), db, true)
+	if err != nil || stamp != session.authority.LeaseStamp() {
+		t.Fatalf("joined release must preserve immutable last-admitted stamp: %#v, %v", stamp, err)
 	}
 	contender, err := acquireSQLiteFilePossession(path)
 	if err != nil {
@@ -163,6 +161,11 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runtime.db")
+	guard, err := WaitSQLiteConstructionGuard(context.Background(), path)
+	if err != nil {
+		t.Fatalf("acquire retained SQLite possession before writes: %v", err)
+	}
+	t.Cleanup(func() { _ = guard.Release() })
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open SQLite: %v", err)
@@ -189,7 +192,7 @@ func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) 
 	}
 	created := 0
 	for _, plan := range plans {
-		if plan.TableName != "runtime_startup_authority_facts" && plan.TableName != "author_activity_order" {
+		if plan.TableName != "runtime_process_generation" && plan.TableName != "runtime_generation_grants" && plan.TableName != "author_activity_order" {
 			continue
 		}
 		statements, err := schemastore.SQLiteStatementsForPlan(plan)
@@ -203,35 +206,40 @@ func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) 
 		}
 		created++
 	}
-	if created != 2 {
-		t.Fatalf("session fixture requires authority and mutation-order tables: created=%d", created)
+	if created != 3 {
+		t.Fatalf("session fixture requires generation, grants and mutation-order tables: created=%d", created)
 	}
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
 		t.Fatalf("construct SQLite backend: %v", err)
 	}
 	t.Cleanup(func() { _ = backend.Close() })
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "sqlite-monitor-release", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "sqlite_retained_owner")
+	identity, err := guard.BackendIdentity(context.Background())
 	if err != nil {
-		t.Fatalf("construct authority: %v", err)
+		t.Fatal(err)
 	}
+	retained := identity.takeInitial()
+	t.Cleanup(func() { _ = retained.Release() })
+	if err := generationauthority.SeedProcessGeneration(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var authority runtimestartupownership.Authority
 	if err := backend.RunTransaction(context.Background(), "seed runtime process authority", func(ctx context.Context, tx *sql.Tx) error {
-		return recordAuthorityTransitionTx(ctx, tx, nil, authority, true)
+		var err error
+		authority, err = acquireProcessGenerationTx(ctx, tx, runtimestartupownership.AcquireRequest{
+			OwnerID: "sqlite-monitor-release", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+		}, uuid.NewString(), "sqlite_retained_owner", true)
+		return err
 	}); err != nil {
 		t.Fatalf("seed authority: %v", err)
 	}
 
-	retained, err := acquireSQLiteFilePossession(path)
-	if err != nil {
-		t.Fatalf("acquire retained SQLite possession: %v", err)
-	}
-	t.Cleanup(func() { _ = retained.Release() })
 	proof, err := backend.RetainOwnershipProof(context.Background())
 	if err != nil {
 		t.Fatalf("retain SQLite proof access: %v", err)
 	}
-	owner := &StartupSQLiteOwner{backend: backend, path: path, schemaGuard: func() error { return nil }}
-	return &sqliteSession{owner: owner, authority: authority, possession: retained, proof: proof}, db
+	owner := &StartupSQLiteOwner{backend: backend, path: path, backendIdentity: identity, schemaGuard: func() error { return nil }}
+	session := &sqliteSession{owner: owner, authority: authority, possession: retained, proof: proof}
+	t.Cleanup(func() { _ = session.Release(context.Background()) })
+	return session, db
 }

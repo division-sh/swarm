@@ -258,7 +258,7 @@ func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyComma
 			if observation.Status != possession {
 				t.Fatalf("fresh schema fabricated or skipped independent possession: %+v", observation)
 			}
-		case "startup_authority_lineage", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies":
+		case "startup_process_generation", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies":
 			if observation.Status != bootverify.AdmissionNotApplicable || !strings.Contains(observation.Reason, "canonical schema inspection") {
 				t.Fatalf("proven absent domain mistaken for unavailable or observed rows: %+v", observation)
 			}

@@ -13,14 +13,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
-	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/spf13/cobra"
 )
 
 const (
 	localTargetOwner         = "platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority"
-	selectedStoreOwnerReader = "platform-spec.yaml#agent_topology_authority.process_capability.repair"
+	selectedStoreOwnerReader = "platform-spec.yaml#agent_topology_authority.process_capability.inspection"
 )
 
 type cliSwarmDirOptions struct {
@@ -258,8 +257,11 @@ func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Comma
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}
 	status := string(inspection.Status)
-	if inspection.Status == runtimestartupownership.AuthorityInspectionValid {
-		status = string(inspection.State)
+	if inspection.Possession != nil {
+		status = "available"
+		if !inspection.Possession.Available {
+			status = "held"
+		}
 	}
 	return doctorTargetPendingFact{Status: status, Owner: selectedStoreOwnerReader, Detail: authorityInspectionLine(inspection)}
 }

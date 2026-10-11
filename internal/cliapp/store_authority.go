@@ -6,32 +6,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/platform"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
-	"github.com/division-sh/swarm/internal/versionmetadata"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 type storeAuthorityOptions struct {
 	configPath string
 	storeMode  string
-	confirm    string
-}
-
-type authorityMaintenanceStore interface {
-	runtimestartupownership.AuthorityMaintenanceStore
-	store.SchemaBootstrapper
-	Close() error
 }
 
 type authorityInspectionStore interface {
@@ -41,18 +28,10 @@ type authorityInspectionStore interface {
 
 func newStoreAuthorityCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
 	opts := storeAuthorityOptions{storeMode: storebackend.ActiveDefaultBackend().String()}
-	cmd := &cobra.Command{
-		Use:   "store",
-		Short: "Inspect and repair selected-store project ownership.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
+	cmd := &cobra.Command{Use: "store", Short: "Inspect the selected-store process lease.", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	status := &cobra.Command{
-		Use:   "status",
-		Short: "Show who the selected store records as project owner.",
-		Args:  cobra.NoArgs,
+	status := &cobra.Command{Use: "status", Short: "Show the selected store's process lease.", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			inspection, err := inspectSelectedStoreAuthority(ctx, root, cmd, opts)
 			if err != nil {
@@ -62,53 +41,9 @@ func newStoreAuthorityCommand(ctx context.Context, root InvocationRoot) *cobra.C
 			return nil
 		},
 	}
-	repair := &cobra.Command{
-		Use:   "repair-authority",
-		Short: "Repair an inconsistent project ownership record after inspection.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
-			selected, closeStore, err := openAuthorityMaintenanceStore(ctx, root, cmd, opts)
-			if err != nil {
-				return err
-			}
-			defer closeAuthorityResult(&runErr, closeStore)
-			inspection, err := selected.InspectAuthority(ctx)
-			if err != nil {
-				return err
-			}
-			if inspection.Status != runtimestartupownership.AuthorityInspectionCorrupt {
-				fmt.Fprintln(cmd.OutOrStdout(), authorityInspectionLine(inspection))
-				return fmt.Errorf("project ownership repair is not required")
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "The recorded project session is inconsistent.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Plan: replace only the broken session record with a clean stopped session.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Your flows, runs, and data are untouched.")
-			if strings.TrimSpace(opts.confirm) == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "Re-run with --confirm %s to apply this exact plan.\n", inspection.FindingsDigest)
-				return commandExitError{code: CLIExitValidation}
-			}
-			if strings.TrimSpace(opts.confirm) != inspection.FindingsDigest {
-				return fmt.Errorf("--confirm does not match the current findings; inspect again")
-			}
-			result, err := selected.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
-				OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
-			})
-			if err != nil {
-				return err
-			}
-			if err := result.Validate(); err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "✓ Project ownership repaired. Your flows, runs, and data were untouched.")
-			return nil
-		},
-	}
-	for _, child := range []*cobra.Command{status, repair} {
-		child.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config")
-		child.Flags().StringVar(&opts.storeMode, "store", opts.storeMode, RuntimeStoreBackendHelp)
-	}
-	repair.Flags().StringVar(&opts.confirm, "confirm", "", "Confirm the exact findings digest printed by inspection")
-	cmd.AddCommand(status, repair)
+	status.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config")
+	status.Flags().StringVar(&opts.storeMode, "store", opts.storeMode, RuntimeStoreBackendHelp)
+	cmd.AddCommand(status)
 	return cmd
 }
 
@@ -158,75 +93,18 @@ func closeAuthorityResult(resultErr *error, closeStore func() error) {
 }
 
 func authorityInspectionLine(inspection runtimestartupownership.AuthorityInspection) string {
-	switch inspection.Status {
-	case runtimestartupownership.AuthorityInspectionEmpty:
-		return "Project owner: no previous session is recorded."
-	case runtimestartupownership.AuthorityInspectionCorrupt:
-		return "Project owner: unknown because the recorded session is inconsistent. Run `swarm store repair-authority` to inspect and repair it."
-	case runtimestartupownership.AuthorityInspectionValid:
-		if inspection.State == runtimestartupownership.StateActive {
-			return fmt.Sprintf("Project owner: session %s is recorded as active; status does not infer whether its process is live.", strings.TrimSpace(inspection.OwnerID))
-		}
-		return "Project owner: no active session is recorded."
-	default:
-		return "Project owner: unavailable."
+	if inspection.Possession == nil {
+		return "Project owner: selected store has not been created."
 	}
-}
-
-func openAuthorityMaintenanceStore(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts storeAuthorityOptions) (authorityMaintenanceStore, func() error, error) {
-	repo := root.Path()
-	noClose := func() error { return nil }
-	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
-	if err != nil {
-		return nil, noClose, err
+	lease := "available"
+	if !inspection.Possession.Available {
+		lease = "held"
 	}
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
-	if err != nil {
-		return nil, noClose, err
+	if inspection.Authority == nil {
+		return fmt.Sprintf("Project owner: selected-store lease is %s; no process generation has been admitted.", lease)
 	}
-	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, CLISourcePlatformSpecPaths{}, opts.storeMode, cmd.Flags().Changed("store"))
-	if err != nil {
-		return nil, noClose, err
-	}
-	selected, err := constructAuthorityMaintenanceStore(ctx, selection, cfgResult.Config)
-	if err != nil {
-		return nil, noClose, err
-	}
-	closeStore := selected.Close
-	request, err := sourceFreeAuthoritySchemaBootstrapRequest()
-	if err != nil {
-		return nil, noClose, errors.Join(err, closeStore())
-	}
-	if err := selected.BootstrapSchema(ctx, request); err != nil {
-		return nil, noClose, errors.Join(err, closeStore())
-	}
-	return selected, closeStore, nil
-}
-
-func sourceFreeAuthoritySchemaBootstrapRequest() (store.SchemaBootstrapRequest, error) {
-	var spec runtimecontracts.PlatformSpecDocument
-	source, err := yamlsource.Load(platform.PlatformSpecYAML())
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, fmt.Errorf("load embedded platform schema: %w", err)
-	}
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, fmt.Errorf("decode embedded platform schema: %w", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, err
-	}
-	metadata, err := versionmetadata.Resolve(InjectedBuildMetadata())
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, err
-	}
-	return store.SchemaBootstrapRequest{
-		PlatformPlans: plans,
-		Origin: store.RuntimeStoreOrigin{
-			SwarmVersion: metadata.BinaryVersion, PlatformVersion: strings.TrimSpace(spec.Platform.Version), CreatedAt: time.Now().UTC(),
-		},
-	}, nil
+	return fmt.Sprintf("Project owner: selected-store lease is %s (last admitted generation %d, owner %s).",
+		lease, inspection.Authority.AuthorityGeneration, inspection.Authority.OwnerID)
 }
 
 func openAuthorityInspectionStore(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts doctorOptions) (authorityInspectionStore, func() error, error) {
@@ -273,14 +151,6 @@ func resolveAuthorityStoreSelection(root InvocationRoot, configPath string, cmd 
 	project := resolveLocalRuntimeStateProject(repo, paths)
 	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
 	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, cfg, defaultPath, defaultSource)
-}
-
-func constructAuthorityMaintenanceStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityMaintenanceStore, error) {
-	request, err := selectedAuthorityRequest(ctx, selection, cfg)
-	if err != nil {
-		return nil, err
-	}
-	return storeselected.OpenAuthorityMaintenance(ctx, request)
 }
 
 func selectedAuthorityRequest(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeselected.AuthorityRequest, error) {

@@ -38,7 +38,7 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 	var configText string
 	if backend == "sqlite" {
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		selected, _, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+		selected, _, err := construction.OpenSQLiteRuntimeForServing(context.Background(), path)
 		if err != nil {
 			t.Fatal(err)
 		}

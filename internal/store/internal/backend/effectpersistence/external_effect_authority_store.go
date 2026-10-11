@@ -303,6 +303,9 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 		if startup.Preparation != nil {
 			return requirePreparedProbeProcess(ctx, tx, authority, false)
 		}
+		if err := requireGenerationGrantProcess(ctx, tx, authority, startup.StartupAuthorityID, false); err != nil {
+			return err
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=$1::uuid AND state_version=$2 AND state IN ('prepared','probe_settled')
@@ -314,6 +317,9 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityServeRegistration:
 		startup := authority.ServeRegistration
+		if err := requireGenerationGrantProcess(ctx, tx, authority, startup.StartupAuthorityID, false); err != nil {
+			return err
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=$1::uuid AND state_version=$2 AND state='admitted'
@@ -405,6 +411,9 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 		if startup.Preparation != nil {
 			return requirePreparedProbeProcess(ctx, tx, authority, true)
 		}
+		if err := requireGenerationGrantProcess(ctx, tx, authority, startup.StartupAuthorityID, true); err != nil {
+			return err
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=? AND state_version=? AND state IN ('prepared','probe_settled')
@@ -416,6 +425,9 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityServeRegistration:
 		startup := authority.ServeRegistration
+		if err := requireGenerationGrantProcess(ctx, tx, authority, startup.StartupAuthorityID, true); err != nil {
+			return err
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=? AND state_version=? AND state='admitted'
@@ -609,10 +621,24 @@ func requirePreparedProbeProcess(ctx context.Context, tx *sql.Tx, authority runt
 	return nil
 }
 
+func requireGenerationGrantProcess(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, grantID string, sqlite bool) error {
+	current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, tx, grantID, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return invalidExternalAuthority(authority, "generation_grant_process_not_current")
+	}
+	return nil
+}
+
 func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.StartupProbe
 	if startup.Preparation != nil {
 		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, false, false)
+	}
+	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
+		return false, err
 	}
 	var count int
 	err := q.QueryRowContext(ctx, `
@@ -628,6 +654,9 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 	if startup.Preparation != nil {
 		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, true, false)
 	}
+	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
+		return false, err
+	}
 	var count int
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_generation_grants f
@@ -639,6 +668,9 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 
 func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
+	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
+		return false, err
+	}
 	var count int
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_generation_grants f
@@ -651,6 +683,9 @@ func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQuer
 
 func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
+	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
+		return false, err
+	}
 	var count int
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_generation_grants f

@@ -316,12 +316,12 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		result.Disposition = runfork.SelectedForkRecoveryCurrent
 		return result, nil
 	}
-	predecessor, err := storestartup.PreparedProcessPredecessor(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, req.Process, sqlite)
-	if err != nil {
-		return result, err
-	}
-	if !predecessor {
-		return result, fmt.Errorf("selected recovery preparation is not a recorded predecessor")
+	// The shared loader already proved this original native admitted execution's
+	// exact preparation, fingerprint and fork/declaration/origin correspondence.
+	// This check orders that evidence against the fenced current process; a
+	// different UUID or lower number alone would not establish provenance.
+	if preparation.ProcessGeneration >= req.Process.AuthorityGeneration || preparation.Coordinates.ProcessAuthorityID == req.Process.AuthorityID {
+		return result, fmt.Errorf("selected recovery admitted preparation is not from an earlier process generation")
 	}
 	var canceled []runtimeeffects.CanceledTurnCommit
 	for _, command := range req.Cancellations {

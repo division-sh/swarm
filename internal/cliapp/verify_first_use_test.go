@@ -101,7 +101,7 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 					if independent["listener_availability"] != 2 {
 						t.Fatalf("both listeners not observed: %v", independent)
 					}
-					for _, check := range []string{"selected_store_schema", "startup_process_possession", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "startup_authority_lineage", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies"} {
+					for _, check := range []string{"selected_store_schema", "startup_process_possession", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "startup_process_generation", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies"} {
 						if storeTail[check] != 1 {
 							t.Fatalf("missing or duplicate dependent %s: %v", check, storeTail)
 						}
