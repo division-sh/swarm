@@ -19,7 +19,7 @@ var deadline2353Clients sync.Map
 // One client observation per exact endpoint/test; it does not resend anything.
 func deadline2353ObserveHTTP(t *testing.T, req *http.Request, endpoint, method string, timeout time.Duration, params map[string]any) (*http.Request, func()) {
 	row := strings.TrimSpace(os.Getenv("TEST_2353_ROW"))
-	if (row == "S01" && method != "event.publish") || (row == "S02" && method != "run.fork") || row == "S03" || !sqlite2353.Enabled() {
+	if (row == "S01" && method != "event.publish") || (row == "S02" && method != "run.fork") || row == "S03" || row == "S04" || !sqlite2353.Enabled() {
 		return req, func() {}
 	}
 	key := t.Name() + "|" + endpoint + "|" + method

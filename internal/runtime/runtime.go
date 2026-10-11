@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 	"log/slog"
 	"os"
 	"regexp"
@@ -2114,6 +2115,13 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
+	if sqlite2353.Enabled() {
+		sqlite2353.Record("runtime.shutdown.enter", map[string]any{"grace_ns": grace.Nanoseconds(), "runtime_active": rt.workOccurrence.ActiveCount(), "process_active": rt.Options.ProcessWorkOwner.ActiveCount()})
+		defer sqlite2353.Window(drainCtx, "runtime.shutdown", []time.Duration{grace / 8, grace / 2, grace * 7 / 8})()
+		defer func() {
+			sqlite2353.Record("runtime.shutdown.exit", map[string]any{"error": fmt.Sprint(shutdownErr), "cause": fmt.Sprint(context.Cause(drainCtx)), "runtime_active": rt.workOccurrence.ActiveCount(), "process_active": rt.Options.ProcessWorkOwner.ActiveCount()})
+		}()
+	}
 	// Finite fan-out turns may still complete committed handoffs through these
 	// consumers. Join only this producer before retiring its dependencies.
 	rt.lifecycleMu.Lock()

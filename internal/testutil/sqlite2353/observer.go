@@ -27,7 +27,7 @@ var identityOnce sync.Once
 
 func Enabled() bool {
 	row := os.Getenv("TEST_2353_ROW")
-	if row != "S01" && row != "S02" && row != "S03" {
+	if row != "S01" && row != "S02" && row != "S03" && row != "S04" {
 		return false
 	}
 	if os.Getenv("TEST_2353_DIR") == "" {
@@ -200,6 +200,11 @@ func Window(ctx context.Context, name string, points []time.Duration) func() {
 				Record(name+".context_cancelled", fmt.Sprint(context.Cause(ctx)))
 				return
 			case <-timer.C:
+				if ctx.Err() != nil {
+					Record(name+".sample_not_taken", fmt.Sprint(context.Cause(ctx)))
+					return
+				}
+				Record(name+".sample_point", map[string]any{"scheduled_ns": at.Nanoseconds(), "actual_elapsed_ns": time.Since(start).Nanoseconds(), "cause": fmt.Sprint(context.Cause(ctx))})
 				Sample(name + "." + strconv.FormatInt(at.Milliseconds(), 10) + "ms")
 			}
 		}
@@ -219,7 +224,7 @@ func Window(ctx context.Context, name string, points []time.Duration) func() {
 
 func Request(ctx context.Context, method string) func(error) {
 	row := os.Getenv("TEST_2353_ROW")
-	if !Enabled() || (row == "S01" && method != "event.publish") || (row == "S02" && method != "run.fork") || row == "S03" || !firstRequest.CompareAndSwap(false, true) {
+	if !Enabled() || (row == "S01" && method != "event.publish") || (row == "S02" && method != "run.fork") || row == "S03" || row == "S04" || !firstRequest.CompareAndSwap(false, true) {
 		return func(error) {}
 	}
 	finish := Phase(ctx, "server."+method)
