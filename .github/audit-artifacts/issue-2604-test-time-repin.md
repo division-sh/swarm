@@ -1,14 +1,15 @@
-# Exact-source Test-Time correction and prepared proof placement
+# Exact-source Test-Time correction and ratified proof placement
 
-This is a local preparation record, not final-head hosted qualification or
+This is a focused/counterfactual record, not final-head hosted qualification or
 parent closure. #2604 run 38097201316 at bd2d853e3 remains RED; all its proofs
 passed, but its hard added-work timing gate did not. #2542/#2151 remain open.
 
 ## Binding Authority
 
 - Exact-source correction: #2535 comment 6103962032 (reviewer-g).
-- Prepared placement boundary: #2604 comments 6103925334 (reviewer-b) and
-  6103929351 (reviewer-g). USER coverage ratification is still required.
+- Placement boundary: #2604 comments 6103925334 (reviewer-b), 6103929351 and
+  final 6104099093 (reviewer-g). USER ratification at 01:15 UTC on 2026-10-11
+  approves the five-root move; the final overlay ruling is full-only.
 - Authoritative spec: test_specification.internal_catalog_conformance.
   qualification_tiers.{fixture_codemod_qualification,timing_publication_and_cadence}.
 
@@ -81,7 +82,7 @@ membership/time, unchanged candidate time and both projected classifications.
   newer reference and now correctly charged as added: 0.66 seconds. Both are
   pipeline canonical-run-before-mutation SQLite refusal proofs; neither is
   exempted because of historical existence.
-- Five expensive codemod roots account for 299.95 seconds. The prepared core
+- Five expensive codemod roots account for 299.95 seconds. The ratified core
   deferral leaves 389 added cells / 46.98 seconds, not the identity-only 46.32.
 
 The same exact candidate receipts from run 38097201316 are admitted against
@@ -93,15 +94,20 @@ receipt for the edited source or new local controls.
 | --- | ---: | ---: | ---: |
 | Original reference and policy | 455.36 / 128.4945 | 561.61 / 600 | 572.96 / 600 |
 | Approved re-pin only | 346.93 / 119.262 | 374.75 / 600 | 386.10 / 600 |
-| Re-pin plus prepared five-root core deferral | 46.98 / 119.262 | 374.75 / 600 | 386.10 / 600 |
+| Re-pin plus ratified placement | 46.98 / 119.262 | 258.79 / 600 | 386.10 / 600 |
 
-The last projection still FAILS the five individual >30-second rules in
-lifecycle/full. No code/prose exception is inferred from the reference re-pin.
+The intermediate preparation without a versioned placement disposition still
+FAILED the five individual >30-second rules. The final finite disposition,
+separate from the re-pin, admits these exact cells only at their approved
+minimum tiers and records original run/source/approval in warning evidence.
+All observed seconds remain charged; other expensive roots, foreign/aliased
+cells and promotion to core remain rejected. The final archived-run projection
+is WARN, exit 0, with no hard problems, not fresh edited-head qualification.
 Retained deltas are +292.54 / +373.66 / +267.83 seconds; strict aggregate
 counterfactuals still fail. Nightly enforcement is not preemptively weakened:
 future complete nightly evidence must be classified on its actual receipts.
 
-## Prepared Placement And Exhaustive Consumption
+## Ratified Placement And Exhaustive Consumption
 
 The existing special-package/explicit-unit owner is used; no new runner,
 scheduler, cache, source switch or test framework is introduced.
@@ -116,10 +122,10 @@ scheduler, cache, source switch or test framework is introduced.
 - codemod-candidate-overlay owns the complete simultaneous 19-directory
   candidate type-check, all original variants and existing issue2413 profile.
 
-The draft follows B's lifecycle/full candidate-overlay placement. G recommends
-full-only for that one unit: USER ratification must resolve the exact minimum
-tier before publication. Full-only changes only lifecycle's added projection
-to 258.79 seconds, not core/full. No final coverage disposition is claimed.
+The final overlay unit is full-only, following G's final ruling and USER
+ratification. No cheap proxy, single-package overlay or second loader mode is
+added: genuinely cheap guards stay core/lifecycle. Future codemod qualification
+must select full or explicitly include the full-only unit.
 
 All five proof bodies are byte-identical to bd2d853e3. Preserve separate
 overlays, processes/stores, source markers, backend/variant cases, race and
@@ -130,14 +136,25 @@ ordinary roots, including neighboring/extended integration-name prefixes.
 
 Planner policy, all-profile execution binding, catalog inventory and timing
 inventory consume the same four explicit units. Negative controls reject
-coverage/envelope drift. Full/lifecycle partition is exhaustive/disjoint;
-the core complement defers exactly five roots. Existing normal budget classes
+coverage/envelope drift. Full's partition is exhaustive/disjoint; lifecycle
+plus its one exact full-only deferral is exhaustive/disjoint. Core defers
+exactly five roots. Existing normal budget classes
 are used with no ceiling, timeout, workload or count change.
 
 ## Focused Proof And Remaining Gate
 
 Vemew, Go1.25.0, GOMAXPROCS=2, GOFLAGS empty, short on-disk TMPDIR:
 
+- Final ratified placement race: 29 roots / 221 PASS records, zero failed or
+  skipped tests, swarm-2604-final-placement-race.jsonl SHA256
+  17cae5d93f8c115b8176e01818d5d862a01278d20e3dffa816b5b393b02d07ad.
+  Includes all-profile native binding with the full-only overlay deferral,
+  exact finite approvals, foreign/renamed/environment/count/backend refusal,
+  core-promotion refusal and unchanged hard aggregate limits in PR/strict modes.
+  Earlier preparation receipts below are retained, not substituted for this delta.
+- Final original-run counterfactual: ratified-repin-placement.json SHA256
+  73875de91b18780f5f973898dda474d6979eaa1472fd5d8af45c169694254a60;
+  WARN/exit0, no hard problems. The unchanged strict aggregate still FAILS.
 - Focused race: 27 roots / 184 PASS records, zero failed/skipped tests:
   swarm-2604-repin-placement-race.jsonl,
   SHA256 10e887a2bbef8bfbb466a54d081c0140fb2d0e339181fc89e8e181f930cc24e5.
@@ -170,6 +187,7 @@ Vemew, Go1.25.0, GOMAXPROCS=2, GOFLAGS empty, short on-disk TMPDIR:
 
 No duplicate local tier, server2 run or speculative hosted retry. Unchanged
 mutation execution receipts carry. The original candidate RED is retained.
-The one combined push remains blocked on USER coverage ratification and the
-explicit versioned >30s placement disposition. Then require delta review and
-new exact-head hosted full PASS. No parent completion or merge claim.
+USER coverage ratification and the explicit versioned >30s disposition are
+recorded. The combined replacement head still requires delta review and new
+exact-head hosted full PASS. No RED is relabeled green and no parent completion
+or merge claim is made.

@@ -59,7 +59,6 @@ profiles:
     - codemod-owner-guards
     - codemod-pipeline-mutation
     - codemod-bus-mutation
-    - codemod-candidate-overlay
     - serveapp-i-reporter
     - catalog-required-inventory
     - catalog-required-verify

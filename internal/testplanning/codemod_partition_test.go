@@ -40,7 +40,8 @@ func validateCodemodProofEnvelopes(policy Policy) error {
 			return fmt.Errorf("%s changed count/environment/selector/child/budget envelope", id)
 		}
 		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-			if slices.Contains(policy.Profiles[tier].Units, id) != (tier != ProfileCore || id == "codemod-owner-guards") {
+			want := tier == ProfileFull || id == "codemod-owner-guards" || tier == ProfileLifecycle && id != "codemod-candidate-overlay"
+			if slices.Contains(policy.Profiles[tier].Units, id) != want {
 				return fmt.Errorf("%s has incorrect %s placement", id, tier)
 			}
 		}
@@ -65,8 +66,14 @@ func TestCodemodProofPlacementRetainsExhaustivePartition(t *testing.T) {
 				units = append(units, ProofUnit{ID: id, Run: unit.Run, Skip: unit.Skip})
 			}
 		}
+		if tier == ProfileLifecycle {
+			// This one exact full-only deferral remains owned, not executed by
+			// lifecycle or replaced by a cheaper compiler proxy.
+			candidate := policy.Units["codemod-candidate-overlay"]
+			units = append(units, ProofUnit{ID: "deferred-full-candidate", Run: candidate.Run})
+		}
 		if err := ValidateGoProofUnitPartition(dir, units); err != nil {
-			t.Fatalf("%s omitted or duplicated an original/new codemod root: %v", tier, err)
+			t.Fatalf("%s executed/deferred partition lost an original/new codemod root: %v", tier, err)
 		}
 	}
 	core := policy.Units["codemod-owner-guards"]
