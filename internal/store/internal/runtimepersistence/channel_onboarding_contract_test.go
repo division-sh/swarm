@@ -245,6 +245,9 @@ func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchann
 func (retiredOnboardingIdentities) RetainedCurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
 }
+func (retiredOnboardingIdentities) RetainedBindingFence(ctx context.Context, _ operatorchannel.InterfaceIdentity) (operatorchannel.BindingFence, error) {
+	return operatorchannel.BindingFence{}, ctx.Err()
+}
 func (retiredOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
 	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
 }

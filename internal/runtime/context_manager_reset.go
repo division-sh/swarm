@@ -90,6 +90,7 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 	}
 	prepared := newRuntimeContextManagerState(m.availability)
 	prepared.nextPublicationGeneration = m.nextPublicationGeneration
+	prepared.channelSessions = m.channelSessions
 	// Staging starts a fresh execution epoch. Publication retains only the
 	// suppression reconstructed from that epoch's durable standing dispositions.
 	if publish {
