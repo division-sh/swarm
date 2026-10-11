@@ -319,26 +319,11 @@ func InsertDiagnosticDirectEventRecord(
 	return event
 }
 
-func InsertDiagnosticDirectEventRecordForRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	eventID string,
-	runID string,
-	parentEventID string,
-	producerID string,
-	payload []byte,
-	createdAt time.Time,
-) events.Event {
+func SeedRunDiagnosticDeadLetterHistory(t testing.TB, ctx context.Context, selected any, runID, eventID string, payload []byte, createdAt time.Time) events.Event {
 	t.Helper()
-	var event events.Event
-	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
-		event, err = eventfixture.DiagnosticDirectForRun(txctx, attempt, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
-		return err
-	})
+	event, err := private.SeedRunDiagnosticDeadLetterHistoryForTest(ctx, selected, runID, eventID, payload, createdAt)
 	if err != nil {
-		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
+		t.Fatalf("persist diagnostic history pair %s: %v", eventID, err)
 	}
 	return event
 }

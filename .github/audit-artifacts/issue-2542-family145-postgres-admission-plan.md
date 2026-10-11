@@ -1244,3 +1244,75 @@ closure. Other raw SQL in the larger lineage/post-T parent fixtures remains
 explicit migration tail. M01 and Docker remain qualification-open in #2353;
 the previous stdlib setup failure remains unclassified. No aggregate package,
 local tier, restart qualification, flake/performance repair, push or PR claimed.
+
+### Entire Run Diagnostic Constructor And Historical Pair Family
+
+The complete live InsertDiagnosticDirectEventRecordForRun capability is removed,
+including its two wrapper consumers and all three indirect runtime/served
+callers. It formerly reconstructed a backend from a caller-owned pool through
+runCanonicalEventMutation, then each consumer independently inserted a receipt.
+The replacement SeedRunDiagnosticDeadLetterHistory consumes only the already
+supplied selected instance and exact run/event/payload/time coordinates. The
+runtime helper now receives its original pg/context; the served helper receives
+the concrete selected instance already returned by its unchanged catalog setup.
+Other raw construction in that served catalog/source chain remains explicit
+family tail; this does not claim the whole served fixture is canonicalized.
+
+The existing eventfixture.DiagnosticDirectForRun semantic constructor and
+canonical record adapter still own the event class, global envelope, runtime
+platform producer, live mode, payload bytes and original event clock. Their
+existing event fact/count-delta revision finalization is preserved, not treated
+as an unrevisioned write. The pipelinepersistence row owner retains the exact
+platform/pipeline dead-letter receipt, NULL entity/instance, fixed reason and
+empty side effects at the original timestamp. Both now commit in one original
+selected mutation transaction. No independent public receipt writer, callback,
+producer selector, dialect or pool escapes; failure returns no provisional
+event. The served helper retains its subsequent exact events/event_receipts
+capture through the original selected revision owner. This historical fixture
+does not settle live pipeline work or grant dispatch/lease/execution authority.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Pre-T diagnostic outcome remains lineage-only | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage, original frontier cardinality/execution/readback |
+| Post-T non-replay facts retain branch divergence | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedAfterForkPoint, unchanged branch facts and no copied diagnostic execution |
+| Served selected fork uses canonical owner and JSON result | execution-proven through the same corrected path | TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON, original DSN/harness, chronology, JSON and readback assertions |
+| Exact pair and original writer/revision | execution-proven through the same corrected path | TestRunDiagnosticHistoryFixturePreservesPairAndOriginalWriterBothStores, one write/one original event revision/no active attempt, canonical stored event and physical receipt identity/NULLs/clock |
+| Real append failure leaves no partial pair or source changes | execution-proven through the same corrected path | TestRunDiagnosticHistoryFixtureRollsBackActualAppendFaultBothStores, existing original-coordinator AFTER INSERT fault, rollback/no write and complete before/after source-domain equality |
+| Missing/duplicate/cancelled/invalid/closed ownership yields no event | execution-proven through the same corrected path | Same pair root, duplicate receipt after exact canonical event replay, absent run, invalid event/time, cancellation, nil/uninitialized and closed owner; exact source snapshot unchanged |
+| Constructor/caller retirement is exhaustive for this finite family | execution-proven through the same corrected path | TestFamily145DiagnosticHistoryConstructorRetiredAndAllCallersUseOriginalOwner, three calls and no live old public definition/reference; finite source/type/caller assertion controls |
+
+Vemew race/count1 receipts: diagnostic-history-native-pilot PASS8.321s for the
+pre-T root; diagnostic-history-native-consumer-tail PASS9.853s runforkexecution
+post-T and12.093s served CLI. The new pair proof initially compared RawMessage
+to []byte using reflect.DeepEqual (different Go types despite identical bytes),
+then incorrectly expected zero revision finalizations. Corrected byte equality
+and the existing canonical adapters' declared event fact/count-delta finalization
+retain stronger exact evidence rather than waive failures or remove history.
+diagnostic-history-canonical-event-revision-controls PASS10.952s. Expanded final
+stored-event/ownership and original append-fault controls PASS13.974s. No new
+fault facility, timeout, retry loop, simulated transaction or assertion reduction.
+
+Changing only the actual pipeline owner's receipt time to at.Add(time.Second)
+produces diagnostic-history-clock-counterexample expected RED10.380s on both
+stores at the exact processed_at assertion. Mutation held through completion,
+then restored exactly; final native controls are GREEN. No wall-clock fallback
+or loosened timestamp comparison. The prior canonical event constructor/adapter
+implementation is unchanged, including event-class and payload-admission owners.
+
+The whole TestFamily145 prefix, historical model, finite snapshots and four
+owner correspondence controls PASS4.598s; all six affected event/delivery/
+revision/staged-consumer guards are GREEN (runtimepersistence2.987s plus the
+event-construction package). Complete codemod dry run Changes=[]; six-package
+U1000 and diff check GREEN. Finite corpus1025 rows/166 exact transitions, digest
+465d137a5142b5000fb14792799282cd98a1276023e3280e74c37d11c037dbea.
+Original893 immutable rows/24 historical receipts remain unchanged. The retired
+public constructor has one exact finite removal row; no compatibility alias,
+guard allowance or baseline increase. Exact-head complexity follows signed
+commit. Authoritative spec records the bounded native fixture contract.
+
+Named supplied-pool admissions remain133 (134 excluding unqualified Docker):
+this cohort removes a differently spelled pool-to-backend reconstruction
+capability and its receipt protocol, not another Admit call. No fresh global
+raw-site census/debt-baseline result, whole-family closure, restart or flake/
+performance claim. #2542/#2151 and existing watchlist mapping remain open;
+M01/Docker remain qualification-open under #2353. No push, PR or tier run.

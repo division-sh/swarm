@@ -354,7 +354,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
-	bundleHash, _ := registerRunForkCLIContractCatalog(t, context.Background(), db, sourceRoot)
+	bundleHash, selected := registerRunForkCLIContractCatalog(t, context.Background(), db, sourceRoot)
 	sourceRunID := uuid.NewString()
 	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
@@ -362,7 +362,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000312, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, bundleHash, at)
-	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, context.Background(), selected, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	forkPointEventID := stageRunForkCLIForkPoint(t, db, sourceRunID, entityID, at.Add(time.Millisecond))
 	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
@@ -917,23 +917,11 @@ func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sq
 	return bundle.SourceArtifact.BundleHash(), selected
 }
 
-func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
+func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context.Context, selected any, runID, eventID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
-	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "", "runtime",
+	storetest.SeedRunDiagnosticDeadLetterHistory(t, ctx, selected, runID, eventID,
 		[]byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`), at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES (
-			$1::uuid, 'platform', 'pipeline', NULL, NULL,
-			'dead_letter', 'runtime_log_pipeline_dead_letter', '{}'::jsonb, $2
-		)
-	`, eventID, at); err != nil {
-		t.Fatalf("seed diagnostic platform receipt: %v", err)
-	}
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventReceipts)
+	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventReceipts)
 }
 
 func runForkPlanHasBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {

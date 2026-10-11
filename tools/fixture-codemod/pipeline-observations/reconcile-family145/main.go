@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "e4228f4f4b90cd6e518ca8d20f48e2949cdd376e7c8f143756a42c203571fe74"
+const targetDigest = "465d137a5142b5000fb14792799282cd98a1276023e3280e74c37d11c037dbea"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -78,8 +78,10 @@ var files = []string{
 	"internal/runtime/runforkexecution/runtime_outcome_test.go",
 	"internal/runtime/runforkexecution/selected_execution_authority_fixture_test.go",
 	"internal/serveapp/main_runtime_test.go",
+	"internal/serveapp/run_fork_runtime_test.go",
 	"internal/serveapp/reset_projection_real_docker_test.go",
 	"internal/serveapp/startup_integrity_test.go",
+	"internal/store/storetest/event.go",
 }
 
 func main() {
@@ -138,6 +140,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		}
 	}
 	if path == "internal/apiv1/operator_event_replay_test.go" && (key == "updateCompleteReplayChainDepth" || key == "updateCompleteReplayTargetRoute") {
+		return "", true
+	}
+	if path == "internal/store/storetest/event.go" && key == "InsertDiagnosticDirectEventRecordForRun" {
 		return "", true
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
