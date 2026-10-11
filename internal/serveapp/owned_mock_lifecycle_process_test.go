@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/store/devscratch"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 	"github.com/google/uuid"
 )
 
@@ -85,6 +86,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 // The test caller owns source selection and explicit execution posture. Retained
 // live-node recovery must not relabel existing work as mock-only execution.
 func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string) (int, error) {
+	defer sqlite2353.Lifetime(ctx)()
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
