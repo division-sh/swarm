@@ -43,10 +43,10 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
 		VALUES
-			(?, ?, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-			('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444', 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}', datetime('now', '+1 minute'), datetime('now', '+1 minute'))
+			(?, ?, 'component-scaffold/active', 'component', '{"vertical_id":"v-active","weight":1.1234567}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444', 'component-scaffold/active', 'component', '{"vertical_id":"wrong-run"}', datetime('now', '+1 minute'), datetime('now', '+1 minute'))
 	`, activeEntityID, runID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
@@ -123,8 +123,8 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 		t.Fatalf("seed readiness in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES (?, ?, 'component-scaffold/uncommitted', 'component', 'ready', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+		VALUES (?, ?, 'component-scaffold/uncommitted', 'component', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, uncommittedEntityID, runID); err != nil {
 		t.Fatalf("seed entity state in tx: %v", err)
 	}

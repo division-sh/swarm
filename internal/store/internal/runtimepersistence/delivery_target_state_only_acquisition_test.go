@@ -39,6 +39,14 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			entityID := runtimepipeline.FlowInstanceEntityID(instance)
 			seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "source")
 			seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, instance, "freeze", "review_item", "active", "{}", time.Now().UTC())
+			exact, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.Route{ScopeKey: "freeze", InstanceID: "instance", InstancePath: instance})
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
+			if err != nil || original.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+				t.Fatalf("initial constructed target = %#v, %v", original, err)
+			}
 			before, err := selected.ListSelectedRunTargetOwners(ctx, runID)
 			if err != nil || len(before) != 1 || before[0].EntityID != entityID || before[0].FlowInstance != instance {
 				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
@@ -53,13 +61,9 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			if err != nil || len(after) != 0 {
 				t.Fatalf("canonical owners after freeze = %#v, %v", after, err)
 			}
-			exact, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.Route{ScopeKey: "freeze", InstanceID: "instance", InstancePath: instance})
-			if err != nil {
-				t.Fatal(err)
-			}
 			record, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
-			if err != nil || record.Presence != runtimepipeline.WorkflowTargetPersistenceStateOnly || record.State.EntityID != entityID || len(record.State.Fields) == 0 || record.State.CreatedAt.IsZero() || record.State.UpdatedAt.IsZero() {
-				t.Fatalf("historical fields must remain readable without construction = %#v, %v", record, err)
+			if err != nil || !reflect.DeepEqual(original, record) || record.State.EntityID != entityID || len(record.State.Fields) == 0 || record.State.CreatedAt.IsZero() || record.State.UpdatedAt.IsZero() {
+				t.Fatalf("frozen source must preserve historical header/data without active ownership = %#v, %v", record, err)
 			}
 		})
 	}
