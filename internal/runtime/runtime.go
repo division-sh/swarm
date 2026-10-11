@@ -2096,6 +2096,49 @@ func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	return rt.stopWithOptions(opts)
 }
 
+func (rt *Runtime) drainIngressForContextWithdrawal(opts ShutdownOptions) (ShutdownOptions, error) {
+	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
+	if err != nil {
+		return ShutdownOptions{}, err
+	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	if rt.Manager != nil {
+		if err := rt.Manager.CheckShutdownAdmission(); err != nil {
+			return ShutdownOptions{}, err
+		}
+	}
+	drainCtx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	err = rt.drainAdmittedIngress(drainCtx, grace)
+	deadline, _ := drainCtx.Deadline()
+	opts.Grace = time.Until(deadline)
+	if opts.Grace <= 0 {
+		opts.Grace = time.Nanosecond
+	}
+	return opts, err
+}
+
+func (rt *Runtime) drainAdmittedIngress(ctx context.Context, grace time.Duration) error {
+	// Accepted producers may still return a native COMMIT and hand it off.
+	// Their join precedes coordinator retirement, including grace-expiry cleanup.
+	rt.lifecycleMu.Lock()
+	fanOutServing := rt.fanOutServing
+	rt.fanOutServing = nil
+	rt.fanOutContext = nil
+	rt.lifecycleMu.Unlock()
+	if fanOutServing != nil {
+		fanOutServing.Close()
+	}
+	if err := rt.shutdownGate.Wait(ctx); err != nil {
+		return errors.Join(
+			fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err),
+			rt.shutdownGate.Wait(context.Background()),
+		)
+	}
+	return nil
+}
+
 func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if rt == nil {
 		return nil
@@ -2117,20 +2160,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
-	var shutdownErr error
-	// Finite fan-out turns may still complete committed handoffs through these
-	// consumers. Join only this producer before retiring its dependencies.
-	rt.lifecycleMu.Lock()
-	fanOutServing := rt.fanOutServing
-	rt.fanOutServing = nil
-	rt.fanOutContext = nil
-	rt.lifecycleMu.Unlock()
-	if fanOutServing != nil {
-		fanOutServing.Close()
-	}
-	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
-		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
-	}
+	shutdownErr := rt.drainAdmittedIngress(drainCtx, grace)
 	// Continuation dispatch may finalize agent readiness. Join that producer
 	// before manager teardown invalidates its lifecycle dependency.
 	if rt.deliveryContinuations != nil {

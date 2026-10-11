@@ -31,6 +31,15 @@ func (a *shutdownAdmission) Closed() bool {
 	return a.closed
 }
 
+func (a *shutdownAdmission) closedAndDrained() bool {
+	if a == nil {
+		return true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed && len(a.active) == 0
+}
+
 func (a *shutdownAdmission) ReopenIfDrained() bool {
 	if a == nil {
 		return true

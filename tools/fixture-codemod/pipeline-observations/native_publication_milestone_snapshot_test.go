@@ -194,3 +194,107 @@ func validateRootForkMilestoneSuccessor(row recipe, actual string) error {
 	}
 	return nil
 }
+
+func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T) {
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var selected *recipe
+	for i := range rows {
+		if rows[i].Function == "TestReceiverCompositionForkBothStores" {
+			if selected != nil {
+				t.Fatal("ambiguous receiver-fork successor")
+			}
+			selected = &rows[i]
+		}
+	}
+	if selected == nil || selected.Family != "native-served-delivery-quiescence-caller" || selected.File != "internal/serveapp/receiver_fork_test.go" || selected.Successor == "" || selected.Removed || selected.Mechanical != nil {
+		t.Fatal("receiver-fork successor changed its migration identity")
+	}
+	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+	if err := validateReceiverForkMilestoneSuccessor(*selected, actual); err != nil {
+		t.Fatal(err)
+	}
+	const seedGate = "\t\t\t\tprobe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)\n"
+	const requestGate = "\t\t\t\tprobe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)\n"
+	const publication = "\t\t\t\t\tpublication.unblock()\n"
+	const nodeWait = "\t\t\t\t\tselect {\n\t\t\t\t\tcase <-reached:\n"
+	const snapshot = "\t\t\t\tbefore := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)\n"
+	without := strings.Replace(actual, requestGate, "", 1)
+	mutants := map[string]string{
+		"missing_seed_gate":               strings.Replace(actual, seedGate, "", 1),
+		"duplicate_seed_gate":             strings.Replace(actual, seedGate, seedGate+seedGate, 1),
+		"wrong_seed":                      strings.Replace(actual, seedGate, strings.Replace(seedGate, "seedEventID", "request.EventID", 1), 1),
+		"missing_request_gate":            without,
+		"duplicate_request_gate":          strings.Replace(actual, requestGate, requestGate+requestGate, 1),
+		"wrong_request":                   strings.Replace(actual, requestGate, strings.Replace(requestGate, "request.EventID", "seedEventID", 1), 1),
+		"after_snapshot":                  strings.Replace(without, snapshot, snapshot+requestGate, 1),
+		"node_before_publication_release": strings.Replace(strings.Replace(actual, publication, "", 1), nodeWait, nodeWait+publication, 1),
+		"premature_node_release":          strings.Replace(actual, snapshot, "\t\t\t\tclose(release)\n"+snapshot, 1),
+		"fingerprint":                     strings.Replace(actual, snapshot, strings.Replace(snapshot, "request.RunID", "seedEventID", 1), 1),
+		"business_assertion":              strings.Replace(actual, "result.ExecutedEventCount != 1", "result.ExecutedEventCount != 0", 1),
+		"unrelated":                       strings.Replace(actual, "{\n", "{\n\tunreviewedSetup()\n", 1),
+	}
+	for name, mutant := range mutants {
+		t.Run(name, func(t *testing.T) {
+			if mutant == actual || validateReceiverForkMilestoneSuccessor(*selected, mutant) == nil {
+				t.Fatal("changed receiver cut or business assertion accepted")
+			}
+			guard := *selected
+			guard.Before, guard.After, guard.Successor = actual, actual, ""
+			if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+				t.Fatal("hostile receiver source accepted by inertness guard")
+			}
+		})
+	}
+	if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+		t.Fatalf("current receiver successor is not inert: %v", err)
+	}
+}
+
+func validateReceiverForkMilestoneSuccessor(row recipe, actual string) error {
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "fecc19b2cd332c799fb77740e3e4e9c0c857810022536660b0f188d1b87791e6" {
+		return fmt.Errorf("receiver predecessor changed")
+	}
+	want, err := canonicalFunction(row.Successor)
+	if err != nil {
+		return err
+	}
+	got, err := canonicalFunction(actual)
+	if err != nil || got != want {
+		return fmt.Errorf("actual receiver function differs from exact successor: %v", err)
+	}
+	// Reverse the one fieldless identity capture and two concrete block replacements.
+	const fieldless = "\t\t\t\t\tseed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"fork.seeded\", \"bundle_hash\": rt.BundleHash, \"payload\": map[string]any{}, \"idempotency_key\": \"empty-fork-seed\"})\n"
+	const capture = "\t\t\t\t\tseedEventID = seed.EventID\n"
+	if strings.Count(actual, fieldless+capture) != 1 {
+		return fmt.Errorf("fieldless seed identity not captured exactly once")
+	}
+	restored := strings.Replace(actual, fieldless+capture, fieldless, 1)
+	for _, boundary := range []struct{ start, end string }{
+		{"\t\t\t\tif surface == \"pending_refusal\" {\n\t\t\t\t\tselect {", "\t\t\t\t} else if !admitted {\n"},
+		{"\t\t\t\t// Join the exact publications, not the independently held node.\n", "\t\t\t\tbefore := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)\n"},
+	} {
+		start := strings.Index(restored, boundary.start)
+		end := strings.Index(restored, boundary.end)
+		if start < 0 || end <= start || strings.Count(restored, boundary.start) != 1 || strings.Count(restored, boundary.end) != 1 {
+			return fmt.Errorf("ambiguous reviewed receiver cut")
+		}
+		oldStart := strings.Index(row.After, boundary.start)
+		if oldStart < 0 {
+			// The historical completion block was pending-only; preserve it verbatim.
+			oldStart = strings.Index(row.After, "\t\t\t\tif surface == \"pending_refusal\" {\n\t\t\t\t\t// Join only the source publications")
+		}
+		oldEnd := strings.Index(row.After, boundary.end)
+		if oldStart < 0 || oldEnd <= oldStart {
+			return fmt.Errorf("immutable predecessor lacks receiver cut")
+		}
+		restored = restored[:start] + row.After[oldStart:oldEnd] + restored[end:]
+	}
+	canonical, err := canonicalFunction(restored)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) != "8eb64583ba2be0ff717d2d2768956a062ebe7d0164f3587493ac7b7836853c73" {
+		return fmt.Errorf("receiver edit exceeds identity capture, completion gates and barrier move: %v", err)
+	}
+	return nil
+}
