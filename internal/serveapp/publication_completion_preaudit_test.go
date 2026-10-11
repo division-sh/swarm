@@ -305,6 +305,7 @@ type publicationCompletionAudit struct {
 	mu                  sync.Mutex
 	native              runtimebus.APIEventPublicationCommitOwner
 	workflow            pipeline.WorkflowPersistenceOwner
+	obligations         pipelineobligation.Store
 	plan                pipeline.DynamicFlowRuntimeReadinessPlan
 	process             *worklifetime.Process
 	request             apiidempotency.Request
@@ -314,11 +315,16 @@ type publicationCompletionAudit struct {
 	heldRuns            map[string]pipeline.DynamicFlowRuntimeReadinessPlan
 	commits             int
 	run                 string
+	eventID             string
 	hold                bool
 	resultFault         string
 	holdRelease         bool
 	entered             chan struct{}
 	release             chan struct{}
+	claimReleased       chan struct{}
+	claimReleaseOnce    sync.Once
+	claimReleaseCount   int
+	claimReleaseError   error
 	enterOnce           sync.Once
 	releaseOnce         sync.Once
 	beforeCommit        func(context.Context)
@@ -327,7 +333,7 @@ type publicationCompletionAudit struct {
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
-	p := &publicationCompletionAudit{hold: hold, entered: make(chan struct{}), release: make(chan struct{})}
+	p := &publicationCompletionAudit{hold: hold, entered: make(chan struct{}), release: make(chan struct{}), claimReleased: make(chan struct{})}
 	previous := projectRuntimePersistenceForServe
 	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 		projected := previous(owner)
@@ -344,6 +350,7 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 		}
 		projected.deps.PipelineObligations = &publicationAuditPipelineRelease{Store: projected.deps.PipelineObligations, ResumeAdmissionPreflighter: preflight, probe: p}
 		p.workflow = native
+		p.obligations = projected.deps.PipelineObligations
 		return projected
 	}
 	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
@@ -363,6 +370,7 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	p.request, p.committed = command.Idempotency, result
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.Publication.Commit.Event.Event().RunID()
+	p.eventID = command.Publication.Commit.Event.Event().ID()
 	fault := p.resultFault
 	p.mu.Unlock()
 	if p.afterCommit != nil {

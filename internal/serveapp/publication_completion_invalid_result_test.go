@@ -127,7 +127,15 @@ func (s *publicationAuditPipelineRelease) Release(ctx context.Context, claim pip
 		case <-ctx.Done():
 		}
 	}
-	return s.Store.Release(ctx, claim)
+	err := s.Store.Release(ctx, claim)
+	s.probe.mu.Lock()
+	if claim.EventID() == s.probe.eventID {
+		s.probe.claimReleaseCount++
+		s.probe.claimReleaseError = err
+		s.probe.claimReleaseOnce.Do(func() { close(s.probe.claimReleased) })
+	}
+	s.probe.mu.Unlock()
+	return err
 }
 
 func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
