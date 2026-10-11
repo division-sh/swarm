@@ -169,6 +169,44 @@ func TestQ10ServedDiagnosticsPreserveMembershipAndAbsentLifecycleBothStores(t *t
 			if counts := probe.Snapshot(); counts.Total.ReadCommits != 2 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 				t.Fatalf("diagnostics escaped original read owner: %+v", counts)
 			}
+			physical, err := ReadWorkflowStateObservationRowsForTest(ctx, fixture.store)
+			if err != nil || len(physical) != 4 {
+				t.Fatalf("global physical field-row count changed: %+v/%v", physical, err)
+			}
+			seen := map[string]int{}
+			importsWithoutHeader, foreignHeaders := 0, 0
+			for _, row := range physical {
+				seen[row.EntityID]++
+				if row.FlowInstance != "storage-witness/"+row.EntityID {
+					t.Fatalf("physical data path changed: %+v", row)
+				}
+				switch row.EntityID {
+				case imported:
+					if row.CurrentState == nil {
+						importsWithoutHeader++
+					} else if *row.CurrentState == "queued" {
+						foreignHeaders++
+					} else {
+						t.Fatalf("same-identity foreign header changed: %+v", row)
+					}
+				case noStage:
+					if row.CurrentState == nil || *row.CurrentState != "pending" {
+						t.Fatalf("internal no-stage posture was omitted: %+v", row)
+					}
+				case fielded:
+					if row.CurrentState == nil || *row.CurrentState != "queued" {
+						t.Fatalf("constructed field-row stage changed: %+v", row)
+					}
+				default:
+					t.Fatalf("global field inventory included a fieldless or invented row: %+v", row)
+				}
+			}
+			if seen[fielded] != 1 || seen[imported] != 2 || seen[noStage] != 1 || importsWithoutHeader != 1 || foreignHeaders != 1 {
+				t.Fatalf("global membership or exact run pairing changed: seen=%v imports=%d foreign=%d", seen, importsWithoutHeader, foreignHeaders)
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 3 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("global observation escaped original read owner: %+v", counts)
+			}
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
 			if got := readServedRunDebugSection(cancelled, fixture.store, backend.name, "entity_state", run); !strings.Contains(got, context.Canceled.Error()) || strings.Contains(got, fielded) {

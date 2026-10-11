@@ -84,6 +84,40 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			if err != nil || len(entities.Entities) != 3 {
 				t.Fatalf("field-contract membership: %+v %v", entities, err)
 			}
+			observations, err := ReadWorkflowStateObservationRowsForTest(ctx, f.store)
+			if err != nil || len(observations) != 3 {
+				t.Fatalf("physical observation changed field-row membership: %+v %v", observations, err)
+			}
+			observed := map[string]bool{}
+			for _, observation := range observations {
+				if observed[observation.EntityID] {
+					t.Fatalf("physical observation duplicated a field row: %+v", observations)
+				}
+				observed[observation.EntityID] = true
+				var matched *operatorread.OperatorEntitySummary
+				for i := range entities.Entities {
+					if entities.Entities[i].EntityID == observation.EntityID {
+						matched = &entities.Entities[i]
+						break
+					}
+				}
+				if matched == nil || observation.FlowInstance != matched.FlowInstance {
+					t.Fatalf("physical observation invented or crossed a data row: %+v", observation)
+				}
+				if observation.EntityID == importID {
+					if observation.CurrentState != nil {
+						t.Fatalf("import borrowed a lifecycle or business stage: %+v", observation)
+					}
+				} else {
+					want := "pending"
+					if observation.EntityID == runID {
+						want = "unknown"
+					}
+					if observation.CurrentState == nil || *observation.CurrentState != want {
+						t.Fatalf("physical header state changed: %+v, want %q", observation, want)
+					}
+				}
+			}
 			for _, entity := range entities.Entities {
 				full, err := operator.LoadOperatorEntity(ctx, entity.EntityID, runID)
 				if err != nil {
