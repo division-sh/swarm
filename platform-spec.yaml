@@ -7269,6 +7269,7 @@ engine:
         scope: |
           API idempotency owns replay, conflict detection, and completion persistence for mutating v1 API calls. SQLite local-dev idempotency must serialize idempotent callback execution without holding a SQLite write transaction across the callback, because callbacks may write through selected runtime owners such as EventBus.Publish and SQLiteRuntimeStore.AppendEventTx. SQLite uses process-local serialization keyed by the selected SQLite database path plus short database operations for purge/load/completion rows; Postgres remains authoritative for production concurrency through its advisory-lock owner. PostgreSQL advisory-lock ownership is bound to one exact reserved session; terminal unlock, unlock-result verification, session close, and capacity restoration are part of the operation result. A terminal release failure clears success from the current response and fails closed. If completion persistence committed before that release failure, the durable completion remains canonical and the next same-key request replays it without re-executing the callback. Callback or publish failure before completion persistence must leave no idempotency completion.
           `event.publish` consumes the same keyed lookup, conflict, replay, and serialization owner, but one typed selected-store operation commits the prepared run, lifecycle, route, event, delivery, replay-scope, and deterministic API completion facts in the publication owner's private transaction. It exposes no transaction or callback capability. Failure at any publication or completion write leaves none of those request-owned facts, and retry cannot create a second publication before one durable completion exists. The stored `event.publish` response includes the deterministic initial selected-delivery snapshot derived from the canonical prepared routes. The first response and every replay return those exact stored bytes; mutable operator delivery readback is not a second response owner and cannot introduce a post-commit API failure.
+          Both event-backed and eventless feed-only `run.start` consume this recorded-completion boundary. Pure keyed replay/conflict precedes fresh bundle, endpoint and feed admission within the original 24-hour window, including when the original source is unavailable; it grants no fresh execution authority. The write-time method projection is canonical semantic JSON. The response column preserves those literal bytes (PostgreSQL JSON, not JSONB; SQLite text), and first/replay readers consume the admitted recorded result rather than a second DTO. Native keyed terminal-release errors retain their existing fail-closed first-response contract even after acknowledged domain/completion commit.
           `conversation.fork` is the other named atomic creation operation. For keyed requests its existing fork creation transaction commits the exact API completion response with the created fork, preserving method, actor, key, request-hash conflict and TTL semantics. A failed completion write rolls back creation; process death or missing response after commit cannot create a second fork on same-key replay. Unkeyed requests intentionally create distinct forks. PostgreSQL preserves advisory-lock-before-serializable-BEGIN ordering and source admission. This promotes no generic transaction around arbitrary API callbacks; other generic mutators retain their existing separately classified contracts.
         excludes:
           - broad API delivery/replay/concurrency semantics owned by #1087
@@ -18693,6 +18694,8 @@ platform_tables:
         finalization or dispatch. Real transport tokens are optional audit evidence, never principal aliases.
         The canonical request hash and original response are retained for 24 hours from first completion;
         request preparation and execution do not shorten that window and replay does not extend it.
+        Response JSON is a byte-preserving receipt, not a normalized JSONB projection. All writers retain
+        their exact admitted response bytes; no legacy store conversion or reader normalization is supported.
       ddl: |
         CREATE TABLE api_idempotency (
             method            TEXT NOT NULL,
@@ -18701,7 +18704,7 @@ platform_tables:
             idempotency_key   TEXT NOT NULL,
             request_hash      TEXT NOT NULL,
             resource_id       TEXT NOT NULL,
-            response          JSONB NOT NULL,
+            response          JSON NOT NULL,
             created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             expires_at        TIMESTAMPTZ NOT NULL,
             CHECK ((method IN ('mailbox.decide', 'mailbox.defer', 'mailbox.begin_input', 'mailbox.cancel_input', 'mailbox.acknowledge') AND actor_kind = 'operator_principal') OR (method NOT IN ('mailbox.decide', 'mailbox.defer', 'mailbox.begin_input', 'mailbox.cancel_input', 'mailbox.acknowledge') AND actor_kind = 'bearer_token')),
@@ -37197,6 +37200,12 @@ api_specification:
         A same-key replay with the same request returns the recorded completion before current bundle or endpoint admission
         is re-evaluated. First response and replay return its recorded initial delivery snapshot, never a mutable post-commit
         operator readback. Post-commit activation or dispatch failure uses durable recovery and cannot replace that result.
+        Before construction, claim acquisition or COMMIT, reserve one of 32 process-wide public-completion
+        slots coupled to the exact authorized occurrence. At capacity refuse immediately with retryable
+        EVENT_PUBLISH_FAILED and reason public_completion_capacity_busy, without any durable effect or
+        server-side waiting queue. Pure keyed replay/conflict precedes this reservation. Acknowledged
+        insertion transfers consequence ownership before the recorded response returns; readiness and actual
+        claim handoff/disposition remain owned and joined, not abandoned with the HTTP caller.
 
         Existing-run publication preflights selected recipients before event/idempotency persistence. Missing recipients,
         noncanonical route ownership, or target failure returns EVENT_NOT_DECLARED, not success with zero deliveries.
@@ -37468,6 +37477,12 @@ api_specification:
         idempotency replay/conflicts retain their existing owners; existing-run event.publish and
         standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,
         resource, feed and permanent-receipt effects.
+
+        Both initiation variants reserve the same process-wide public-completion capacity before
+        construction and mutation. Feed-only replay/conflict also precedes fresh source/feed admission;
+        a completed exact key does not require the original bundle to remain loaded. Eventless starts
+        retain their exact run/root/feed activation responsibility without inventing an event or claim.
+        First/replay returns the native recorded method result, not mutable run/feed reconstruction.
 
         '
       scope:
@@ -39975,6 +39990,18 @@ process_local_work_lifetime_authority:
     forbidden: [arbitrary_scope_hierarchy, free_string_identity, process_global_task_registry, nil_or_noop_async_owner, legacy_occurrence_adoption]
   admission_and_settlement:
     begin: Every enqueue, spawn, callback registration, channel send, or buffer escape acquires its opaque occurrence lease before the work becomes reachable. Admission after a fence or retirement fails closed. The same gate admits a fixed standing class only for generation-long machinery such as a Manager execution loop, retry loop, child occurrence, or reserved transition executor; standing classification is typed at the owner API and never inferred from a free-string label.
+    public_completion: >-
+      The existing Process owner admits at most 32 concurrent public event.publish/run.start completion
+      responsibilities across all its runtimes, including precommit reservations and acknowledged consequences.
+      Admission is nonblocking, linearized against fencing/retirement and precedes construction, exact
+      publication claim acquisition and native COMMIT. Native store capacity can impose a stricter bound.
+      A slot owns an existing exact occurrence lease detached from caller cancellation before escape;
+      original request cancellation still governs precommit admission and COMMIT. Acknowledged work,
+      including commit with a keyed terminal-release error, retains that lease until actual handoff/disposition
+      and exact claim cleanup, not merely worker spawn or asynchronous-dispatch return. Feed-only starts
+      retain their eventless activation responsibility under the same bound. Every refusal, rollback and
+      unused replay reservation settles exactly once. Retirement cancels and joins these leases before
+      store/source release. No queue, generic task registry, pool enlargement or early claim release follows.
     context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Admission detaches caller cancellation before accepted work escapes; queued callbacks receive and execute on the lease context, so request completion cannot cancel accepted work while occurrence retirement always does. Work accepted before fencing continues under that exact lease and must not reacquire occurrence admission from inside its queued or spawned execution. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
     selected_process_context: Only the process root constructs selected-fork occurrences; a loaded runtime has no selected-fork child constructor. A process-owned selected fork retains the exact process identity through direct work, standing work, Manager composition and route descendants. Each owner projects its own process into accepted lease contexts; a missing or foreign ambient process never supplies this authority. Retirement or replacement of an unrelated loaded runtime cannot cancel this selected occurrence, and retiring the selected occurrence cannot fence a loaded successor. Process retirement cancels all accepted selected work and cannot issue its exact store-release join receipt until selected descendants and preparation disposition have joined.
     selected_operation_lifetime: Direct and admitted staged selected execution reserve process ownership before materialization or readiness binding. Caller cancellation remains authoritative before commit; committed work uses the admitted process context. The exact selected execution_id/run_id/generation occurrence is bound once and retained through publication, quiescence, activation, post-commit candidate handoff, durable execution closure and synchronous failure disposition. Publish return does not retire that occurrence. The orchestration lease is standing so transient quiescence never waits for its own caller. Candidate reservation, sink registration and commit/rollback settlement retain their existing admission rules; no caller may strip occurrence authority or use unowned context to escape a retired runtime. The activation owner reports committed activation and source disposition even when post-commit candidate submission fails; direct and staged callers propagate that failure and close execution authority without attempting materialized-only discard of the activated fork. Failure cleanup retains process ownership and propagates every cleanup/join failure; store release cannot precede successful joining. A control context that must outlive the operation receives an explicit ownership transfer before the operation lease is released, never an indefinitely retained operation lease or detached cleanup. Process retirement still cancels execution and rejects new admission; unrelated runtime replacement does not.
@@ -40194,7 +40221,11 @@ durable_pipeline_processing_obligation_authority:
       The selected-store current publication claim atomically commits its pipeline receipt and executable delivery
       handoff through the existing settlement owner before its independent private session retires and asynchronous
       publication returns. Only the short database handoff is joined, not downstream node/child/provider execution;
-      deferring this handoff itself would retain the same unbounded already-acknowledged session backlog. Pipeline
+      deferring this handoff itself would retain the same unbounded already-acknowledged session backlog.
+      Typed public API completion is a distinct return boundary: its pre-COMMIT Process reservation permits
+      the recorded HTTP response before receiver finalization, but retains the bounded accepted consequence
+      through this exact short handoff or actual coordinated dispatch disposition and claim cleanup.
+      Ordinary asynchronous dispatcher return still joins the handoff; no additional unowned tail is allowed. Pipeline
       publication retains its ordinary initial asynchronous node attempt through the same current-generation
       delivery-continuation owner and configured dispatcher used by recovery; unrelated recovery work is not a
       prerequisite for launching that attempt. Initial dispatch and recovery compete at the same exact continuation

@@ -61,6 +61,7 @@ type DeploymentRunCreationCommand struct {
 
 type CommittedDeploymentRunCreation struct {
 	Record       durabledata.RunCreationOperationRecord
+	Completion   apiidempotency.Completion
 	Activations  []runtimepipeline.CommittedFlowInstanceActivation
 	Acknowledged bool
 	Replay       bool

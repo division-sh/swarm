@@ -503,7 +503,7 @@ func storePostgresDirectiveProjection(ctx context.Context, tx *sql.Tx, op runtim
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO api_idempotency (method, actor_kind, actor_id, idempotency_key, request_hash, resource_id, response, created_at, expires_at)
-		VALUES ($1, 'bearer_token', $2, $3, $4, $5, $6::jsonb, $7, $8)
+		VALUES ($1, 'bearer_token', $2, $3, $4, $5, $6::json, $7, $8)
 		ON CONFLICT (method, actor_kind, actor_id, idempotency_key) DO UPDATE SET
 			resource_id = EXCLUDED.resource_id, response = EXCLUDED.response, created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at
 		WHERE api_idempotency.request_hash = EXCLUDED.request_hash

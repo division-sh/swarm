@@ -246,7 +246,7 @@ func storeAPIIdempotency(ctx context.Context, q execQueryer, req apiidempotencyc
 			method, actor_kind, actor_id, idempotency_key, request_hash,
 			resource_id, response, created_at, expires_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8, $9)
 	`, req.Method, req.Actor.Kind, req.Actor.ID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now, req.Now.Add(req.TTL))
 	if err != nil {
 		return fmt.Errorf("store api idempotency response: %w", err)

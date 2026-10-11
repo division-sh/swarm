@@ -72,7 +72,7 @@ type deploymentRunStartProbeStore struct {
 func (s *deploymentRunStartProbeStore) CommitDeploymentRunCreation(_ context.Context, command DeploymentRunCreationCommand) (CommittedDeploymentRunCreation, error) {
 	s.calls++
 	s.got, s.root = command.RunCreation, command.Root.Plan
-	result := CommittedDeploymentRunCreation{Record: durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunCreation.RunID}}, Acknowledged: s.acknowledged, Replay: s.replay}
+	result := CommittedDeploymentRunCreation{Record: durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunCreation.RunID, Outcome: "created", Status: "running"}}, Acknowledged: s.acknowledged, Replay: s.replay}
 	if !s.replay {
 		result.Activations = []runtimepipeline.CommittedFlowInstanceActivation{{Plan: command.Root.Plan, Created: true, ReadinessAttemptOrdinal: 1, Acknowledged: s.acknowledged}}
 	}
@@ -102,13 +102,15 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 			bundle, _ := semanticview.Bundle(source)
 			bundle.Semantics.Version = "1"
 			var calls int
+			finalized := make(chan struct{}, 1)
 			finalizer := runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, activation runtimepipeline.CommittedFlowInstanceActivation) error {
+				defer func() { finalized <- struct{}{} }()
 				calls++
 				if !activation.Acknowledged || correlation.RunIDFromContext(ctx) != activation.Plan.Readiness.RunID {
 					t.Fatalf("finalizer lost exact acknowledged run authority: %+v", activation)
 				}
-				if test.cancel && ctx.Err() == nil {
-					t.Fatal("finalizer concealed cancellation")
+				if test.cancel && ctx.Err() != nil {
+					t.Fatal("accepted finalizer inherited caller cancellation")
 				}
 				return ctx.Err()
 			})
@@ -132,7 +134,14 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 				store.cancel = cancel
 			}
 			got, err := bus.StartDeploymentRunAcknowledged(ctx, command, apiidempotency.Request{Method: "run.start"})
-			if !errors.Is(err, fault) || got.Summary.RunID != command.RunID || calls != test.wantCalls || store.calls != 1 {
+			if test.wantCalls != 0 {
+				select {
+				case <-finalized:
+				case <-time.After(2 * time.Second):
+					t.Fatal("accepted deployment consequence did not finalize")
+				}
+			}
+			if !errors.Is(err, fault) || got.Record.Summary.RunID != command.RunID || calls != test.wantCalls || store.calls != 1 {
 				t.Fatalf("commit evidence: result=%+v err=%v finalizations=%d commits=%d", got, err, calls, store.calls)
 			}
 		})
@@ -167,7 +176,7 @@ func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
 	request := apiidempotency.Request{Method: "run.start"}
 	ctx := testAuthorActivityContext(context.Background())
 	got, err := bus.StartDeploymentRunAcknowledged(ctx, command, request)
-	if err != nil || got.Summary.RunID != command.RunID || store.calls != 1 || store.got.EventID != "" || len(store.got.InitialEvent) != 0 {
+	if err != nil || got.Record.Summary.RunID != command.RunID || store.calls != 1 || store.got.EventID != "" || len(store.got.InitialEvent) != 0 {
 		t.Fatalf("deployment forward = %#v, %v; calls=%d command=%#v", got, err, store.calls, store.got)
 	}
 	if store.root.Readiness.RunID != command.RunID || store.root.Identity.InstancePath != command.RunID || store.root.CreatingInput != (runtimepipeline.FlowConstructionInput{}) {

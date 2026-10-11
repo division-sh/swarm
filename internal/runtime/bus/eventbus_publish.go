@@ -274,43 +274,46 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	ctx context.Context,
 	command durabledata.RunCreationCommand,
 	request apiidempotency.Request,
-) (durabledata.RunCreationOperationRecord, error) {
+) (result CommittedDeploymentRunCreation, err error) {
 	_, _, canonical, err := command.RequestHash()
 	if err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
+		return CommittedDeploymentRunCreation{}, err
 	}
 	initiation, err := canonical.Initiation()
 	if err != nil || initiation != durabledata.RunCreationFeedOnly || request.Method != "run.start" {
-		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires an eventless feed-only command and run.start authority")
+		return CommittedDeploymentRunCreation{}, errors.New("deployment run start requires an eventless feed-only command and run.start authority")
 	}
-	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginPublicCompletion(ctx)
 	if err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
+		return CommittedDeploymentRunCreation{}, err
 	}
-	if lease != nil {
-		defer func() { _ = lease.Done() }()
-	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			err = errors.Join(err, lease.Done())
+		}
+	}()
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
+		return CommittedDeploymentRunCreation{}, err
 	}
 	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok || fact.BundleHash() != canonical.BundleHash {
-		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires the exact selected bundle source fact")
+		return CommittedDeploymentRunCreation{}, errors.New("deployment run start requires the exact selected bundle source fact")
 	}
 	owner, ok := eb.store.(DeploymentRunCreationCommitOwner)
 	if !ok || owner == nil {
-		return durabledata.RunCreationOperationRecord{}, errors.New("selected store does not support atomic deployment run creation")
+		return CommittedDeploymentRunCreation{}, errors.New("selected store does not support atomic deployment run creation")
 	}
 	if eb.templateInstancePlanner == nil || eb.flowActivationFinalizer == nil {
-		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires canonical root construction and attachment owners")
+		return CommittedDeploymentRunCreation{}, errors.New("deployment run start requires canonical root construction and attachment owners")
 	}
 	mode := eb.executionPosture.RootMode()
 	if err := eb.executionPosture.Admit(mode, "deployment root construction"); err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
+		return CommittedDeploymentRunCreation{}, err
 	}
 	if existing, found := runtimeeffects.ExecutionModeFromContext(ctx); found && existing != mode {
-		return durabledata.RunCreationOperationRecord{}, errors.New("deployment root construction execution mode contradicts its runtime owner")
+		return CommittedDeploymentRunCreation{}, errors.New("deployment root construction execution mode contradicts its runtime owner")
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	ctx = runtimecorrelation.WithRunID(ctx, canonical.RunID)
@@ -320,17 +323,22 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 		OccurredAt: time.Now().UTC(),
 	})
 	if err != nil {
-		return durabledata.RunCreationOperationRecord{}, fmt.Errorf("prepare deployment root construction: %w", err)
+		return CommittedDeploymentRunCreation{}, fmt.Errorf("prepare deployment root construction: %w", err)
 	}
 	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{root})
 	if err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
+		return CommittedDeploymentRunCreation{}, err
 	}
 	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root, RouteTopology: topology}})
 	if !committed.Acknowledged {
-		return committed.Record, errors.Join(commitErr, errors.New("deployment run creation commit was not acknowledged"))
+		return committed, errors.Join(commitErr, errors.New("deployment run creation commit was not acknowledged"))
 	}
-	return committed.Record, errors.Join(commitErr, eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations))
+	if !committed.Replay && committed.Record.Summary.Outcome == "created" {
+		acceptedCtx := runtimeeffects.WithExecutionMode(eb.publicCompletionContext(ctx, lease, canonical.RunID), mode)
+		transferred = true
+		go eb.finishPublicDeploymentStart(acceptedCtx, lease, committed)
+	}
+	return committed, commitErr
 }
 
 // PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable
@@ -342,14 +350,17 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	idempotency apiidempotency.Request,
 	completion apiidempotency.Completion,
 	runCreation *durabledata.RunCreationCommand,
-) (apiidempotency.Completion, bool, error) {
-	ctx, lease, err := eb.beginRuntimeWork(ctx)
+) (result apiidempotency.Completion, replay bool, err error) {
+	ctx, lease, err := eb.beginPublicCompletion(ctx)
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	if lease != nil {
-		defer func() { _ = lease.Done() }()
-	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			err = errors.Join(err, lease.Done())
+		}
+	}()
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return apiidempotency.Completion{}, false, err
@@ -374,7 +385,9 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	completion, err = withAPIEventPublicationDeliveryCompletion(completion, command)
+	if idempotency.Method == "event.publish" {
+		completion, err = withAPIEventPublicationDeliveryCompletion(completion, command)
+	}
 	if err != nil {
 		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
 	}
@@ -406,30 +419,12 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if committed.Replay {
 		return committed.Completion, true, errors.Join(commitErr, prepared.publicationClaim.Release(handoffCtx))
 	}
-	prepared, ready, finalizationErr := eb.applyCommittedPublication(handoffCtx, prepared, committed.Publication)
-	if !ready {
-		err = finalizationErr
-		eb.reportLocalDispatchFailure("api_event_publication_finalize_failed", evt, err)
-		if commitErr != nil {
-			return committed.Completion, false, errors.Join(commitErr, err)
-		}
-		return committed.Completion, false, nil
+	if !committed.Acknowledged {
+		return apiidempotency.Completion{}, false, errors.Join(commitErr, errors.New("API publication commit was not acknowledged"), prepared.publicationClaim.Release(handoffCtx))
 	}
-	if finalizationErr != nil {
-		eb.reportLocalDispatchFailure("api_event_publication_finalize_diagnostic", evt, finalizationErr)
-	}
-	if prepared.exactDuplicate {
-		err = eb.DispatchPreparedPublish(handoffCtx, prepared)
-	} else {
-		err = eb.DispatchPreparedPublishAsync(handoffCtx, prepared)
-	}
-	if err != nil {
-		eb.reportLocalDispatchFailure("api_event_publication_dispatch_failed", evt, err)
-		if commitErr != nil {
-			return committed.Completion, false, errors.Join(commitErr, err)
-		}
-		return committed.Completion, false, nil
-	}
+	acceptedCtx := eb.publicCompletionContext(preparedCtx, lease, evt.RunID())
+	transferred = true
+	go eb.finishPublicPublication(acceptedCtx, lease, prepared, committed.Publication)
 	return committed.Completion, false, commitErr
 }
 

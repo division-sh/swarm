@@ -3,7 +3,6 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -217,7 +217,7 @@ func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (api
 	if record.Summary.Outcome != "created" {
 		return apiidempotency.Completion{}, fmt.Errorf("rejected run creation has no success completion")
 	}
-	response, err := json.Marshal(struct {
+	response, err := canonicaljson.Bytes(struct {
 		RunID       string                  `json:"run_id"`
 		Status      string                  `json:"status"`
 		DataBinding runtimedata.DataBinding `json:"data_binding"`
@@ -271,15 +271,23 @@ func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, in
 			}
 		}()
 	}
-	_, cachedReplay := lease.Replay()
+	cachedCompletion, cachedReplay := lease.Replay()
 	outcome := runPostgresEventMutationResult(ctx, s, true, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedDeploymentRunCreation, error) {
 		result, err := commitDeploymentRunCreationTx(ctx, attempt, s.durableData, s, command, input.Root, fact, cachedReplay, storescenarioexecution.EnsurePostgresFromContext)
-		if err != nil || lease == nil || cachedReplay || result.Record.Summary.Outcome != "created" {
+		if err != nil || result.Record.Summary.Outcome != "created" {
 			return result, err
+		}
+		if cachedReplay {
+			result.Completion = cachedCompletion
+			return result, nil
 		}
 		completion, err := deploymentRunCompletion(result.Record)
 		if err != nil {
 			return result, err
+		}
+		result.Completion = completion
+		if lease == nil {
+			return result, nil
 		}
 		err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			return storeapiidempotency.StorePostgresCompletionTx(ctx, lease, tx, completion)
@@ -312,15 +320,23 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 		}
 		defer lease.Release()
 	}
-	_, cachedReplay := lease.Replay()
+	cachedCompletion, cachedReplay := lease.Replay()
 	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite deployment run creation", true, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedDeploymentRunCreation, error) {
 		result, err := commitDeploymentRunCreationTx(ctx, attempt, s.durableData, s, command, input.Root, fact, cachedReplay, storescenarioexecution.EnsureSQLiteFromContext)
-		if err != nil || lease == nil || cachedReplay || result.Record.Summary.Outcome != "created" {
+		if err != nil || result.Record.Summary.Outcome != "created" {
 			return result, err
+		}
+		if cachedReplay {
+			result.Completion = cachedCompletion
+			return result, nil
 		}
 		completion, err := deploymentRunCompletion(result.Record)
 		if err != nil {
 			return result, err
+		}
+		result.Completion = completion
+		if lease == nil {
+			return result, nil
 		}
 		err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			return storeapiidempotency.StoreSQLiteCompletionTx(ctx, lease, tx, completion)

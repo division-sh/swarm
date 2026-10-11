@@ -346,7 +346,7 @@ func sqliteRenderType(raw string) (string, error) {
 		return "TEXT", nil
 	case "UUID":
 		return "TEXT", nil
-	case "JSONB":
+	case "JSON", "JSONB":
 		return "TEXT", nil
 	case "BYTEA":
 		return "BLOB", nil
