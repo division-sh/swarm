@@ -26,9 +26,14 @@ const (
 	TestTimeReferenceDigest = "f195969f9056e3c1e26605d114b50e61c8c2efddec55bdee0745f3de516a9db4"
 	// User-ratified finite placement, independently reviewed against this full
 	// execution. This does not grant an aggregate allowance or approve core.
-	testTimeCodemodPlacementApproval = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
-	testTimeCodemodPlacementSource   = "bd2d853e3417db3981fca9ca60f6cad5980773e6"
-	testTimeCodemodPlacementRun      = int64(38097201316)
+	testTimeCodemodPlacementApproval   = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
+	testTimeCodemodPlacementSource     = "bd2d853e3417db3981fca9ca60f6cad5980773e6"
+	testTimeCodemodPlacementRun        = int64(38097201316)
+	testTimeReporterPlacementApproval  = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6106221574"
+	testTimeReporterPlacementSource    = "dd0ed42ac877c3e974926a5731a8c9f75d943ef1"
+	testTimeReporterPlacementPlan      = "47311fabc6f046391ab4255a9b7b764af8693917f4496cf720f9b03fcab2b614"
+	testTimeServedReporterReceipt      = "1e4e3d7c7024bc2debce0fe5cf023ce6125da755a78384add5cb8f90d191fe2e"
+	testTimeConformanceReporterReceipt = "2171e803f24fdb0511e66f6e68beb326537c77dfd662a056113e627c0bc716db"
 )
 
 type TimingCell struct {
@@ -327,8 +332,8 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 			row.Added = append(row.Added, root)
 			row.AddedSeconds += root.Seconds
 			if root.Seconds > 30 {
-				if hasReviewedCodemodPlacement(root.TimingCell, tier) {
-					row.Warnings = append(row.Warnings, fmt.Sprintf("%s: %.3fs added root %s.%s has reviewed placement %s (run %d, source %s); its entire cost remains charged", tier, root.Seconds, root.Package, root.Root, testTimeCodemodPlacementApproval, testTimeCodemodPlacementRun, testTimeCodemodPlacementSource))
+				if approval := reviewedTimingPlacement(root.TimingCell, tier); approval != "" {
+					row.Warnings = append(row.Warnings, fmt.Sprintf("%s: %.3fs added root %s.%s has reviewed placement %s; its entire cost remains charged", tier, root.Seconds, root.Package, root.Root, approval))
 				} else {
 					problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
 				}
@@ -356,6 +361,25 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	}
 	problems = append(problems, row.costProblems(mode)...)
 	return row, problems
+}
+
+func reviewedTimingPlacement(cell TimingCell, tier string) string {
+	if hasReviewedCodemodPlacement(cell, tier) {
+		return fmt.Sprintf("%s (run %d, source %s)", testTimeCodemodPlacementApproval, testTimeCodemodPlacementRun, testTimeCodemodPlacementSource)
+	}
+	if cell.Backend != "" || cell.Count != "count-1" || cell.Environment != "ci-postgres-gateway-empty-v1" || tier != testplanning.ProfileLifecycle && tier != testplanning.ProfileFull {
+		return ""
+	}
+	var receipt string
+	switch {
+	case cell.Package == "github.com/division-sh/swarm/internal/serveapp" && cell.Root == "TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores":
+		receipt = "serveapp-i-reporter-primary-evidence.json sha256=" + testTimeServedReporterReceipt
+	case cell.Package == "github.com/division-sh/swarm/internal/runtime/conformance" && cell.Root == "TestIssue2394ReporterFiveHundredServingWindowBothStores":
+		receipt = "conformance-2394-reporter-window-primary-evidence.json sha256=" + testTimeConformanceReporterReceipt
+	default:
+		return ""
+	}
+	return fmt.Sprintf("%s (source %s, local plan %s, measured receipt %s)", testTimeReporterPlacementApproval, testTimeReporterPlacementSource, testTimeReporterPlacementPlan, receipt)
 }
 
 func hasReviewedCodemodPlacement(cell TimingCell, tier string) bool {
