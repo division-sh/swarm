@@ -18,6 +18,10 @@ func VerifyQ10NativeFieldlessNoStagePrivateHistoryForTest(t *testing.T, open pip
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatal(err)
 			}
+			physical, err := fixture.PhysicalCounts(ctx)
+			if err != nil || physical.EntityStates != 0 || physical.ConstructedHeaders != 1 {
+				t.Fatalf("fieldless construction must retain one real header without a data row: %+v err=%v", physical, err)
+			}
 			current, records, err := fixture.TrackedMutationProjection(ctx, runtimeRunID(ctx), instance.EntityID)
 			if err != nil {
 				t.Fatal(err)
