@@ -31,13 +31,38 @@ type observedTerminalStore struct {
 	activatedSelectedStore
 	mu       sync.Mutex
 	attempts int
+	closed   bool
+}
+
+type observedNativeStateRetirement struct {
+	process *worklifetime.Process
+	store   *observedTerminalStore
+	called  chan struct{}
+	err     error
+}
+
+func (s *observedNativeStateRetirement) Retire(receipt *worklifetime.ProcessJoinReceipt) error {
+	if err := s.process.ValidateJoinReceipt(receipt); err != nil {
+		return err
+	}
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+	if !s.store.closed {
+		return errors.New("native cleanup ran before selected-store retirement")
+	}
+	close(s.called)
+	return s.err
 }
 
 func (s *observedTerminalStore) CloseActivated(receipt *worklifetime.ProcessJoinReceipt) error {
 	s.mu.Lock()
 	s.attempts++
 	s.mu.Unlock()
-	return s.activatedSelectedStore.CloseActivated(receipt)
+	err := s.activatedSelectedStore.CloseActivated(receipt)
+	s.mu.Lock()
+	s.closed = err == nil
+	s.mu.Unlock()
+	return err
 }
 
 func TestTerminalStoreReleaseJoinsDelayedAccessBothStores(t *testing.T) {
@@ -57,6 +82,9 @@ func TestTerminalStoreReleaseJoinsDelayedAccessBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			cleanupErr := errors.New("retained native cleanup obstruction")
+			native := &observedNativeStateRetirement{process: process, store: observed, called: make(chan struct{}), err: cleanupErr}
+			lifecycle.nativeState = native
 			lease, err := process.Begin(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -73,6 +101,11 @@ func TestTerminalStoreReleaseJoinsDelayedAccessBothStores(t *testing.T) {
 			if attempts != 0 {
 				t.Errorf("store close attempted before accepted work settled: %d", attempts)
 			}
+			select {
+			case <-native.called:
+				t.Error("native cleanup ran before late counted work and selected store joined")
+			default:
+			}
 			var one int
 			if err := db.QueryRowContext(context.WithoutCancel(lease.Context()), "SELECT 1").Scan(&one); err != nil || one != 1 {
 				t.Errorf("delayed accepted store access lost its capability: value=%d error=%v", one, err)
@@ -80,8 +113,13 @@ func TestTerminalStoreReleaseJoinsDelayedAccessBothStores(t *testing.T) {
 			if err := lease.Done(); err != nil {
 				t.Error(err)
 			}
-			if err := <-completed; !errors.Is(err, context.Canceled) {
+			if err := <-completed; !errors.Is(err, context.Canceled) || !errors.Is(err, cleanupErr) {
 				t.Errorf("shutdown did not retain its expired join diagnostic: %v", err)
+			}
+			select {
+			case <-native.called:
+			default:
+				t.Error("eventual complete process/store join did not run native retirement")
 			}
 			if err := db.PingContext(context.Background()); err == nil {
 				t.Error("successfully joined selected store remained open")
