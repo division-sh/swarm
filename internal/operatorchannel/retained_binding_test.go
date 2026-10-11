@@ -182,7 +182,8 @@ func TestRetainedBindingPreservesAbsenceCancellationAndObservationErrors(t *test
 			case "absent":
 				store.rows = nil
 			case "unbound":
-				store.rows[0].Status = BindingUnbound
+				store.rows[0] = Binding{PrincipalID: original.PrincipalID, Interface: original.Interface, Status: BindingUnbound,
+					Revision: original.Revision, OperationID: uuid.NewString(), UpdatedAt: original.UpdatedAt}
 			case "foreign_interface":
 				store.rows[0].Interface.SemanticGeneration = "different-generation"
 				store.rows[0].Interface.Selector = store.rows[0].Interface.CanonicalSelector()
