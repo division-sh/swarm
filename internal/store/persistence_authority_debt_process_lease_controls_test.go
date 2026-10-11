@@ -14,7 +14,7 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtProcessLeaseCollectorTo = "224bf6a58334280b1232fd12b5bf18cbdb6855fad720e6690adc72e36174faa7"
+const debtProcessLeaseCollectorTo = "fac8c15d09513ebba99297f15e237f6aa6ad24b92ed3c049e68e2dbe3a988344"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -273,7 +273,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 			const typ = "github.com/division-sh/swarm/internal/store/internal/startupownership.StartupPostgresOwner"
 			findings := []authorityFinding{
 				{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "StartupPostgresOwner", Member: "exported-type", Resolved: typ, RawSQL: true},
-				{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "NewPostgres", Member: "result:", Resolved: "*" + typ, RawSQL: true},
+				{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "NewPostgres", Member: "result:#1", Resolved: "*" + typ, RawSQL: true},
 			}
 			debtClassifyProcessLeaseCustody(copy, findings)
 			for _, finding := range findings {
@@ -299,5 +299,37 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+func TestPersistenceAuthorityDebtProcessLeaseCustodyUsesCollectorMember(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	const path = "internal/store/internal/startupownership/owner.go"
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, path), nil, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const typ = "github.com/division-sh/swarm/internal/store/internal/startupownership.StartupPostgresOwner"
+	var findings []authorityFinding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != "NewPostgres" {
+			continue
+		}
+		// Use the collector's actual authored-field naming, not a shortened TSV
+		// operation (which discards the occurrence index).
+		findings = append(findings, authorityFinding{Kind: "raw-authority-export", File: path, Enclosing: fn.Name.Name,
+			Member: debtAuthorityFieldName("result", 0, fn.Type.Results.List[0]), Resolved: "*" + typ, RawSQL: true})
+	}
+	findings = append(findings, authorityFinding{Kind: "raw-authority-export", File: path, Enclosing: "StartupPostgresOwner",
+		Member: "exported-type", Resolved: typ, RawSQL: true})
+	debtClassifyProcessLeaseCustody(root, findings)
+	if len(findings) != 2 || len(authorityDebtSites(findings)) != 0 {
+		t.Fatalf("exact source-owned findings must remain visible but not become consumer debt: %+v", findings)
+	}
+	for _, finding := range findings {
+		if !finding.RawSQL || finding.Kind != "raw-authority-export" || !debtProcessLeaseCustodyFinding(finding) {
+			t.Fatal("classification hid or altered the all-owner evidence:", finding)
+		}
 	}
 }
