@@ -247,6 +247,8 @@ func TestCommandPathTablesCarryNoRetiredSpellings(t *testing.T) {
 		{[]string{"run", "fork"}, true},
 		{[]string{"agent", "list"}, true},
 		{[]string{"event", "list"}, true},
+		{[]string{"channel", "logout"}, true},
+		{[]string{"channel"}, false},
 		{[]string{"runs"}, false},
 		{[]string{"trace"}, false},
 		{[]string{"fork"}, false},
