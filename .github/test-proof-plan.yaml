@@ -1148,6 +1148,7 @@ units:
       TestReceiverConstructionAndObserverIsolationBothStores: [sqlite, postgres]
       TestReceiverFlowInitializationPublicationBothStores: [postgres/agent, postgres/node, postgres/observer_and_agent, postgres/observer_and_two_agents, sqlite/agent, sqlite/node, sqlite/observer_and_agent, sqlite/observer_and_two_agents]
       TestReceiverEntitylessPendingAttachmentExecutesBothStores: [sqlite, postgres]
+      TestReceiverPublicationCommitUncertaintyBothStores: [sqlite/rollback_before_lost_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_lost_ack, postgres/commit_before_lost_ack]
       TestReceiverConfigActivationRaceAndRollbackBothStores: [postgres/different_keys, postgres/exact, postgres/numeric_kind_no_agents, postgres/numeric_kind_only, postgres/rollback_first, postgres/same_key, sqlite/different_keys, sqlite/exact, sqlite/numeric_kind_no_agents, sqlite/numeric_kind_only, sqlite/rollback_first, sqlite/same_key]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
