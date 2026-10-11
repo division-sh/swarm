@@ -13,7 +13,13 @@ import (
 	"time"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
@@ -109,17 +115,42 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
-	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES
-			(?, ?, 'scoring/vertical-a', 'vertical', 'discovered',
-			 '{}', '{"vertical_name":"Healthcare"}', '{}', 1, ?, ?, ?),
-			(?, ?, 'scoring/vertical-b', 'vertical', 'pending',
-			 '{}', '{"vertical_name":"Manufacturing"}', '{}', 1, ?, ?, ?)
-	`, runID, entityA, now, now, now, runID, entityB, now, now, now); err != nil {
-		t.Fatalf("seed sqlite entity_state: %v", err)
+	source := sourceartifactfixture.Fact()
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), source)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("44444444-4444-4444-4444-444444444444", source.BundleHash()))
+	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+	// Prepared reader projections use the native commit, not public construction.
+	for _, seed := range []struct {
+		id, key, stage, name string
+	}{
+		{entityA, "vertical-a", "discovered", "Healthcare"},
+		{entityB, "vertical-b", "pending", "Manufacturing"},
+	} {
+		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
+			InstanceID: seed.key, StorageRef: "scoring/" + seed.key, EntityID: seed.id,
+			WorkflowName: "scoring", WorkflowVersion: "1", EntityType: "vertical",
+			CurrentState: seed.stage, StageDefined: true, CreatedAt: now, EnteredStageAt: now,
+			Fields: map[string]any{"vertical_name": seed.name},
+		}, pipeline.WorkflowLifecycleMutationPlan{}, now)
+		if err != nil {
+			t.Fatalf("prepare sqlite entity projection: %v", err)
+		}
+		committed, err := sqliteStore.CommitFlowInstanceActivation(ctx, command)
+		if err != nil || !committed.Acknowledged || !committed.Created {
+			t.Fatalf("commit sqlite entity projection: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+		}
+		owner, err := command.Plan.Readiness.FlowIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, found, err := sqliteStore.LoadWorkflowInstance(ctx, owner)
+		if err != nil || !found || stored.EntityID != seed.id || stored.StorageRef != "scoring/"+seed.key ||
+			stored.InstanceID != seed.key || stored.WorkflowName != "scoring" || stored.EntityType != "vertical" ||
+			!stored.StageDefined || stored.CurrentState != seed.stage || stored.Revision != 1 ||
+			!stored.CreatedAt.Equal(now) || !stored.EnteredStageAt.Equal(now) ||
+			!reflect.DeepEqual(stored.Fields, map[string]any{"vertical_name": seed.name}) {
+			t.Fatalf("native entity projection drifted before CLI read: found=%t stored=%+v err=%v", found, stored, err)
+		}
 	}
 	registry, err := apiv1.LoadRegistry(ResolvePath(RepoRoot(), defaultPlatformSpecPath))
 	if err != nil {
