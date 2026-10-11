@@ -42,7 +42,9 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 					t.Fatalf("ordinary producer delivery should execute and settle: %s", status)
 				}
 				var count int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id = $1 AND current_state = 'done'`, started.RunID).Scan(&count); err != nil {
+				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND fi.current_state='done'`, started.RunID).Scan(&count); err != nil {
 					t.Fatal(err)
 				}
 				if count != 2 {
