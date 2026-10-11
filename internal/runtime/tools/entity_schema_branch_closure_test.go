@@ -41,3 +41,59 @@ func TestEntityOperationSchemaClosurePreservesMapsAndBranchPresence(t *testing.T
 		t.Fatal("closure ignored open record inside oneOf")
 	}
 }
+
+func TestRoleScopedEntityWholeReadSchemaPreservesNullableLifecycle(t *testing.T) {
+	contract := entityruntime.Contract{EntityType: "case", Entity: runtimecontracts.EntityContract{
+		Fields: map[string]runtimecontracts.EntityFieldDecl{"current_state": {Type: "text"}},
+	}}
+	entry := roleScopedEntityToolSchemaEntry(contract, roleScopedEntityToolSpec{Kind: roleScopedEntityToolReadWhole})
+	execution, err := admitBuiltinExecutionTool("read_case", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []map[string]any{entry.OutputSchema, execution.OutputSchema()} {
+		if problems := validateGeneratedJSONSchema("whole entity read", schema); len(problems) != 0 {
+			t.Fatal(problems)
+		}
+		admitted, err := runtimecontracts.AdmitToolInputSchemaMap(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name    string
+			stage   any
+			present bool
+			valid   bool
+		}{
+			{"staged", "queued", true, true},
+			{"actual unknown", "unknown", true, true},
+			{"absent named stage", nil, true, true},
+			{"missing stage key", nil, false, false},
+			{"integer", int64(1), true, false},
+			{"boolean", false, true, false},
+			{"object", map[string]any{}, true, false},
+			{"list", []any{}, true, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				row := map[string]any{"entity_id": "entity", "flow_instance": "review/one", "entity_type": "case",
+					"fields": map[string]any{"current_state": "business"}}
+				if tc.present {
+					row["current_state"] = tc.stage
+				}
+				if err := admitted.Validate(row); (err == nil) != tc.valid {
+					t.Fatalf("typed output valid=%t row=%#v: %v", tc.valid, row, err)
+				}
+				if err := ValidatePayloadAgainstSchema(schema, row); (err == nil) != tc.valid {
+					t.Fatalf("schema output valid=%t row=%#v: %v", tc.valid, row, err)
+				}
+			})
+		}
+		for _, extra := range []string{"bookkeeping", "loops", "undeclared"} {
+			row := map[string]any{"entity_id": "entity", "flow_instance": "review/one", "entity_type": "case",
+				"current_state": nil, "fields": map[string]any{}, extra: nil}
+			if err := admitted.Validate(row); err == nil {
+				t.Fatalf("nullable stage admitted extra output key %s", extra)
+			}
+		}
+	}
+}
