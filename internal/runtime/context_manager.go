@@ -2872,28 +2872,14 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		releasePreparation()
 		releasePreparation = nil
 	}
-	joinStanding := func() {
-		joined := true
-		for _, occurrence := range standingToRetire {
-			if err := occurrence.RetireAndWait(context.Background()); err != nil {
-				joined = false
-				result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
-			}
-		}
-		if joined {
-			m.mu.Lock()
-			entry.standing = nil
-			m.mu.Unlock()
-		}
-	}
 	if runtimeToShutdown == nil {
-		joinStanding()
+		result.ShutdownErr = errors.Join(result.ShutdownErr, m.joinStandingContextRetirement(entry, standingToRetire))
 		return result
 	}
 	entry.shutdownMu.Lock()
 	defer entry.shutdownMu.Unlock()
 	if entry.shutdownComplete {
-		joinStanding()
+		result.ShutdownErr = errors.Join(result.ShutdownErr, m.joinStandingContextRetirement(entry, standingToRetire))
 		return result
 	}
 	remaining, drainErr := runtimeToShutdown.drainIngressForContextWithdrawal(opts)
@@ -2908,12 +2894,27 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 	if runtimeToShutdown.deliveryContinuations != nil {
 		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.deliveryContinuations.Retire(context.Background()))
 	}
-	joinStanding()
+	result.ShutdownErr = errors.Join(result.ShutdownErr, m.joinStandingContextRetirement(entry, standingToRetire))
 	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(remaining))
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true
 	}
 	return result
+}
+
+func (m *RuntimeContextManager) joinStandingContextRetirement(entry *runtimeContextEntry, occurrences []*worklifetime.StandingOccurrence) error {
+	var joinErr error
+	for _, occurrence := range occurrences {
+		if err := occurrence.RetireAndWait(context.Background()); err != nil {
+			joinErr = errors.Join(joinErr, fmt.Errorf("retire standing process occurrence: %w", err))
+		}
+	}
+	if joinErr == nil {
+		m.mu.Lock()
+		entry.standing = nil
+		m.mu.Unlock()
+	}
+	return joinErr
 }
 
 func (m *RuntimeContextManager) QuiesceAllRuntimeContexts(_ context.Context) error {
