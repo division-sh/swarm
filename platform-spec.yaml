@@ -24029,8 +24029,12 @@ test_specification:
         roots use the existing selected-backend DelayServingWrites collector at 300ms, closing only after
         exactly 20 acknowledged claim and 20 acknowledged chunk commits and zero separate release.
         Cursor visibility is not acknowledgment; native final commit time and captured active/error receipts
-        remain authoritative after Collector.Stop detaches future capture. A separate zero-delay collector
-        must observe actual remaining drain and mixed-batch commits; stale cleanup cannot detach it.
+        remain authoritative after exact-old atomic collector replacement detaches future capture without
+        an unobserved interval; every concurrent Begin belongs to old or successor. A separate zero-delay collector
+        observes future drain and mixed-batch commits; precaptured descendant settlement stays in the old
+        collector. Named native delivery-settlement receipts must prove outstanding post-issuance drain,
+        or the existing public/selected summary must prove descendants already settled before handoff.
+        Stale cleanup cannot detach the successor.
         Lifecycle retains served normal/census/window under serveapp-i-reporter and the conformance window
         under conformance-2394-reporter-window. Full additionally retains the original served all-commit root
         under serveapp-i-reporter-all-commit and original conformance all-commit root under

@@ -104,6 +104,26 @@ func (c *Collector) Stop() {
 	}
 }
 
+// Replace detaches this exact collector and installs its successor atomically.
+// Attempts captured before replacement still finish into their original receipt.
+func (c *Collector) Replace(options Options) (*Collector, func(), error) {
+	options, err := normalizeOptions(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c == nil || c.slot == nil {
+		return nil, nil, errors.New("transaction probe replacement requires an installed collector")
+	}
+	c.slot.mu.Lock()
+	defer c.slot.mu.Unlock()
+	if c.slot.collector != c {
+		return nil, nil, errors.New("transaction probe replacement requires the current exact collector")
+	}
+	next := newCollector(c.slot, options)
+	c.slot.collector = next
+	return next, next.Stop, nil
+}
+
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -127,8 +147,23 @@ type Slot struct {
 }
 
 func (s *Slot) Install(options Options) (*Collector, func(), error) {
+	options, err := normalizeOptions(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.collector != nil {
+		return nil, nil, errors.New("selected backend already has a transaction probe")
+	}
+	c := newCollector(s, options)
+	s.collector = c
+	return c, c.Stop, nil
+}
+
+func normalizeOptions(options Options) (Options, error) {
 	if options.Delay < 0 {
-		return nil, nil, errors.New("transaction probe delay cannot be negative")
+		return Options{}, errors.New("transaction probe delay cannot be negative")
 	}
 	if options.DelayScope == "" {
 		options.DelayScope = DelayAllCommits
@@ -136,16 +171,13 @@ func (s *Slot) Install(options Options) (*Collector, func(), error) {
 	switch options.DelayScope {
 	case DelayAllCommits, DelayAllWrites, DelayServingWrites:
 	default:
-		return nil, nil, errors.New("unknown transaction probe delay scope")
+		return Options{}, errors.New("unknown transaction probe delay scope")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.collector != nil {
-		return nil, nil, errors.New("selected backend already has a transaction probe")
-	}
-	c := &Collector{options: options, slot: s, snapshot: Snapshot{ByOperation: make(map[Operation]Counts), ActiveByClass: make(map[ActiveClass]uint64)}}
-	s.collector = c
-	return c, c.Stop, nil
+	return options, nil
+}
+
+func newCollector(slot *Slot, options Options) *Collector {
+	return &Collector{options: options, slot: slot, snapshot: Snapshot{ByOperation: make(map[Operation]Counts), ActiveByClass: make(map[ActiveClass]uint64)}}
 }
 
 type Attempt struct {

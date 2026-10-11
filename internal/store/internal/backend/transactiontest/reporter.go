@@ -51,6 +51,29 @@ func ValidateReporterContinuation(issuance, detached, successor Snapshot) error 
 	return nil
 }
 
+// ValidateReporterJoined is evaluated after both execution and store cleanup,
+// never on a pre-teardown snapshot of work still owned by a collector.
+func ValidateReporterJoined(issuance, detached, successor Snapshot) error {
+	if detached.Active != 0 || successor.Active != 0 {
+		return fmt.Errorf("reporter collectors still own captured attempts: old=%+v successor=%+v", detached, successor)
+	}
+	return ValidateReporterContinuation(issuance, detached, successor)
+}
+
+// ValidateReporterDrain admits already-settled descendants or a named native
+// settlement after issuance, including work captured by the detached collector.
+func ValidateReporterDrain(issuance, detached, successor Snapshot, settledBeforeHandoff bool) error {
+	old := detached.ByOperation[DeliverySettle]
+	next := successor.ByOperation[DeliverySettle]
+	if next.WriteCommits > 0 || old.WriteCommits > issuance.ByOperation[DeliverySettle].WriteCommits && old.LastCommitAt.After(issuance.ByOperation[FanOutChunk].LastCommitAt) {
+		return nil
+	}
+	if settledBeforeHandoff {
+		return nil
+	}
+	return fmt.Errorf("outstanding reporter descendants have no observed post-issuance settlement: old=%+v successor=%+v", old, next)
+}
+
 // ValidateReporterStress makes continued all-commit injection observable after
 // issuance, including the mixed batch; retaining the old root name is not proof.
 func ValidateReporterStress(issuance, final Snapshot, delay time.Duration) error {
