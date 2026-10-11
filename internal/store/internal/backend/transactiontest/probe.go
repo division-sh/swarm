@@ -106,22 +106,22 @@ func (c *Collector) Stop() {
 
 // Replace detaches this exact collector and installs its successor atomically.
 // Attempts captured before replacement still finish into their original receipt.
-func (c *Collector) Replace(options Options) (*Collector, func(), error) {
+func (c *Collector) Replace(options Options) (*Collector, error) {
 	options, err := normalizeOptions(options)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if c == nil || c.slot == nil {
-		return nil, nil, errors.New("transaction probe replacement requires an installed collector")
+		return nil, errors.New("transaction probe replacement requires an installed collector")
 	}
 	c.slot.mu.Lock()
 	defer c.slot.mu.Unlock()
 	if c.slot.collector != c {
-		return nil, nil, errors.New("transaction probe replacement requires the current exact collector")
+		return nil, errors.New("transaction probe replacement requires the current exact collector")
 	}
 	next := newCollector(c.slot, options)
 	c.slot.collector = next
-	return next, next.Stop, nil
+	return next, nil
 }
 
 func (c *Collector) Snapshot() Snapshot {

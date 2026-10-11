@@ -98,11 +98,11 @@ func TestFanOutGrantedActualCommitCountBothStores(t *testing.T) {
 			if postgres && (retired.Retained.FirstCommitAt.IsZero() || retired.Retained.LastCommitAt.Before(chunkReceipt.LastCommitAt)) {
 				t.Fatalf("retained acknowledgement timestamp missing: %+v", retired.Retained)
 			}
-			successor, stopSuccessor, err := collector.Replace(transactiontest.Options{})
+			successor, err := collector.Replace(transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(stopSuccessor)
+			t.Cleanup(successor.Stop)
 			restore() // A stale restoration must not detach the replacement collector.
 			if _, err := selected.FanOutRunSummary(ctx, fixture.runID, time.Now().UTC()); err != nil {
 				t.Fatal(err)

@@ -114,7 +114,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			var issuanceReceipt storetest.TransactionSnapshot
 			// Registered before the harness: inspect captured attempts only after
 			// serve and selected-store cleanup have joined, not immediately at Stop.
-			if servingWindow {
+			if transactionOptions.Delay > 0 {
 				t.Cleanup(func() {
 					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
 						if collector != nil {
@@ -127,6 +127,11 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 					}
 					if transactions != nil && continuation != nil {
 						if err := storetest.ValidateReporterJoined(issuanceReceipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+							t.Error(err)
+						}
+					}
+					if transactions != nil && !servingWindow && !issuanceReceipt.ByOperation[storetest.TransactionFanOutChunk].LastCommitAt.IsZero() {
+						if err := storetest.ValidateReporterStressJoined(issuanceReceipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
 							t.Error(err)
 						}
 					}
@@ -239,11 +244,11 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				t.Errorf("original all-commit delay not applied to every chunk: %+v", chunks)
 			}
 			settledBeforeHandoff := false
+			issuanceReceipt = receipt
 			if servingWindow {
 				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
 					t.Fatal(err)
 				}
-				issuanceReceipt = receipt
 				var atCut cliapp.DiagnosticRunDiagnosisResult
 				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &atCut)
 				settledBeforeHandoff = atCut.FanOut.Settled == 500 && atCut.FanOut.Unsettled == 0 && atCut.FanOut.Owed == 0

@@ -24,8 +24,8 @@ Both fixture final cleanups consume `ValidateReporterJoined` after runtime and
 store cleanup, retaining final old/successor snapshots rather than logging only
 Active. `TestReporterJoinedRejectsHeldCleanupErrorAfterEarlyAssertion` proves
 that the pre-teardown assertion cannot supply final credit and that a held
-acknowledged cleanup error is rejected after it joins. **The complete final
-unacknowledged-error oracle is still pending the clarification below.**
+acknowledged cleanup error is rejected after it joins. The complete oracle was
+clarified by reviewer-g at6105895380, as recorded below.
 
 R10/R13 distinguish actual descendant drain from merely mixed-batch writes.
 Before handoff the existing public/selected fan-out summary records whether the
@@ -55,8 +55,21 @@ The correction preserves raw unacknowledged receipts, checks serving failures
 and all actual COMMIT/cleanup failures, and retains final captured accounting.
 The deterministic native rollback-only control proves this distinction. This
 does **not** assert that every non-serving unacknowledged error is harmless.
-The requested final error-oracle clarification is posted at6105762790; final
-qualification/closure and PR opening remain held until the reviewer resolves it.
+The clarification request6105762790 is resolved by6105895380: global Failed==0
+is not required; both collectors must join at Active0, serving claim/chunk
+Failed0, global CommitFailures0/CleanupFailures0, with exact native receipts and
+all public/selected assertions. Raw non-serving Failed/RollbackAttempts remain
+unacknowledged evidence, never successful or declared harmless. Early-review
+code findings were closed at491e17ee8, not final proof or merge approval.
+
+The fresh491 census identified one new callback-type footprint: Replace's
+redundant returned cleanup function. Remove that new result and register the
+successor's existing Stop, without a registry/baseline increase or guard change.
+Codex's draft2613 P2 also requires stable joined all-commit snapshots. Both old
+stress roots now revalidate after harness/store teardown, with an explicit held
+cleanup-error negative control. The immediate complete-journey validation stays.
+These bounded repairs require fresh affected source/receipt qualification; the
+passing491 window receipts are retained, not claimed as the new-head receipts.
 
 The failed109 aggregate, catalog census omission and a mixed-source guard build
 remain failed diagnostic evidence. The catalog owner omission is repaired.

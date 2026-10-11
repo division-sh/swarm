@@ -27,7 +27,7 @@ func TestCollectorAtomicReplacementNeverLosesBegin(t *testing.T) {
 	replaceErr := make(chan error, 1)
 	done := make(chan struct{})
 	go func() {
-		next, _, err := old.Replace(Options{})
+		next, err := old.Replace(Options{})
 		replaced <- next
 		replaceErr <- err
 		close(done)
@@ -61,10 +61,10 @@ func TestCollectorAtomicReplacementNeverLosesBegin(t *testing.T) {
 	if old.Snapshot().Active != 0 || next.Snapshot().Active != 0 || old.Snapshot().Total.WriteCommits != 1 || next.Snapshot().Total.WriteCommits != 1 {
 		t.Fatalf("replacement reassigned or lost receipts: old=%+v next=%+v", old.Snapshot(), next.Snapshot())
 	}
-	if _, _, err := old.Replace(Options{}); err == nil {
+	if _, err := old.Replace(Options{}); err == nil {
 		t.Fatal("stale predecessor replaced the successor")
 	}
-	if _, _, err := next.Replace(Options{DelayScope: "invalid"}); err == nil {
+	if _, err := next.Replace(Options{DelayScope: "invalid"}); err == nil {
 		t.Fatal("invalid replacement changed the current collector")
 	}
 	unchanged := slot.Begin(true, false)
