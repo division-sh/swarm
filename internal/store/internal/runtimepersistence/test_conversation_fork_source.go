@@ -9,9 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -63,9 +64,9 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 	if !ok || source.BundleHash() == "" {
 		return result, fmt.Errorf("fork fixture requires exact source scope")
 	}
-	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect) error {
+	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivity.Dialect) error {
 		query := "SELECT bundle_hash FROM runs WHERE run_id=?"
-		if dialect == authoractivityfixture.DialectPostgres {
+		if dialect == authoractivity.DialectPostgres {
 			query = "SELECT bundle_hash FROM runs WHERE run_id=$1::uuid"
 		}
 		var bundleHash string
@@ -91,7 +92,7 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 			) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`
 			at := fixture.CreatedAt.Add(-3 * time.Minute)
 			args := []any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, at, at}
-			if dialect == authoractivityfixture.DialectPostgres {
+			if dialect == authoractivity.DialectPostgres {
 				query = `INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -119,7 +120,55 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 			if err != nil {
 				return err
 			}
-			event, err := eventfixture.ExistingRunRoot(ctx, attempt, dialect, eventID, fixture.RunID, kind, producer, []byte("{}"), events.EventEnvelope{}, at)
+			event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{
+				RunID: fixture.RunID,
+				Facts: events.EventFacts{ID: eventID, Type: kind,
+					Producer: events.ProducerClaim{Type: producer.Type(), ID: producer.ID()},
+					Payload:  []byte("{}"), Envelope: events.EventEnvelope{}, RoutingSource: events.NoRoutingSource(),
+					CreatedAt: at, ExecutionMode: executionmode.Live},
+			})
+			if err != nil {
+				return err
+			}
+			// This fixed historical witness is explicitly schema-less, as before;
+			// production event admission and persistence still own its evidence.
+			binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+				BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+				EventKey:   string(kind), SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+				SchemaClass: events.PayloadSchemaSchemaLess,
+			})
+			if err != nil {
+				return err
+			}
+			payload, err := events.NewPayloadAdmission(event.Payload(), binding)
+			if err != nil {
+				return err
+			}
+			bound, err := events.ApplyPayloadAdmission(event, payload)
+			if err != nil {
+				return err
+			}
+			admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				return err
+			}
+			ledger, err := events.NewConnectEvaluationLedger(nil)
+			if err != nil {
+				return err
+			}
+			settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+			if err != nil {
+				return err
+			}
+			record, err := eventrecord.FromAdmitted(admitted, settlement)
+			if err != nil {
+				return err
+			}
+			if dialect == authoractivity.DialectPostgres {
+				_, err = insertCanonicalFixtureRecordForTest(ctx, attempt, "postgres", record)
+			} else {
+				_, err = insertCanonicalFixtureRecordForTest(ctx, attempt, "sqlite", record)
+			}
 			if err != nil {
 				return err
 			}
@@ -135,7 +184,7 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 		}
 		err = mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-				return persist(txctx, tx, attempt, authoractivityfixture.DialectPostgres)
+				return persist(txctx, tx, attempt, authoractivity.DialectPostgres)
 			})
 		}).Err()
 	case *SQLiteRuntimeStore:
@@ -144,7 +193,7 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 		}
 		err = mutationprotocol.RunSQLite(ctx, store.backend, "conversation fork source fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-				return persist(txctx, tx, attempt, authoractivityfixture.DialectSQLite)
+				return persist(txctx, tx, attempt, authoractivity.DialectSQLite)
 			})
 		}).Err()
 	default:
