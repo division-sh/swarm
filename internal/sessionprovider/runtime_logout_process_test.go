@@ -22,8 +22,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/google/uuid"
 )
 
 type logoutProcessFixture struct {
@@ -91,6 +93,9 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 				id := killNativeLogoutAtBoundary(t, logoutProcessFixture{Backend: backend, Location: f.location,
 					Directory: f.basePath, OperationID: f.operation.OperationID, Phase: phase})
 				ctx := f.ctx
+				if phase == "reserved" {
+					acquireLogoutProcessFixture(t, f, uuid.NewString())
+				}
 				original, err := f.selected.GetChannelTeardown(ctx, id)
 				if err != nil || original.Logout == nil || original.Phase != channelonboarding.TeardownAuthorityRetired {
 					t.Fatal("process death lost its exact pending responsibility", original, err)
@@ -107,6 +112,11 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 					t.Fatal("process death did not retain exact journal launch evidence", before, err)
 				}
 				for range 2 {
+					if phase == "reserved" {
+						if _, err := f.selected.RecoverUnlaunchedChannelLogout(ctx, id, original.Revision, time.Now().UTC()); err != nil {
+							t.Fatal(err)
+						}
+					}
 					if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(ctx,
 						effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
 						t.Fatal(err)
@@ -118,12 +128,15 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 				}
 				retained, err := f.selected.GetChannelTeardown(ctx, id)
 				wantPhase, wantRevision := channelonboarding.TeardownFailed, original.Revision+1
-				if reservedOnly {
-					wantPhase, wantRevision = original.Phase, original.Revision
-				}
 				if err != nil || retained.Phase != wantPhase || retained.Revision != wantRevision ||
 					retained.Logout == nil || *retained.Logout != *original.Logout {
 					t.Fatal("process recovery lost or repeated frozen settlement", retained, err)
+				}
+				if reservedOnly {
+					if retained.FailureCode != "logout_not_launched" {
+						t.Fatal("reservation-only recovery lost no-launch disposition", retained)
+					}
+					requireLogoutContextRetirement(t, f, original)
 				}
 				state, err := openSessionState(ctx, f.basePath, original.Logout.Account.ConnectionID, original.Logout.Account.AccountRef)
 				if phase == "sdk_deleted_before_settlement" {
@@ -179,6 +192,18 @@ func runNativeLogoutDeathChild(t *testing.T, config logoutProcessFixture) {
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
+	if config.Phase == "reserved" {
+		owner, err := f.selected.(startupownership.Store).AcquireProcessCapability(f.ctx, startupownership.AcquireRequest{
+			OwnerID: "logout-death-child", BootID: uuid.NewString(), RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID})
+		if err != nil {
+			t.Fatal("child lacked canonical process possession", err)
+		}
+		t.Cleanup(func() {
+			if err := owner.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	f.state = sessionStateFixture(t, f.basePath, f.operation.SessionConnectionID, f.operation.SessionAccount.AccountRef)
 	c := openRuntimeConnectionFixture(t, f)
 	connectRuntimeConnectionFixture(t, f, c)
