@@ -49,6 +49,8 @@ func TestR7NativeObserverCreationOrdersPreserveCompiledDeclarationsBothStores(t 
 				at := time.Now().UTC()
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 				constructed := map[string]runtimeflowidentity.Instance{}
+				originalReceipts := map[string]runtimepipeline.FlowConstructionPublicationEvidence{}
+				index := runtimepipeline.FlowInstanceIndexReader(selected)
 				construct := func(flow, key string) runtimeflowidentity.Instance {
 					t.Helper()
 					identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flow, key, runID)
@@ -73,6 +75,23 @@ func TestR7NativeObserverCreationOrdersPreserveCompiledDeclarationsBothStores(t 
 					}
 					seedComponentFlowConstruction(t, ctx, selected, source, instance)
 					constructed[identity.InstancePath] = identity
+					owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, identity.Route())
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, err := runtimepipeline.NewExactFlowInstanceLookup(source, testSourceArtifactFact(source), owner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					observation, found, err := index.LookupFlowInstance(ctx, request)
+					if err != nil || !found || observation.Identity() != identity {
+						t.Fatalf("original native construction absent or changed: found=%t identity=%+v err=%v", found, observation.Identity(), err)
+					}
+					receipt, native, err := observation.NativeConstruction()
+					if err != nil || !native || receipt.Identity != identity {
+						t.Fatalf("original native construction receipt invalid: native=%t receipt=%+v err=%v", native, receipt, err)
+					}
+					originalReceipts[identity.InstancePath] = receipt
 					if !reflect.DeepEqual(definitions, table.ConnectDeclarationDefinitions("observer")) {
 						t.Fatal("native construction changed compiled observer declarations")
 					}
@@ -139,7 +158,7 @@ func TestR7NativeObserverCreationOrdersPreserveCompiledDeclarationsBothStores(t 
 				for _, observation := range observations {
 					identity := observation.Identity()
 					receipt, native, err := observation.NativeConstruction()
-					if err != nil || !native || !observation.Valid() || observation.SourceFact() != testSourceArtifactFact(source) || identity != constructed[identity.InstancePath] || receipt.Identity != identity {
+					if err != nil || !native || !observation.Valid() || observation.SourceFact() != testSourceArtifactFact(source) || identity != constructed[identity.InstancePath] || !reflect.DeepEqual(receipt, originalReceipts[identity.InstancePath]) {
 						t.Fatalf("publication changed native construction: identity=%+v err=%v", identity, err)
 					}
 				}
