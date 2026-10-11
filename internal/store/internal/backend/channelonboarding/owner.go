@@ -484,11 +484,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			}
 		}
 		i, c := op.Interface.Normalized(), op.Coordinate.Normalized()
-		admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
-		if err != nil {
-			return err
-		}
-		session, err := marshalSessionAccount(op.SessionAccount)
+		admissions, session, err := marshalActivationAdmissions(op.CredentialAdmissions, op.SessionAccount)
 		if err != nil {
 			return err
 		}
@@ -1113,6 +1109,18 @@ type credentialAdmissionRecord struct {
 	Kind      domain.CredentialAdmissionKind `json:"kind"`
 	Receipt   string                         `json:"receipt,omitempty"`
 	ValueSeal string                         `json:"value_seal"`
+}
+
+func marshalActivationAdmissions(admissions []domain.CredentialAdmission, account operatorchannel.SessionAccountAdmission) ([]byte, any, error) {
+	credentials, err := marshalCredentialAdmissions(admissions)
+	if err != nil {
+		return nil, nil, err
+	}
+	session, err := marshalSessionAccount(account)
+	if err != nil {
+		return nil, nil, err
+	}
+	return credentials, session, nil
 }
 
 func marshalSessionAccount(account operatorchannel.SessionAccountAdmission) (any, error) {
