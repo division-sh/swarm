@@ -21082,15 +21082,21 @@ run_model:
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
-        runtime.run_fork.selected_contract_deferred_work_admission classifies timed-join and
-        fan-out delivery-barrier declarations, connect-time resolution through the exhaustive current matrix
+        runtime.run_fork.selected_contract_deferred_work_admission classifies connect-time resolution through the exhaustive current matrix
         (`create` and `select-or-create` can create; `select`, `fan-out`, and `reply` cannot) as
-        unsupported while the ephemeral selected-fork container has no
-        long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
+        unsupported while the selected-fork container has no admitted dynamic construction owner. Workflow,
+        arrival and fan-out delivery-barrier schedules use the retained selected runtime, existing completion owner
+        and generic schedule lifecycle. Their declaration alone is not an unavailable capability. Dynamic creation
+        rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
         carried through selected execution admission and every container construction. Exact fan-out barrier historical
         materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
-        selected dispatch of pending schedules. The selected execution gate remains in force before selected mutations.
+        selected dispatch of pending schedules. A child barrier folds exact retained terminal recipient contributions
+        with its fresh child settlements; a terminal failure is never reinterpreted as success. The existing
+        completion transaction owns closure and the exact generic schedule admission; the retained schedule owner
+        publishes the completion occurrence and the ordinary handler commits its authored outcome. Every step still
+        requires current selected authority. Settled recipients are never issued again. The selected execution gate
+        remains in force before selected mutations.
         No rejected path may create
         executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
         lineage, or runtime-execution state. Agent
@@ -21245,7 +21251,7 @@ run_model:
         published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
         validates its exact captured source schedule before writes and retains the admitted absolute due rather
         than resetting it to child birth. An already published barrier occurrence requires its historical delivery
-        continuation and is never rearmed. Timed-join, pending barrier and dynamic-flow continuation remain gated by #642.'
+        continuation and is never rearmed. Dynamic-flow and other unproved continuation capabilities remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
@@ -21477,8 +21483,9 @@ run_model:
         primitive and selected-contract frontier execution retain their distinct admission owners. Workflow and
         arrival schedules require exact retained source evidence, native child inventory and current selected
         authority; pending arrival deadlines continue their original due and membership through actual publication,
-        delivery and settlement. Completed or failed source occurrences are not fresh arms. Handler fan-out barriers,
-        semantically dynamic-flow-creating input resolution and other unproved capabilities remain blocked. Unsupported
+        delivery and settlement. Completed or failed source occurrences are not fresh arms. Handler fan-out barriers
+        preserve all-settled semantics through their retained completion and schedule owners; semantically
+        dynamic-flow-creating input resolution and other unproved capabilities remain blocked. Unsupported
         historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized

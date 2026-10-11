@@ -18,10 +18,7 @@ import (
 
 const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred_work_owner_unavailable"
 
-const (
-	selectedContractDeferredWorkFanOutBarrier       = "fan_out_delivery_barrier"
-	selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
-)
+const selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
 
 type selectedContractDeferredWorkAdmission struct {
 	owner           string
@@ -211,18 +208,9 @@ func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
 
 func selectedContractDeferredWorkCapabilities(source semanticview.Source) []string {
 	capabilities := make([]string, 0, 4)
-	// Workflow and arrival schedules have retained execution owners. Availability
+	// Workflow, arrival and delivery-barrier schedules have retained owners. Availability
 	// does not discharge their fixed-cut evidence or native inventory admission.
 	if source != nil {
-		hasFanOutBarrier := false
-		for _, join := range source.WorkflowJoins() {
-			if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
-				hasFanOutBarrier = true
-			}
-		}
-		if hasFanOutBarrier {
-			capabilities = append(capabilities, selectedContractDeferredWorkFanOutBarrier)
-		}
 		if selectedContractSourceCanCreateDynamicFlow(source) {
 			capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
 		}

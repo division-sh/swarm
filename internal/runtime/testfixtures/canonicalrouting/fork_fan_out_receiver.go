@@ -72,3 +72,48 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
 		"    start.closed:\n      advances_to: done\n", "    start.closed:\n      advances_to: done\n    start.checkpointed:\n      emit:\n        event: work.cut\n")
 	return root
 }
+
+// CopyForkFanOutBarrierReceiver keeps the mixed-recipient cut and adds a real
+// producer-owned all-settled outcome with a separate root business consumer.
+func CopyForkFanOutBarrierReceiver(t testing.TB) string {
+	t.Helper()
+	root := CopyForkFanOutReceiverOwnership(t)
+	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"), `      advances_to: active
+      data_accumulation:
+        writes:
+          - target_field: marker
+            value: "producer-owned"
+`, "")
+	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"),
+		"          fields: {token: entry}\n", `          fields: {token: entry}
+      join:
+        id: all-receivers-settled
+        members: {from_fan_out: true}
+        on_complete:
+          advances_to: active
+          data_accumulation:
+            writes: [{target_field: marker, value: 'producer-owned'}]
+          emit:
+            event: batch.completed
+            fields: {total: join.total}
+`)
+	applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"),
+		"work.ready:\n  token: text\n", "work.ready:\n  token: text\nbatch.completed:\n  total: integer\n")
+	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"),
+		"outputs: [work.ready]", "outputs: [work.ready, batch.completed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"connect:\n", "connect:\n  - {event: batch.completed, from: producer, to: .}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"    - start.checkpointed\n", "    - start.checkpointed\n    - batch.completed\n")
+	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"),
+		"  marker: text\n", "  marker: text\n  completed_total: {type: integer, initial: 0}\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
+		"    start.checkpointed:\n", `    batch.completed:
+      data_accumulation:
+        writes: [{target_field: completed_total, value: payload.total}]
+    start.checkpointed:
+`)
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
+		"    - start.checkpointed\n", "    - start.checkpointed\n    - batch.completed\n")
+	return root
+}
