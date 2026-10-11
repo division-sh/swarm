@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"database/sql"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -17,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -32,20 +30,17 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 	source := semanticview.Wrap(bundle)
 	for _, setup := range []struct {
 		name string
-		open func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+		open func(*testing.T) fanInBarrierConformanceStore
 	}{
-		{"sqlite", func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-			s := storetest.StartSQLiteRuntimeStore(t)
-			return s, storetest.Database(s)
+		{"sqlite", func(t *testing.T) fanInBarrierConformanceStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
-		{"postgres", func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		{"postgres", func(t *testing.T) fanInBarrierConformanceStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	} {
 		t.Run(setup.name, func(t *testing.T) {
-			backend, db := setup.open(t)
+			backend := setup.open(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
@@ -66,7 +61,7 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 					}
 				}
 				if err != nil || len(matches) != 1 {
-					dumpFanInBarrierEvents(t, ctx, backend, db)
+					dumpFanInBarrierEvents(t, ctx, backend)
 					t.Logf("stream runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 					t.Fatalf("period %s: matches=%#v err=%v", period, matches, err)
 				}

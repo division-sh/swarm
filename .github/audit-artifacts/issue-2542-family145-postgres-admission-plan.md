@@ -2132,3 +2132,54 @@ across both files and four constructors. It requires fewer distinct semantic rep
 per caller than the larger fan-out chains with held transactions and process-loss
 faults; those chains remain explicit D/S, not postponed unnamed debt. Scheduling
 table posted at6110431613. No leaf review request, push or PR.
+
+### Fan-in shared carrier closure in the same delivery-reset batch
+
+Both files and all four openings now consume native construction without any DB,
+dialect, getter or returned-pool carrier. All six original roots (including the
+two alias roots sharing the singleton proof) execute on both stores under race.
+The shared period/operating report helpers preserve their global LIKE suffix,
+timestamp/identity order and multiplicity. The event-ID settlement read remains
+unscoped by run and returns native stored text; consumer decode, ledger validation,
+exact target/candidate/public readback and no-redispatch assertions remain. The
+diagnostic cut is global events, separate public routing reads, then global
+deliveries through the closed delivery owner, retaining native text, NULL defaults
+and original order. An unavailable read never manufactures partial success.
+
+The named missing-selected-period fault deletes only the exact run/entity/path
+after lawful source construction and the original settled-publication cut, through
+the selected unrevisioned native coordinator. The native scope matrix preserves
+sibling fields plus complete header/readiness/clocks; one write/no revision is
+asserted. A channel-gated SQLite holder proves original writer admission and joined
+queued cancellation. Initial proof defects are retained as RED receipts: the
+fieldful header observer rightly rejects absent fields (use its existing fieldless
+cut for post-fault header evidence), settled transaction counters do not count an
+active holder as begun, and delivery clocks are the delivery owner's clocks, not
+event creation clocks. These are corrected test assumptions, not retry/timeout
+changes. The positive fault and physical-observation assertions are preserved.
+
+| Shared capability / manifestation | Exact proof |
+| --- | --- |
+| Four raw openings and both-file DB transport closure | Six unchanged original roots, twelve backend cells, race GREEN31.655s +16.152s; original barrier root after observer error plumbing GREEN16.488s |
+| Global report LIKE/multiplicity/order and independent original reads | Both-store native observation matrix; five read commits/zero writes; actual wildcard deletion RED on both stores, restored GREEN |
+| Global diagnostic delivery fields/multiplicity/clock order | Both-store four-row/two-run/two-subscriber native matrix uses canonical delivery snapshots for expected clocks, GREEN14.582s |
+| Exact missing-owner fault with retained construction/identity | Native compiled source, foreign run/path zero/no mutation, exact deletion one write/no revision; actual path-predicate deletion RED on both stores, restored GREEN |
+| Original SQLite admission and cancellation/join | Held selected writer, one queued fault, no second begun transaction, exact context cancellation, joined fault and holder GREEN5.179s |
+| Foreign/raw/cancelled/closed/missing ownership produces no evidence | Grouped native observation/fault refusal matrix GREEN; absent settlement remains sql.ErrNoRows |
+| Every business assertion and finite source mapping | Existing conservation machinery plus three exact helper-operation/transport controls; altered operation, duplicate call, removed business assertion and raw query are rejected |
+
+Receipts reset-fanin-* in the existing Vemew evidence directory. Original roots
+2fb57d4dd2dd61ddfd60cff09c6cc2bf3ecd25bd1a86565bc15de4b2834e1c28;
+sibling roots and restored counterexamples retain their independent JSON receipts.
+Corpus1065/213 transitions, digest
+8582e4cc89ebae87af4e4ea8d5c090e71560381c48b3b730d09358c0ddde157a.
+Four changes extend already-reviewed recipe rows; five add current rows, so count
+is1065, not1069. All893 historical tuples and24 historical receipts remain.
+One candidate overlay GREEN165.772s; affected event/delivery/revision/loan guards
+GREEN4.277s, U1000 clean; the complete80-root sweep and complexity are checkpoint
+receipts, not per-scalar qualification. Native scope controls restored GREEN16.021s.
+Live source-spelling count129 =114 outside plus15 private; M0/D92/S37 remain,
+and Docker's unqualified debit is separate. This is not a fresh global census or
+zero-debt/closure/restart claim. No raw fault query, allowance, selector or callback
+crosses storetest. Next conformance fixture chains and their S exceptions remain
+in this family; no new issue, review-per-reader, push, PR or local tier.

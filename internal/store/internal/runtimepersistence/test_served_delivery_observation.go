@@ -15,6 +15,42 @@ import (
 
 type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
 
+type FanInDiagnosticDeliveryStorage = delivery.FanInDiagnosticDeliveryStorage
+
+func ReadFanInDiagnosticDeliveriesForTest(ctx context.Context, selected any) ([]FanInDiagnosticDeliveryStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []FanInDiagnosticDeliveryStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadFanInDiagnosticDeliveriesTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func DeleteFanInSelectedPeriodOwnerForTest(ctx context.Context, selected any, runID, entityID string) (int64, error) {
+	for _, id := range []string{runID, entityID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return 0, err
+		}
+	}
+	var removed int64
+	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		removed, err = pipelinepersistence.DeleteFanInSelectedPeriodOwnerTx(ctx, tx, runID, entityID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 type NodeDeliveryDiagnosticStorage struct {
 	Rows, DeadLetters, Receipts []string
 }

@@ -22,6 +22,31 @@ type PreparedTargetConflictStorage struct {
 	SubscriberID, RouteIdentity, TargetEncoding string
 }
 
+type FanInDiagnosticDeliveryStorage struct {
+	EventID, SubscriberID, Status, Reason, Failure string
+}
+
+func ReadFanInDiagnosticDeliveriesTx(ctx context.Context, tx *sql.Tx) (out []FanInDiagnosticDeliveryStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT), subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries ORDER BY created_at, delivery_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row FanInDiagnosticDeliveryStorage
+		if err := rows.Scan(&row.EventID, &row.SubscriberID, &row.Status, &row.Reason, &row.Failure); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func ReadPublicationDeliveryTargetEncodingsTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
 	query := `SELECT COALESCE(delivery_target_route,'{}') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id,delivery_id`
 	if postgres {

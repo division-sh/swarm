@@ -400,6 +400,68 @@ func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, nam
 
 type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
 
+type FanInDiagnosticEventStorage = eventrecord.FanInDiagnosticEventStorage
+
+func ReadFanInPeriodReportedEventIDsForTest(ctx context.Context, selected any) ([]string, error) {
+	return readFanInReportedEventIDsForTest(ctx, selected, false)
+}
+
+func ReadFanInOperatingReportedEventIDsForTest(ctx context.Context, selected any) ([]string, error) {
+	return readFanInReportedEventIDsForTest(ctx, selected, true)
+}
+
+func readFanInReportedEventIDsForTest(ctx context.Context, selected any, operating bool) ([]string, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		if operating {
+			out, err = eventrecord.ReadFanInOperatingReportedEventIDsTx(ctx, tx)
+		} else {
+			out, err = eventrecord.ReadFanInPeriodReportedEventIDsTx(ctx, tx)
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadFanInEventRouteSettlementForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return "", err
+	}
+	var out string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadFanInEventRouteSettlementTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func ReadFanInDiagnosticEventsForTest(ctx context.Context, selected any) ([]FanInDiagnosticEventStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []FanInDiagnosticEventStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadFanInDiagnosticEventsTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadSourceRouteSettlementStorageForTest(ctx context.Context, selected any, runID, eventID string) (SourceRouteSettlementStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return SourceRouteSettlementStorage{}, err
