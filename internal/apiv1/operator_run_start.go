@@ -60,6 +60,9 @@ func runStartConfigured(opts RunStartHandlerOptions) bool {
 	if publication.Idempotency == nil {
 		return false
 	}
+	if lookup, ok := publication.Acknowledged.(publicPublicationCompletionLookup); ok && lookup != nil {
+		return true
+	}
 	if runtimeContextManager(publication.RuntimeContexts) != nil {
 		return true
 	}

@@ -100,16 +100,20 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 }
 
 func testAuthorActivityContextForSource(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
+	return testAuthorActivityContextForRuntime(ctx, authorActivityTestRuntimeInstanceID, fact)
+}
+
+func testAuthorActivityContextForRuntime(ctx context.Context, runtimeID string, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := fact.Validate(); err != nil {
 		panic(err)
 	}
-	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
-		authorActivityTestRuntimeInstanceID, fact.BundleHash(),
+		runtimeID, fact.BundleHash(),
 	))
 }
 
@@ -238,7 +242,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			return nil, err
 		}
 		if err := deliveryStore.ActivateDeliveryAuthority(
-			testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact),
+			testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact),
 			authority,
 		); err != nil {
 			return nil, err
@@ -321,7 +325,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 			return nil, err
 		}
-		if err := coordinator.Start(testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact)); err != nil {
+		if err := coordinator.Start(testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact)); err != nil {
 			return nil, err
 		}
 		t.Cleanup(func() {

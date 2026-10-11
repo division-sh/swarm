@@ -107,6 +107,10 @@ type apiEventAcknowledgedPublisher interface {
 	PublishAPIEventWithRunCreationAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion, *durabledata.RunCreationCommand) (apiidempotency.Completion, bool, error)
 }
 
+type publicPublicationCompletionLookup interface {
+	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
+}
+
 func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]MethodHandler {
 	if !eventPublishConfigured(opts.Publication) {
 		return nil
@@ -190,9 +194,7 @@ func lookupPublicPublication(ctx context.Context, req Request, opts EventPublica
 	if err != nil || request.IdempotencyKey == "" {
 		return apiidempotency.Completion{}, false, request, err
 	}
-	owner, ok := opts.Acknowledged.(interface {
-		LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
-	})
+	owner, ok := opts.Acknowledged.(publicPublicationCompletionLookup)
 	if !ok || owner == nil {
 		return apiidempotency.Completion{}, false, request, errors.New("public publication requires selected-store completion lookup")
 	}

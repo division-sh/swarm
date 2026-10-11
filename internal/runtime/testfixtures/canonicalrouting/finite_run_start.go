@@ -39,6 +39,30 @@ func CopyDeploymentRunStart(t testing.TB) string {
 	})
 }
 
+func CopyPublicCompletionInitiation(t testing.TB) string {
+	t.Helper()
+	root := CopyPublicCompletionFeedOnly(t)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: deployment\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n")
+	return root
+}
+
+func CopyPublicCompletionFeedOnly(t testing.TB) string {
+	t.Helper()
+	root := CopyDeploymentRunStart(t)
+	// portfolio.opened belongs to the component's unpinned-resource rejection
+	// control; the served completion journey carries only active declarations.
+	writeClosedVariantFile(t, root, "events.yaml", "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\n")
+	return root
+}
+
+func CopyPublicCompletionReplacement(t testing.TB) string {
+	t.Helper()
+	root := CopyPublicCompletionFeedOnly(t)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: replacement\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n")
+	return root
+}
+
 func CopyFiniteEagerClosure(t testing.TB, childFinal bool) string {
 	t.Helper()
 	child := "stages: {waiting: {}}\n"

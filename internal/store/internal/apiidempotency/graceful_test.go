@@ -21,7 +21,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			db.SetMaxOpenConns(1)
-			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
+			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSON NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -121,7 +121,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
 	dsn, observer, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
+	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSON NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 		t.Fatal(err)
 	}
 	req := apiidempotencycontract.Request{Method: "test.wait", Actor: apiidempotencycontract.BearerActor("actor"), IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}

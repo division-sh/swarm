@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -23,13 +24,14 @@ import (
 
 type publicationAcknowledgementProbeStore struct {
 	InMemoryEventStore
-	acknowledged bool
-	replay       bool
-	err          error
-	cancel       context.CancelFunc
-	commits      int
-	rootOwner    ActiveTargetDescriptor
-	construction runtimepipeline.FlowConstructionPublicationEvidence
+	acknowledged   bool
+	replay         bool
+	err            error
+	cancel         context.CancelFunc
+	commits        int
+	rootOwner      ActiveTargetDescriptor
+	construction   runtimepipeline.FlowConstructionPublicationEvidence
+	afterAPICommit func()
 }
 
 func (s *publicationAcknowledgementProbeStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entity string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
@@ -223,6 +225,12 @@ func (s *publicationAcknowledgementProbeStore) CommitAPIEventPublication(ctx con
 	if err != nil {
 		return CommittedAPIEventPublication{}, err
 	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.afterAPICommit != nil {
+		s.afterAPICommit()
+	}
 	return CommittedAPIEventPublication{Publication: committed, Completion: command.Completion, Acknowledged: true}, s.err
 }
 
@@ -387,9 +395,14 @@ type publicationAcknowledgementProbe struct {
 	persisted  atomic.Int32
 	dispatched atomic.Int32
 	started    chan struct{}
+	release    <-chan struct{}
+	process    atomic.Pointer[worklifetime.Process]
 }
 
-func (p *publicationAcknowledgementProbe) NotifyLifecycle(_ context.Context, signal lifecycleprobe.Signal) {
+func (p *publicationAcknowledgementProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	if process, ok := worklifetime.ProcessFromContext(ctx); ok {
+		p.process.Store(process)
+	}
 	switch signal.Kind {
 	case lifecycleprobe.EventPersisted:
 		p.persisted.Add(1)
@@ -399,6 +412,12 @@ func (p *publicationAcknowledgementProbe) NotifyLifecycle(_ context.Context, sig
 			select {
 			case p.started <- struct{}{}:
 			default:
+			}
+		}
+		if p.release != nil {
+			select {
+			case <-p.release:
+			case <-ctx.Done():
 			}
 		}
 	}
@@ -454,7 +473,15 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 	for _, acknowledged := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unacknowledged", true: "acknowledged"}[acknowledged], func(t *testing.T) {
 			store := &publicationAcknowledgementProbeStore{acknowledged: acknowledged, err: fault}
-			probe := &publicationAcknowledgementProbe{started: make(chan struct{}, 1)}
+			release := make(chan struct{})
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+			probe := &publicationAcknowledgementProbe{started: make(chan struct{}, 1), release: release}
 			source, endpoint := acknowledgedRootInputEndpoint(t)
 			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Durable: DurableTestDependencyProjection(store)})
 			if err != nil {
@@ -480,11 +507,124 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 				case <-time.After(2 * time.Second):
 					t.Fatal("acknowledged API publication did not dispatch")
 				}
+				process := probe.process.Load()
+				if process == nil || process.PublicCompletionCount() != 1 {
+					t.Fatal("post-ACK error or worker spawn released the held responsibility")
+				}
 			} else if actual.ResourceID != "" {
 				t.Fatalf("unacknowledged completion = %#v", actual)
 			}
 			if store.commits != 1 || probe.persisted.Load() != int32(want) || probe.dispatched.Load() != int32(want) {
 				t.Fatalf("commits/persisted/dispatched = %d/%d/%d, want 1/%d/%d", store.commits, probe.persisted.Load(), probe.dispatched.Load(), want, want)
+			}
+			close(release)
+			if err := bus.workOwner.WaitForQuiescence(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := bus.workOwner.(*worklifetime.RuntimeOccurrence).RetireAndWait(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if process := probe.process.Load(); process != nil {
+				if _, err := process.Join(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if process := probe.process.Load(); process != nil && process.PublicCompletionCount() != 0 {
+				t.Fatal("terminal disposition retained the public reservation")
+			}
+		})
+	}
+}
+
+func TestPublicCompletionExactOccurrenceSurvivesRuntimeFence(t *testing.T) {
+	for _, variant := range []string{"runtime", "standing", "selected", "manager-standing"} {
+		t.Run(variant, func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			source, endpoint := acknowledgedRootInputEndpoint(t)
+			store := &publicationAcknowledgementProbeStore{acknowledged: true}
+			probe := &publicationAcknowledgementProbe{started: make(chan struct{}, 1)}
+			runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, WorkOwner: runtime, TestLifecycleProbe: probe, Durable: DurableTestDependencyProjection(store)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var owner worklifetime.Occurrence = runtime
+			var retireChild func()
+			switch variant {
+			case "standing", "manager-standing":
+				standing, err := runtime.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "service", RunID: "standing-run", Generation: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner = standing
+				retireChild = func() { _ = standing.RetireAndWait(context.Background()) }
+				if variant == "manager-standing" {
+					manager, err := worklifetime.NewManagerRunOccurrence(t.Context(), runtime, worklifetime.ManagerRunIdentity{Generation: 1})
+					if err != nil {
+						t.Fatal(err)
+					}
+					seed, err := manager.Begin(t.Context(), standing)
+					if err != nil {
+						t.Fatal(err)
+					}
+					owner, _ = worklifetime.OccurrenceFromContext(seed.Context())
+					if err := seed.Done(); err != nil {
+						t.Fatal(err)
+					}
+					retireChild = func() {
+						_ = manager.RetireAndWait(context.Background())
+						_ = standing.RetireAndWait(context.Background())
+					}
+				}
+			case "selected":
+				selected, err := process.NewSelectedFork(t.Context(), worklifetime.SelectedForkIdentity{ExecutionID: "execution", RunID: "selected-run", Generation: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner = selected
+				retireChild = func() { _ = selected.RetireAndWait(context.Background()) }
+			}
+			t.Cleanup(func() {
+				if retireChild != nil {
+					retireChild()
+				}
+				_, _ = runtime.RetireAndWait(context.Background())
+				_, _ = process.Join(context.Background())
+			})
+			store.afterAPICommit = func() {
+				if err := runtime.Fence(); err != nil {
+					t.Error(err)
+				}
+			}
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.requested", "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+			store.rootOwner = ActiveTargetDescriptor{ID: event.RunID(), FlowInstance: event.RunID(), EntityID: runtimeflowidentity.EntityID(event.RunID())}
+			store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
+			ctx := worklifetime.WithOccurrence(testAuthorActivityContext(t.Context()), owner)
+			if _, replay, err := bus.PublishAPIEventAcknowledged(ctx, event, &endpoint, apiidempotency.Request{Method: "event.publish"}, apiidempotency.Completion{ResourceID: event.ID(), Response: json.RawMessage(`{"ok":true}`)}); err != nil || replay {
+				t.Fatalf("acknowledged exact occurrence: replay=%t err=%v", replay, err)
+			}
+			select {
+			case <-probe.started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("post-ACK runtime re-admission lost accepted work")
+			}
+			if err := owner.WaitForQuiescence(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if retireChild != nil {
+				retireChild()
+			}
+			if _, err := runtime.RetireAndWait(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := process.Join(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if process.PublicCompletionCount() != 0 {
+				t.Fatal("exact occurrence retained its slot after disposition")
 			}
 		})
 	}

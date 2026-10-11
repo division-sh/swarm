@@ -31,8 +31,8 @@ func BeginPublicCompletion(ctx context.Context, owner Occurrence) (*Lease, error
 	if process == nil {
 		return nil, errors.New("public completion requires its occurrence's process owner")
 	}
-	accepted := context.WithoutCancel(ctx)
-	reservation, err := process.occurrence.gate.beginOwned(WithProcess(accepted, process), true, nil, true)
+	accepted := WithProcess(context.WithoutCancel(ctx), process)
+	reservation, err := process.occurrence.gate.beginOwned(accepted, true, nil, true)
 	if err != nil {
 		return nil, err
 	}
