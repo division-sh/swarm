@@ -97,6 +97,10 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 			if err != nil {
 				return err
 			}
+			plan, err = requireMaterializedRunForkReplyPlan(ctx, tx, s.replies, plan, lineage.ForkRunID, true)
+			if err != nil {
+				return err
+			}
 			result.ReplayResumeAdmission = plan.ReplayResumeAdmission
 			if !plan.ExecutionReady {
 				result.UnsupportedBlockers = plan.UnsupportedBlockers
@@ -230,6 +234,10 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 				return fmt.Errorf("load selected contract binding: %w", err)
 			}
 			plan, err := planRunForkSnapshot(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID}, privaterunforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			if err != nil {
+				return err
+			}
+			plan, err = requireMaterializedRunForkReplyPlan(txctx, tx, s.replies, plan, lineage.ForkRunID, false)
 			if err != nil {
 				return err
 			}

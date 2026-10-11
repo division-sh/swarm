@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -48,5 +49,32 @@ func TestRunForkReplyCarrierUsesExactCapturedRow(t *testing.T) {
 	}
 	if got, err := projectRunForkReplyReference("", "", nil, ""); err != nil || got != "" {
 		t.Fatalf("absent incoming reply invented a carrier: %q error=%v", got, err)
+	}
+}
+
+func TestRunForkReplyProspectiveProjectionKeepsUnrelatedBlockers(t *testing.T) {
+	for _, state := range []replycontext.State{replycontext.StateOpen, replycontext.StateTerminal} {
+		t.Run(string(state), func(t *testing.T) {
+			plan, child, _ := runForkReplyPlanFixture(t, state, true, false)
+			blockers := []runfork.RunForkUnsupportedBlocker{
+				{Code: runfork.RunForkBlockerOpenReplyContextUnsupported},
+				{Code: runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported},
+				{Code: runfork.RunForkBlockerTimerHistoryUnproven},
+			}
+			before := append([]runfork.RunForkUnsupportedBlocker(nil), blockers...)
+			got, err := runForkReplyProjectionBlockers(plan, child, blockers)
+			want := blockers
+			if state == replycontext.StateOpen {
+				want = blockers[1:]
+			}
+			if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(blockers, before) {
+				t.Fatalf("prospective projection changed unrelated/source blockers: got=%+v want=%+v error=%v", got, want, err)
+			}
+			plan.ReplyContexts = nil
+			got, err = runForkReplyProjectionBlockers(plan, child, blockers)
+			if err != nil || !reflect.DeepEqual(got, before) {
+				t.Fatalf("uncaptured open reply was admitted prospectively: %+v error=%v", got, err)
+			}
+		})
 	}
 }

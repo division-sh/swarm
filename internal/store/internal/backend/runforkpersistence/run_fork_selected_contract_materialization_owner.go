@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -451,24 +450,15 @@ func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID
 	if err != nil {
 		return nil, err
 	}
-	replies, err := projectRunForkReplyContexts(plan, childRunID)
-	if err != nil {
-		return nil, err
-	}
 	blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, admission, nil)
-	openReply := false
-	for _, record := range replies {
-		openReply = openReply || record.State == replycontext.StateOpen
-	}
 	filtered := make([]runfork.RunForkUnsupportedBlocker, 0, len(blockers))
 	for _, blocker := range blockers {
-		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven && eligible ||
-			blocker.Code == runfork.RunForkBlockerOpenReplyContextUnsupported && openReply {
+		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven && eligible {
 			continue
 		}
 		filtered = append(filtered, blocker)
 	}
-	return filtered, nil
+	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
 }
 
 func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, sourceRunID string, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {

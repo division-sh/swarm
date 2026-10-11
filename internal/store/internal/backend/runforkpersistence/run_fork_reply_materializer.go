@@ -45,6 +45,39 @@ func projectRunForkReplyReference(sourceRunID, childRunID string, captured []rep
 	return deterministicRunForkReplyContextID(childRunID, replyID), nil
 }
 
+// This checks only whether this one blocker has a complete projection. Actual
+// admission is discharged later, after the child rows are written and read back.
+func runForkReplyProjectionBlockers(plan runfork.RunForkPlan, childRunID string, blockers []runfork.RunForkUnsupportedBlocker) ([]runfork.RunForkUnsupportedBlocker, error) {
+	records, err := projectRunForkReplyContexts(plan, childRunID)
+	if err != nil {
+		return nil, err
+	}
+	hasOpen := false
+	for _, record := range records {
+		hasOpen = hasOpen || record.State == replycontext.StateOpen
+	}
+	filtered := make([]runfork.RunForkUnsupportedBlocker, 0, len(blockers))
+	for _, blocker := range blockers {
+		if blocker.Code == runfork.RunForkBlockerOpenReplyContextUnsupported && hasOpen {
+			continue
+		}
+		filtered = append(filtered, blocker)
+	}
+	return filtered, nil
+}
+
+func requireMaterializedRunForkReplyPlan(ctx context.Context, tx *sql.Tx, owner runForkReplyContextOwner, plan runfork.RunForkPlan, childRunID string, postgres bool) (runfork.RunForkPlan, error) {
+	admission, err := requireMaterializedRunForkReplyContexts(ctx, tx, owner, plan, childRunID, postgres, plan.ReplayResumeAdmission)
+	if err != nil {
+		return plan, err
+	}
+	plan.ReplayResumeAdmission = admission
+	plan.ExecutionReady = admission.StateOnlyExecutionReady || admission.DeliveryEventReplayReady
+	plan.UnsupportedBlockers = admission.UnsupportedBlockers
+	plan.UnsupportedBlockerCount = len(admission.UnsupportedBlockers)
+	return plan, nil
+}
+
 // Reply authority is projected from the captured semantic record. In particular,
 // old return entries and carried correlation are not selected again at child birth.
 func projectRunForkReplyContext(plan runfork.RunForkPlan, childRunID string, source replycontext.Record) (replycontext.Record, error) {

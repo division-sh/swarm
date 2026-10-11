@@ -89,18 +89,22 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
-	if !plan.ExecutionReady {
+	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	blockers, err := runForkReplyProjectionBlockers(plan, forkRunID, plan.UnsupportedBlockers)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if (!plan.ExecutionReady && len(blockers) == len(plan.UnsupportedBlockers)) || len(blockers) != 0 {
 		return runfork.RunForkMaterialization{
 			SourceRunID:           plan.SourceRunID,
 			ForkPoint:             plan.ForkPoint,
 			ExecutionReady:        false,
 			ReplayResumeAdmission: plan.ReplayResumeAdmission,
-			UnsupportedBlockers:   plan.UnsupportedBlockers,
+			UnsupportedBlockers:   blockers,
 			DeliveryResumeBlocked: true,
-		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
+		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(blockers))
 	}
 
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
 	var materialization runfork.RunForkMaterialization
 	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
@@ -144,9 +148,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 					return err
 				}
-				if _, err := requireMaterializedRunForkReplyContexts(ctx, tx, s.replies, plan, forkRunID, true, plan.ReplayResumeAdmission); err != nil {
+				readback, err := requireMaterializedRunForkReplyPlan(ctx, tx, s.replies, plan, forkRunID, true)
+				if err != nil {
 					return err
 				}
+				existing.ReplayResumeAdmission, existing.ExecutionReady = readback.ReplayResumeAdmission, readback.ExecutionReady
 				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 				if err != nil {
 					return err
@@ -193,7 +199,8 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
 				return err
 			}
-			if _, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, true, plan.ReplayResumeAdmission); err != nil {
+			replyAdmission, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, true, plan.ReplayResumeAdmission)
+			if err != nil {
 				return err
 			}
 			for _, entity := range plan.Entities {
@@ -230,8 +237,8 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				ForkPoint:                plan.ForkPoint,
 				MaterializedEntityCount:  len(plan.Entities),
 				MaterializedFanOutCount:  materializedFanOutCount,
-				ExecutionReady:           true,
-				ReplayResumeAdmission:    plan.ReplayResumeAdmission,
+				ExecutionReady:           replyAdmission.StateOnlyExecutionReady || replyAdmission.DeliveryEventReplayReady,
+				ReplayResumeAdmission:    replyAdmission,
 				SelectedContractBinding:  selectedContractBinding,
 				DeliveryResumeBlocked:    true,
 				SourceRunStatusUnchanged: true,
@@ -276,15 +283,19 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
-	if !plan.ExecutionReady {
+	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	blockers, err := runForkReplyProjectionBlockers(plan, forkRunID, plan.UnsupportedBlockers)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if (!plan.ExecutionReady && len(blockers) == len(plan.UnsupportedBlockers)) || len(blockers) != 0 {
 		return runfork.RunForkMaterialization{
 			SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ExecutionReady: false,
-			ReplayResumeAdmission: plan.ReplayResumeAdmission, UnsupportedBlockers: plan.UnsupportedBlockers,
+			ReplayResumeAdmission: plan.ReplayResumeAdmission, UnsupportedBlockers: blockers,
 			DeliveryResumeBlocked: true,
-		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
+		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(blockers))
 	}
 
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
 	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run fork materialization", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -327,9 +338,11 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				if err := requireExactSQLiteRunForkScenarioProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 					return err
 				}
-				if _, err := requireMaterializedRunForkReplyContexts(txctx, tx, s.replies, plan, forkRunID, false, plan.ReplayResumeAdmission); err != nil {
+				readback, err := requireMaterializedRunForkReplyPlan(txctx, tx, s.replies, plan, forkRunID, false)
+				if err != nil {
 					return err
 				}
+				existing.ReplayResumeAdmission, existing.ExecutionReady = readback.ReplayResumeAdmission, readback.ExecutionReady
 				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 				if err != nil {
 					return err
@@ -375,7 +388,8 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
 				return err
 			}
-			if _, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, false, plan.ReplayResumeAdmission); err != nil {
+			replyAdmission, err := materializeRunForkReplyContexts(forkCtx, tx, attempt, s.replies, plan, forkRunID, false, plan.ReplayResumeAdmission)
+			if err != nil {
 				return err
 			}
 			for _, entity := range plan.Entities {
@@ -403,8 +417,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			}
 			materialization = runfork.RunForkMaterialization{
 				SourceRunID: plan.SourceRunID, ForkRunID: forkRunID, ForkRunStatus: runfork.RunForkMaterializedStatus,
-				ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), MaterializedFanOutCount: materializedFanOutCount, ExecutionReady: true,
-				ReplayResumeAdmission: plan.ReplayResumeAdmission, SelectedContractBinding: selectedContractBinding,
+				ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), MaterializedFanOutCount: materializedFanOutCount,
+				ExecutionReady:        replyAdmission.StateOnlyExecutionReady || replyAdmission.DeliveryEventReplayReady,
+				ReplayResumeAdmission: replyAdmission, SelectedContractBinding: selectedContractBinding,
 				DeliveryResumeBlocked: true, SourceRunStatusUnchanged: true, DataPins: pins,
 			}
 			return nil
