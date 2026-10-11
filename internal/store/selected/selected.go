@@ -281,9 +281,9 @@ func OpenRuntime(ctx context.Context, req RuntimeRequest) (*Owner, error) {
 	var err error
 	switch req.Selection.Backend {
 	case storebackend.BackendPostgres:
-		owner, err = openPostgresRuntime(req.PostgresDSN, req.SessionLockTTL)
+		owner, err = openPostgresRuntime(ctx, req.PostgresDSN, req.SessionLockTTL)
 	case storebackend.BackendSQLite:
-		owner, err = openSQLiteRuntime(req.Selection.SQLitePath, req.SessionLockTTL)
+		owner, err = openSQLiteRuntime(ctx, req.Selection.SQLitePath, req.SessionLockTTL)
 	default:
 		return nil, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
@@ -300,8 +300,8 @@ func validateOpenedRuntime(ctx context.Context, owner *Owner) (*Owner, error) {
 	return owner, nil
 }
 
-func openPostgresRuntime(dsn string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenPostgres(dsn)
+func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration) (*Owner, error) {
+	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -313,8 +313,8 @@ func openPostgresRuntime(dsn string, ttl time.Duration) (*Owner, error) {
 	return owner, nil
 }
 
-func openSQLiteRuntime(path string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration) (*Owner, error) {
+	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(ctx, path)
 	if err != nil {
 		return nil, err
 	}
