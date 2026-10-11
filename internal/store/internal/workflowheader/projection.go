@@ -52,12 +52,16 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	if id, err := uuid.Parse(runID); err != nil || id == uuid.Nil || id.String() != runID {
 		return Projection{}, false, fmt.Errorf("constructed header projection requires canonical nonzero run UUID")
 	}
+	entityPredicate := "CAST(fi.entity_id AS TEXT) = $2"
+	if lockPostgres {
+		entityPredicate = "fi.entity_id = NULLIF($2, '')::uuid"
+	}
 	query := `SELECT fi.entity_id, fi.instance_path, fi.entity_type, fi.flow_template, fi.current_state, fi.revision,
 		fi.gates, fi.bookkeeping, fi.accumulator,
 		es.entity_id, es.flow_instance, es.entity_type, es.fields
 		FROM flow_instances fi
 		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND (es.entity_id = fi.entity_id OR es.flow_instance = fi.instance_path)
-		WHERE fi.run_id = $1 AND ($2 = '' OR CAST(fi.entity_id AS TEXT) = $2)
+		WHERE fi.run_id = $1 AND ($2 = '' OR ` + entityPredicate + `)
 		AND ($3 = '' OR fi.instance_path = $3)`
 	if lockPostgres {
 		query += ` FOR UPDATE OF fi`
@@ -88,7 +92,7 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	if err := rows.Close(); err != nil {
 		return Projection{}, false, err
 	}
-	if id, err := uuid.Parse(header.EntityID); err != nil || id == uuid.Nil || id.String() != header.EntityID || header.InstancePath == "" || strings.TrimSpace(header.InstancePath) != header.InstancePath || header.FlowTemplate == "" || strings.TrimSpace(header.FlowTemplate) != header.FlowTemplate || header.Stage == "" || header.Revision <= 0 {
+	if id, err := uuid.Parse(header.EntityID); err != nil || id == uuid.Nil || header.InstancePath == "" || strings.TrimSpace(header.InstancePath) != header.InstancePath || header.FlowTemplate == "" || strings.TrimSpace(header.FlowTemplate) != header.FlowTemplate || header.Stage == "" || header.Revision <= 0 {
 		return Projection{}, false, &ProjectionError{runID, header.EntityID, header.InstancePath, "constructed header projection has invalid identity or lifecycle progress"}
 	}
 	if declaredType.Valid {
@@ -190,7 +194,7 @@ func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Proj
 		if err := rows.Scan(&state.EntityID, &state.InstancePath, &state.EntityType, &state.Fields); err != nil {
 			return nil, err
 		}
-		if id, err := uuid.Parse(state.EntityID); err != nil || id == uuid.Nil || id.String() != state.EntityID ||
+		if id, err := uuid.Parse(state.EntityID); err != nil || id == uuid.Nil ||
 			state.InstancePath == "" || strings.TrimSpace(state.InstancePath) != state.InstancePath ||
 			state.EntityType == "" || strings.TrimSpace(state.EntityType) != state.EntityType {
 			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, "state-only projection requires exact identity and declared fields"}

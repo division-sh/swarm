@@ -18,15 +18,17 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 	t.Helper()
 	db := historicalSnapshotDatabase(t, backend)
 	jsonType := "TEXT"
+	entityIDType := "TEXT"
 	if backend == "postgres" {
 		jsonType = "JSONB"
+		entityIDType = "UUID"
 	}
 	for _, query := range []string{
 		`CREATE TABLE run_fork_revision_heads(run_id TEXT PRIMARY KEY,last_revision BIGINT NOT NULL)`,
 		`CREATE TABLE run_fork_revisions(run_id TEXT NOT NULL,revision BIGINT NOT NULL,PRIMARY KEY(run_id,revision))`,
 		fmt.Sprintf(`CREATE TABLE entity_mutations(mutation_id TEXT PRIMARY KEY,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,new_value %s,created_at TIMESTAMP)`, jsonType),
-		fmt.Sprintf(`CREATE TABLE entity_state(run_id TEXT,entity_id TEXT,fields %s,flow_instance TEXT,entity_type TEXT,PRIMARY KEY(run_id,entity_id))`, jsonType),
-		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id TEXT,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,gates %s,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, jsonType, jsonType, jsonType),
+		fmt.Sprintf(`CREATE TABLE entity_state(run_id TEXT,entity_id %s,fields %s,flow_instance TEXT,entity_type TEXT,PRIMARY KEY(run_id,entity_id))`, entityIDType, jsonType),
+		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,gates %s,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType, jsonType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)
@@ -39,7 +41,7 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"original"}',$2,'company')`, run, entity); err != nil {
+	if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"original"}',CAST($2 AS TEXT),'company')`, run, entity); err != nil {
 		t.Fatal(err)
 	}
 	if constructed {
@@ -307,7 +309,7 @@ func TestVerifyRunCrossRunIsolationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"foreign-bypass"}',$2,'company')`, foreign, entity); err != nil {
+			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"foreign-bypass"}',CAST($2 AS TEXT),'company')`, foreign, entity); err != nil {
 				t.Fatal(err)
 			}
 			insertRunDriftHeader(t, db, foreign, entity, entity, "company", "queued")
@@ -369,7 +371,7 @@ func TestVerifyRunSnapshotIsolationBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			added := uuid.NewString()
-			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$2,NULL,'worker','done',1,'{}','{}','{}','terminated')`, run, added); err != nil {
+			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,CAST($2 AS TEXT),NULL,'worker','done',1,'{}','{}','{}','terminated')`, run, added); err != nil {
 				t.Fatal(err)
 			}
 			for _, row := range []runForkRevisionEntityMutation{
@@ -416,7 +418,7 @@ func TestVerifyRunEntityMembershipBothStores(t *testing.T) {
 					switch cut {
 					case "state_only":
 						entity = uuid.NewString()
-						if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{}',$2,'company')`, run, entity); err != nil {
+						if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{}',CAST($2 AS TEXT),'company')`, run, entity); err != nil {
 							t.Fatal(err)
 						}
 					case "history_only":

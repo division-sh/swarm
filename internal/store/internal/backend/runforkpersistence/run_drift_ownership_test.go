@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +188,63 @@ func TestVerifyRunSharedHeaderReadScopeBothStores(t *testing.T) {
 				t.Fatalf("escaped inventory became usable: %v", err)
 			}
 		})
+	}
+}
+
+func TestQ10SharedHeaderPreservesNativeEntitySpellingsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, constructed := range []bool{false, true} {
+			kind := "imported"
+			if constructed {
+				kind = "constructed"
+			}
+			for _, spelling := range []string{"canonical", "upper", "compact"} {
+				t.Run(backend+"/"+kind+"/"+spelling, func(t *testing.T) {
+					db, run, entity := runDriftDatabase(t, backend, constructed)
+					input := entity
+					switch spelling {
+					case "upper":
+						input = strings.ToUpper(entity)
+					case "compact":
+						input = strings.ReplaceAll(entity, "-", "")
+					}
+					for _, table := range []string{"entity_state", "flow_instances"} {
+						if _, err := db.Exec("UPDATE "+table+" SET entity_id=$1 WHERE run_id=$2", input, run); err != nil {
+							t.Fatal(err)
+						}
+					}
+					want := input
+					if backend == "postgres" {
+						want = entity
+					}
+					ctx := context.Background()
+					tx, err := db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					inventory, err := workflowheader.InventoryForRead(ctx, tx, run)
+					if err != nil {
+						t.Fatal(err)
+					}
+					members := inventory.StateOnly
+					if constructed {
+						members = inventory.Constructed
+					}
+					if len(members) != 1 || members[0].EntityID != want || len(inventory.StateOnly)+len(inventory.Constructed) != 1 {
+						t.Fatalf("native identity or membership changed: %+v, want %q constructed=%t", inventory, want, constructed)
+					}
+					read, found, err := workflowheader.LoadForRead(ctx, tx, run, want, entity)
+					if err != nil || found != constructed || (found && read.EntityID != want) {
+						t.Fatalf("native stored-coordinate read: %+v found=%t err=%v", read, found, err)
+					}
+					mutation, found, err := workflowheader.LoadForMutation(ctx, tx, backend == "postgres", run, input, entity)
+					if err != nil || found != constructed || (found && mutation.EntityID != want) {
+						t.Fatalf("native input-coordinate mutation read: %+v found=%t err=%v", mutation, found, err)
+					}
+				})
+			}
+		}
 	}
 }
 
