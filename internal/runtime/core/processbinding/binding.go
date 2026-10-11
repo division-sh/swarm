@@ -61,6 +61,34 @@ func (b Binding) Equal(other Binding) bool {
 }
 
 func (b Binding) SameProcessExecution(other Binding) bool {
+	return b.SameProcessLease(other) && b.BundleHash == other.BundleHash && b.RuntimeInstanceID == other.RuntimeInstanceID
+}
+
+// SameProcessLease compares immutable process attribution only. Neither this
+// comparison nor a valid binding proves current native possession.
+func (b Binding) SameProcessLease(other Binding) bool {
 	return b.ProcessAuthorityID == other.ProcessAuthorityID && b.ProcessOwnerID == other.ProcessOwnerID &&
-		b.ProcessBootID == other.ProcessBootID && b.BundleHash == other.BundleHash && b.RuntimeInstanceID == other.RuntimeInstanceID
+		b.ProcessBootID == other.ProcessBootID
+}
+
+// LifecycleMutationKind preserves the distinction between a nominal operation,
+// source-set replacement under the same lease, and replacement of the process.
+// The durable lifecycle writer still validates the exact current target grant.
+func (b Binding) LifecycleMutationKind(target Binding, nominal string, terminal bool) (string, error) {
+	if err := b.Validate(); err != nil {
+		return "", fmt.Errorf("previous lifecycle process binding: %w", err)
+	}
+	if err := target.Validate(); err != nil {
+		return "", fmt.Errorf("target lifecycle process binding: %w", err)
+	}
+	if b.Equal(target) {
+		return strings.TrimSpace(nominal), nil
+	}
+	if !b.SameProcessLease(target) {
+		return "process_takeover", nil
+	}
+	if terminal {
+		return "source_set_retire", nil
+	}
+	return "source_set_rebind", nil
 }

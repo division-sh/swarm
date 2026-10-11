@@ -50,16 +50,6 @@ func PreparedProcessPredecessor(ctx context.Context, q authorityQueryer, prepara
 	return preparedProcessInLineage(ctx, q, preparation, generation, current.PredecessorAuthorityID, sqlite)
 }
 
-// PreparedProcessRecorded observes the existing head and its ancestry. It does
-// not predict currentness under a future process acquisition or authorize it.
-func PreparedProcessRecorded(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, sqlite bool) (bool, error) {
-	record, found, err := loadAuthorityHeadRecord(ctx, q, sqlite, false)
-	if err != nil || !found {
-		return false, err
-	}
-	return preparedProcessInLineage(ctx, q, preparation, generation, record.AuthorityID, sqlite)
-}
-
 func preparedProcessInLineage(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, firstID string, sqlite bool) (bool, error) {
 	if err := preparation.Validate(); err != nil {
 		return false, err

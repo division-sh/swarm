@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -106,7 +109,151 @@ func (tx *postgresBootstrapExitTx) Commit() error {
 		// Real SQL commits; only the caller's acknowledgement is faulted.
 		return errBootstrapPrimary
 	}
+	if tx.owner.phase == "cancel_after_commit" {
+		tx.owner.cancel()
+	}
 	return nil
+}
+
+func TestPostgresRetainedGenerationCommitDisposition(t *testing.T) {
+	spec := loadPlatformSpecForSQLiteSchemaTest(t)
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{"rollback", "lost_commit_response", "cancel_after_row", "cancel_after_commit"} {
+		t.Run(phase, func(t *testing.T) {
+			dsn, observer, _ := testutil.StartEmptyPostgres(t)
+			connector, err := pq.NewConnector(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			control := &postgresBootstrapExitConnector{Connector: connector, phase: "success", cancel: cancel}
+			db := sql.OpenDB(control)
+			defer db.Close()
+			backend, err := postgresbackend.New(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := postgresbackend.AcquireBlockingAdvisoryLockLease(context.Background(), backend, "swarm:runtime:shared-store-owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := lease.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
+			schema, err := NewPostgres(backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.BindProcessLease(lease); err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.BootstrapSchema(ctx, SchemaBootstrapRequest{PlatformPlans: plans, Origin: RuntimeStoreOrigin{
+				SwarmVersion: "process-generation-ack", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			identity := processbinding.LeaseIdentity{
+				LeaseID: uuid.NewString(), OwnerID: "generation-ack", BootID: uuid.NewString(),
+				RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend,
+			}
+			control.phase = phase
+			var provisional processbinding.LeaseStamp
+			refusal := errors.New("injected generation rollback")
+			committed, err := lease.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				var err error
+				provisional, err = generationauthority.AdvanceProcessGeneration(txctx, tx, identity, false)
+				if err != nil {
+					return err
+				}
+				if phase == "rollback" {
+					return refusal
+				}
+				if phase == "cancel_after_row" {
+					cancel()
+				}
+				return nil
+			})
+			if provisional.Generation != 1 || provisional.LeaseIdentity != identity {
+				t.Fatalf("native provisional generation missing: %+v %v", provisional, err)
+			}
+			wantCommit := phase == "cancel_after_commit"
+			if committed != wantCommit {
+				t.Fatalf("acknowledged COMMIT=%t want=%t err=%v", committed, wantCommit, err)
+			}
+			switch phase {
+			case "rollback":
+				if !errors.Is(err, refusal) {
+					t.Fatalf("rollback lost cause: %v", err)
+				}
+			case "cancel_after_row":
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("logical cancellation lost: %v", err)
+				}
+			case "lost_commit_response":
+				if !errors.Is(err, errBootstrapPrimary) {
+					t.Fatalf("uncertain COMMIT lost cause: %v", err)
+				}
+			case "cancel_after_commit":
+				if ctx.Err() != context.Canceled || err != nil {
+					t.Fatalf("physical ack and caller cancellation conflated: %v %v", ctx.Err(), err)
+				}
+			}
+			if control.begins.Load() != 2 {
+				t.Fatalf("native generation admission replayed: BEGINs=%d", control.begins.Load())
+			}
+			persisted, err := generationauthority.ReadProcessGeneration(context.Background(), observer, false)
+			want := processbinding.LeaseStamp{}
+			if phase == "lost_commit_response" || phase == "cancel_after_commit" {
+				want = provisional
+			}
+			if err != nil || persisted != want {
+				t.Fatalf("physical generation=%+v want=%+v err=%v", persisted, want, err)
+			}
+			control.phase = "success"
+			if phase == "lost_commit_response" {
+				if err := lease.ProveCurrent(context.Background()); err == nil {
+					t.Fatal("ambiguous retained session stayed usable")
+				}
+				if _, err := lease.RunTransactionOutcome(context.Background(), func(context.Context, *sql.Tx) error {
+					t.Fatal("ambiguous lease replayed a generation callback")
+					return nil
+				}); err == nil {
+					t.Fatal("ambiguous retained generation reused")
+				}
+			} else if err := lease.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			peerBackend, err := postgresbackend.New(observer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			peer, acquired, err := postgresbackend.AcquireAdvisoryLockLease(context.Background(), peerBackend, "swarm:runtime:shared-store-owner")
+			if err != nil || !acquired {
+				t.Fatalf("generation exit leaked native possession: acquired=%t err=%v", acquired, err)
+			}
+			defer func() {
+				if err := peer.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
+			identity.LeaseID, identity.BootID = uuid.NewString(), uuid.NewString()
+			var successor processbinding.LeaseStamp
+			committed, err = peer.RunTransactionOutcome(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
+				var err error
+				successor, err = generationauthority.AdvanceProcessGeneration(txctx, tx, identity, false)
+				return err
+			})
+			if err != nil || !committed || successor.Generation != want.Generation+1 || successor.LeaseIdentity != identity {
+				t.Fatalf("exact successor failed: ack=%t generation=%+v err=%v", committed, successor, err)
+			}
+		})
+	}
 }
 
 func TestPostgresBootstrapOwnsSQLAndCommitOutcome(t *testing.T) {
