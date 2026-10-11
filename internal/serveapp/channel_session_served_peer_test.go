@@ -368,6 +368,19 @@ func (p *serveNativeProtocolPeer) customer(text, id string) (types.JID, types.JI
 
 func (p *serveNativeProtocolPeer) customerMessage(text, id string) (waBinary.Node, types.JID, types.JID) {
 	p.t.Helper()
+	sender, from, lid := p.customerSender()
+	return sender.EncryptText(p.t, text, id), from, lid
+}
+
+func (p *serveNativeProtocolPeer) customerReply(text, id string, original servedNativeMessage) types.JID {
+	p.t.Helper()
+	sender, from, _ := p.customerSender()
+	p.sendEncrypted(sender.EncryptReply(p.t, text, id, original.ID, original.Body.GetConversation()), id)
+	return from
+}
+
+func (p *serveNativeProtocolPeer) customerSender() (*whatsappfixture.SignalSender, types.JID, types.JID) {
+	p.t.Helper()
 	p.mu.Lock()
 	registration := p.registration
 	p.mu.Unlock()
@@ -380,7 +393,7 @@ func (p *serveNativeProtocolPeer) customerMessage(text, id string) (waBinary.Nod
 	p.receivers[lid.ToNonAD()] = servedNativeReceiver{sender: sender, lid: lid.ToNonAD()}
 	p.ownedSenders = append(p.ownedSenders, sender)
 	p.mu.Unlock()
-	return sender.EncryptText(p.t, text, id), from.ToNonAD(), lid.ToNonAD()
+	return sender, from.ToNonAD(), lid.ToNonAD()
 }
 
 func (p *serveNativeProtocolPeer) text(text, id string) {
