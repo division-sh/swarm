@@ -484,7 +484,7 @@ func (c *Coordinator) DispatchPublished(event events.Event, routes []events.Deli
 	}
 	jobs := make([]dispatchJob, 0, len(routes))
 	for index, route := range routes {
-		lease, err := c.workOwner.Begin(c.runContext)
+		lease, err := c.beginDispatchWork(c.runContext)
 		if err != nil {
 			for _, job := range jobs {
 				err = errors.Join(err, job.lease.Done())
@@ -776,13 +776,20 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 		c.rescanNeeded = true
 		return nil
 	}
-	lease, err := c.workOwner.Begin(ctx)
+	lease, err := c.beginDispatchWork(ctx)
 	if err != nil {
 		return fmt.Errorf("admit delivery continuation dispatch %s: %w", item.DeliveryID, err)
 	}
 	c.reserved[item.DeliveryID] = struct{}{}
 	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route, lease: lease, wakeVersion: c.wakeVersion.Load()}
 	return nil
+}
+
+func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Lease, error) {
+	if runtime, ok := c.workOwner.(*worklifetime.RuntimeOccurrence); ok {
+		return runtime.BeginAcceptedDescendant(ctx)
+	}
+	return c.workOwner.Begin(ctx)
 }
 
 func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration, bool, error) {
