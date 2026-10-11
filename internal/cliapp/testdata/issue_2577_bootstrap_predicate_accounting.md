@@ -103,3 +103,30 @@ authorized until the drain finishes; original-caller cancellation releases its
 wait, preserves unresolved cleanup possession, and joins the counted settlement
 without unlink/deletion. The setup performs account observation before holding
 the private transaction; otherwise the setup's own read cannot reach dispatch.
+
+## N66 Public Logout And Accepted Settlement Tail
+
+`TestRunServeWhatsAppPublicLogoutBothStores` executes signed pairing, principal
+claim, enabled-ingress restart, Inbox, authenticated logout and a second restart.
+It proves revision/account refusal, private-target-free exact result, idempotent
+replay, historical readback and no implicit SDK reconnect after successful
+unlink. This adds public RunServe proof, not physical or process-death closure.
+
+`RuntimeConnection.DispatchSessionLogout` reserves finite work from its existing
+process owner before journal authorization. Only journal/history settlement and
+the original cleanup use that accepted tail; SDK drain, preflight, launch and
+unlink retain their original runtime/source/occurrence fences. No new process,
+completion capability, execution exemption or shared handoff rule is introduced.
+Retirement previously left a launched attempt without its result because the
+settlement tried to acquire completion work from the retired runtime.
+
+`TestSessionLogoutJournalCanceledAfterLaunchRemainsUncertainBothStores` is RED
+on the preceding production tree and GREEN after this repair on both stores
+under `-race`: caller cancellation, runtime retirement, atomic uncertain result
+and retained pairing. `TestSessionLogoutRequiresAcceptedProcessTailBeforeAuthorizationBothStores`
+proves process fencing refuses before authorization/frame/deletion, with work
+counts and the frozen responsibility unchanged. The real local-deletion fault
+in `TestSessionLogoutJournalDoesNotTreatLocalDeleteFailureAsNoEffectBothStores`
+proves that remote acceptance followed by local failure stays uncertain and
+does not authorize resend. Process-death and successor public journeys remain
+in this same PR; these named proofs do not substitute for them.
