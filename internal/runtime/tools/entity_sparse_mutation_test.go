@@ -281,12 +281,20 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	if err != nil || constructed.InstancePath != flowInstance {
 		t.Fatalf("entity fixture constructor path: constructed=%+v err=%v", constructed, err)
 	}
+	graph, found := semanticview.WorkflowStageTopology(source, flowID)
+	if !found {
+		t.Fatal("entity fixture requires its compiled stage catalog")
+	}
+	storedStage, err := graph.ResolveStoredStage(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
-		CurrentState: stage, StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+		CurrentState: storedStage.ID(), StageDefined: !storedStage.IsStatelessPosture(), Fields: fields, CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	if err != nil {
 		t.Fatal(err)
