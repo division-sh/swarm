@@ -63,6 +63,15 @@ func (p *mixedFanOutSourceProbe) NotifyLifecycle(ctx context.Context, signal lif
 }
 
 func TestIssue642FanOutIssuedPendingRecipientMatrix(t *testing.T) {
+	runMixedFanOutPendingMatrix(t, false)
+}
+
+func TestIssue642FanOutContinuedChildReforkBothStores(t *testing.T) {
+	runMixedFanOutPendingMatrix(t, true)
+}
+
+func runMixedFanOutPendingMatrix(t *testing.T, refork bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, retained := range []fanoutobligation.InheritedTerminalDisposition{fanoutobligation.InheritedSucceeded, fanoutobligation.InheritedDeadLettered} {
 			t.Run(backend+"/"+string(retained), func(t *testing.T) {
@@ -153,13 +162,14 @@ func TestIssue642FanOutIssuedPendingRecipientMatrix(t *testing.T) {
 				})
 				forkCtx, forkCancel := context.WithTimeout(ctx, 30*time.Second)
 				defer forkCancel()
-				result, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
+				executionRequest := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
-				})
+				}
+				result, err := family.Execute(forkCtx, executionRequest)
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
 					t.Fatalf("mixed fan-out activation acknowledgment: %+v err=%v", result, err)
 				}
@@ -236,6 +246,10 @@ func TestIssue642FanOutIssuedPendingRecipientMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				assertMixedFanOutPendingPlan(t, finalCut, observed.id, retained)
+				if refork {
+					executionRequest.SourceRunID, executionRequest.At = claim.RunID(), observed.id
+					proveMixedFanOutChildRefork(t, ctx, selected, executionRequest, afterChild, retained)
+				}
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(forkCtx), 10*time.Second)
 				defer cleanupCancel()
 				if err := family.RetireSelectedContexts(cleanupCtx); err != nil {
