@@ -68,6 +68,11 @@ func validateIssue2564WorkloadPartition(p Policy) error {
 				}
 			}
 		}
+		var err error
+		runs, err = reporterSelectedAndDeferredRuns(p, profile, runs)
+		if err != nil {
+			return err
+		}
 		if err := ValidateGoProofPartition(filepath.Join("..", "serveapp"), runs); err != nil {
 			return fmt.Errorf("%s: %w", profile, err)
 		}

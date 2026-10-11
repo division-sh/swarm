@@ -436,7 +436,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-neutral", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
-		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-reporter-all-commit", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",
 		"serveapp-2564-h1", "serveapp-2564-h2",
 	}
 	var serveappPartitions []testplanning.ProofUnit
@@ -482,7 +482,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	var conformanceUnits []testplanning.ProofUnit
-	for _, id := range []string{"conformance-1", "conformance-heavy-fanout", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+	for _, id := range []string{"conformance-1", "conformance-heavy-fanout", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-2394-reporter-window", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
@@ -577,6 +577,12 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			t.Errorf("profile %s does not include runtime-full", profileName)
 		}
 		for _, id := range serveappUnits {
+			if profileName == testplanning.ProfileLifecycle && id == "serveapp-i-reporter-all-commit" {
+				if foundServeapp[id] {
+					t.Errorf("profile %s executes full-only reporter stress", profileName)
+				}
+				continue
+			}
 			if !foundServeapp[id] {
 				t.Errorf("profile %s does not include %s", profileName, id)
 			}
@@ -652,6 +658,15 @@ func validateServeappPolicyPartition(policy testplanning.Policy, dir, profileNam
 			return fmt.Errorf("%s unit %s weakens the complete uncached serveapp partition: %+v", profileName, id, unit)
 		}
 		runs = append(runs, unit.Run)
+	}
+	if profileName == testplanning.ProfileLifecycle {
+		// Validate the exhaustive selected-plus-deferred union. This single
+		// full-only owner is not lifecycle execution credit.
+		stress := policy.Units["serveapp-i-reporter-all-commit"]
+		if stress.Run != testplanning.ServedReporterStressRun || !slices.Contains(policy.Profiles[testplanning.ProfileFull].Units, "serveapp-i-reporter-all-commit") || slices.Contains(profile.Units, "serveapp-i-reporter-all-commit") {
+			return fmt.Errorf("lifecycle reporter deferral lost its exact full stress owner")
+		}
+		runs = append(runs, stress.Run)
 	}
 	if err := testplanning.ValidateGoProofPartition(dir, runs); err != nil {
 		return fmt.Errorf("%s serveapp partition: %w", profileName, err)

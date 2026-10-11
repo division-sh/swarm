@@ -63,6 +63,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		{ProfileCore, ProfileCore, nil}, {ProfileLifecycle, ProfileLifecycle, nil}, {ProfileFull, ProfileFull, nil},
 		{"core-plus-soaks", ProfileCore, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
 		{"lifecycle-plus-soaks", ProfileLifecycle, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
+		{"lifecycle-plus-reporter-stress", ProfileLifecycle, []string{"conformance-2394-reporter", "serveapp-i-reporter-all-commit"}},
 		{"core-plus-burst", ProfileCore, []string{"hitl-releasee2e-burst-1"}},
 		{"lifecycle-plus-bursts", ProfileLifecycle, []string{"hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2"}},
 		{"lifecycle-plus-invocation", ProfileLifecycle, []string{"hitl-releasee2e-invocation-1"}},

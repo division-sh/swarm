@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
@@ -61,4 +62,16 @@ func CollectTransactions(t testing.TB, selected any, options TransactionProbeOpt
 	}
 	t.Cleanup(restore)
 	return collector
+}
+
+func ValidateReporterIssuance(receipt TransactionSnapshot, submitted time.Time, chunks uint64, delay time.Duration) error {
+	return transactiontest.ValidateReporterIssuance(receipt, submitted, chunks, delay)
+}
+
+func ValidateReporterContinuation(issuance, detached, successor TransactionSnapshot) error {
+	return transactiontest.ValidateReporterContinuation(issuance, detached, successor)
+}
+
+func ValidateReporterStress(issuance, final TransactionSnapshot, delay time.Duration) error {
+	return transactiontest.ValidateReporterStress(issuance, final, delay)
 }

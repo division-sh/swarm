@@ -16,6 +16,7 @@ import (
 
 var conformance2394Units = []string{
 	"conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter",
+	"conformance-2394-reporter-window",
 }
 
 const conformance2394Soak = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
@@ -243,7 +244,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// Its explicit-empty reporter regression also proves exact no-write settlement.
 	// #2438 2c adds the receiver-configuration carrier restoration guard.
 	// #2438 A9 adds the exact-owner construction-receipt fixture control.
-	want := []int{168, 14, 5, 1}
+	want := []int{168, 14, 5, 1, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -358,7 +359,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:187 =164 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
+	if !reflect.DeepEqual(groups[4], []string{"TestIssue2394ReporterFiveHundredServingWindowBothStores"}) {
+		t.Fatalf("serving-window owner changed: %v", groups[4])
+	}
+	t.Log("complete disjoint census:192 =168 general +14 core +5 pressure +1 stress +1 window +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfileFull} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

@@ -62,7 +62,7 @@ hard:
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
-	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter": 780, "persistence-authority-debt-census": 480}
+	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 480}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
