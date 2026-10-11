@@ -1,5 +1,3 @@
-//go:build issue2413
-
 package serveapp
 
 import (
@@ -11,9 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
-// Deferred R7 acceptance: https://github.com/division-sh/swarm/pull/2515#issuecomment-5938269535.
-// #2413 must remove this tag and restore required coverage when full ancestry is implemented.
-// Run with: go test -tags=issue2413 ./internal/serveapp -run '^TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores$' -race -count=3.
+// Required R7 ancestry proof: equal leaf keys must retain their structural parent.
 func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInBarrier)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
