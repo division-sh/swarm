@@ -24242,6 +24242,11 @@ test_specification:
         executable plan must be bound before canonical command-evidence admission; pre-bind plans may validate
         as planning outputs but cannot qualify via successful package-only receipts or gain timing credit.
         Current build presence, workload and selected-root validation cannot be skipped for an empty context.
+        Populated build strings alone are not executable binding. Every executable unit must carry nonempty
+        selected and required roots, exact required-or-deferred classification and declared-child obligations.
+        Empty units, foreign/duplicate root cells, missing declared children and undeclared receipt roots refuse
+        through the shared command-evidence admission owner before budget or timing credit; legitimate original
+        backend/scope-separated cells and declared deferrals retain their existing owners and semantics.
         A valid current build context or declared environment/count scope differing from the historical snapshot is advisory,
         not incomplete proof. Changed build contexts and new scopes are charged as added/uncomparable cells,
         never as retained timing or speedup credit; historical cells remain removal-neutral. Reference byte/digest

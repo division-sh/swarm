@@ -348,6 +348,7 @@ func TestCommandEvidenceRequiresBoundCurrentPlan(t *testing.T) {
 func TestRequiredExecutionRejectsZeroRecordsAndSkippedBackend(t *testing.T) {
 	const pkg = "module/served"
 	unit := testplanning.ProofUnit{
+		SelectedRoots:       []testplanning.TestRoot{{Package: pkg, Name: "TestBoth"}},
 		TestBearingPackages: []string{pkg},
 		RequiredTests:       []testplanning.RequiredTest{{TestRoot: testplanning.TestRoot{Package: pkg, Name: "TestBoth"}, Children: []string{"sqlite", "postgres"}}},
 	}
@@ -431,6 +432,26 @@ func TestBoundOrdinaryRootSkipCannotQualifyCompletion(t *testing.T) {
 	if err := testplanning.BindExecution(&plan, inventory, proofs, policy); err != nil {
 		t.Fatal(err)
 	}
+	for _, venue := range []string{testplanning.VenueLocal, testplanning.VenueCI} {
+		for _, profile := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+			bound, err := testplanning.BuildPlan(policy, model, packages, profile, "executable admission census", "head", testplanning.BuildOptions{Venue: venue})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := testplanning.BindExecution(&bound, inventory, proofs, policy); err != nil {
+				t.Fatal(err)
+			}
+			if problems := commandPlanProblems(bound); len(problems) != 0 {
+				t.Fatalf("native %s/%s plan refused: %v", venue, profile, problems)
+			}
+			selected, required := 0, 0
+			for _, unit := range bound.Units {
+				selected += len(unit.SelectedRoots)
+				required += len(unit.RequiredTests)
+			}
+			t.Logf("native %s/%s: units=%d selected=%d required=%d; executable admission PASS", venue, profile, len(bound.Units), selected, required)
+		}
+	}
 	var unit testplanning.ProofUnit
 	for _, candidate := range plan.Units {
 		if slices.Contains(candidate.Packages, "github.com/division-sh/swarm/cmd/swarm-test") {
@@ -447,13 +468,11 @@ func TestBoundOrdinaryRootSkipCannotQualifyCompletion(t *testing.T) {
 	evidence.ExecutionTier = unit.ExecutionTier
 	const skipped = "TestParseTestArgs"
 	found := false
-	for _, proof := range unit.SelectedRoots {
-		result := "pass"
-		if proof.Name == skipped && proof.Package == "github.com/division-sh/swarm/cmd/swarm-test" {
-			result = "skip"
+	for i, row := range evidence.Report.Tests {
+		if row.Test == skipped && row.Package == "github.com/division-sh/swarm/cmd/swarm-test" {
+			evidence.Report.Tests[i].Result = "skip"
 			found = true
 		}
-		evidence.Report.Tests = append(evidence.Report.Tests, TestTiming{Package: proof.Package, Test: proof.Name, Result: result})
 	}
 	if !found {
 		t.Fatal("broad unit does not select the ordinary root")
@@ -809,6 +828,30 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 func bindTimingFixtureBuild(t *testing.T, plan *testplanning.RunPlan) {
 	t.Helper()
 	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1"}
+	for i := range plan.Units {
+		unit := &plan.Units[i]
+		unit.SelectedRoots, unit.RequiredTests = nil, nil
+		unit.TestBearingPackages = slices.Clone(unit.Packages)
+		var names []string
+		for name := range unit.RequiredChildren {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if backend, soak := testplanning.SoakBackend(unit.Run); soak {
+			names = []string{testplanning.SoakTest}
+			unit.RequiredChildren = map[string][]string{testplanning.SoakTest: {backend}}
+		}
+		if len(names) == 0 {
+			names = []string{"TestTimingFixture_" + strings.NewReplacer("-", "_", ".", "_", "/", "_").Replace(unit.ID)}
+		}
+		for _, pkg := range unit.Packages {
+			for _, name := range names {
+				root := testplanning.TestRoot{Package: pkg, Name: name}
+				unit.SelectedRoots = append(unit.SelectedRoots, root)
+				unit.RequiredTests = append(unit.RequiredTests, testplanning.RequiredTest{TestRoot: root, Children: slices.Clone(unit.RequiredChildren[name])})
+			}
+		}
+	}
 	rebindTimingFixture(t, plan, &CommandEvidence{})
 }
 
@@ -835,6 +878,18 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		report.Summary.Packages++
 		report.Summary.PackageElapsedSec++
 	}
+	for _, required := range unit.RequiredTests {
+		report.Tests = append(report.Tests, TestTiming{Package: required.Package, Test: required.Name, Result: "pass", Elapsed: 1})
+		for _, child := range required.Children {
+			report.Tests = append(report.Tests, TestTiming{Package: required.Package, Test: required.Name + "/" + child, Result: "pass", Elapsed: 1})
+		}
+	}
+	for _, deferred := range unit.DeferredTests {
+		report.Tests = append(report.Tests, TestTiming{Package: deferred.Package, Test: deferred.Name, Result: "skip"})
+		report.Summary.SkippedTests++
+	}
+	report.Summary.Tests = len(report.Tests)
+	report.Summary.Events += len(report.Tests)
 	return CommandEvidence{
 		WorkflowRunID:   1,
 		WorkflowAttempt: 1,

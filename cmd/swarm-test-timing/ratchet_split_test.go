@@ -220,6 +220,51 @@ func TestEvaluateBudgetUnboundPlanCannotEarnAdvisoryCredit(t *testing.T) {
 	}
 }
 
+func TestEvaluateBudgetPopulatedBuildWithoutRootsCannotQualify(t *testing.T) {
+	for _, event := range []string{"pull_request", "push", "schedule", "workflow_dispatch"} {
+		t.Run(event, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 0, false)
+			cfg.event = event
+			plan, err := readPlan(cfg.planPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json")
+			receipt, err := readEvidence(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan.Units[0].SelectedRoots, plan.Units[0].RequiredTests, plan.Units[0].TestBearingPackages = nil, nil, nil
+			plan.Digest = ""
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256(raw)
+			plan.Digest = hex.EncodeToString(digest[:])
+			if err := plan.Validate(); err != nil {
+				t.Fatalf("planning validation must stay separate: %v", err)
+			}
+			receipt.PlanDigest = plan.Digest
+			receipt.Report.Tests = nil
+			receipt.Report.Summary.Tests, receipt.Report.Summary.Events = 0, 1
+			if err := writeJSON(cfg.planPath, plan); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSON(path, receipt); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(cfg); err == nil {
+				t.Fatal("populated build with package-only receipts qualified without roots")
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 || result.TestTime == nil || result.TestTime.Status != testtiming.BudgetIncomplete || len(result.TestTime.Tiers) != 0 || len(result.Surfaces) != 1 || result.Surfaces[0].Status != testtiming.BudgetIncomplete {
+				t.Fatalf("zero-root plan gained budget or timing credit: %+v", result)
+			}
+		})
+	}
+}
+
 func readRatchetCLIResult(t *testing.T, cfg config) testtiming.BudgetResult {
 	t.Helper()
 	var result testtiming.BudgetResult

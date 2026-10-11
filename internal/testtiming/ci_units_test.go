@@ -142,6 +142,8 @@ func TestCIUnitsTimingCanonicalSupplementCannotEscapeCost(t *testing.T) {
 				var baseline []RootTime
 				for _, unit := range plan.Units {
 					e := timingTestEvidence(plan, unit.ID, AttemptPrimary, 10)
+					e.Report.Tests = nil
+					e.Report.Summary.Tests = 0
 					e.BuildContext, e.WorkloadProfile, e.ExecutionTier = plan.BuildContext, unit.WorkloadProfile, unit.ExecutionTier
 					for _, root := range unit.SelectedRoots {
 						seconds := 0.0

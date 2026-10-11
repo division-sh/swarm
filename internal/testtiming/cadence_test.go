@@ -46,6 +46,8 @@ func cadenceFixtureAttempt(t *testing.T, profile, head string, run int64, failed
 		evidence := timingTestEvidence(plan, unit.ID, AttemptPrimary, 1)
 		evidence.WorkflowRunID = run
 		evidence.BuildContext = plan.BuildContext
+		evidence.Report.Tests = nil
+		evidence.Report.Summary.Tests = 0
 		evidence.WorkloadProfile, evidence.ExecutionTier = unit.WorkloadProfile, unit.ExecutionTier
 		for _, root := range unit.SelectedRoots {
 			status := "pass"
