@@ -209,6 +209,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
+					receiverRoute := agentRoute
 					if variant == "crossed_agent_scope" {
 						agentRoute, err = agentidentity.PresentRoute("foreign", target.InstanceID, target.InstancePath)
 						if err != nil {
@@ -221,7 +222,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					}
 					route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent,
 						Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: target.TemplateID, EntityID: target.EntityID, FlowInstance: target.InstancePath})}
-					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, receiverRoute)
 					if err != nil {
 						t.Fatal(err)
 					}

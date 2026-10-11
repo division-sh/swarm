@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,22 +23,30 @@ func (s *PipelineSQLiteOwner) ReceiverMaterializedTx(ctx context.Context, tx *sq
 // Delivery settlement is not state ownership. The existing target persistence
 // owner admits the exact persisted halves before dependent execution is ready.
 func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute, sqlite bool) (bool, error) {
-	if tx == nil || !route.Recipient.IsAgent() || !route.Target.MaterializingEntity() {
-		return false, fmt.Errorf("receiver materialization requires a transaction and exact future agent target")
+	if tx == nil || !route.Recipient.IsAgent() || route.Initialization.Empty() {
+		return false, fmt.Errorf("receiver materialization requires a transaction and exact construction dependency")
 	}
 	if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
 		return false, err
 	}
-	target := route.Target.Route()
+	if err := route.Initialization.ValidateRoute(route); err != nil {
+		return false, err
+	}
+	target := route.Initialization.ConstructionTarget().Route()
+	receiver := route.Initialization.ReceiverRoute()
+	scope, logical := receiver.ScopeKey, receiver.InstanceID
+	if receiver.Presence == agentidentity.RouteRoot {
+		scope, logical = ".", route.AgentIdentity.RunID
+	}
 	flow, err := flowidentity.NewRunScopedFlowInstance(route.AgentIdentity.RunID,
-		flowidentity.StoredRoute(target.FlowID, flowidentity.LogicalInstanceID(target.FlowInstance), target.FlowInstance))
+		flowidentity.StoredRoute(scope, logical, target.FlowInstance))
 	if err != nil {
 		return false, err
 	}
 	if !flow.MatchesAgentRoute(route.AgentIdentity) {
 		return false, fmt.Errorf("receiver materialization target contradicts exact agent coordinates")
 	}
-	entity := identity.NormalizeEntityID(route.Target.Route().EntityID)
+	entity := identity.NormalizeEntityID(target.EntityID)
 	record, err := loadWorkflowTargetPersistence(ctx, tx, flow, entity, sqlite)
 	if err != nil {
 		return false, err
@@ -63,8 +72,12 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 			WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, flow.RunID, flow.Route.InstancePath, entity.String()).Scan(&receipt); err != nil {
 			return false, fmt.Errorf("load exact receiver construction receipt: %w", err)
 		}
-		if err := pipeline.ValidateFlowConstructionPublication(receipt, flow, entity.String(), route.Initialization.CreatingEventID()); err != nil {
+		original, err := pipeline.ProjectFlowConstructionPublication(receipt, flow, entity.String())
+		if err != nil {
 			return false, err
+		}
+		if original.CreatingInput.EventID != route.Initialization.CreatingEventID() {
+			return false, fmt.Errorf("receiver dependency contradicts original construction publication")
 		}
 	}
 	return true, nil

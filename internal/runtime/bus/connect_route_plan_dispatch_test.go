@@ -2326,7 +2326,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if got := store.events[evt.ID()].TargetRoute().Normalized(); got != want.Target.Route().Normalized() {
 		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
 	}
-	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2552,7 +2552,7 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": minted}),
 	}
-	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2669,7 +2669,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": eventID}),
 	}
-	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3154,7 +3154,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		EntityID:     activation.Instance.EntityID,
 	}),
 	}
-	createdWant.Initialization, err = events.AdmitFlowReceiverInitialization(missing, createdWant.Target)
+	createdWant.Initialization, err = events.AdmitFlowReceiverInitialization(missing, createdWant.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3690,7 +3690,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		EntityID:     activation.Instance.EntityID,
 	}),
 	}
-	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target, flowReceiverRouteFixture(t, activation.Instance.Route()))
 	if err != nil {
 		t.Fatal(err)
 	}
