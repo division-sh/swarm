@@ -9,18 +9,20 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
 )
 
-func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode.Mode, status deliverylifecycle.Status) (*runForkRevisionSnapshot, []runfork.RunForkFanOutObligation) {
+func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode.Mode, status deliverylifecycle.Status, summary fanoutbarrier.Summary, generation attemptgeneration.Generation) (*runForkRevisionSnapshot, []runfork.RunForkFanOutObligation) {
 	t.Helper()
 	snapshot, obligations := barrierScheduleProjectionFixture(t)
 	snapshot.Revision = 7
@@ -57,7 +59,18 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 			t.Fatal(err)
 		}
 	}
+	ref, _ := registration.Handle.JoinRef()
+	ref, err := ref.BindFanOutIntent(registration.IntentKey.TriggeringDeliveryID, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.Handle, err = timeridentity.JoinCompleteHandle(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	barrier.Summary = &summary
 	obligations[0].Intent.Request.Key, obligations[0].Intent.Request.PlanRef = registration.IntentKey, registration.PlanRef
+	obligations[0].Intent.Request.Cardinality = summary.Total
 	timer := &snapshot.Timers[0]
 	command, err := genericschedule.FanOutBarrierAdmission(*registration, *barrier.Summary, timer.FireAt)
 	if err != nil {
@@ -125,7 +138,6 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 		t.Fatal(err)
 	}
 	snapshot.Events = []runForkRevisionEvent{genericPublicationRevisionEvent(record, event)}
-	ref, _ := registration.Handle.JoinRef()
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: ref.FlowPath(), FlowInstance: registration.Route.InstancePath, EntityID: registration.EntityID,
 	})}.Normalized()
@@ -150,7 +162,7 @@ func TestPublishedBarrierAdmissionRequiresExactFixedCutPublicationAndDelivery(t 
 		for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
 			for _, fault := range []string{"exact", "missing_event", "duplicate_event", "foreign_event", "future_event", "unversioned_event", "missing_schema", "wrong_task", "wrong_payload", "missing_delivery", "duplicate_delivery", "foreign_delivery", "future_delivery", "unversioned_delivery", "wrong_delivery_id", "wrong_recipient", "wrong_target", "materializing_target", "wrong_subscriber", "settled_delivery"} {
 				t.Run(map[bool]string{false: "flow/", true: "root/"}[root]+string(mode)+"/"+fault, func(t *testing.T) {
-					snapshot, obligations := publishedBarrierEvidenceFixture(t, root, mode, deliverylifecycle.StatusPending)
+					snapshot, obligations := publishedBarrierEvidenceFixture(t, root, mode, deliverylifecycle.StatusPending, fanoutbarrier.Summary{}, attemptgeneration.Generation{})
 					switch fault {
 					case "missing_event":
 						snapshot.Events = nil
@@ -223,7 +235,7 @@ func TestPublishedBarrierEvidenceKeepsObserversSeparateFromOutcomeOwner(t *testi
 	for _, root := range []bool{false, true} {
 		for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed} {
 			t.Run(map[bool]string{false: "flow/", true: "root/"}[root]+string(status), func(t *testing.T) {
-				snapshot, obligations := publishedBarrierEvidenceFixture(t, root, executionmode.Live, status)
+				snapshot, obligations := publishedBarrierEvidenceFixture(t, root, executionmode.Live, status, fanoutbarrier.Summary{}, attemptgeneration.Generation{})
 				original := snapshot.Deliveries[0].Snapshot.Route
 				observer := snapshot.Deliveries[0]
 				target := original.Target.Route()
@@ -255,4 +267,59 @@ func TestPublishedBarrierEvidenceKeepsObserversSeparateFromOutcomeOwner(t *testi
 			})
 		}
 	}
+}
+
+func TestPublishedBarrierEvidencePreservesNonemptySummaryAndLoopGeneration(t *testing.T) {
+	for _, root := range []bool{false, true} {
+		for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
+			for _, summary := range []fanoutbarrier.Summary{{Total: 2, Succeeded: 2}, {Total: 2, DeadLettered: 1, Canceled: 1}, {Total: 3, Succeeded: 1, DeadLettered: 1, SemanticRejected: 1}} {
+				for _, generated := range []bool{false, true} {
+					t.Run(map[bool]string{false: "flow/", true: "root/"}[root]+string(mode)+"/"+publishedBarrierSummaryName(summary)+"/"+map[bool]string{false: "bare", true: "generation"}[generated], func(t *testing.T) {
+						generation := attemptgeneration.Generation{}
+						if generated {
+							flow := "."
+							if !root {
+								flow = "orders"
+							}
+							generation = attemptgeneration.Generation{FlowID: flow, LoopID: "review", ActivationID: uuid.NewString(), RevisionField: "revision", RevisionID: "source-revision", Attempt: 7}
+						}
+						snapshot, obligations := publishedBarrierEvidenceFixture(t, root, mode, deliverylifecycle.StatusPending, summary, generation)
+						activation, err := projectRunForkGenericActivation(snapshot.Timers[0])
+						if err != nil {
+							t.Fatal(err)
+						}
+						before, err := json.Marshal(snapshot)
+						if err != nil {
+							t.Fatal(err)
+						}
+						admitted, _, err := runForkPublishedFanOutBarrierEvidence(snapshot, *obligations[0].Barrier, activation)
+						if err != nil {
+							t.Fatal(err)
+						}
+						payload, err := canonicaljson.Decode(admitted.Event().Payload())
+						if err != nil || !payload.Equal(activation.Command.Payload) {
+							t.Fatalf("retained summary or generation changed: payload=%s err=%v", admitted.Event().Payload(), err)
+						}
+						if !admitted.Event().CreatedAt().Equal(activation.CurrentDueAt) || admitted.Event().ExecutionMode() != mode || activation.ValidateForkJoinRestorationSource() == nil {
+							t.Fatal("publication evidence changed due/mode or granted rearming")
+						}
+						after, _ := json.Marshal(snapshot)
+						if !reflect.DeepEqual(before, after) {
+							t.Fatal("publication evidence changed the source cut")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func publishedBarrierSummaryName(summary fanoutbarrier.Summary) string {
+	if summary.Succeeded == summary.Total {
+		return "success"
+	}
+	if summary.Canceled != 0 {
+		return "dead-letter-canceled"
+	}
+	return "mixed"
 }
