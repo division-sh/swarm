@@ -884,17 +884,22 @@ func (l *AdvisoryLockLease) RunTransaction(
 	ctx context.Context,
 	fn func(context.Context, *sql.Tx) error,
 ) error {
+	_, err := l.RunTransactionOutcome(ctx, fn)
+	return err
+}
+
+func (l *AdvisoryLockLease) RunTransactionOutcome(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
 	if l == nil {
-		return errors.New("advisory lock lease has no current PostgreSQL session")
+		return false, errors.New("advisory lock lease has no current PostgreSQL session")
 	}
 	l.mu.Lock()
 	session := l.session
 	current := !l.released && session != nil
 	l.mu.Unlock()
 	if !current {
-		return errors.New("advisory lock lease has no current PostgreSQL session")
+		return false, errors.New("advisory lock lease has no current PostgreSQL session")
 	}
-	return RunAuthorityTransaction(ctx, session, fn)
+	return RunAuthorityTransactionOutcome(ctx, session, fn)
 }
 
 func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {

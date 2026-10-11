@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 const EntityPresenceModel = "sparse-v1"
@@ -37,6 +38,19 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, $1, $2, $3, $4)`, swarmVersion, platformVersion, createdAt.UTC(), EntityPresenceModel); err != nil {
 		return fmt.Errorf("stamp fresh postgres store origin: %w", err)
+	}
+	return SeedFreshProcessGeneration(ctx, tx, plans)
+}
+
+// Partial explicit schema fixtures need not declare the process table. A real
+// serving bootstrap consumes the complete authoritative platform table plans.
+func SeedFreshProcessGeneration(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, plans []TableDDL) error {
+	for _, plan := range plans {
+		if plan.TableName == "runtime_process_generation" {
+			return generationauthority.SeedProcessGeneration(ctx, q)
+		}
 	}
 	return nil
 }
@@ -273,7 +287,7 @@ func platformTableOrder(name string) int {
 		return 57
 	case "agent_sessions":
 		return 60
-	case "runtime_startup_authority_facts":
+	case "runtime_process_generation", "runtime_startup_authority_facts":
 		return 61
 	case "runtime_generation_grants":
 		return 61
