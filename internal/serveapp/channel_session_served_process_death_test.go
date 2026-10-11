@@ -235,8 +235,15 @@ func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, pee
 func requireServedNativeProcessPairingClaim(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key string, saveProof bool, claim func(string) types.JID) channelonboarding.Result {
 	t.Helper()
 	var result channelonboarding.Result
-	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
-		"provider": "whatsapp", "verb": string(verb), "save_proof": saveProof, "idempotency_key": key}, &result)
+	func() {
+		began := time.Now()
+		t.Logf("native %s request began=%s", verb, began.UTC().Format(time.RFC3339Nano))
+		defer func() {
+			t.Logf("native %s request interval=%s", verb, time.Since(began))
+		}()
+		requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
+			"provider": "whatsapp", "verb": string(verb), "save_proof": saveProof, "idempotency_key": key}, &result)
+	}()
 	id := result.Operation.OperationID
 	deadline := time.Now().Add(5 * time.Second)
 	for result.Pairing == nil || result.Pairing.Code == "" {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/trace"
 	"sort"
 	"sync"
 
@@ -376,6 +377,8 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 }
 
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {
+	region := trace.StartRegion(ctx, "whatsapp.bootstrap.request-wait")
+	defer region.End()
 	owned, incoming, release, err := s.selectRuntime(ctx, candidate)
 	if err != nil || owned == nil || release == nil || ctx.Err() != nil {
 		if owned == nil || release == nil {
@@ -396,11 +399,14 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	case <-attempt.done:
 		return errors.Join(attempt.err, context.Cause(ctx))
 	case <-ctx.Done():
+		trace.Log(ctx, "whatsapp.bootstrap", "request-canceled")
 		return context.Cause(ctx)
 	}
 }
 
 func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool, incoming *sessionprovider.RuntimeIncomingOptions, release func() error) (err error) {
+	region := trace.StartRegion(owned, "whatsapp.bootstrap.owned-attempt")
+	defer region.End()
 	defer func() {
 		attempt.err = errors.Join(err, release())
 		close(attempt.done)
