@@ -128,14 +128,26 @@ func (s *publicationAuditPipelineRelease) Release(ctx context.Context, claim pip
 		}
 	}
 	err := s.Store.Release(ctx, claim)
+	s.recordClaimDisposition(claim, err)
+	return err
+}
+
+func (s *publicationAuditPipelineRelease) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
+	outcome, err := s.Store.Settle(ctx, claim, disposition)
+	if outcome.Committed() {
+		s.recordClaimDisposition(claim, err)
+	}
+	return outcome, err
+}
+
+func (s *publicationAuditPipelineRelease) recordClaimDisposition(claim pipelineobligation.Claim, err error) {
 	s.probe.mu.Lock()
 	if claim.EventID() == s.probe.eventID {
-		s.probe.claimReleaseCount++
-		s.probe.claimReleaseError = err
-		s.probe.claimReleaseOnce.Do(func() { close(s.probe.claimReleased) })
+		s.probe.claimDisposeCount++
+		s.probe.claimDisposeError = err
+		s.probe.claimDisposeOnce.Do(func() { close(s.probe.claimDisposed) })
 	}
 	s.probe.mu.Unlock()
-	return err
 }
 
 func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
