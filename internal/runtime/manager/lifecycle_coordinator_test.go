@@ -175,7 +175,7 @@ func TestLifecycleReintroductionClassifiesExactExecutionAuthority(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: tc.target}
-			got, target, err := lifecycleReintroductionAuthority(store, previous)
+			got, target, err := lifecycleExecutionBinding(store, previous, "restart", false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,7 +188,7 @@ func TestLifecycleReintroductionClassifiesExactExecutionAuthority(t *testing.T) 
 
 func TestLifecycleReintroductionRejectsPersistenceWithoutExecutionBinding(t *testing.T) {
 	store := struct{ AgentLifecyclePersistence }{AgentLifecyclePersistence: newLifecyclePersistenceProbe()}
-	if _, _, err := lifecycleReintroductionAuthority(store, lifecycleProbeProcessBinding()); err == nil ||
+	if _, _, err := lifecycleExecutionBinding(store, lifecycleProbeProcessBinding(), "restart", false); err == nil ||
 		!strings.Contains(err.Error(), "requires process execution binding") {
 		t.Fatalf("missing binding error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestLifecycleTerminalMutationClassifiesGrantRetirementAndProcessTakeover(t 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: tc.target}
-			got, _, err := lifecycleMutationExecutionAuthority(store, previous, "teardown", true)
+			got, _, err := lifecycleExecutionBinding(store, previous, "teardown", true)
 			if err != nil {
 				t.Fatal(err)
 			}
