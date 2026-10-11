@@ -375,8 +375,6 @@ func (k ConnectRoutePlanResolutionKind) Code() string {
 	}
 }
 
-func (k ConnectRoutePlanResolutionKind) empty() bool { return k == 0 }
-
 type ConnectRoutePlanFailure uint8
 
 const (
@@ -2960,19 +2958,6 @@ func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRou
 		return ConnectResolutionStatic
 	}
 	if instanceKey != nil {
-		return ConnectResolutionInstanceKey
-	}
-	return 0
-}
-
-func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResolutionKind {
-	if !plan.resolutionKind.empty() {
-		return plan.resolutionKind
-	}
-	if !plan.target.Empty() || len(plan.targetSet) > 0 {
-		return ConnectResolutionStatic
-	}
-	if plan.instanceKey != nil {
 		return ConnectResolutionInstanceKey
 	}
 	return 0
