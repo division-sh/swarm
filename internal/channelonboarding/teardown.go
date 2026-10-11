@@ -378,7 +378,10 @@ func (s *DestructiveService) Recover(ctx context.Context) error {
 		case TeardownContextRetirement:
 			_, err = s.RetireContext(resumeCtx, op.Scope.BundleHash, op.Scope.ContextPublicationGeneration, op.RequestKeyHash, op.RequestHash, "runtime_context_retired")
 		case TeardownLogout:
-			_, err = s.driveSessionLogout(ctx, op)
+			// Only the effect journal can recover unlink evidence. The prior
+			// process's SDK occurrence cannot be reconstructed or redispatched
+			// by destructive startup recovery, including before authorization.
+			continue
 		default:
 			err = fmt.Errorf("%w: unsupported teardown kind %q", ErrConflict, op.Kind)
 		}

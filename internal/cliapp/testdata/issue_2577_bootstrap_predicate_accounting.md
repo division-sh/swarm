@@ -32,22 +32,24 @@ execution proof or complete #2577 closure.
 
 ## N66 Logout Recovery Consumer
 
-`channelonboarding.DestructiveService.Recover` now dispatches the distinct
-`logout` responsibility through its typed session-lifecycle port. It does not
-invoke the ordinary activation refresher, release credentials, select a fresh
-SDK occurrence or complete the responsibility itself. The original operation,
+`channelonboarding.DestructiveService.Recover` consumes strict pending logout
+responsibility without SDK dispatch. Existing effect-journal recovery owns
+unlink evidence and its atomic historical projection. Destructive startup
+recovery does not require a dead process's SDK, invoke the ordinary activation
+refresher, release credentials, select a fresh occurrence or complete the
+responsibility itself. The original operation,
 revision, paired-account admission, declaration/source coordinate and SDK
 occurrence remain frozen in the existing selected teardown owner.
 
 `TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores` executes the
 real SQLite/PostgreSQL reservation and recovery owner twice. Its observation
-adapter asserts unchanged frozen evidence, no fresh preparation, no ordinary
+adapter refuses any SDK dispatch and asserts unchanged frozen evidence, no fresh preparation, no ordinary
 disconnecting cleanup, no invented settlement and canceled-wait refusal.
 `TestSessionLogoutFencesCurrentActivationBothStores` proves that reservation
 retires current executable activation and rejects standing republication and
 unjournaled completion. The observation adapter grants no SDK or journal
-authority: native dispatch, outcome settlement, restart-to-completion and the
-served logout journey remain unfinished in the same #2577 PR.
+authority. The later journal, public logout and process-death sections below
+name the separate execution proofs; observation alone establishes none of them.
 
 This accounts for the changed A10/A27 consumer body before regeneration; it
 does not alter the scanner, its scope rules or the existing P08/P10/P21 proof
@@ -130,3 +132,26 @@ in `TestSessionLogoutJournalDoesNotTreatLocalDeleteFailureAsNoEffectBothStores`
 proves that remote acceptance followed by local failure stays uncertain and
 does not authorize resend. Process-death and successor public journeys remain
 in this same PR; these named proofs do not substitute for them.
+
+## N66 Launched Process Death And Startup Ordering
+
+`TestServedWhatsAppLogoutLaunchedProcessDeathBothStores` executes the actual
+SDK in a child RunServe process after genuine pairing and operator confirmation.
+The external peer verifies the exact linked-device unlink frame and withholds
+its result. The fixture kills and joins only its owned child, joins its original
+HTTP caller and peer disconnect, then boots twice. Public history must retain
+the same effect/responsibility, a single uncertain settlement, no READY state,
+no new connection and no unlink on exact replay or changed-key refusal.
+
+The first execution was RED on both stores: destructive startup recovery tried
+to locate the dead SDK before runtime effect recovery, blocking boot entirely.
+Only that automatic dispatch is removed. Strict pending inspection and ordinary
+teardown ordering are unchanged; the existing effect recovery owner remains the
+only interpreter and atomic writer for unlink outcome evidence. Reservation
+without journal evidence stays pending, not fabricated complete. Explicit live
+logout still uses the retained native owner and requires current launch fences.
+The repaired both-store process-death journey is GREEN under `-race`.
+
+The changed A10/A27 predicate fingerprint is regenerated only after these
+execution proofs and the no-dispatch/no-invented-settlement store proof pass.
+No scanner, inclusion, P08/P10/P21 obligation, deadline or census policy changes.
