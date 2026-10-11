@@ -194,3 +194,20 @@ outcome and zero second frame. The selected-store recovery test's cancellation
 during lookup is independently RED before the post-inspection guard and GREEN
 after it on both stores. These are additional finite N66 proofs, not physical
 P01-P09 or a claim that the remaining served notice/successor matrix is closed.
+
+## Served Native Notice Acknowledgment
+
+`TestRunServeWhatsAppNoticeAcknowledgmentBothStores` drives the authored
+`notify_human` tool through a finite authenticated OpenAI-compatible test peer,
+not a seeded mailbox row. Actual SDK-encrypted delivery must equal the canonical
+notice content and its exact journal receipt. A foreign customer is rejected;
+an unknown quoted receipt gets teaching; the authenticated operator's genuine
+reply acknowledges through the neutral intent owner. Public unread count becomes
+zero without altering notice status or inventing decision/history mutations.
+The same RunServe restarts with the acknowledgment retained and no notice resend;
+the producer is invoked for exactly its original two completion turns.
+
+The both-store `-race` journey passes at this checkpoint. Earlier native receipt
+wait timeouts, including a captured private-database fsync stack, remain retained
+as qualification evidence; this passing run alone is not a causal latency repair
+or deadline waiver. Physical provider interoperability is still unqualified.
