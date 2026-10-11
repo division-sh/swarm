@@ -135,7 +135,54 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
 				t.Fatalf("public child changed source business state: %v", err)
 			}
+			issue642RequireServedBarrierGrandchild(t, rt, fork, child, producer.Key())
 		})
+	}
+}
+
+func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixture, parent apiv1.RunForkExecutionResult, inherited operatorread.OperatorEventFull, producer string) {
+	t.Helper()
+	phase, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	reader := rt.selected.(interface {
+		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	})
+	plan, err := reader.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: parent.ForkRunID, At: inherited.EventID})
+	if err != nil || len(plan.FanOutObligations) != 1 || plan.FanOutObligations[0].Barrier == nil || plan.FanOutObligations[0].Barrier.Status != fanoutbarrier.StatusClosedPending {
+		t.Fatalf("served grandchild lacks its exact unfinished transferred cut: %+v err=%v", plan, err)
+	}
+	before, err := storetest.ReadSelectedForkSourceDomain(phase, rt.selected, parent.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{"source_run_id": parent.ForkRunID, "fork_event_id": inherited.EventID,
+		"allow_source_freeze": true, "idempotency_key": "served-published-barrier-grandchild"})
+	if grandchild.SourceRunID != parent.ForkRunID || grandchild.ForkRunID == "" || grandchild.ForkRunID == parent.ForkRunID || grandchild.ForkRunID == parent.SourceRunID ||
+		grandchild.ForkEventID != inherited.EventID || grandchild.ForkRevision != plan.ForkPoint.Revision || grandchild.ForkRunStatus != "running" ||
+		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 0 {
+		t.Fatalf("served grandchild changed the committed join cut or borrowed activation: %+v", grandchild)
+	}
+	publication := issue642WaitBarrierDeliveredEvent(t, phase, rt, activityidentity.ForkLineageEventID(grandchild.ForkRunID, inherited.EventID), producer)
+	issue642WaitExactBarrierPipeline(t, phase, rt, publication.EventID)
+	output := issue642WaitBarrierOutput(t, phase, rt, grandchild.ForkRunID)
+	issue642WaitExactBarrierPipeline(t, phase, rt, output.EventID)
+	entity, err := rt.selected.LoadOperatorEntity(phase, grandchild.ForkRunID, grandchild.ForkRunID)
+	if err != nil || entity.Fields["completed_total"] != float64(1) || entity.Entity.Revision != 2 {
+		t.Fatalf("served grandchild did not commit its real final consumer once: %+v err=%v", entity, err)
+	}
+	final, err := reader.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: grandchild.ForkRunID, At: output.EventID})
+	if err != nil || len(final.FanOutObligations) != 1 || final.FanOutObligations[0].Barrier == nil {
+		t.Fatalf("served grandchild lost its exact settled barrier cut: %+v err=%v", final, err)
+	}
+	barrier := final.FanOutObligations[0].Barrier
+	if barrier.Status != fanoutbarrier.StatusFired || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
+		barrier.ScheduleActivationID != "" || barrier.TransferredOccurrence == nil || barrier.TransferredOccurrence.Publication.SourceRunID != parent.ForkRunID ||
+		barrier.TransferredOccurrence.Publication.SourceEventID != inherited.EventID || barrier.TransferredOccurrence.Publication.EventID != publication.EventID {
+		t.Fatalf("served grandchild lost immediate-source lineage/summary or rearmed a timer: %+v", barrier)
+	}
+	after, err := storetest.ReadSelectedForkSourceDomain(phase, rt.selected, parent.ForkRunID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("served grandchild mutated its immediate source business state: %v", err)
 	}
 }
 
