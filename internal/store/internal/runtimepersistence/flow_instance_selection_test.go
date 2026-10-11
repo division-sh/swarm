@@ -13,6 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -260,5 +262,97 @@ func TestR7ConstructionCommitRechecksSelectorAndPathBothStores(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestR7PreparedSelectionRechecksDurableAdmissionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, change := range []string{"unchanged", "run_stopped", "source_replaced", "stored_winner", "terminal_winner"} {
+			t.Run(backend+"/"+change, func(t *testing.T) {
+				f, request := newR7SelectionProof(t, backend)
+				index := f.store.(pipeline.FlowInstanceIndexReader)
+				selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+				if err != nil || selected.Activation == nil || selected.Observation.Valid() {
+					t.Fatalf("prepare from admitted absence: %+v err=%v", selected, err)
+				}
+				committer := agentFixtureFlowActivationCommitter{store: f.store}
+				var winner pipeline.FlowInstanceActivationPlan
+				// The prepared operation stays unchanged while a durable owner wins.
+				switch change {
+				case "run_stopped":
+					_, _, err = f.store.(runlifecycle.OperationOwner).MarkTerminalRun(f.ctx, runlifecycle.TerminalRequest{
+						RunID: request.Lookup.RunID(), State: runlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+					})
+				case "source_replaced":
+					artifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  replacement: {}\n"))
+					sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), artifact)
+					_, err = f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{
+						RunID: request.Lookup.RunID(), Source: sourceartifactfixture.FactFor(artifact),
+					})
+				case "stored_winner", "terminal_winner":
+					constructor := request.Constructor
+					constructor.Instance, err = flowidentity.KeyedChild(request.Lookup.Source(), request.Lookup.ParentIdentity(), "worker", "different-stored-winner")
+					if err != nil {
+						t.Fatal(err)
+					}
+					constructor.Instance.EntityID = uuid.NewString()
+					winner, err = f.manager.PrepareFlowInstanceActivation(f.ctx, constructor)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err = committer.CommitFlowInstanceActivation(f.ctx, winner); err != nil {
+						t.Fatal(err)
+					}
+					if winner.Identity.InstancePath == selected.Identity().InstancePath || winner.Identity.EntityID == flowidentity.EntityID(winner.Identity.InstancePath) {
+						t.Fatal("winner must have a different path and non-derived entity identity")
+					}
+					if change == "terminal_winner" {
+						owner := flowidentity.RunScopedFlowInstance{RunID: request.Lookup.RunID(), Route: winner.Identity.Route()}
+						err = f.workflows.MarkTerminated(f.ctx, owner, identity.NormalizeEntityID(winner.Identity.EntityID), winner.OccurredAt.Add(time.Hour))
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if change == "unchanged" {
+					committed, err := committer.CommitFlowInstanceActivation(f.ctx, *selected.Activation)
+					if err != nil || !committed.Acknowledged || !committed.Created || committed.Plan.Identity != selected.Identity() {
+						t.Fatalf("unchanged preparation lost exact construction: %+v err=%v", committed, err)
+					}
+					observed, found, err := index.LookupFlowInstance(f.ctx, request.Lookup)
+					if err != nil || !found || observed.Identity() != selected.Identity() {
+						t.Fatalf("construction lost admitted stored identity: %+v found=%t err=%v", observed, found, err)
+					}
+					return
+				}
+				requireR7SelectionNoMutation(t, f, func() {
+					committed, err := committer.CommitFlowInstanceActivation(f.ctx, *selected.Activation)
+					if err == nil || committed.Acknowledged || committed.Created {
+						t.Fatalf("earlier absence granted commit after %s: %+v err=%v", change, committed, err)
+					}
+					if change == "stored_winner" || change == "terminal_winner" {
+						var conflict *pipeline.FlowInstanceActivationConflict
+						if !errors.As(err, &conflict) || conflict.Owner.Route != selected.Identity().Route() {
+							t.Fatalf("stale creation lost original operation identity: %v", err)
+						}
+						observed, found, err := index.LookupFlowInstance(f.ctx, request.Lookup)
+						if err != nil || !found || observed.Identity() != winner.Identity {
+							t.Fatalf("conflict changed the actual winner: %+v found=%t err=%v", observed, found, err)
+						}
+						fresh, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+						if change == "stored_winner" {
+							if err != nil || fresh.Activation != nil || fresh.Identity() != winner.Identity {
+								t.Fatalf("new selection did not reuse the durable winner: %+v err=%v", fresh, err)
+							}
+						} else {
+							var terminal *pipeline.TerminatedReceiverError
+							if !errors.As(err, &terminal) || fresh.Activation != nil || fresh.Observation.Valid() {
+								t.Fatalf("new selection resurrected the terminal winner: %+v err=%v", fresh, err)
+							}
+						}
+					}
+				})
+			})
+		}
 	}
 }
