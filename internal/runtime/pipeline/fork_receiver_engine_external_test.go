@@ -125,12 +125,12 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 				runID := uuid.NewString()
 				seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-				if err := rt.Bus.Publish(ctx, seed); err != nil {
+				if err := rt.Bus.PublishAndWait(ctx, seed); err != nil {
 					t.Fatal(err)
 				}
 				waitForkEngineCompletion(t, db, runID)
 				requestEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-				if err := rt.Bus.Publish(ctx, requestEvent); err != nil {
+				if err := rt.Bus.PublishAndWait(ctx, requestEvent); err != nil {
 					t.Fatal(err)
 				}
 				waitForkEngineCompletion(t, db, runID)
@@ -158,10 +158,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				resumeSettled := func() { resumeSettledOnce.Do(func() { close(probe.resumeSettled) }) }
 				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				// A durable source receipt can precede release of its ordinary lease.
-				if err := rt.Bus.WaitForQuiescence(forkCtx); err != nil {
-					t.Fatalf("source execution did not join before measuring retained work: %v", err)
-				}
+				// PublishAndWait joins the exact source delivery trees, not the live sweeper.
 				baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
 				done := make(chan struct{})
