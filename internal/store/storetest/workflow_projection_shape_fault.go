@@ -53,6 +53,10 @@ func SetWorkflowProjectionPlatformBookkeeping(ctx context.Context, selected any,
 	return private.SetWorkflowProjectionPlatformBookkeepingForTest(ctx, selected, run, path)
 }
 
+func AddWorkflowProjectionPrivateBookkeeping(ctx context.Context, selected any, run, path string) (int64, error) {
+	return private.AddWorkflowProjectionPrivateBookkeepingForTest(ctx, selected, run, path)
+}
+
 func SetWorkflowProjectionConflictingEntityType(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return private.SetWorkflowProjectionConflictingEntityTypeForTest(ctx, selected, run, entity)
 }

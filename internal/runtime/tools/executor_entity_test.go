@@ -687,7 +687,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	siblingID := uuid.NewString()
 	foreignID := uuid.NewString()
@@ -703,10 +703,8 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "other_case", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `UPDATE flow_instances
-		SET bookkeeping = jsonb_set(bookkeeping, '{private_fact}', '"must-not-leak"'::jsonb, true)
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`, owner.RunID, currentID, owner.Route.InstancePath); err != nil {
-		t.Fatalf("inject role-scoped hostile bookkeeping: %v", err)
+	if changed, err := storetest.AddWorkflowProjectionPrivateBookkeeping(ctx, fixture.selected, owner.RunID, owner.Route.InstancePath); err != nil || changed != 1 {
+		t.Fatalf("inject role-scoped hostile bookkeeping: changed=%d err=%v", changed, err)
 	}
 	stored, found, err := fixture.pipeline.Load(ctx, owner)
 	if err != nil || !found || stored.CurrentState != "queued" || stored.Bookkeeping["private_fact"] != "must-not-leak" {

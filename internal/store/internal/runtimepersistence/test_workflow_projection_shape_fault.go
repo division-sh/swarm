@@ -94,6 +94,16 @@ func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, select
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, pipelinepersistence.SetWorkflowProjectionPlatformBookkeepingForTest)
 }
 
+func AddWorkflowProjectionPrivateBookkeepingForTest(ctx context.Context, selected any, run, path string) (int64, error) {
+	postgres, err := workflowProjectionNativePostgres(selected)
+	if err != nil {
+		return 0, err
+	}
+	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, func(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
+		return pipelinepersistence.AddWorkflowProjectionPrivateBookkeepingForTest(ctx, tx, postgres, run, path)
+	})
+}
+
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.SetWorkflowProjectionConflictingEntityTypeForTest)
 }
