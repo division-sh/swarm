@@ -79,6 +79,22 @@ func TestFiniteSelectedDeploymentReceiverFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestForkFanOutReceiverFixtureLoadsAndVerifies(t *testing.T) {
+	root := CopyForkFanOutReceiverOwnership(t)
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	if plans := source.FanOutPlans(); len(plans) != 1 || plans[0].ItemsFrom != "payload.tokens" {
+		t.Fatalf("receiver fixture requires one real compiled handler source: %+v", plans)
+	}
+	if report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{}); len(report.Errors()) != 0 || len(report.Warnings()) != 0 {
+		t.Fatalf("fan-out receiver fixture boot errors=%+v warnings=%+v", report.Errors(), report.Warnings())
+	}
+}
+
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, MapScatterGather, ArtifactID("examples/routing/policy-rules"))
 	for _, name := range canonicalExampleNames() {
