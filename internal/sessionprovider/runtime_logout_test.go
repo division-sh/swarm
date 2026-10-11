@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
+	waStore "go.mau.fi/whatsmeow/store"
 )
 
 func TestWhatsAppRuntimeLogoutPreparationUsesOriginalSDKBothStores(t *testing.T) {
@@ -72,6 +74,156 @@ func TestWhatsAppRuntimeLogoutPreparationUsesOriginalSDKBothStores(t *testing.T)
 			}
 			if _, err := c.PrepareSessionLogout(f.ctx, f.operation); err == nil || errors.Is(err, context.DeadlineExceeded) {
 				t.Fatal("closed owner prepared a new logout target", err)
+			}
+		})
+	}
+}
+
+type logoutDeletionFaultFixture struct {
+	waStore.DeviceContainer
+	cause  error
+	called bool
+}
+
+type logoutSettlementObservationFixture struct {
+	effects.Store
+	results chan error
+}
+
+func (f *logoutSettlementObservationFixture) SettleExternalAttempt(ctx context.Context, s effects.Settlement) error {
+	err := f.Store.SettleExternalAttempt(ctx, s)
+	f.results <- err
+	return err
+}
+
+func (f *logoutDeletionFaultFixture) DeleteDevice(context.Context, *waStore.Device) error {
+	f.called = true
+	return f.cause
+}
+
+func TestSessionLogoutJournalDoesNotTreatLocalDeleteFailureAsNoEffectBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newActiveInputFixture(t, backend)
+			c := openRuntimeConnectionFixture(t, f)
+			original := c.state.currentOccurrence()
+			fault := &logoutDeletionFaultFixture{DeviceContainer: original.stores.container, cause: errors.New("exact private deletion fixture refusal")}
+			original.stores.container = fault
+			connectRuntimeConnectionFixture(t, f, c)
+			op := reserveRuntimeLogoutFixture(t, f, c)
+			ctx := logoutJournalFixture(t, f, op)
+			done := make(chan error, 1)
+			go func() { done <- c.DispatchSessionLogout(ctx, op) }()
+			frame := f.peer.next(t)
+			if frame.node.Tag != "iq" || frame.node.Attrs["xmlns"] != "md" {
+				t.Fatal("local deletion proof did not reach actual remote unlink", frame.node)
+			}
+			f.peer.acknowledge(t, frame)
+			if err := awaitOccurrenceProbe(t, f.peer.ctx, done); !errors.Is(err, fault.cause) || !fault.called || original.client.Store.Deleted {
+				t.Fatal("remote success/local failure lost evidence or deleted pairing", err, fault.called)
+			}
+			identity, _ := effects.ChannelLogoutOperationID(op.TeardownID)
+			outcome, found, err := f.selected.(effects.OutcomeStore).GetExternalEffectOutcome(ctx, identity)
+			if err != nil || !found || outcome.AttemptState != effects.StateOutcomeUncertain {
+				t.Fatal("local deletion error was misclassified as no effect", outcome, err)
+			}
+			retained, err := f.selected.GetChannelTeardown(ctx, op.TeardownID)
+			if err != nil || retained.Phase != channelonboarding.TeardownFailed || retained.FailureCode != "logout_outcome_uncertain" || *retained.Logout != *op.Logout {
+				t.Fatal("uncertain logout lost exact frozen responsibility", retained, err)
+			}
+			if err := c.DispatchSessionLogout(ctx, op); err == nil {
+				t.Fatal("local deletion failure authorized another remote unlink")
+			}
+			select {
+			case extra := <-f.peer.frames:
+				t.Fatal("local deletion failure replayed remote unlink", extra.node)
+			default:
+			}
+		})
+	}
+}
+
+func TestSessionLogoutJournalCanceledAfterLaunchRemainsUncertainBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newActiveInputFixture(t, backend)
+			c := openRuntimeConnectionFixture(t, f)
+			connectRuntimeConnectionFixture(t, f, c)
+			original := c.state.currentOccurrence()
+			op := reserveRuntimeLogoutFixture(t, f, c)
+			ctx := logoutJournalFixture(t, f, op)
+			observed := &logoutSettlementObservationFixture{Store: f.selected.(effects.Store), results: make(chan error, 1)}
+			ctx = effects.WithController(ctx, effects.NewController(observed).WithExecutionPosture(executionposture.Live))
+			caller, cancel := context.WithCancel(ctx)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- c.DispatchSessionLogout(caller, op) }()
+			frame := f.peer.next(t)
+			if frame.node.Tag != "iq" || frame.node.Attrs["xmlns"] != "md" {
+				t.Fatal("cancellation proof did not reach actual unlink", frame.node)
+			}
+			cancel()
+			if err := awaitOccurrenceProbe(t, f.peer.ctx, done); !errors.Is(err, context.Canceled) {
+				t.Fatal("postlaunch cancellation did not release caller wait", err)
+			}
+			wait, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			if _, err := f.workOwner.RetireAndWait(wait); err != nil {
+				t.Fatal("cancellation abandoned journal settlement or original cleanup", err)
+			}
+			select {
+			case err := <-observed.results:
+				if err != nil {
+					t.Fatal("original counted logout tail could not settle after cancellation/retirement", err)
+				}
+			default:
+				t.Fatal("original counted logout tail did not attempt settlement")
+			}
+			identity, _ := effects.ChannelLogoutOperationID(op.TeardownID)
+			outcome, found, err := f.selected.(effects.OutcomeStore).GetExternalEffectOutcome(wait, identity)
+			if err != nil || !found || outcome.AttemptState != effects.StateOutcomeUncertain || original.client.Store.Deleted {
+				t.Fatal("canceled launched unlink became no-effect/success or deleted pairing", outcome, err)
+			}
+			retained, err := f.selected.GetChannelTeardown(wait, op.TeardownID)
+			if err != nil || retained.Phase != channelonboarding.TeardownFailed || retained.FailureCode != "logout_outcome_uncertain" {
+				t.Fatal("canceled unlink lost truthful readback", retained, err)
+			}
+		})
+	}
+}
+
+func TestSessionLogoutRequiresAcceptedProcessTailBeforeAuthorizationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newActiveInputFixture(t, backend)
+			c := openRuntimeConnectionFixture(t, f)
+			connectRuntimeConnectionFixture(t, f, c)
+			original := c.state.currentOccurrence()
+			op := reserveRuntimeLogoutFixture(t, f, c)
+			ctx := logoutJournalFixture(t, f, op)
+			process, ok := worklifetime.ProcessFromContext(c.ctx)
+			if !ok {
+				t.Fatal("original connection lost its process owner")
+			}
+			before := process.ActiveCount()
+			if err := process.Fence(); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.DispatchSessionLogout(ctx, op); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatal("logout did not refuse unowned settlement before authorization", err)
+			}
+			identity, _ := effects.ChannelLogoutOperationID(op.TeardownID)
+			if _, found, err := f.selected.(effects.OutcomeStore).GetExternalEffectOutcome(ctx, identity); err != nil || found {
+				t.Fatal("fenced process authorized a logout attempt", err, found)
+			}
+			retained, err := f.selected.GetChannelTeardown(ctx, op.TeardownID)
+			if err != nil || retained.Phase != op.Phase || retained.Revision != op.Revision || original.client.Store.Deleted || process.ActiveCount() != before {
+				t.Fatal("failed tail admission changed responsibility, pairing or work accounting", retained, err)
+			}
+			select {
+			case frame := <-f.peer.frames:
+				t.Fatal("fenced process sent an unlink", frame.node)
+			default:
 			}
 		})
 	}
