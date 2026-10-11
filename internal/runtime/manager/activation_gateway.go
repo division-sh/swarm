@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -81,11 +82,11 @@ func (am *AgentManager) ProveUnpublishedFlowActor(ctx context.Context, token eff
 	if err != nil {
 		return agenttopology.FlowReadinessPlan{}, err
 	}
-	if !found || readiness.PlanHash != admission.PlanFingerprint || readiness.AttemptOrdinal != attempt.Ordinal() || readiness.AttemptState != "accepted" || !readiness.Eligible() {
+	if !found {
 		return agenttopology.FlowReadinessPlan{}, fmt.Errorf("activation observation has no matching current readiness")
 	}
-	if readiness.Plan.RunID != admission.RunID || readiness.Plan.Identity.Route() != identity.Route || readiness.Plan.BundleHash != attempt.ProcessBinding().BundleHash || readiness.OwningRunSource.BundleHash() != readiness.Plan.BundleHash {
-		return agenttopology.FlowReadinessPlan{}, fmt.Errorf("activation observation readiness differs from its admitted source or identity")
+	if err := validateActivationActorReadiness(readiness, admission, attempt, identity); err != nil {
+		return agenttopology.FlowReadinessPlan{}, err
 	}
 	if _, err := am.verifyConstructedFlowTree(ctx, pipeline.FlowInstanceActivationRequest{
 		ContractBundle: am.semanticReadinessSource.source, Instance: readiness.Plan.Identity,
@@ -105,6 +106,16 @@ func (am *AgentManager) ProveUnpublishedFlowActor(ctx context.Context, token eff
 		return agenttopology.FlowReadinessPlan{}, err
 	}
 	return admission, am.requireRunExecutionOwnership(ctx, admission.RunID)
+}
+
+func validateActivationActorReadiness(readiness pipeline.DynamicFlowRuntimeReadiness, admission agenttopology.FlowReadinessPlan, attempt pipeline.DynamicFlowRuntimeActivationAttempt, identity flowidentity.RunScopedFlowInstance) error {
+	if readiness.PlanHash != admission.PlanFingerprint || readiness.AttemptOrdinal != attempt.Ordinal() || readiness.AttemptState != "accepted" || !readiness.Eligible() {
+		return fmt.Errorf("activation observation has no matching current readiness")
+	}
+	if readiness.Plan.RunID != admission.RunID || readiness.Plan.Identity.Route() != identity.Route || readiness.Plan.BundleHash != attempt.ProcessBinding().BundleHash || readiness.OwningRunSource.BundleHash() != readiness.Plan.BundleHash {
+		return fmt.Errorf("activation observation readiness differs from its admitted source or identity")
+	}
+	return nil
 }
 
 func proveActivationActorExpectation(actor actors.AgentConfig, expected []pipeline.DynamicFlowRuntimeAgentExpectation) error {
