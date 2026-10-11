@@ -45,6 +45,7 @@ type SessionAuthority struct {
 	mu                      sync.Mutex
 	conn                    *sql.Conn
 	activeTx                *sql.Tx
+	finishTxProof           func()
 	refs                    int
 	closed                  bool
 	discardPending          bool
@@ -291,6 +292,10 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (a *SessionAuthority) beginTxOptions(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return a.beginTxOptionsWithProof(ctx, opts, nil)
+}
+
+func (a *SessionAuthority) beginTxOptionsWithProof(ctx context.Context, opts *sql.TxOptions, admitProof func() func()) (*sql.Tx, error) {
 	if a == nil || a.fenced.Load() {
 		return nil, errors.New("PostgreSQL session authority is missing")
 	}
@@ -318,6 +323,9 @@ func (a *SessionAuthority) beginTxOptions(ctx context.Context, opts *sql.TxOptio
 		a.operationMu.Unlock()
 		return nil, err
 	}
+	if admitProof != nil {
+		a.finishTxProof = admitProof()
+	}
 	begin := a.testBeginTx
 	if begin == nil {
 		begin = func(beginCtx context.Context, conn *sql.Conn) (*sql.Tx, error) {
@@ -342,6 +350,7 @@ func (a *SessionAuthority) beginTxOptions(ctx context.Context, opts *sql.TxOptio
 			return nil, errors.Join(err, rollbackSessionTransaction(tx, a))
 		}
 		discard := a.prepareDiscardExcept(nil)
+		a.finishProof()
 		a.operationMu.Unlock()
 		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 	}
@@ -376,9 +385,18 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
 		// its exact disposition. Terminal callbacks run after operation unlock.
 		discard = a.prepareDiscardExcept(nil)
 	}
+	a.finishProof()
 	a.operationMu.Unlock()
 	sessionDiscard{leases: retirements}.drain()
 	return errors.Join(err, discard.drain())
+}
+
+func (a *SessionAuthority) finishProof() {
+	finish := a.finishTxProof
+	a.finishTxProof = nil
+	if finish != nil {
+		finish()
+	}
 }
 
 func (a *SessionAuthority) beginOperation() (func(), error) {
@@ -806,6 +824,16 @@ func runAuthorityTransaction(
 	opts *sql.TxOptions,
 	fn func(context.Context, *sql.Tx) error,
 ) (committed bool, err error) {
+	return runAuthorityTransactionWithProof(ctx, session, opts, fn, nil)
+}
+
+func runAuthorityTransactionWithProof(
+	ctx context.Context,
+	session *SessionAuthority,
+	opts *sql.TxOptions,
+	fn func(context.Context, *sql.Tx) error,
+	admitProof func() func(),
+) (committed bool, err error) {
 	if session == nil {
 		return false, errors.New("PostgreSQL session authority is required")
 	}
@@ -815,7 +843,7 @@ func runAuthorityTransaction(
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
 	beginStarted := time.Now()
-	tx, err := session.beginTxOptions(ctx, opts)
+	tx, err := session.beginTxOptionsWithProof(ctx, opts, admitProof)
 	// The session is already pinned; this includes waiting for its operation
 	// ownership but no new connection-pool acquisition.
 	probe.RecordAdmission(0, 0, time.Since(beginStarted))
@@ -968,6 +996,98 @@ func (l *AdvisoryLockLease) MonitorProveCurrent(ctx context.Context, deadline ti
 	return l.proveCurrent(ctx, deadline)
 }
 
+// ProveCurrentWithRead keeps a canonical read and its settlement inside the
+// retained monitor's one operation boundary and local-fencing decision.
+func (l *AdvisoryLockLease) ProveCurrentWithRead(ctx context.Context, deadline time.Duration, read func(context.Context, *sql.Tx) error) error {
+	if l == nil || read == nil || deadline < 0 {
+		return errors.New("retained PostgreSQL proof requires a lease, read and nonnegative budget")
+	}
+	l.mu.Lock()
+	session, current, prove := l.session, !l.released && l.session != nil, l.testProve
+	l.mu.Unlock()
+	if !current {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var decision *localProofDecision
+	_, err := runAuthorityTransactionWithProof(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, func(sqlCtx context.Context, tx *sql.Tx) error {
+		var held bool
+		var err error
+		if prove != nil {
+			held, err = prove(sqlCtx, session, l.lockKey)
+		} else {
+			err = tx.QueryRowContext(sqlCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+		}
+		if err == nil && !held {
+			err = errors.New("retained PostgreSQL session no longer owns its advisory lock")
+		}
+		if err == nil {
+			err = read(sqlCtx, tx)
+		}
+		if err != nil {
+			session.fenceLocal()
+		}
+		return err
+	}, func() func() {
+		decision = newLocalProofDecision(ctx, session, deadline)
+		return decision.finish
+	})
+	if decision != nil && decision.expired {
+		err = errors.Join(err, context.DeadlineExceeded)
+	}
+	if session.fenced.Load() {
+		err = errors.Join(err, errors.New("retained PostgreSQL session authority is fenced"), wrapAdvisoryDiscardError(session.forceDiscard()))
+	}
+	return errors.Join(err, ctx.Err())
+}
+
+type localProofDecision struct {
+	mu                sync.Mutex
+	ctx               context.Context
+	session           *SessionAuthority
+	deadline          time.Duration
+	expiresAt         time.Time
+	finished, expired bool
+	timer             *time.Timer
+	timerDone         chan struct{}
+}
+
+func newLocalProofDecision(ctx context.Context, session *SessionAuthority, deadline time.Duration) *localProofDecision {
+	d := &localProofDecision{ctx: ctx, session: session, deadline: deadline, expiresAt: time.Now().Add(deadline)}
+	if deadline > 0 {
+		d.timerDone = make(chan struct{})
+		d.timer = time.AfterFunc(time.Until(d.expiresAt), func() {
+			defer close(d.timerDone)
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if !d.finished && ctx.Err() == nil {
+				d.expired = true
+				session.fenceLocal()
+			}
+		})
+	}
+	return d
+}
+
+func (d *localProofDecision) finish() {
+	d.mu.Lock()
+	if d.finished {
+		d.mu.Unlock()
+		return
+	}
+	if d.deadline > 0 && !d.finished && !time.Now().Before(d.expiresAt) && d.ctx.Err() == nil {
+		d.expired = true
+		d.session.fenceLocal()
+	}
+	d.finished = true
+	d.mu.Unlock()
+	if d.timer != nil && !d.timer.Stop() {
+		<-d.timerDone
+	}
+}
+
 func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Duration) (err error) {
 	if l == nil {
 		return errors.New("advisory lock lease has no current PostgreSQL session")
@@ -994,29 +1114,8 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
 	}
 	// This timer makes only the local fencing decision. SQL remains on this
 	// owner goroutine and is joined before the session operation is released.
-	var decisionMu sync.Mutex
-	finished, expired := false, false
-	expiresAt := time.Now().Add(deadline)
-	if deadline > 0 {
-		timerDone := make(chan struct{})
-		timer := time.AfterFunc(time.Until(expiresAt), func() {
-			defer close(timerDone)
-			decisionMu.Lock()
-			if !finished && ctx.Err() == nil {
-				expired = true
-				session.fenceLocal()
-			}
-			decisionMu.Unlock()
-		})
-		defer func() {
-			decisionMu.Lock()
-			finished = true
-			decisionMu.Unlock()
-			if !timer.Stop() {
-				<-timerDone
-			}
-		}()
-	}
+	decision := newLocalProofDecision(ctx, session, deadline)
+	defer decision.finish()
 	var conn *sql.Conn
 	keep := false
 	defer func() {
@@ -1065,16 +1164,10 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
 			err = errors.New("retained PostgreSQL session closed before proof settlement")
 		}
 	}
-	decisionMu.Lock()
-	if deadline > 0 && !finished && !time.Now().Before(expiresAt) && ctx.Err() == nil {
-		expired = true
-		session.fenceLocal()
-	}
-	finished = true
-	if expired {
+	decision.finish()
+	if decision.expired {
 		err = errors.Join(err, context.DeadlineExceeded)
 	}
-	decisionMu.Unlock()
 	if session.fenced.Load() {
 		return errors.Join(err, errors.New("retained PostgreSQL session authority is fenced"))
 	}
