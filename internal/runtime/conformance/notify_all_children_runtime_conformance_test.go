@@ -256,11 +256,6 @@ func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, sele
 		t.Fatalf("acquire notify-all-children process topology capability: %v", err)
 	}
 	t.Cleanup(func() {
-		select {
-		case <-capability.Done():
-			return
-		default:
-		}
 		if err := capability.Release(context.Background()); err != nil {
 			t.Errorf("release notify-all-children process topology capability: %v", err)
 		}

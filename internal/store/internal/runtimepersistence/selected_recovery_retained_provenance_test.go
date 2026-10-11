@@ -76,8 +76,13 @@ func TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothS
 				}
 				// The discarded journal is not a compatibility source. The native
 				// selected binding is the surviving historical owner in R5.3.
-				if _, err := db.ExecContext(ctx, `DROP TABLE runtime_startup_authority_facts`); err != nil {
-					t.Fatal(err)
+				query := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('runtime_startup_authority_facts','runtime_startup_authority_repairs')`
+				if !sqlite {
+					query = `SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('runtime_startup_authority_facts','runtime_startup_authority_repairs')`
+				}
+				var journals int
+				if err := db.QueryRowContext(ctx, query).Scan(&journals); err != nil || journals != 0 {
+					t.Fatalf("fresh selected provenance still depends on process history: tables=%d err=%v", journals, err)
 				}
 				reader := store.(interface {
 					ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)

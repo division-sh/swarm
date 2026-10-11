@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -187,11 +188,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if _, err := channelonboarding.InspectPendingTeardowns(ctx, retained); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to teardown reader: %v", err)
 			}
-			var processRows int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&processRows); err != nil {
+			stamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if processRows != 0 {
+			if stamp.Generation != 0 {
 				t.Fatal("read inspection acquired process authority")
 			}
 		})

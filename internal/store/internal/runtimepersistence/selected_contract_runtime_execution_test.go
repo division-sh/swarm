@@ -517,7 +517,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 	assertRecoveryRolledBack()
 	bad := recoveryRequest
-	bad.Process.StateVersion++
+	bad.Process.BootID = uuid.NewString()
 	if _, err := recovery.RecoverSelectedFork(ctx, bad); err == nil {
 		t.Fatal("stale process recovered execution")
 	}
