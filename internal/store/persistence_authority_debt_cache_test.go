@@ -52,6 +52,12 @@ func debtAnalysisCacheForCheckout(t *testing.T, root string) debtAnalysisCache {
 		filepath.Join(root, "internal/store/persistence_authority_debt_sidecar_test.go"),
 		filepath.Join(root, "internal/store/persistence_authority_registry_test.go"),
 	}
+	const processPolicy = "internal/store/persistence_authority_debt_process_lease_test.go"
+	if _, err := os.Stat(filepath.Join(root, processPolicy)); err == nil {
+		paths = append(paths, filepath.Join(root, processPolicy))
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 	walker, err := filepath.Glob(filepath.Join(root, "internal/checkoutsource/*.go"))
 	if err != nil {
 		t.Fatal(err)
