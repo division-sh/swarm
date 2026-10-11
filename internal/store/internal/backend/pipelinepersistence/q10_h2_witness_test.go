@@ -31,7 +31,8 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 				Identity: flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", "h01", "hub/h01")},
 				EntityID: entity, EntityType: "hub", WorkflowName: "hub", Mode: "template", Status: "active", StageDefined: true,
 				CurrentState: "active", Fields: []byte(`{"hub_id":"h01","count":0,"c1":0,"c2":0}`),
-				Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{"instance_id":"h01"}`),
+				Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+				Config:    []byte(`{"instance_id":"h01","storage_ref":"hub/h01","flow_path":"hub/h01"}`),
 				CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
 			}
 			tx, err := db.BeginTx(ctx, nil)
@@ -46,7 +47,10 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 			root.Identity.Route = flowidentity.StoredRoute(".", run, run)
 			root.EntityID, root.EntityType, root.WorkflowName = run, "", "."
 			root.Mode, root.Fields = "static", nil
-			root.Config = []byte(`{}`)
+			root.Config, err = json.Marshal(map[string]string{"instance_id": run, "storage_ref": run, "flow_path": run})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := commitWorkflowHeaderAndFields(ctx, tx, postgres, root, workflowEngineStateDecision{createState: true}); err != nil {
 				t.Fatal(err)
 			}
