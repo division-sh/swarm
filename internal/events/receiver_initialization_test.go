@@ -97,6 +97,112 @@ func TestReceiverInitializationObserversDoNotBecomeMaterializers(t *testing.T) {
 	}
 }
 
+func TestReceiverInitializationSeparatesStaticActorFromConstruction(t *testing.T) {
+	event, _, agents := receiverMaterializationFixture(t)
+	agent := agents[0]
+	construction := agent.Target.Route()
+	actor := construction
+	actor.EntityID = ""
+	var err error
+	agent.Target, err = NewEntitylessReceiverTarget(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReceiverMaterializations(event, []DeliveryRoute{agent}); err != nil {
+		t.Fatalf("entityless actor lost its independent construction dependency: %v", err)
+	}
+	raw, err := EncodeReceiverMaterializationRecord(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := agent
+	bare.Initialization = ReceiverInitialization{}
+	restored, err := RestoreReceiverMaterializationRecord(bare, raw)
+	if err != nil || !SameDeliveryRouteIdentity(agent, restored) {
+		t.Fatalf("independent construction roundtrip: %v", err)
+	}
+	for _, crossed := range []string{"instance", "flow", "run"} {
+		hostile := agent
+		switch crossed {
+		case "instance":
+			actor.FlowInstance = "consumer/other"
+			hostile.Target, _ = NewEntitylessReceiverTarget(actor)
+		case "flow":
+			actor.FlowID = "other"
+			hostile.Target, _ = NewEntitylessReceiverTarget(actor)
+		case "run":
+			hostile.Initialization.runID = uuid.NewString()
+		}
+		if err := ValidateReceiverMaterializations(event, []DeliveryRoute{hostile}); err == nil {
+			t.Fatalf("accepted crossed %s construction dependency", crossed)
+		}
+		actor = construction
+		actor.EntityID = ""
+	}
+}
+
+func TestReceiverInitializationReusedConstructionKeepsOriginalPublication(t *testing.T) {
+	original, _, agents := receiverMaterializationFixture(t)
+	agent := agents[0]
+	construction := agent.Target.Route()
+	var err error
+	agent.Initialization.target, err = NewExistingEntityTarget(construction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := construction
+	actor.EntityID = ""
+	agent.Target, err = NewEntitylessReceiverTarget(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := original.Clone()
+	later.id = uuid.NewString()
+	if err := ValidateReceiverMaterializations(later, []DeliveryRoute{agent}); err != nil {
+		t.Fatalf("later publication cannot retain original construction: %v", err)
+	}
+	if agent.Initialization.CreatingEventID() != original.ID() {
+		t.Fatal("later publication replaced original constructor identity")
+	}
+	foreign := later.Clone()
+	foreign.runID = uuid.NewString()
+	if err := ValidateReceiverMaterializations(foreign, []DeliveryRoute{agent}); err == nil {
+		t.Fatal("accepted original construction from another run")
+	}
+}
+
+func TestReceiverInitializationStoredStartupRetainsTypedAbsence(t *testing.T) {
+	event, _, agents := receiverMaterializationFixture(t)
+	agent := agents[0]
+	flow := agent.Target.Route()
+	dependency, err := NewExistingEntityTarget(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Initialization, err = AdmitStoredFlowReceiverInitialization(event.RunID(), "", dependency)
+	if err != nil || agent.Initialization.Empty() || agent.Initialization.CreatingEventID() != "" {
+		t.Fatalf("startup construction absence was erased or rejected: %v", err)
+	}
+	flow.EntityID = ""
+	agent.Target, err = NewEntitylessReceiverTarget(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReceiverMaterializations(event, []DeliveryRoute{agent}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := EncodeReceiverMaterializationRecord(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := agent
+	bare.Initialization = ReceiverInitialization{}
+	restored, err := RestoreReceiverMaterializationRecord(bare, raw)
+	if err != nil || !SameDeliveryRouteIdentity(restored, agent) {
+		t.Fatalf("startup absence roundtrip: %v", err)
+	}
+}
+
 func TestReceiverInitializationClosedWireAndIdentity(t *testing.T) {
 	event, node, _ := receiverMaterializationFixture(t)
 	bare := node

@@ -11,27 +11,41 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReceiverInitialization binds a delivery to its canonical construction
-// publication. The selected store still verifies the construction receipt and
-// exact attachment authority before execution.
+// ReceiverInitialization binds a delivery to its selected flow's construction,
+// independently of the recipient's state ownership. The store verifies the
+// original receipt and exact attachment authority before execution.
 type ReceiverInitialization struct {
 	runID, eventID string
 	target         DeliveryTargetOwnership
 }
 
 func AdmitFlowReceiverInitialization(event Event, target DeliveryTargetOwnership) (ReceiverInitialization, error) {
+	if !target.MaterializingEntity() {
+		return ReceiverInitialization{}, fmt.Errorf("new receiver construction requires a materializing flow target")
+	}
 	s := ReceiverInitialization{runID: event.RunID(), eventID: event.ID(), target: target}
 	return s, s.validate()
 }
 
-func (s ReceiverInitialization) Empty() bool                             { return s.eventID == "" }
-func (s ReceiverInitialization) CreatingEventID() string                 { return s.eventID }
-func (s ReceiverInitialization) FlowLifecycle() bool                     { return !s.Empty() }
-func (s ReceiverInitialization) Equal(other ReceiverInitialization) bool { return s == other }
+func AdmitStoredFlowReceiverInitialization(runID, creatingEventID string, target DeliveryTargetOwnership) (ReceiverInitialization, error) {
+	if !target.ExistingEntity() {
+		return ReceiverInitialization{}, fmt.Errorf("stored receiver construction requires an existing flow target")
+	}
+	s := ReceiverInitialization{runID: runID, eventID: creatingEventID, target: target}
+	return s, s.validate()
+}
+
+func (s ReceiverInitialization) Empty() bool                                 { return s.runID == "" }
+func (s ReceiverInitialization) CreatingEventID() string                     { return s.eventID }
+func (s ReceiverInitialization) ConstructionTarget() DeliveryTargetOwnership { return s.target }
+func (s ReceiverInitialization) FlowLifecycle() bool                         { return !s.Empty() }
+func (s ReceiverInitialization) Equal(other ReceiverInitialization) bool     { return s == other }
 
 func (s ReceiverInitialization) validate() error {
-	if canonicalMaterializationUUID(s.runID) != nil || canonicalMaterializationUUID(s.eventID) != nil ||
-		!s.target.MaterializingEntity() || s.target.Validate() != nil {
+	if canonicalMaterializationUUID(s.runID) != nil ||
+		(s.eventID != "" && canonicalMaterializationUUID(s.eventID) != nil) ||
+		(s.target.MaterializingEntity() && s.eventID == "") ||
+		(!s.target.MaterializingEntity() && !s.target.ExistingEntity()) || s.target.Validate() != nil {
 		return fmt.Errorf("receiver initialization requires exact construction publication and target")
 	}
 	return nil
@@ -45,7 +59,8 @@ func (s ReceiverInitialization) ValidatePublication(runID, eventID string) error
 	if err := s.validate(); err != nil {
 		return err
 	}
-	if s.runID != runID || s.eventID != eventID {
+	if s.runID != runID || canonicalMaterializationUUID(eventID) != nil ||
+		s.target.MaterializingEntity() && s.eventID != eventID {
 		return fmt.Errorf("receiver initialization publication mismatch")
 	}
 	return nil
@@ -55,11 +70,26 @@ func (s ReceiverInitialization) ValidateRoute(route DeliveryRoute) error {
 	if err := s.validate(); err != nil {
 		return err
 	}
-	if !SameDeliveryTargetOwnership(s.target, route.Target) {
+	if route.Recipient.IsAgent() {
+		if route.AgentIdentity.Validate() != nil || route.AgentIdentity.RunID != s.runID {
+			return fmt.Errorf("receiver initialization agent run mismatch")
+		}
+		construction, actor := s.target.Route(), route.Target.Route()
+		if route.Target.MaterializingEntity() && !SameDeliveryTargetOwnership(s.target, route.Target) {
+			return fmt.Errorf("materializing actor contradicts its construction target")
+		}
+		if route.Target.Empty() || route.Target.Validate() != nil || construction.FlowID != actor.FlowID || construction.FlowInstance != actor.FlowInstance {
+			return fmt.Errorf("receiver initialization actor flow mismatch")
+		}
+		instance := route.AgentIdentity.FlowInstance()
+		if instance == "" {
+			instance = s.runID
+		}
+		if construction.FlowInstance != instance {
+			return fmt.Errorf("receiver initialization agent instance mismatch")
+		}
+	} else if !SameDeliveryTargetOwnership(s.target, route.Target) {
 		return fmt.Errorf("receiver initialization target mismatch")
-	}
-	if route.Recipient.IsAgent() && route.AgentIdentity.RunID != s.runID {
-		return fmt.Errorf("receiver initialization agent run mismatch")
 	}
 	return nil
 }
