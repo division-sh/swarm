@@ -291,6 +291,18 @@ func TestSessionLogoutJournalBothStores(t *testing.T) {
 				if err != nil || !found || before.AttemptState != effects.StateLaunched {
 					t.Fatalf("unlink preceded committed journal launch: %+v, %v", before, err)
 				}
+				if err := c.DispatchSessionLogout(ctx, op); err == nil {
+					t.Fatal("concurrent logout borrowed the in-flight SDK effect")
+				}
+				concurrent, found, err := journal.GetExternalEffectOutcome(ctx, identity)
+				if err != nil || !found || concurrent != before {
+					t.Fatal("concurrent caller changed the original launched outcome", concurrent, err)
+				}
+				select {
+				case extra := <-f.peer.frames:
+					t.Fatal("concurrent logout sent another frame", extra.node)
+				default:
+				}
 				if acknowledged {
 					f.peer.acknowledge(t, frame)
 				} else if err := frame.peer.conn.CloseNow(); err != nil {
