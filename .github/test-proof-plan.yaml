@@ -1196,6 +1196,8 @@ units:
     run: '^Test(C.*|[G-H].*)$'
     required_children:
       TestCreatingPredecessorAdmissionBothStores: [sqlite/pending, sqlite/claimed, sqlite/retry, sqlite/delivered, sqlite/dead_letter, sqlite/no_delivery, sqlite/different_sender, sqlite/missing_receipt, postgres/pending, postgres/claimed, postgres/retry, postgres/delivered, postgres/dead_letter, postgres/no_delivery, postgres/different_sender, postgres/missing_receipt]
+      TestCreatingPredecessorTargetKindsBothStores: [sqlite/entityless_receiver, sqlite/materializing_entity, sqlite/materializing_agent_without_initialization, postgres/entityless_receiver, postgres/materializing_entity, postgres/materializing_agent_without_initialization]
+      TestCreatingPredecessorClaimHistoryBothStores: [sqlite/busy, sqlite/future_retry, sqlite/reclaimable, sqlite/eligible_retry, postgres/busy, postgres/future_retry, postgres/reclaimable, postgres/eligible_retry]
       TestCreatingPredecessorNoInputBothStores: [sqlite/fieldless, sqlite/fielded, postgres/fieldless, postgres/fielded]
       TestCreatingPredecessorCanceledTurnBothStores: [sqlite, postgres]
       TestCanceledTurnPreservesCapturedProviderDrainBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
