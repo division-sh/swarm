@@ -19574,8 +19574,8 @@ platform_tables:
         multi_bundle_persistence.bundle_identity format and intentionally have no database foreign key
         to bundles.bundle_hash so historical audit identity survives bundle deletion.'
     entity_mutations:
-      description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
-        entity_state.bookkeeping, entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
+      description: 'Append-only mutation log for admitted authored-field and constructed lifecycle changes. The authored_field
+        domain records entity_state.fields; lifecycle_state, bookkeeping, gate and accumulator record flow_instances facts.
         The mutation log is the audit trail for the flight recorder and the undo log for fork/replay.
         Not a separate event stream — just a side-table that captures the before/after of every state change. Domain is
         producer-owned and never inferred from path spelling; path is uninterpreted within its selected domain.'
