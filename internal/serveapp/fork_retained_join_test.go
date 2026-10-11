@@ -2,9 +2,15 @@ package serveapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -68,22 +74,38 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.FailNow()
 			}
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			a2WaitJoinPublicRun(t, rt, started.RunID, "", 0, true)
 			first, joins := readRetainedRootJoins(t, rt, started.RunID)
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
 			}
+			firstRef := joins[0].JoinRef()
+			if joins[0].Generation() != first.Generation() {
+				t.Fatal("first join borrowed another loop generation")
+			}
+			waitRetainedJoinOutcomes(t, rt, started.RunID, []timeridentity.JoinRef{firstRef})
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			a2WaitJoinPublicRun(t, rt, started.RunID, "", 0, true)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
 			}
+			var currentRef timeridentity.JoinRef
+			for _, join := range sourceJoins {
+				if join.Generation() == current.Generation() {
+					if currentRef.Valid() {
+						t.Fatal("repeat has duplicate joins for its exact loop generation")
+					}
+					currentRef = join.JoinRef()
+				}
+			}
+			if !currentRef.Valid() || !currentRef.Declaration().Equal(firstRef.Declaration()) {
+				t.Fatal("repeat lost the declared join in its exact loop generation")
+			}
+			sourceJoins = waitRetainedJoinOutcomes(t, rt, started.RunID, []timeridentity.JoinRef{firstRef, currentRef})
 			for _, join := range sourceJoins {
 				if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || len(join.Outputs) != 1 || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
@@ -201,4 +223,111 @@ func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID str
 		t.Fatal(err)
 	}
 	return loop, joins
+}
+
+func waitRetainedJoinOutcomes(t *testing.T, rt servedControlProofRuntime, runID string, expected []timeridentity.JoinRef) []joinruntime.Activation {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var joins []joinruntime.Activation
+	for time.Now().Before(deadline) {
+		var raw json.RawMessage
+		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
+		var entity operatorread.OperatorEntityFull
+		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
+			t.Fatal(err)
+		}
+		if entity.Entity.RunID != runID || entity.Entity.EntityID != runID || entity.Entity.FlowInstance != runID {
+			t.Fatalf("retained join observation crossed its exact root owner: %+v", entity.Entity)
+		}
+		carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joins, err = joinruntime.List(carrier.StateBuckets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, join := range joins {
+			if err := join.JoinRef().StageEntry().RequireOwner(runID, ".", runID, runID, runID, "working"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		complete, err := retainedJoinOutcomesComplete(joins, expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if complete {
+			return joins
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("exact retained join outcomes did not complete within the existing budget: %+v", joins)
+	return nil
+}
+
+func retainedJoinOutcomesComplete(joins []joinruntime.Activation, expected []timeridentity.JoinRef) (bool, error) {
+	if len(expected) == 0 || len(joins) != len(expected) {
+		return false, fmt.Errorf("retained join catalog has %d entries, want %d exact generations", len(joins), len(expected))
+	}
+	complete := true
+	for _, ref := range expected {
+		if !ref.Valid() || !ref.Generation().Valid() {
+			return false, fmt.Errorf("retained join requires a valid captured generation")
+		}
+		found := 0
+		for _, join := range joins {
+			if !join.JoinRef().Equal(ref) {
+				continue
+			}
+			found++
+			if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
+				complete = false
+			}
+		}
+		if found != 1 {
+			return false, fmt.Errorf("retained join generation has %d matches, want exactly one", found)
+		}
+	}
+	return complete, nil
+}
+
+func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
+	at := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	loop, err := loopruntime.New("run", "run", "", ".", "revision", "start", "working", 3, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "controller"), "review.requested", "working", "reviews")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{RunID: "run", FlowScope: ".", InstanceID: "run", InstancePath: "run", EntityID: "run", Stage: "working", Cause: "construction"}, loop.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := joinruntime.NewActivation(ref, []string{"member-one"}, nil, at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending.Status, pending.CloseReason, pending.OutcomePending = joinruntime.StatusClosed, joinruntime.CloseReasonComplete, true
+	ready := operatorread.RunTestQuiescence{Ready: true}
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{pending}, []timeridentity.JoinRef{ref}); !ready.Ready || err != nil || complete {
+		t.Fatalf("ready-but-future-pending observation released the fence: ready=%+v complete=%t err=%v", ready, complete, err)
+	}
+	completed := pending
+	completed.TimerCancelled, completed.OutcomePending, completed.OutcomeFired = true, false, true
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed}, []timeridentity.JoinRef{ref}); err != nil || !complete {
+		t.Fatalf("exact completed outcome did not release the fence: complete=%t err=%v", complete, err)
+	}
+	foreign, err := loopruntime.New("other", "other", "", ".", "revision", "start", "working", 3, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignRef, err := ref.WithGeneration(foreign.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed}, []timeridentity.JoinRef{foreignRef}); err == nil || complete {
+		t.Fatalf("another completed generation released the fence: complete=%t err=%v", complete, err)
+	}
 }
