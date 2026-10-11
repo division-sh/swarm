@@ -7,16 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
@@ -54,23 +50,6 @@ func TestAuthorityInspectionPropagatesOperationAndCloseErrors(t *testing.T) {
 	}
 }
 
-func TestAuthorityMaintenancePropagatesCloseError(t *testing.T) {
-	resultErr := errors.New("repair failed")
-	closeCalls := 0
-	closeAuthorityResult(&resultErr, func() error {
-		closeCalls++
-		return errors.New("maintenance close failed")
-	})
-	for _, want := range []string{"repair failed", "maintenance close failed"} {
-		if !strings.Contains(resultErr.Error(), want) {
-			t.Fatalf("repair error = %v, want %q", resultErr, want)
-		}
-	}
-	if closeCalls != 1 {
-		t.Fatalf("maintenance close calls = %d, want 1", closeCalls)
-	}
-}
-
 func TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), "missing", "selected.db")
@@ -80,7 +59,7 @@ func TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference(t *testin
 	if code != 0 || stderr != "" {
 		t.Fatalf("store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
-	if stdout != "Project owner: no previous session is recorded.\n" {
+	if stdout != "Project owner: selected store has not been created.\n" {
 		t.Fatalf("store status = %q", stdout)
 	}
 	if strings.Contains(strings.ToLower(stdout), "context") {
@@ -93,56 +72,48 @@ func TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference(t *testin
 
 func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T) {
 	unsetStoreSelectorEnv(t)
-	sqlitePath := filepath.Join(t.TempDir(), "selected.db")
-	configPath := writeStoreAuthorityConfig(t, sqlitePath)
-	bootstrapStoreAuthoritySQLite(t, configPath, sqlitePath)
-	seedValidAuthorityHead(t, sqlitePath, "durable-status-owner")
-	possessionPath := sqlitePath + ".possession"
-	if err := os.Remove(possessionPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("remove inactive possession coordinate before read-only status: %v", err)
-	}
-	beforeInfo, err := os.Stat(sqlitePath)
+	path := filepath.Join(t.TempDir(), "selected.db")
+	configPath := writeStoreAuthorityConfig(t, path)
+	bootstrapStoreAuthoritySQLite(t, configPath, path, "durable-status-owner")
+	before, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("stat selected SQLite store before status: %v", err)
+		t.Fatal(err)
 	}
-
+	coordinate, err := os.Stat(path + ".possession")
+	if err != nil {
+		t.Fatal(err)
+	}
 	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "status")
-	if code != 0 || stderr != "" {
-		t.Fatalf("store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
+	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-status-owner).\n" {
+		t.Fatalf("read-only status: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "session durable-status-owner is recorded as active") {
-		t.Fatalf("store status = %q", stdout)
-	}
-	afterInfo, err := os.Stat(sqlitePath)
+	after, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("stat selected SQLite store after status: %v", err)
+		t.Fatal(err)
 	}
-	if beforeInfo.Size() != afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
-		t.Fatalf("store status mutated selected SQLite database: before=(%d,%s) after=(%d,%s)", beforeInfo.Size(), beforeInfo.ModTime(), afterInfo.Size(), afterInfo.ModTime())
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("status mutated selected database: before=%#v after=%#v", before, after)
 	}
-	if _, err := os.Stat(possessionPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("read-only store status created SQLite possession coordinate: %v", err)
+	afterCoordinate, err := os.Stat(path + ".possession")
+	if err != nil || !os.SameFile(coordinate, afterCoordinate) {
+		t.Fatalf("status replaced possession coordinate: %v", err)
 	}
 }
 
-func TestSQLiteAuthorityMaintenanceConstructionRetainsBackendPossession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "maintenance.db")
-	selected, err := constructAuthorityMaintenanceStore(context.Background(), storebackend.Selection{
-		Backend: storebackend.BackendSQLite, SQLitePath: path,
-	}, &config.Config{})
-	if err != nil {
-		t.Fatalf("construct SQLite authority maintenance store: %v", err)
+func TestStoreStatusRejectsMissingCoordinateWithoutRecreatingIt(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	path := filepath.Join(t.TempDir(), "selected.db")
+	configPath := writeStoreAuthorityConfig(t, path)
+	bootstrapStoreAuthoritySQLite(t, configPath, path, "inactive-owner")
+	if err := os.Remove(path + ".possession"); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = selected.Close() })
-
-	contender, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
-	if contender != nil {
-		_ = contender.Close()
-		t.Fatal("authority maintenance construction released SQLite possession before repair")
+	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "status")
+	if code == 0 || !strings.Contains(stdout+stderr, "possession coordinate was missing") {
+		t.Fatalf("status inferred live ownership from a stamp without its coordinate: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	var acquisitionErr *runtimestartupownership.AcquisitionError
-	if !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
-		t.Fatalf("authority maintenance contender error=%v, want takeover_required", err)
+	if _, err := os.Stat(path + ".possession"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only status recreated coordinate: %v", err)
 	}
 }
 
@@ -175,7 +146,7 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 	configPath := os.Getenv("SWARM_CONFIG")
 
 	stdout, stderr, code := runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
-	if code != 0 || stderr != "" || stdout != "Project owner: no previous session is recorded.\n" {
+	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available; no process generation has been admitted.\n" {
 		t.Fatalf("PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
 	var publicObjects int
@@ -187,31 +158,17 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 	}
 
 	selected := storetest.AdmitPostgresRuntimeStore(t, sandbox.DB)
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "durable-postgres-status-owner", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "postgres_retained_session")
+	})
 	if err != nil {
 		t.Fatalf("construct PostgreSQL authority: %v", err)
 	}
-	snapshot, err := canonicaljson.Bytes(authority)
-	if err != nil {
-		t.Fatalf("encode PostgreSQL authority: %v", err)
-	}
-	if _, err := storetest.DatabaseForTest(selected).ExecContext(ctx, `
-		INSERT INTO runtime_startup_authority_facts (
-			fact_id, authority_id, authority_generation, transition_ordinal,
-			state_version, state, owner_id, boot_id, runtime_instance_id,
-			backend, acquisition_id, acquisition_request_hash, acquisition_kind,
-			predecessor_authority_id, successor_authority_id, snapshot, created_at
-		) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9::uuid,$10,$11::uuid,$12,$13,NULL,NULL,$14::jsonb,$15)
-	`, uuid.NewString(), authority.AuthorityID, authority.AuthorityGeneration, authority.TransitionOrdinal,
-		authority.StateVersion, authority.State, authority.OwnerID, authority.BootID, authority.RuntimeInstanceID,
-		authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind,
-		string(snapshot), authority.RecordedAt.UTC()); err != nil {
-		t.Fatalf("seed PostgreSQL authority: %v", err)
+	if err := capability.Release(ctx); err != nil {
+		t.Fatal(err)
 	}
 	stdout, stderr, code = runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "session durable-postgres-status-owner is recorded as active") {
+	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-postgres-status-owner).\n" {
 		t.Fatalf("current PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
 }
@@ -220,10 +177,7 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 	var spec struct {
 		PlatformTables struct {
 			Tables map[string]struct {
-				PossessionLossContract struct {
-					OperationErrorRecheck string `yaml:"operation_error_recheck"`
-					TerminalReadback      string `yaml:"terminal_readback"`
-				} `yaml:"possession_loss_contract"`
+				PossessionLossContract       string `yaml:"possession_loss_contract"`
 				DiagnosticInspectionContract string `yaml:"diagnostic_inspection_contract"`
 			} `yaml:"tables"`
 		} `yaml:"platform_tables"`
@@ -232,94 +186,59 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 				Acquisition             string `yaml:"acquisition"`
 				Grants                  string `yaml:"grants"`
 				LifecycleReconciliation string `yaml:"lifecycle_reconciliation"`
-				Repair                  struct {
+				Inspection              struct {
 					Rule string `yaml:"rule"`
-				} `yaml:"repair"`
+				} `yaml:"inspection"`
 			} `yaml:"process_capability"`
 		} `yaml:"agent_topology_authority"`
 	}
 	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
-	authority := spec.PlatformTables.Tables["runtime_startup_authority_facts"]
-	for name, value := range map[string]string{
-		"operation error recheck": authority.PossessionLossContract.OperationErrorRecheck,
-		"terminal readback":       authority.PossessionLossContract.TerminalReadback,
-		"diagnostic inspection":   authority.DiagnosticInspectionContract,
-	} {
-		if !strings.Contains(value, "monitor deadline") && name != "diagnostic inspection" {
-			t.Fatalf("%s contract does not bind the configured monitor deadline: %q", name, value)
+	for _, retired := range []string{"runtime_startup_authority_facts", "runtime_startup_authority_repairs"} {
+		if _, exists := spec.PlatformTables.Tables[retired]; exists {
+			t.Fatalf("retired process journal remains in fresh DDL: %s", retired)
 		}
-		if name == "diagnostic inspection" && (!strings.Contains(value, "read-only") || !strings.Contains(value, "possession coordinate")) {
-			t.Fatalf("diagnostic inspection contract does not prohibit bootstrap mutation: %q", value)
-		}
+	}
+	generation := spec.PlatformTables.Tables["runtime_process_generation"]
+	if !strings.Contains(generation.PossessionLossContract, "monitor deadline") ||
+		!strings.Contains(generation.PossessionLossContract, "while accepted work survives") {
+		t.Fatalf("loss contract omitted bounded proof or retained possession: %q", generation.PossessionLossContract)
+	}
+	if !strings.Contains(generation.DiagnosticInspectionContract, "without mutation") ||
+		!strings.Contains(generation.DiagnosticInspectionContract, "MVCC admission snapshot") ||
+		!strings.Contains(generation.DiagnosticInspectionContract, "No inspector creates") {
+		t.Fatalf("read-only inspection contract is incomplete: %q", generation.DiagnosticInspectionContract)
 	}
 	process := spec.AgentTopologyAuthority.ProcessCapability
-	if !strings.Contains(process.Acquisition, "backend-file identity") ||
-		!strings.Contains(process.Acquisition, "pool bound to one inode") ||
-		!strings.Contains(process.Acquisition, "acquisition or repair") ||
-		!strings.Contains(process.Acquisition, "<canonical database path>.possession") ||
-		!strings.Contains(process.Acquisition, "another SQLite-managed file are prohibited") ||
-		!strings.Contains(process.Acquisition, "complete pair") ||
-		!strings.Contains(process.Acquisition, "unsupported filesystem tampering") {
-		t.Fatalf("process acquisition contract does not bind the SQLite pool and retained possession: %q", process.Acquisition)
+	for _, required := range []string{"backend-file identity", "pool bound to one inode", "<canonical database path>.possession",
+		"another SQLite-managed file are prohibited", "complete pair", "unsupported filesystem tampering",
+		"acknowledged native COMMIT", "there is no process journal"} {
+		if !strings.Contains(strings.ToLower(process.Acquisition), strings.ToLower(required)) {
+			t.Fatalf("acquisition contract omitted %q", required)
+		}
 	}
-	if !strings.Contains(process.Grants, "release error can never publish released") || !strings.Contains(process.Grants, "configured monitor deadline") {
-		t.Fatalf("process grant contract does not bind failed release classification: %q", process.Grants)
+	if !strings.Contains(process.Grants, "error can never publish successful release") || !strings.Contains(process.Grants, "configured monitor deadline") {
+		t.Fatalf("grant contract does not bind failed release classification: %q", process.Grants)
 	}
-	if !strings.Contains(process.LifecycleReconciliation, "topology_authority_kind") ||
-		!strings.Contains(process.LifecycleReconciliation, "execution_lifetime") ||
-		!strings.Contains(process.LifecycleReconciliation, "fails closed") {
-		t.Fatalf("lifecycle reconciliation contract does not bind canonical-column cross-checking: %q", process.LifecycleReconciliation)
+	for _, required := range []string{"topology_authority_kind", "execution_lifetime", "fails closed"} {
+		if !strings.Contains(process.LifecycleReconciliation, required) {
+			t.Fatalf("lifecycle census omitted %q", required)
+		}
 	}
-	if !strings.Contains(process.Repair.Rule, "every current nonterminal runtime") || !strings.Contains(process.Repair.Rule, "same transaction") {
-		t.Fatalf("authority repair contract does not bind atomic grant retirement: %q", process.Repair.Rule)
+	if !strings.Contains(process.Inspection.Rule, "cannot release") || !strings.Contains(process.Inspection.Rule, "before accepted work and exact disposal join") {
+		t.Fatalf("inspection creates early unlock permission: %q", process.Inspection.Rule)
 	}
 }
 
-func TestStoreRepairAuthorityRequiresExactFindingsAndJournalsRepair(t *testing.T) {
+func TestStoreHasNoRepairMutationCommand(t *testing.T) {
 	unsetStoreSelectorEnv(t)
-	sqlitePath := filepath.Join(t.TempDir(), "selected.db")
-	configPath := writeStoreAuthorityConfig(t, sqlitePath)
-	bootstrapStoreAuthoritySQLite(t, configPath, sqlitePath)
-	seedCorruptAuthorityHead(t, sqlitePath)
-
-	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "repair-authority")
-	if code != CLIExitValidation || stderr != "" {
-		t.Fatalf("repair inspection = code:%d stdout:%q stderr:%q", code, stdout, stderr)
+	path := filepath.Join(t.TempDir(), "uncreated", "selected.db")
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"store", "repair-authority"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "unknown command") {
+		t.Fatalf("retired repair command remains admitted: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	for _, want := range []string{
-		"The recorded project session is inconsistent.",
-		"Plan: replace only the broken session record with a clean stopped session.",
-		"Your flows, runs, and data are untouched.",
-		"Re-run with --confirm sha256:",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("repair inspection omitted %q:\n%s", want, stdout)
-		}
-	}
-	digest := regexp.MustCompile(`--confirm (sha256:[0-9a-f]{64})`).FindStringSubmatch(stdout)
-	if len(digest) != 2 {
-		t.Fatalf("repair inspection omitted exact findings digest:\n%s", stdout)
-	}
-
-	stdout, stderr, code = runStoreAuthorityCommand(t, configPath, "repair-authority", "--confirm", digest[1])
-	if code != 0 || stderr != "" {
-		t.Fatalf("confirmed repair = code:%d stdout:%q stderr:%q", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "✓ Project ownership repaired. Your flows, runs, and data were untouched.") {
-		t.Fatalf("confirmed repair transcript:\n%s", stdout)
-	}
-
-	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("open repaired store: %v", err)
-	}
-	defer selected.Close()
-	var repairs int
-	if err := storetest.DatabaseForTest(selected).QueryRow(`SELECT COUNT(*) FROM runtime_startup_authority_repairs`).Scan(&repairs); err != nil {
-		t.Fatalf("read authority repair journal: %v", err)
-	}
-	if repairs != 1 {
-		t.Fatalf("authority repair journal rows = %d, want 1", repairs)
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unknown command touched selected-store infrastructure: %v", err)
 	}
 }
 
@@ -337,7 +256,7 @@ func runStoreAuthorityCommandWithStore(t *testing.T, configPath, backend string,
 	return stdout.String(), stderr.String(), code
 }
 
-func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath string) {
+func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID string) {
 	t.Helper()
 	paths, err := ResolveCLISourcePlatformSpecPaths(RepoRoot(), CLISourcePlatformSpecPathOptions{
 		ConfigPath: configPath,
@@ -354,7 +273,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath string) 
 	if err != nil {
 		t.Fatalf("generate selected-store schema plans: %v", err)
 	}
-	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(context.Background(), sqlitePath)
 	if err != nil {
 		t.Fatalf("open selected SQLite store: %v", err)
 	}
@@ -368,6 +287,18 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath string) 
 	}); err != nil {
 		t.Fatalf("bootstrap selected SQLite store: %v", err)
 	}
+	capability, err := selected.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+		OwnerID: ownerID, BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := capability.ProveCurrent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := capability.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeStoreAuthorityConfig(t *testing.T, sqlitePath string) string {
@@ -375,59 +306,4 @@ func writeStoreAuthorityConfig(t *testing.T, sqlitePath string) string {
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, path, fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", sqlitePath))
 	return path
-}
-
-func seedCorruptAuthorityHead(t *testing.T, sqlitePath string) {
-	t.Helper()
-	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("open selected store: %v", err)
-	}
-	defer selected.Close()
-	authorityID := uuid.NewString()
-	_, err = storetest.DatabaseForTest(selected).Exec(`
-		INSERT INTO runtime_startup_authority_facts (
-			fact_id, authority_id, authority_generation, transition_ordinal,
-			state_version, state, owner_id, boot_id, runtime_instance_id,
-			backend, acquisition_id, acquisition_request_hash, acquisition_kind,
-			predecessor_authority_id, successor_authority_id, snapshot
-		) VALUES (?, ?, 1, 1, 1, 'active', 'broken-owner', ?, ?,
-			'sqlite_retained_owner', ?, ?, 'cold', NULL, NULL, '{}')
-	`, uuid.NewString(), authorityID, uuid.NewString(), uuid.NewString(), uuid.NewString(), strings.Repeat("a", 64))
-	if err != nil {
-		t.Fatalf("seed corrupt authority head: %v", err)
-	}
-}
-
-func seedValidAuthorityHead(t *testing.T, sqlitePath, ownerID string) {
-	t.Helper()
-	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("open selected store: %v", err)
-	}
-	defer selected.Close()
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: ownerID, BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "sqlite_retained_owner")
-	if err != nil {
-		t.Fatalf("construct valid authority: %v", err)
-	}
-	snapshot, err := canonicaljson.Bytes(authority)
-	if err != nil {
-		t.Fatalf("encode valid authority: %v", err)
-	}
-	_, err = storetest.DatabaseForTest(selected).Exec(`
-		INSERT INTO runtime_startup_authority_facts (
-			fact_id, authority_id, authority_generation, transition_ordinal,
-			state_version, state, owner_id, boot_id, runtime_instance_id,
-			backend, acquisition_id, acquisition_request_hash, acquisition_kind,
-			predecessor_authority_id, successor_authority_id, snapshot, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-	`, uuid.NewString(), authority.AuthorityID, authority.AuthorityGeneration, authority.TransitionOrdinal,
-		authority.StateVersion, authority.State, authority.OwnerID, authority.BootID, authority.RuntimeInstanceID,
-		authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind,
-		string(snapshot), authority.RecordedAt.UTC())
-	if err != nil {
-		t.Fatalf("seed valid authority head: %v", err)
-	}
 }

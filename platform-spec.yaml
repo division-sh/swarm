@@ -7320,7 +7320,7 @@ engine:
           no bounded successor-acquisition promise is made. Unsafe paths, invalid configuration and listener
           conflicts remain errors, not permission to bypass waiting or create a second scope dimension.
         scope: |
-          SQLite startup ownership retains an operating-system lock only on the persistent `<canonical database path>.possession` coordinate on a supported local filesystem, preventing competing runtime processes from acquiring the same selected store without contending with SQLite's engine locks. The coordinate is derived from the canonical database parent and basename, is never database identity, and is retained as a second exact identity alongside the canonical database resource. Swarm never deletes, replaces, migrates, exports, or rotates the coordinate. No advisory lock may target the database, WAL, journal, SHM, or another SQLite-managed file. Missing or replaced database/coordinate identity fails closed and terminalizes retained authority as ownership_unprovable. Deliberate same-user coordinate replacement is unsupported filesystem tampering, not a hostile-filesystem exclusion guarantee. This exact process-capability lock does not promote general production multi-writer SQLite semantics. One process capability owns the complete boot-selected source set and issues one revocable grant per admitted runtime generation. Shared-store consumers execute only under those grants: pipeline maintenance, system nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. A process epoch does not replace, reload, add, or remove a loaded source. Shutdown quiesces and joins every admitted consumer while its exact grant remains current before retiring process authority. Destructive reset may clear the complete source set only through its named fail-closed reset operation; it is not a source-replacement mechanism. Issuing two live grants for the same runtime coordinate and generation is prohibited. Runtime loops inherit the serve-process lifetime context; bounded startup, recovery, reset, and shutdown operation contexts MUST NOT become their post-commit lifetime owner. A committed startup handoff is retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable; retry consumes the same handoff and cannot reacquire, infer, or publish metadata-only authority. PostgreSQL startup ownership retains one private session authority from advisory-lock acquisition through every persisted authority transition and exact unlock. Transition transactions reuse that session, including with a one-connection pool. Public connection or transaction context values are not ownership authority. Unlock must execute through the retained session and return true; release errors are returned rather than converted into successful retirement.
+          SQLite startup ownership retains an operating-system lock only on the persistent `<canonical database path>.possession` coordinate on a supported local filesystem, preventing competing runtime processes from acquiring the same selected store without contending with SQLite's engine locks. The coordinate is derived from the canonical database parent and basename, is never database identity, and is retained as a second exact identity alongside the canonical database resource. Swarm never deletes, replaces, migrates, exports, or rotates the coordinate. No advisory lock may target the database, WAL, journal, SHM, or another SQLite-managed file. Missing or replaced database/coordinate identity fails closed and terminalizes retained authority as ownership_unprovable. Deliberate same-user coordinate replacement is unsupported filesystem tampering, not a hostile-filesystem exclusion guarantee. This exact process-capability lock does not promote general production multi-writer SQLite semantics. One process capability owns the complete boot-selected source set and issues one revocable grant per admitted runtime generation. Shared-store consumers execute only under those grants: pipeline maintenance, system nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. A process epoch does not replace, reload, add, or remove a loaded source. Shutdown quiesces and joins every admitted consumer while its exact grant remains current before retiring process authority. Destructive reset may clear the complete source set only through its named fail-closed reset operation; it is not a source-replacement mechanism. Issuing two live grants for the same runtime coordinate and generation is prohibited. Runtime loops inherit the serve-process lifetime context; bounded startup, recovery, reset, and shutdown operation contexts MUST NOT become their post-commit lifetime owner. A committed startup handoff is retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable; retry consumes the same handoff and cannot reacquire, infer, or publish metadata-only authority. PostgreSQL startup ownership retains one private session authority from blocking advisory-lock acquisition through bootstrap, acknowledged singleton generation publication, current-grant operations and exact unlock. Owned transactions reuse that session, including with a one-connection pool. The last admitted stamp is unchanged by joined release and is not live-holder evidence. Public connection or transaction context values are not ownership authority. Unlock must execute through the retained session and return true; release errors are returned rather than converted into successful retirement.
         terminal_cleanup: >
           Terminal process-possession evidence remains a failure in the returned shutdown result and never restores
           execution, visibility or grant authority. The process supervisor distinguishes that evidence from actual
@@ -15577,8 +15577,6 @@ platform_tables:
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
         - runtime_process_generation
-        - runtime_startup_authority_facts
-        - runtime_startup_authority_repairs
         - runtime_generation_grants
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
@@ -15620,7 +15618,7 @@ platform_tables:
       - PostgreSQL ordering acquisition reads the existing singleton with FOR UPDATE without issuing a redundant initialization write. An absent singleton is initialized in that same transaction, followed by a fresh locking read so concurrent initialization cannot leave stale or missing sequence evidence. This physical optimization does not cache ordering facts across native transactions, omit the mutation fence, or allocate an occurrence.
       - The native pooled, retained PostgreSQL and SQLite settlement owners bind one private ordering-possession scope to the exact SQL transaction and dialect without acquiring the fence early. Its first consumer retains the existing exclusive singleton acquisition and lock order; later consumers may reuse only that still-active exact transaction's proven possession, checking cancellation even when no SQL acquisition is needed. One story batch consumes its locked sequence and retains the exact advancement CAS. Commit, rollback, panic cleanup and every native retry retire the predecessor scope; RevisionOnly, a context boolean, a foreign transaction or an ended scope is not possession. This scope never caches generation, process, run, binding or expiry authorization and cannot lend SQL control or change the physical lock lifetime.
       - Agent lifecycle mutations, including retained selected-fork grant authorization and deferred termination, acquire that story lock before locking the run or selected execution. Authorization still precedes every domain mutation in the same transaction; it cannot invert the story/run order or be moved outside the transaction.
-      - Generation-authority mutation fencing reuses this existing selected-store ordering coordinate. Pooled delivery claims, retained lifecycle mutations, grant proof and transition, explicit retirement, bulk takeover/authority repair, and retained reset cleanup acquire it before authority-head, run, execution/binding, lifecycle-cell or grant-fact locks. Selected grant foreign-key acquisitions occur while this fence is held. Grant facts are append-only; mutation authorization reads the actual current head after fence acquisition, not a historical head selected before waiting. The fence lasts through commit or rollback. Claim-wins blocks retirement until that mutation ends; retirement-wins admits no new attempt or claim version. Cancelled waiters and failed mutations change neither grant nor domain state. This ordering does not allocate author occurrences or change previously accepted provider-tail settlement rights. No new registry, per-process mutex permission, or once-latest-row lock substitutes for the shared transaction fence.
+      - Generation-authority mutation fencing reuses this existing selected-store ordering coordinate. Pooled delivery claims, retained lifecycle mutations, grant proof and transition, explicit retirement, process-generation admission with predecessor grant retirement, and retained reset cleanup acquire it before process-generation, run, execution/binding, lifecycle-cell or grant-fact locks. Selected grant foreign-key acquisitions occur while this fence is held. Grant facts are append-only; mutation authorization reads the actual current head after fence acquisition, not a historical head selected before waiting. The fence lasts through commit or rollback. Claim-wins blocks retirement until that mutation ends; retirement-wins admits no new attempt or claim version. Cancelled waiters and failed mutations change neither grant nor domain state. This ordering does not allocate author occurrences or change previously accepted provider-tail settlement rights. No new registry, per-process mutex permission, or once-latest-row lock substitutes for the shared transaction fence.
       - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
       - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
       - A named selected-store mutation attempt binds one native transaction, its evidence mode, retry-local result, story drafts, declared historical effects, and any completion-candidate reservation. Only the private lifecycle owner may finalize evidence or interpret native COMMIT acknowledgement. Retry discards the failed attempt's drafts, generated identities, results, and reservations while retaining explicit baseline declarations and the operation's occurrence lease. A positive COMMIT acknowledgement exposes only that attempt's typed result; later cleanup or handoff failure cannot erase it. Runtime consumers of that result MUST complete the exact committed finalization and dispatch before reporting the joined post-commit error, and MUST NOT release or retry it as an uncommitted attempt. Missing acknowledgement exposes no attempt value and fails closed, but is not proof of rollback. A completion candidate is reserved only from its canonical durable request in the same attempt and is submitted only after acknowledged COMMIT. Standalone and composed writers join this same attempt rather than pair unrelated transaction, story, revision, and handoff values.
@@ -18242,6 +18240,22 @@ platform_tables:
         Exact same-lease replay preserves generation; conflicting identity fails. No capability is published
         from an unacknowledged commit. Process release leaves the last stamp intact; actual possession,
         not a persisted active flag or lower counter, governs current serving permission. Reset preserves it.
+      possession_loss_contract: >-
+        Operation cancellation is not possession loss. Independent native proof and current-stamp decoding remain
+        serialized with the retained owner; local waiting is neutral and the configured monitor deadline starts after serialization.
+        Failed native possession or malformed/mismatched current data irreversibly fences new work and local grants.
+        SQLite uses its private reserved proof connection rather than workload-pool admission. Neither local fencing
+        nor a failed diagnostic read releases a still-held lease while accepted work survives. Readback and cleanup
+        remain owned and joined. Only an independently decoded newer current stamp may enrich an already-fenced
+        diagnostic as ownership_superseded; it cannot revive permission or authorize successor acquisition.
+        Actual joined release or process death, not a durable terminal row, releases possession. Remote PostgreSQL
+        disposal can outlive local death. The serving exit deadline observes actual internal and external stop.
+      diagnostic_inspection_contract: >-
+        Inspection reads the singleton without mutation and observes native lease availability independently of an
+        MVCC admission snapshot. The last admitted stamp is separately labeled and is not inferred to be the holder.
+        A holder may still be bootstrapping before advancing the row. An absent store or empty catalog has no admitted
+        stamp; initialized missing or malformed rows fail closed. No inspector creates a parent, database, coordinate,
+        schema, process generation, registration or receipt. The retired journal/repair tables are unsupported.
       ddl: |
         CREATE TABLE runtime_process_generation (
             singleton_id        INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -18252,91 +18266,6 @@ platform_tables:
             runtime_instance_id UUID,
             backend             TEXT CHECK (backend IN ('postgres_retained_session', 'sqlite_retained_owner')),
             CHECK ((generation = 0 AND lease_id IS NULL AND owner_id IS NULL AND boot_id IS NULL AND runtime_instance_id IS NULL AND backend IS NULL) OR (generation > 0 AND lease_id IS NOT NULL AND owner_id IS NOT NULL AND boot_id IS NOT NULL AND runtime_instance_id IS NOT NULL AND backend IS NOT NULL))
-        );
-    runtime_startup_authority_facts:
-      description: >-
-        Append-only typed evidence for the one process-composition-owned retained selected-store
-        capability. authority_generation is the sole global ordering authority; timestamps are
-        diagnostic evidence only and storage timestamp precision never participates in snapshot
-        validity or authority matching. Acquisition is bound to one exact boot/request hash. Every
-        readback recomputes the acquisition ID, request hash, and deterministic authority ID from
-        the canonical acquisition fields and rejects evidence whose backend differs from the
-        selected adapter. A crash takeover atomically supersedes the exact active predecessor, retires that predecessor's
-        new-work grants, and appends its successor after backend-exclusive possession has already
-        been proved. Operator authority repair atomically retires every current nonterminal new-work grant before
-        recording completion, while delivery continuations and provider drains remain unchanged. Runtime generations consume revocable grants and cannot acquire, release,
-        copy, infer, or replace this authority.
-      possession_loss_contract:
-        operation_error_recheck: >-
-          A selected-store operation error is not itself ownership loss. The existing process capability performs an
-          independent possession proof. Its configured monitor deadline starts only after that serialized proof owns the session,
-          not while waiting behind healthy admitted work. Failure to complete proof within budget irreversibly fences
-          local execution admission and generation grants as ownership_unprovable without waiting on stalled SQL or an
-          operation/grant mutex held across it. This is a local permission decision, not proof of physical database loss,
-          completed SQL cleanup or released remote possession. Outstanding proof SQL and cleanup remain owned and joined.
-          SQLite reproof uses the process session's private reserved connection, not ordinary workload pool admission;
-          its deadline is not postponed by pool pressure. Failed durable release retains that resource for reproof.
-        terminal_readback: >-
-          Observed retained-session disposal or unexpected SQLite possession-coordinate release fences the capability
-          and local grants before optional successor-lineage readback. Only exact validated lineage may enrich diagnostics
-          as ownership_superseded; missing, unavailable or malformed readback cannot delay the safety decision. Readback
-          and cleanup remain owned and joined. Late successful SQL, transitions or diagnostic enrichment cannot revive
-          retired capability/grants or authorize takeover. SQLite successor readback uses fresh autocommit reads on
-          the same retained proof connection. Local fencing precedes optional bounded readback, and readback completion
-          closes the resource and restores its reservation. The monitor deadline is not a universal query or shutdown timeout.
-      diagnostic_inspection_contract: >-
-        `swarm store status` is read-only. It never creates a SQLite parent, database file, or possession coordinate, bootstraps or origin-stamps
-        either selected store, or creates PostgreSQL schema objects. An absent SQLite target or an empty PostgreSQL/SQLite
-        catalog reports the canonical empty authority inspection. Existing SQLite inspection opens the selected file in
-        read-only mode. A non-empty catalog missing the authority table fails closed instead of being reported as empty.
-        Serve startup and explicit repair remain the only consumers here that may invoke schema bootstrap or mutation.
-      ddl: |
-        CREATE TABLE runtime_startup_authority_facts (
-            fact_id             UUID PRIMARY KEY,
-            authority_id        UUID NOT NULL,
-            authority_generation BIGINT NOT NULL CHECK (authority_generation > 0),
-            transition_ordinal  BIGINT NOT NULL CHECK (transition_ordinal > 0),
-            state_version       BIGINT NOT NULL CHECK (state_version > 0),
-            state               TEXT NOT NULL CHECK (state IN ('active','released','superseded')),
-            owner_id            TEXT NOT NULL,
-            boot_id             UUID NOT NULL,
-            runtime_instance_id UUID NOT NULL,
-            backend             TEXT NOT NULL,
-            acquisition_id      UUID NOT NULL,
-            acquisition_request_hash TEXT NOT NULL CHECK (length(acquisition_request_hash) = 64),
-            acquisition_kind    TEXT NOT NULL CHECK (acquisition_kind IN ('cold','clean_handoff','crash_takeover','authority_repair')),
-            predecessor_authority_id UUID,
-            successor_authority_id UUID,
-            snapshot            JSONB NOT NULL,
-            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((authority_generation = 1 AND predecessor_authority_id IS NULL AND acquisition_kind = 'cold') OR (authority_generation > 1 AND predecessor_authority_id IS NOT NULL AND acquisition_kind IN ('clean_handoff','crash_takeover','authority_repair'))),
-            CHECK ((state = 'superseded') = (successor_authority_id IS NOT NULL)),
-            UNIQUE (authority_generation, transition_ordinal),
-            UNIQUE (authority_id, transition_ordinal),
-            UNIQUE (authority_id, state_version),
-            INDEX idx_runtime_startup_authority (authority_generation, transition_ordinal),
-            INDEX idx_runtime_startup_acquisition (acquisition_id, transition_ordinal),
-            INDEX idx_runtime_startup_boot (boot_id, created_at)
-        );
-    runtime_startup_authority_repairs:
-      description: >-
-        Immutable operator repair journal for corrupt process-authority evidence. Repair first
-        proves exclusive selected-store possession, refuses live holders and unprovable SQLite
-        filesystems, verifies the exact findings digest, and appends a terminal monotonic repair
-        authority while atomically retiring every current nonterminal runtime-generation new-work grant.
-        It never mutates flows, runs, events, topology, continuations, drains, or user
-        data. This table is not a serve takeover or compatibility surface.
-      ddl: |
-        CREATE TABLE runtime_startup_authority_repairs (
-            operation_id          UUID PRIMARY KEY,
-            request_hash          TEXT NOT NULL CHECK (request_hash ~ '^sha256:[0-9a-f]{64}$'),
-            findings_digest       TEXT NOT NULL CHECK (findings_digest ~ '^sha256:[0-9a-f]{64}$'),
-            backend               TEXT NOT NULL CHECK (backend IN ('postgres_retained_session','sqlite_retained_owner')),
-            before_snapshot       JSONB NOT NULL,
-            repaired_authority_id UUID NOT NULL,
-            authority_generation BIGINT NOT NULL CHECK (authority_generation > 0),
-            result                JSONB NOT NULL,
-            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     runtime_generation_grants:
       description: >-
@@ -27317,12 +27246,7 @@ cli_specification:
               command: swarm store status
               classification: split
               owner_issue: '#2157'
-              reason: selected-store ownership status has the fixed human transcript required by the process-capability repair contract; shared output modes are outside this child.
-            store_repair_authority:
-              command: swarm store repair-authority
-              classification: split
-              owner_issue: '#2157'
-              reason: the exact-digest repair ceremony has the fixed human transcript required by the process-capability repair contract; shared output modes are outside this child.
+              reason: selected-store ownership status has the fixed human lease transcript; shared output modes are outside this child.
             describe:
               command: swarm describe
               classification: shared_output
@@ -28226,27 +28150,22 @@ cli_specification:
       - trusted runtime identity and context registry consumption
       - store/data migration and swarm run start behavior
     store:
-      command: swarm store <status|repair-authority>
+      command: swarm store status
       group: getting_started
       tier: must_have
       implementation_status: implemented
-      owner: agent_topology_authority.process_capability.repair
+      owner: agent_topology_authority.process_capability.inspection
       behavior: >-
         `swarm store status` opens the independently selected current-format runtime store and renders exactly one
-        human Project owner line from the canonical durable authority inspection owner. It never interprets local
-        context registration, descriptors, PIDs, endpoints, or elapsed time as possession. `swarm store
-        repair-authority` is the only operator repair ceremony: it reports exact findings and its bounded plan,
-        states that flows, runs, and data are untouched, and requires the exact current findings digest through
-        `--confirm` before mutation. Repair first proves exclusive backend possession, refuses a live holder, alias,
-        replaced SQLite identity, or unsupported/unprovable filesystem, and journals the result atomically with the
-        repaired terminal authority. There is no serve force flag, store adoption, migration, compatibility decoder,
-        or context-selected store.
+        human Project owner line from the canonical current-generation reader and independent point-in-time native
+        lease observation. The last admitted stamp is not necessarily the holder, which may still be bootstrapping.
+        It never interprets local context registration, descriptors, PIDs, endpoints, or elapsed time as possession.
+        No parent, database, coordinate, schema or generation row is created by inspection. Missing initialized
+        singleton data or malformed identity fails closed. There is no repair command, journal, serve force flag,
+        store adoption, migration, compatibility decoder or context-selected store.
       subcommands:
         status:
-          output: 'Project owner: <canonical selected-store inspection>'
-        repair_authority:
-          confirmation: --confirm <sha256 findings digest>
-          user_data: untouched
+          output: 'Project owner: <native lease observation; separately labeled last admitted generation>'
     test:
       command: swarm test [directory] [scenario-label] [--derive <flow>] [--input <pin>|--all-inputs] [--timeout <duration>] [--poll-interval <duration>] [--workspace-backend host|docker]
       group: author_validate
@@ -40954,7 +40873,7 @@ agent_topology_authority:
       filesystem. It acquires and revalidates that coordinate before creating or opening a fresh database or allowing pool
       and schema mutation. The coordinate is engine-lock-disjoint: advisory locks on the database, WAL, journal, SHM, or
       another SQLite-managed file are prohibited. One opaque possession records both the resulting immutable backend-file
-      identity and the exact coordinate identity. Every later acquisition or repair must lock and match that complete pair
+      identity and the exact coordinate identity. Every later acquisition must lock and match that complete pair
       before selected-store mutation; a pool bound to one inode and a possession value bound to another database or
       coordinate fails closed. Swarm never deletes, replaces, rotates, migrates, or exports the coordinate. Missing or
       replaced database/coordinate identity terminalizes the retained process capability as ownership_unprovable.
@@ -40963,17 +40882,19 @@ agent_topology_authority:
       ordinary workload capacity; an unlimited pool remains unlimited. Reservation and partial startup failures
       close the proof resource and release possession. This is not another database open, pool, or authority.
       Deliberate same-user coordinate replacement is unsupported filesystem tampering and is not claimed as a hostile
-      zero-overlap boundary. Only then may the same retained capability lock and classify the global durable authority head. A valid active
-      predecessor with absent backend possession is atomically superseded, every predecessor new-work grant is
-      retired, and one monotonic successor authority generation is appended in the same transaction. Source-set
-      topology, durable delivery continuations, and provider drains are distinct facts and remain unchanged.
-      Inspection, acquisition, terminal successor readback, and repair revalidation consume one selected-store
-      authority decoder. It requires the authority backend to equal the active adapter, every terminal row to follow
-      its exact active row, every clean-handoff or crash-takeover generation to follow the immediately preceding
-      persisted generation with the declared released or superseded state, and every repair generation to match its
-      immutable repair journal. Isolated row validity, synchronized row/snapshot agreement, or a raised generation
-      is never lineage proof. Exact acquisition replay is idempotent; conflicting replay and corrupt or contradictory evidence fail closed.
-      PIDs, descriptors, endpoints, hostnames, heartbeats, timestamps, and elapsed time never authorize takeover.
+      zero-overlap boundary. The retained native owner then advances the one runtime_process_generation row
+      under the existing mutation fence and atomically retires the preceding process's new-work grants.
+      Each actual native acquisition mints a distinct lease ID, including reacquisition with identical boot inputs;
+      exact row replay is permitted only inside that same retained lease. Fresh bootstrap alone creates the
+      zero-generation singleton; an initialized missing or malformed row is an error, never a repair or reseed.
+      Source-set topology, durable delivery continuations, and provider drains are distinct facts and remain unchanged.
+      Capability publication consumes an acknowledged native COMMIT, reproves possession, and checks cancellation
+      before returning. Lost acknowledgment or cancellation disposes the exact native owner without publishing a
+      capability or replaying an ambiguous session. A later native owner advances any actually committed stamp.
+      The generationauthority reader beside the existing mutation fence owns strict stamp decoding and comparison.
+      One well-formed row, matching UUIDs, or a lower generation is not native possession or historical provenance.
+      There is no process journal, clean/crash classification, repair operation, announcement, or steal protocol.
+      PIDs, descriptors, endpoints, hostnames, heartbeats, timestamps, and elapsed time never authorize acquisition.
       SQLite aliases, construction/backend identity mismatch, replaced file identity, and unsupported or unprovable filesystems fail closed without mutation.
     grants: >-
       Normal startup and source-set refresh require the LiveGenerationGrant interface; SourceSetPlan
@@ -40988,19 +40909,20 @@ agent_topology_authority:
       session, process capability, and grants. An independent exact proof or the separately owned
       possession monitor decides whether ownership was actually lost; caller cancellation is never
       translated into ownership_unprovable. SQLite ordinary proof, operation-error and failed-release reproof use
-      the same privately retained connection for fresh autocommit authority reads, never pooled fallback, cached
-      health, or a retained read transaction. Failed durable release retains proof access for independent reproof
-      and monitor rearming. Successful durable and possession release close it and restore its reservation;
+      the same privately retained connection for fresh autocommit generation reads, never pooled fallback, cached
+      health, or a retained read transaction. Cancellation before release I/O preserves that access for independent
+      reproof and monitor rearming. Joined proof closure and native possession release restore its reservation;
       selected-backend disposal cancels and joins pending retention and closes all retained proof resources.
       PostgreSQL checks operation admission before starting owned SQL,
       drains admitted BEGIN/statements/results and checks explicit cancellation before COMMIT admission. After
       COMMIT admission the actual acknowledged outcome or uncertainty governs; later cleanup errors do not erase
       acknowledged commit. The retained session owns outstanding SQL until commit/rollback and cleanup join. Retained-session release
-      is terminal only after the durable release and backend-possession release both succeed. If release fails,
+      is terminal only after the accepted consumers and backend-possession release both join. Release does not
+      rewrite the last-admitted generation. If release fails,
       one independent proof uses the capability's configured monitor deadline as a local-fencing budget: exact
       current possession keeps the same capability live and re-arms its monitor while already committed grant
       retirements remain retired; failed or unprovable possession terminalizes as ownership_unprovable. A release
-      error can never publish released. The proof budget starts only after independent proof owns the serialized
+      error can never publish successful release. The proof budget starts only after independent proof owns the serialized
       session; it does not expire while queued behind healthy admitted work. Missing that budget fences local
       grants/readiness without waiting on stalled SQL or grant/operation mutexes. This may withdraw availability
       from a healthy silent server and does not prove remote release. All outstanding proof/readback/cleanup remains
@@ -41075,28 +40997,27 @@ agent_topology_authority:
       release therefore retains loss observation. The first failed proof terminalizes exactly once
       as ownership_unprovable. ownership_superseded requires exact durable successor authority evidence and is never
       inferred from probe failure. Monitor failure cannot append or authorize a successor.
-    repair:
-      owner: one private selected-store authority inspection and repair adapter
+    inspection:
+      owner: the canonical generation reader plus the independent native possession observer
       rule: >-
-        Inspection reads exact durable evidence without inferring liveness. Repair is a separate journaled operator
-        operation, never a serve flag. It requires exclusive retained backend possession plus the exact confirmed
-        findings digest, refuses a proven live holder and unprovable SQLite identity, appends one monotonic terminal
-        authority repair and immutable repair journal atomically, and retires every current nonterminal runtime
-        generation new-work grant in that same transaction without relying on corrupt authority identity. It cannot mutate source sets, lifecycle topology,
-        deliveries, drains, flows, runs, events, or user data.
-        Repair lineage is derived from the trusted repair operation and findings digest, never from malformed
-        authority, boot, runtime, predecessor, successor, or snapshot fields; the exact untrusted row survives only
-        as immutable before-snapshot journal evidence.
+        Read-only inspection reports the last admitted stamp separately from point-in-time native availability.
+        A new holder may still be bootstrapping before publication; the stamp never identifies a live holder by itself.
+        Store admission snapshots consume only the generation reader within their existing read transaction;
+        the separate native observer runs outside that snapshot and grants no serving or mutation permission.
+        Corrupt initialized generation state fails closed. No repair command, mutable inspection, findings digest,
+        retained-history scan or journal can recreate permission. SQLite terminal notification fences local execution
+        but cannot release its proof access or flock before accepted work and exact disposal join.
     presentation: >-
-      Automatic crash takeover prints at most `✓ Recovered previous session`. A live holder refusal says another
-      swarm serve is running, includes its durable recorded start age when available, and tells the operator to stop
-      it or serve a different project. Exact successor loss says `This serve lost ownership to a newer serve and is
+      Serving exposes an alive/not-ready probe while blocking on native possession; a healthy incumbent is not
+      refused or assigned an inferred start age. Read-only store status names native held/available and, separately,
+      the last admitted generation and owner when present. It never infers recovery from a prior stamp.
+      Exact successor loss says `This serve lost ownership to a newer serve and is
       shutting down.` Unprovable ownership says `This serve can no longer verify project ownership and is shutting
       down.` Either proven ownership-loss outcome cancels serve and returns a nonzero process status; ordinary
       external cancellation remains a successful shutdown. Ownership loss may make durable finalization unprovable,
       but it cannot skip process-local runtime deactivation and join; finalization and shutdown errors are retained
       together, and the selected store remains open unless the process work owner joins successfully. Lease, grant,
-      generation, authority, and fencing vocabulary is never exposed on these human surfaces.
+      generation, authority, and fencing vocabulary is not injected into the serving lifecycle transcript.
       `--context` owns endpoint registration only and never selects a store or resolves same-store ownership.
     forbidden: >-
       Runtime acquisition or release, memory fallback, copied-evidence authority, borrowed
@@ -41416,7 +41337,7 @@ managed_agent_capability_surface:
       retained_context_lifetime: After successful execution closure and activation of an active fork, the selected execution owner explicitly transfers its exact bound context and retained projection resources from synchronous orchestration to process-owned controls. Request completion settles the orchestration lease, not the selected occurrence or retained process ownership. Terminal or failed operations release their own resources after settlement. The selected owner registers preparation before loading and publishes materialization and its exact binding under the same admission boundary consumed by stop and retirement. Reset and process shutdown retire this owner, reject further preparation, cancel accepted operations, join their disposition and retained contexts, and only then permit process join and store release. A retired owner is terminal; fresh process composition, or fresh same-process composition under the retained-source reset supervisor after exact predecessor join, must construct a new owner rather than reopening it or adopting old tokens. The selected-store RunFork boundary owns reset-successor construction, and the process supervisor retains all unjoined candidate responsibility through convergence and final store release.
       selected_stop_commit: The named selected-fork stop operation consumes an exact durable binding and current process possession. Both selected stores reprove those facts in the terminal transaction, serialize against execution claim through the run lock, reject unsettled running execution, and consume the existing run-lifecycle terminalization owner. A prepared but unclaimed execution is terminally closed with cancellation evidence and a new fence in the same transaction, so a late claim cannot execute it. An admitted stop use remains process-owned while selected execution settles and joins; that stop owns terminal disposition, and execution failure cleanup must not separately discard its fork. A conflicting binding, stale process or failed terminal mutation changes no run, delivery, control or author-activity state. Terminal repeats retain the existing run-control refusal. This operation grants no ordinary ingress, historical replay, deferred execution or loaded-runtime authority.
       selected_stop_fork_point: Selected stop validates the exact closed fork-point kind, positive revision and event-ID correspondence in its durable binding. An event point requires its canonical event ID; a deployment revision has no event ID. Terminal repeat refusal and control/readback-only recovery apply to both kinds.
-      startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, strict persisted preparation and fingerprint, and recorded predecessor ancestry; a different UUID or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Outside the exact selected_deployment_feed_recovery exception, recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery reconstructs an exact keyed run.fork result only from the permanent fork-operation record after activation; the expiring API cache is not result authority.
+      startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, the original native admitted preparation and its fingerprint, exact persisted execution/fork/source/point/declaration/origin provenance, and a strictly earlier admitted process generation; a different UUID, lower counter alone or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Outside the exact selected_deployment_feed_recovery exception, recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery reconstructs an exact keyed run.fork result only from the permanent fork-operation record after activation; the expiring API cache is not result authority.
       selected_deployment_feed_recovery: >
         An interrupted selected execution may resume only a durably admitted finite deployment-feed phase under
         the same child and permanent fork operation. The process supervisor owns the rebuilt selected container;

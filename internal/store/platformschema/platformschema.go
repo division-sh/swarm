@@ -287,7 +287,7 @@ func platformTableOrder(name string) int {
 		return 57
 	case "agent_sessions":
 		return 60
-	case "runtime_process_generation", "runtime_startup_authority_facts":
+	case "runtime_process_generation":
 		return 61
 	case "runtime_generation_grants":
 		return 61

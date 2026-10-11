@@ -28,7 +28,7 @@ func SelectedStoreDependentAdmissionChecks() []SelectedStoreAdmissionCheck {
 		{"pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources"},
 		{"retained_source_integrity", "internal/runtime/startuprecovery.Inspect"},
 		{"startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission"},
-		{"startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection"},
+		{"startup_process_generation", "internal/runtime/startupownership.AdmitAuthorityInspection"},
 		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
 		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
 		{"retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations"},

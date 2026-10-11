@@ -119,7 +119,7 @@ func (o SelectedContractExecutionOwner) requirePreparationProcess(ctx context.Co
 	}
 	if got.AuthorityID != want.AuthorityID || got.AuthorityGeneration != want.AuthorityGeneration ||
 		got.OwnerID != want.OwnerID || got.BootID != want.BootID || got.RuntimeInstanceID != want.RuntimeInstanceID ||
-		got.AcquisitionID != want.AcquisitionID || got.Backend != want.Backend {
+		got.Backend != want.Backend {
 		return errors.New("selected preparation process capability differs from its bound owner")
 	}
 	return nil

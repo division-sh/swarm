@@ -21,7 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -273,14 +273,15 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatalf("create replacement SQLite identity: %v", err)
 	}
-	contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
-	if contender != nil {
-		_ = contender.Close()
-		t.Fatal("replaced SQLite path admitted a concurrent process constructor while its possession coordinate was held")
+	inspection, err := storeselected.OpenAdmissionInspection(ctx, storeselected.AuthorityRequest{Selection: storebackend.Selection{
+		Backend: storebackend.BackendSQLite, SQLitePath: path,
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var contenderAcquisitionErr *runtimestartupownership.AcquisitionError
-	if !errors.As(contenderErr, &contenderAcquisitionErr) || contenderAcquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
-		t.Fatalf("replaced-path contender error=%v, want takeover_required", contenderErr)
+	defer inspection.Close()
+	if observation, err := inspection.ProbePossession(ctx); err != nil || observation.Available {
+		t.Fatalf("replaced database path bypassed the retained possession coordinate: %#v, %v", observation, err)
 	}
 
 	capability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
@@ -292,12 +293,12 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	}
 	requireSQLiteBackendIdentityRefusal(t, err)
 
-	var authorityRows int
-	if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&authorityRows); err != nil {
+	var authorityRows, generation int
+	if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(ctx, `SELECT COUNT(*), generation FROM runtime_process_generation`).Scan(&authorityRows, &generation); err != nil {
 		t.Fatalf("read constructed SQLite authority rows: %v", err)
 	}
-	if authorityRows != 0 {
-		t.Fatalf("constructed SQLite backend gained %d authority rows after identity replacement", authorityRows)
+	if authorityRows != 1 || generation != 0 {
+		t.Fatalf("constructed SQLite backend admitted a generation after identity replacement: rows=%d generation=%d", authorityRows, generation)
 	}
 	if info, err := os.Stat(path); err != nil || info.Size() != 0 {
 		t.Fatalf("replacement SQLite identity was mutated: info=%#v err=%v", info, err)

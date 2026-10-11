@@ -27,11 +27,11 @@ func selectedFanOutAdmission(ctx context.Context, tx *sql.Tx, sqlite bool, grant
 	if sqlite {
 		backend = "sqlite_retained_owner"
 	}
-	authority, exists, err := loadAuthorityHeadModeTx(ctx, tx, backend, sqlite, false)
+	authority, exists, err := loadProcessAuthorityTx(ctx, tx, backend, sqlite, false)
 	if err != nil {
 		return nil, err
 	}
-	if !exists || authority.State != runtimeownership.StateActive ||
+	if !exists ||
 		grant.ProcessAuthorityID != authority.AuthorityID || grant.ProcessOwnerID != authority.OwnerID || grant.ProcessBootID != authority.BootID {
 		return nil, errors.New("selected deployment grant differs from current process authority")
 	}

@@ -1059,6 +1059,10 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 	return s.runLifecyclePostgresOwner.RegisterCompletionCandidateSink(ctx, scope, sink)
 }
 
+func (s *PostgresStore) ReleaseConstructionPossession() error {
+	return s.startupPostgresOwner.ReleaseConstructionPossession()
+}
+
 func (s *PostgresStore) Renew(ctx context.Context, lease *sessions.Lease) (*sessions.Lease, error) {
 	return s.lLMPostgresOwner.Renew(ctx, lease)
 }
@@ -1069,10 +1073,6 @@ func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.
 
 func (s *PostgresStore) RenewDirectiveExecutionLease(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) error {
 	return s.agentPostgresOwner.RenewDirectiveExecutionLease(ctx, operationID, ownerID, now, lease)
-}
-
-func (s *PostgresStore) RepairAuthority(ctx context.Context, req startupownership.AuthorityRepairRequest) (startupownership.AuthorityRepairResult, error) {
-	return s.startupPostgresOwner.RepairAuthority(ctx, req)
 }
 
 func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {
@@ -2325,10 +2325,6 @@ func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifec
 
 func (s *SQLiteRuntimeStore) RenewDirectiveExecutionLease(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) error {
 	return s.agentSQLiteOwner.RenewDirectiveExecutionLease(ctx, operationID, ownerID, now, lease)
-}
-
-func (s *SQLiteRuntimeStore) RepairAuthority(ctx context.Context, req startupownership.AuthorityRepairRequest) (startupownership.AuthorityRepairResult, error) {
-	return s.startupSQLiteOwner.RepairAuthority(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {

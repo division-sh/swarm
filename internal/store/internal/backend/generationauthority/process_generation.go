@@ -40,6 +40,32 @@ func ReadProcessGeneration(ctx context.Context, q processGenerationReader, sqlit
 	return readProcessGeneration(ctx, q, sqlite, false)
 }
 
+func ReadProcessGenerationTx(ctx context.Context, tx *sql.Tx, sqlite bool) (processbinding.LeaseStamp, error) {
+	if ctx == nil || tx == nil {
+		return processbinding.LeaseStamp{}, errors.New("process-generation context and transaction are required")
+	}
+	if err := FenceMutation(ctx, tx, sqlite); err != nil {
+		return processbinding.LeaseStamp{}, err
+	}
+	return readProcessGeneration(ctx, tx, sqlite, !sqlite)
+}
+
+func ProcessCoordinatesCurrent(ctx context.Context, q processGenerationReader, expected processbinding.LeaseCoordinates, sqlite bool) (bool, error) {
+	if err := expected.Validate(); err != nil {
+		return false, err
+	}
+	current, err := ReadProcessGeneration(ctx, q, sqlite)
+	return err == nil && current.Generation != 0 && current.Coordinates() == expected, err
+}
+
+func ProcessCoordinatesCurrentTx(ctx context.Context, tx *sql.Tx, expected processbinding.LeaseCoordinates, sqlite bool) (bool, error) {
+	if err := expected.Validate(); err != nil {
+		return false, err
+	}
+	current, err := ReadProcessGenerationTx(ctx, tx, sqlite)
+	return err == nil && current.Generation != 0 && current.Coordinates() == expected, err
+}
+
 func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlite, lock bool) (processbinding.LeaseStamp, error) {
 	if ctx == nil || q == nil {
 		return processbinding.LeaseStamp{}, errors.New("process-generation context and reader are required")
