@@ -104,17 +104,26 @@ func TestServedWhatsAppLogoutReservationProcessDeathBothStores(t *testing.T) {
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &historical)
 				if historical.Logout == nil || historical.Logout.Teardown.TeardownID != reserved.Logout.Teardown.TeardownID ||
 					historical.Logout.EffectOperationID != reserved.Logout.EffectOperationID ||
-					historical.Logout.Teardown.Revision != reserved.Logout.Teardown.Revision ||
-					historical.Logout.Teardown.Phase != channelonboarding.TeardownAuthorityRetired ||
+					historical.Logout.Teardown.Revision != reserved.Logout.Teardown.Revision+1 ||
+					historical.Logout.Teardown.Phase != channelonboarding.TeardownFailed ||
+					historical.Logout.Teardown.FailureCode != "logout_not_launched" ||
 					historical.Operation.Phase != channelonboarding.PhaseRetired ||
 					(historical.Readiness != nil && historical.Readiness.Ready) {
 					t.Fatal("reservation-only recovery fabricated settlement or fresh execution", historical)
 				}
-				requireServedJSONRPCError(t, endpoint, "channel.logout", params)
+				var replay channelonboarding.SessionLogoutReadback
+				requireServedJSONRPCResult(t, endpoint, "channel.logout", params, &replay)
+				cli := requireServedNativeCLILogout(t, endpoint, ready.Operation.OperationID, params["idempotency_key"].(string))
+				if replay.Teardown.TeardownID != historical.Logout.Teardown.TeardownID ||
+					replay.Teardown.Revision != historical.Logout.Teardown.Revision || replay.Teardown.FailureCode != "logout_not_launched" ||
+					cli.Teardown.TeardownID != replay.Teardown.TeardownID || cli.Teardown.Revision != replay.Teardown.Revision ||
+					cli.Teardown.FailureCode != "logout_not_launched" {
+					t.Fatal("failed/no-launch replay changed the original responsibility", replay, cli)
+				}
 				var unchanged channelonboarding.Result
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &unchanged)
-				if unchanged.Logout == nil || unchanged.Logout.Teardown.Revision != reserved.Logout.Teardown.Revision ||
-					unchanged.Logout.Teardown.Phase != channelonboarding.TeardownAuthorityRetired {
+				if unchanged.Logout == nil || unchanged.Logout.Teardown.Revision != historical.Logout.Teardown.Revision ||
+					unchanged.Logout.Teardown.Phase != channelonboarding.TeardownFailed {
 					t.Fatal("missing original SDK owner rewrote pending responsibility", unchanged)
 				}
 				if err := process.stop(); err != nil {

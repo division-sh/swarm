@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -72,33 +73,42 @@ func logoutEffectMatches(op domain.TeardownOperation, a effects.Authority) bool 
 // SettleLogoutEffectTx is called only inside the existing effect settlement
 // transaction, after exact journal evidence has been checked. Ordinary teardown
 // completion intentionally cannot project this result.
-func SettleLogoutEffectTx(ctx context.Context, tx *sql.Tx, s effects.Settlement, postgres bool) error {
+func SettleLogoutEffectTx(ctx context.Context, tx *sql.Tx, s effects.Settlement, postgres bool) (bool, error) {
 	if !s.Authority.Valid() || s.Authority.Kind != effects.AuthorityChannelLogout ||
 		s.OperationID != s.Authority.ChannelLogout.EffectOperationID || s.Now.IsZero() {
-		return fmt.Errorf("%w: invalid logout effect settlement", domain.ErrConflict)
+		return false, fmt.Errorf("%w: invalid logout effect settlement", domain.ErrConflict)
 	}
 	d := logoutDialect(postgres)
 	op, found, err := loadTeardown(ctx, tx, d, s.Authority.ChannelLogout.TeardownID, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !found || !logoutEffectMatches(op, s.Authority) {
-		return domain.ErrConflict
+		return false, domain.ErrConflict
 	}
 	phase, code, message, err := logoutEffectResult(s)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if op.Phase.Terminal() {
 		if op.Revision != s.Authority.ChannelLogout.TeardownRevision+1 || op.Phase != phase || op.FailureCode != code || op.FailureMessage != message {
-			return domain.ErrConflict
+			return false, domain.ErrConflict
 		}
-		return nil
+		return false, nil
 	}
 	if op.Phase != domain.TeardownAuthorityRetired || op.Revision != s.Authority.ChannelLogout.TeardownRevision {
-		return domain.ErrRevisionConflict
+		return false, domain.ErrRevisionConflict
 	}
-	now := canonicalTime(s.Now)
+	if err := settleLogoutResultTx(ctx, tx, d, op, phase, code, message, s.Now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func settleLogoutResultTx(ctx context.Context, tx *sql.Tx, d dialect, op domain.TeardownOperation,
+	phase domain.TeardownPhase, code, message string, at time.Time,
+) error {
+	now := canonicalTime(at)
 	result, err := tx.ExecContext(ctx, d.bind(`UPDATE channel_onboarding_teardowns
 		SET phase=?,teardown_revision=teardown_revision+1,failure_code=?,failure_message=?,updated_at=?,completed_at=?
 		WHERE teardown_id=? AND teardown_revision=? AND phase='authority_retired'`),

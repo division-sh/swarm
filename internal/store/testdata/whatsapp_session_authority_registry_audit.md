@@ -1,5 +1,49 @@
 # WhatsApp Session Authority Classification (#2577)
 
+## Never-Authorized Logout Recovery
+
+`RecoverUnlaunchedChannelLogout` is a typed semantic owner method on both
+selected facades: exact teardown UUID/revision/time in, detached responsibility
+out. It exposes no SQL, transaction callback, provider reader or executable
+permission. Domain startup recovery consumes it without selecting any SDK.
+
+The private backend's `recoverUnlaunchedLogout`,
+`logoutOriginalWithdrawnWithoutAuthorizationTx`, and shared
+`settleLogoutResultTx` own their existing transaction. They validate the frozen
+teardown codec and revision, retain journal ownership whenever an operation
+exists, and only settle never-authorized responsibility under the exact same
+generation/authorization fence. Their SQL-bearing parameters and calls remain
+`private-backend`; no selected pool or transaction escapes.
+
+`RuntimeAuthorityWithdrawnTx` is an existing startup-owner reader, classified
+`private-domain-adapter`. It consumes the established process-authority row and
+lineage codecs; it never infers death from cache absence, a clock, missing rows
+or a caller-defined probe. Only an exact released/superseded original admits
+the no-journal decision. Its transaction is supplied by the selected mutation
+owner, and its return is only a boolean, not execution authority.
+
+The served reservation-kill/two-restart proof and both-store native crash,
+live-authorizer, missing-observation, late-authorization and committed-journal
+controls name these consumers. The new shared settlement helper factors the
+existing journal SQL, not another writer or journal. Regeneration must classify
+only these exact owner/facade findings; no scanner, disposition policy, debt
+baseline or raw-fixture permission changes are authorized.
+
+The exact finding-registry run also exposed omitted, already-existing N66
+sites: `exactTeardownReplayTx`, `prepareTeardownReservationTx`,
+`requireNoConflictingLogoutTx`, `fenceLogoutConnectionTx`,
+`LogoutEffectAuthorityCurrent`, `SettleLogoutEffectTx`,
+`requireChannelLogoutAuthorityTx`, `requireChannelLogoutSettlementAuthorityTx`,
+and their reservation/authorization/source-settlement callers. All remain
+`private-backend`: principal/revision locking, exact connection-consumer
+retirement, original journal admission and immutable settlement are in the
+existing selected transaction. The real journal/foreign-authority/rollback/
+drain and reservation-overlap matrices exercise those paths; no new raw SQL
+permission is inferred from the shared helper name. Remove the two obsolete
+`reserveTeardown` call fingerprints after the earlier owner extraction, not
+their admission/rollback obligations. These omissions are repaired in this PR,
+not excused by the newly added recovery owner or a policy/baseline change.
+
 The two changed `channelonboarding/owner.go` ExecContext fingerprints remain
 `private-backend`: the existing operation update and activation publication
 now also write the exact private session-account provenance. Their selected
