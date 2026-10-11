@@ -522,6 +522,7 @@ type StartRequest struct {
 	Posture                ActivationPosture                 `json:"activation_posture"`
 	Ceremony               IdentityCeremony                  `json:"identity_ceremony"`
 	SaveProof              bool                              `json:"save_proof"`
+	ConnectFenceRevision   int64                             `json:"-"`
 	ClientLanguage         string                            `json:"client_language"`
 	CredentialReservations []CredentialReservation           `json:"credential_reservations"`
 	RequestedAt            time.Time                         `json:"requested_at"`
@@ -532,6 +533,9 @@ func (r StartRequest) SlotKey() string {
 }
 
 func (r StartRequest) Validate() error {
+	if r.ConnectFenceRevision < 0 || r.Verb != VerbConnect && r.ConnectFenceRevision != 0 {
+		return fmt.Errorf("%w: only connect may retain a non-negative predecessor fence", ErrInvalidRequest)
+	}
 	if strings.TrimSpace(r.OperationID) == "" || strings.TrimSpace(r.RequestKeyHash) == "" || strings.TrimSpace(r.RequestHash) == "" || strings.TrimSpace(r.PrincipalID) == "" || !r.Verb.Valid() || strings.TrimSpace(r.Provider) == "" || strings.TrimSpace(r.TargetSelector) == "" || r.RequestedAt.IsZero() {
 		return fmt.Errorf("%w: operation identity, semantic request, principal, verb, provider, target, and time are required", ErrInvalidRequest)
 	}
@@ -582,6 +586,7 @@ type Operation struct {
 	CredentialAdmissions    []CredentialAdmission             `json:"credential_admissions,omitempty"`
 	IdentityOperationID     string                            `json:"identity_operation_id,omitempty"`
 	BindingRevision         int64                             `json:"binding_revision,omitempty"`
+	ConnectFenceRevision    int64                             `json:"-"`
 	ActivationRevision      int64                             `json:"activation_revision,omitempty"`
 	ConfirmationOperationID string                            `json:"confirmation_operation_id,omitempty"`
 	FailureCode             string                            `json:"failure_code,omitempty"`
