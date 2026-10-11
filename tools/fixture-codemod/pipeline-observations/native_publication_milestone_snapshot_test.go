@@ -221,8 +221,11 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 	const publication = "\t\t\t\t\tpublication.unblock()\n"
 	const nodeWait = "\t\t\t\t\tselect {\n\t\t\t\t\tcase <-reached:\n"
 	const snapshot = "\t\t\t\tbefore := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)\n"
+	const fieldlessCapture = "\"idempotency_key\": \"empty-fork-seed\"})\n\t\t\t\t\tseedEventID = seed.EventID\n"
 	without := strings.Replace(actual, requestGate, "", 1)
 	mutants := map[string]string{
+		"missing_fieldless_identity":      strings.Replace(actual, fieldlessCapture, strings.Replace(fieldlessCapture, "\t\t\t\t\tseedEventID = seed.EventID\n", "", 1), 1),
+		"wrong_fieldless_identity":        strings.Replace(actual, fieldlessCapture, strings.Replace(fieldlessCapture, "seedEventID = seed.EventID", "seedEventID = \"foreign\"", 1), 1),
 		"missing_seed_gate":               strings.Replace(actual, seedGate, "", 1),
 		"duplicate_seed_gate":             strings.Replace(actual, seedGate, seedGate+seedGate, 1),
 		"wrong_seed":                      strings.Replace(actual, seedGate, strings.Replace(seedGate, "seedEventID", "request.EventID", 1), 1),
