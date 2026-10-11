@@ -213,8 +213,9 @@ func seedProviderTriggerSmokeRuntime(
 	agentID string,
 ) {
 	t.Helper()
+	const fixtureBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Now().UTC()
-	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: fixtureBundleHash})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
@@ -241,7 +242,6 @@ func seedProviderTriggerSmokeRuntime(
 	`, runID, entityID, flowInstance, entitySlug, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
-	const fixtureBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	fixtureSource, err := runtimecorrelation.NewSourceArtifactFact(fixtureBundleHash)
 	if err != nil {
 		t.Fatalf("construct provider trigger fixture source: %v", err)
