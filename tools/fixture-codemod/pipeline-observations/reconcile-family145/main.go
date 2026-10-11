@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "586632d2e5c9f319e8b7bdf74c4893d7d48f59d89290b41cedbbb44b61a58ce2"
+const targetDigest = "166e629b983617acd77b2a7cec0ee945ebc0f902ea2edcaf820180ba879c686a"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -85,6 +85,13 @@ var files = []string{
 	"internal/runtime/node_delivery_startup_recovery_test.go",
 	"internal/runtime/workflow_timer_startup_recovery_test.go",
 	"internal/runtime/template_instance_delivery_test.go",
+	"internal/runtime/telegram_connector_supported_surface_test.go",
+	"internal/runtime/slack_connector_managed_credential_supported_surface_test.go",
+	"internal/runtime/microsoft_graph_connector_client_credentials_supported_surface_test.go",
+	"internal/runtime/notion_connector_managed_credential_supported_surface_test.go",
+	"internal/runtime/github_app_issue_comment_supported_surface_test.go",
+	"internal/runtime/github_app_issue_workflow_supported_surface_test.go",
+	"internal/runtime/channel_runtime_supported_surface_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
 	"internal/runtime/artifact_action_result_delivery_test.go",
@@ -175,6 +182,12 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 	}
 	if path == "internal/runtime/runforkadmission/revision_source_route_test.go" && key == "captureRunForkRevision" {
 		return "", true
+	}
+	if path == "internal/runtime/telegram_connector_supported_surface_test.go" && key == "seedTelegramConnectorSupportedSurfaceWorkflowVersion" {
+		return "", true
+	}
+	if path == "internal/runtime/channel_runtime_supported_surface_test.go" && key == "startConfiguredChannelActivityNode" && after["assertConfiguredChannelClaimedDispatch"] != "" {
+		return after["assertConfiguredChannelClaimedDispatch"], false
 	}
 	if path == "internal/apiv1/operator_event_publish_test.go" {
 		if key == "sqliteEventDeliveryTargetRoutes" {

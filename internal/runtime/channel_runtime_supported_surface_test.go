@@ -251,7 +251,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				}
 			}
 
-			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator, coordinator)
 			actor := models.AgentConfig{
 				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.DeclaredForRun(t, runID, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
@@ -362,9 +362,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  replacementOwner,
 			})
 
-			stopActivityNode()
 			coordinator = mismatchedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			mismatchedExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, mismatchedCoordinator, mismatchedCoordinator)
 			mismatchedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
 			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
@@ -386,9 +385,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  replacementOwner,
 			})
 
-			stopActivityNode()
 			coordinator = reloadedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			staleExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, reloadedCoordinator, reloadedCoordinator)
 			staleCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "stale-plan-generation")
 			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
@@ -411,9 +409,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				FlowRoutes:          bus,
 				ChannelActivations:  fencedOwner,
 			})
-			stopActivityNode()
 			coordinator = fencedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			fencedExecutor := configuredChannelExecutor(source, fencedOwner, credentialStore, fencedCoordinator, fencedCoordinator)
 			fencedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "replacement-fence")
 			type executionResult struct {
@@ -632,15 +629,15 @@ func channelToolTextMaximum(t *testing.T, definitions []llm.ToolDefinition, name
 	return 0
 }
 
-func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, db *sql.DB) func() {
+func assertConfiguredChannelClaimedDispatch(t *testing.T, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, selected any) {
 	t.Helper()
-	if coordinator == nil || bus == nil || db == nil {
-		t.Fatal("configured channel claimed-dispatch fixture requires coordinator, bus, and store")
+	if coordinator == nil || bus == nil {
+		t.Fatal("configured channel claimed dispatch requires coordinator and bus")
 	}
+	storetest.ObserveSelectedPool(t, selected)
 	if nodes := coordinator.BackgroundNodes(); len(nodes) != 0 {
 		t.Fatalf("configured channel background nodes = %d, want claimed event dispatch only", len(nodes))
 	}
-	return func() {}
 }
 
 type channelAckLossExecutor struct {

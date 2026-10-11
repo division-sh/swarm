@@ -29,6 +29,92 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+// Connector reads retain physical event scope; no dispatch eligibility or clock is inferred.
+func ReadConnectorNormalizedProviderEventIDForTest(ctx context.Context, selected any, runID, entityID, eventName, providerEventID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return "", err
+	}
+	if err := validateStandaloneStorageEvent(selected, entityID); err != nil {
+		return "", err
+	}
+	if eventName == "" || strings.TrimSpace(eventName) != eventName {
+		return "", fmt.Errorf("connector storage observation requires eventName")
+	}
+	if providerEventID == "" || strings.TrimSpace(providerEventID) != providerEventID {
+		return "", fmt.Errorf("connector storage observation requires providerEventID")
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadConnectorNormalizedProviderEventIDTx(ctx, tx, postgres, runID, entityID, eventName, providerEventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func CountConnectorNamedSourceEventForTest(ctx context.Context, selected any, runID, eventName, sourceEventID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return 0, err
+	}
+	if err := validateStandaloneStorageEvent(selected, sourceEventID); err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(eventName) == "" {
+		return 0, fmt.Errorf("connector storage observation requires eventName")
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountConnectorNamedSourceEventTx(ctx, tx, runID, eventName, sourceEventID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func CountConnectorNamedEventIdentityForTest(ctx context.Context, selected any, eventID, eventName string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(eventName) == "" {
+		return 0, fmt.Errorf("connector storage observation requires eventName")
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountConnectorNamedEventIdentityTx(ctx, tx, eventID, eventName)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func ReadConnectorEventChronologyForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return "", err
+	}
+
+	_, postgres := selected.(*PostgresStore)
+	var out string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadConnectorEventChronologyTx(ctx, tx, postgres, runID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 type SelectedCausalDiagnosticStorage struct {
 	Events     []eventrecord.LifecycleDiagnosticEventLineage
 	Projection []byte

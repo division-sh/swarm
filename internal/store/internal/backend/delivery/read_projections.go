@@ -24,6 +24,46 @@ type PreparedTargetConflictStorage struct {
 
 type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Status, Reason, Failure, Target string }
 
+func CountConnectorRunNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, run, node string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, run, node).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadConnectorLatestNodeDeliveryDiagnosticTx(ctx context.Context, tx *sql.Tx, postgres bool, run, node string) (string, error) {
+	query := `SELECT COALESCE(status,'') || ':' || COALESCE(reason_code,'') || ':' || COALESCE(json_extract(failure,'$.detail.code'),'') FROM event_deliveries WHERE run_id=$1 AND subscriber_type='node' AND subscriber_id=$2 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(status,'') || ':' || COALESCE(reason_code,'') || ':' || COALESCE(failure->'detail'->>'code','') FROM event_deliveries WHERE run_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2 ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	if err := tx.QueryRowContext(ctx, query, run, node).Scan(&out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func CountConnectorEntityDeadLettersTx(ctx context.Context, tx *sql.Tx, entity string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE entity_id=$1`, entity).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadConnectorLatestEntityDeadLetterDiagnosticTx(ctx context.Context, tx *sql.Tx, postgres bool, entity string) (string, error) {
+	query := `SELECT COALESCE(json_extract(failure,'$.class'),'') || ':' || COALESCE(json_extract(failure,'$.detail.code'),'') FROM dead_letters WHERE entity_id=$1 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(failure->>'class','') || ':' || COALESCE(failure->'detail'->>'code','') FROM dead_letters WHERE entity_id=$1::uuid ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	if err := tx.QueryRowContext(ctx, query, entity).Scan(&out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 func ReadTemplateEventDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, event string) (out []TemplateDeliveryDiagnosticStorage, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT subscriber_type,subscriber_id,status,COALESCE(reason_code,''),COALESCE(CAST(failure AS TEXT),''),COALESCE(CAST(delivery_target_route AS TEXT),'') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id`, event)
 	if err != nil {

@@ -2636,3 +2636,71 @@ sufficient; no new abstraction, compatibility path or spec/runtime behavior is
 introduced. Collector and exact retained stage-completion occurrence are unchanged.
 M01, Docker, semantic drain, D3 SQL-order, M07 possession loss and rollback holds
 remain unwaived. Next ready shared dependency is connector6/twelve backend arms.
+
+## Whole connector6 construction, replay and observation chain
+
+The complete Telegram, Slack, Graph, Notion, GitHub-comment and GitHub-workflow
+dependency is migrated, including all twelve backend arms, both shared carriers,
+every failure/request/normalized-event observer and Telegram's diagnostic tail.
+Six supplied-pool openings are retired. PostgreSQL now opens from the original
+native fixture location; SQLite keeps its native original owner. Existing cleanup
+registration still joins consumers before store close and sandbox release.
+This is bounded connector integration, not public standing or process-restart
+qualification. All original credentials, refresh, transport, rate-limit, missing
+credential, duplicate publication, replay, journal and no-secret assertions stay.
+
+The old workflow-version UPDATE is deleted: the already-native source-aware flow
+activation recipe supplies the compiled version at construction. Request replay
+reads the complete canonical event rather than fabricating producer/envelope,
+lineage and timestamp, including the old fresh-clock fallback. The configured
+channel helper never started or stopped work: its immutable predecessor returned
+a no-op after asserting zero background nodes. The replacement asserts original
+selected ownership and the same zero-background-node invariant; actual joined
+coordinator/runtime cleanup remains unchanged across all seven helper calls.
+
+| Canonical owner | Exhaustive changed consumption / surviving distinction |
+| --- | --- |
+| native selected construction and source-aware flow activation | All twelve connector arms use existing recipes; neither carrier retains a pool/dialect. No later config writer or alternate native constructor is introduced. |
+| eventrecord and canonical event decoding | Both normalized lookup helpers retain exact run/entity/name, marker run/name, provider ID, event_ids membership and original latest timestamp. Six failure counters retain run/name/source. Both presence helpers retain event ID/name and exact-one count, without a run filter. Both request readers return complete stored identity/clock. Whole-run physical chronology retains its original order/text. Event bridges remain in existing test_event_support.go. |
+| closed delivery read projections | Node-event counter reuses CountTemplateNodeDelivery. Telegram diagnostics retain exact run/node counts and latest status/reason/code; dead-letter count/latest failure remain entity-only across runs. No new SQL allowance or delivery interpreter. |
+| pipelinepersistence / activityjournal | Separate latest platform/pipeline request-receipt diagnostic preserves the original event join and processed-time limit. Run-attempt diagnostic counts all physical attempts, without tool/status filtering. Existing tool/source/earliest journal readers and credential-leak witnesses are unchanged and reused. |
+| original selected read coordinator | Ten fixed detached reads keep independent cuts. Raw/foreign/cancelled/closed ownership and storage errors produce no partial count/identity/text; missing scalar evidence retains <none>, and diagnostic errors remain visible rather than changing a success verdict. No public SQL/callback/selector bridge. |
+| finite codemod | Existing corpus expands to319 exact transitions /1145 recipes, preserving immutable Before tuples and historical receipts. Whole-caller escape guard, every original behavioral condition, exact port arguments and removed no-op lifetime are hostile-controlled. Eleven closed backend read shapes are compared directly to immutable original SQL predicates/order/limits/NULL behavior. No generic signature move or classifier change. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Telegram native construction, normal/failure/replay, complete request identity and foreign normalized scope | reproduced and fixed: TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway, both stores under race; real gateway-produced evidence rejects wrong run/entity/name/provider, with original duplicate/no-dispatch checks |
+| Slack credentials/refresh/replay/failure | execution-proven through the same corrected path: TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal, both stores under race |
+| Graph client-credential refresh, replay and failure | execution-proven through the same corrected path: TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJournal, both stores under race |
+| Notion managed credentials/rate limit/replay/failure | execution-proven through the same corrected path: TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal, both stores under race |
+| Both GitHub application workflows, token handling, failure and journal replay | execution-proven through the same corrected path: TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal and TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal, both stores under race |
+| Shared configured-channel assertion/lifetime and earliest/source journal siblings | execution-proven through the same corrected path: TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores and TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBothStores, both stores under race |
+| Independent fixed read ownership, empty/missing/error and physical identity/clock/chronology | reproduced and fixed: both new TestConnector...BothStores roots under race, original transaction counter, cross-run identity-only witness, foreign/raw/cancelled/closed owner controls; immutable SQL correspondence proves diagnostic scope and absence/default/order preservation |
+
+Receipts: /home/youmew/.cache/swarm-2542-family145/connector-*.
+Eight affected original roots pass on both stores under race: Slack pilot14.11s,
+final Telegram13.67s and remaining six roots58.02s. Storage counterexamples
+PASS14.559s. Initial new counterexample setup correctly refused normal publication
+of the closed inbound marker; it was replaced by real gateway scope proof, not a
+new generic writer. The first gateway counterexample accidentally reused the
+fixture's stable coordinates; truly foreign UUIDs repair that test. No production
+admission, timeout, retry, skip or business assertion was weakened.
+Finite/hostile/correspondence guards pass; complete candidate overlay PASS150.17s,
+planner binding/partition PASS43.945s, event/delivery/lifecycle/revision boundary
+guards and writer census pass. Unused, dry-run and signed-head complexity evidence
+are recorded beside these receipts. No local tier, server2, push or PR.
+
+Authoritative downward ratchet PASS172.493s:9184 ->9068, exactly116 removals,
+added0; confirmed raw-operation debt6641 ->6541, excluded uncertainties67
+unchanged. Global scanner54708 findings /39010 raw sites includes legitimate
+owners and is not the debt denominator. Supplied-pool queue104 ->98 =96 external
++2 private, provisional M0/D61/S37; cumulative qualified delivery-reset openings36.
+Editing/investigation remains dominant; original behavior
+executions total85.80s, fixed read controls14.56s, overlay150.17s and ratchet172.49s.
+These are measured receipt costs, not an added-CI-cost claim.
+
+Whole connector-chain closure only; parent #2151/#2542 remains open. Existing
+watchlist/architecture tracking suffices; no new framework, dual owner or issue.
+M01, Docker, semantic drain, D3 SQL-order, M07 possession loss and rollback remain
+unwaived. Next ready dependency: inbound acknowledgment fixture and its complete
+four-root chain, reusing existing receipt/cardinality ports without new SQL.

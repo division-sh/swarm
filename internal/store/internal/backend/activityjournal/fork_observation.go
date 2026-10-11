@@ -5,6 +5,14 @@ import (
 	"database/sql"
 )
 
+func CountConnectorRunActivityAttemptsTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, run).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func ReadActivityForkAttemptStatusStorageTx(ctx context.Context, tx *sql.Tx, runID, requestID string) (string, error) {
 	var status string
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT status FROM activity_attempts WHERE request_event_id=$1 AND run_id=$2),'')`, requestID, runID).Scan(&status)

@@ -22,25 +22,20 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
 
 		const flowInstance = boundedProviderFlowID
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
 			ctx:           ctx,
-			db:            db,
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
@@ -51,7 +46,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        false,
 		})
 	})
 
@@ -61,12 +55,10 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
@@ -77,7 +69,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        true,
 		})
 	})
 }
@@ -509,25 +500,7 @@ func countNotionManagedConnectorActivityAttemptsForSource(t *testing.T, backend 
 func countNotionManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
 	failureEventType := boundedProviderFlowID + "/notion_append_block_children.failed"
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND event_name = ?
-			  AND source_event_id = ?
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_name = $2
-			  AND source_event_id = $3::uuid
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)
 	if err != nil {
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)
 	}
