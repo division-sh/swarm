@@ -225,9 +225,6 @@ func (s *postgresSession) Authority() (runtimestartupownership.Authority, error)
 }
 
 func (s *postgresSession) ProveCurrent(ctx context.Context) error {
-	if err := s.lease.ProveCurrent(ctx); err != nil {
-		return err
-	}
 	return s.proveGeneration(ctx, 0)
 }
 
@@ -236,12 +233,7 @@ func (s *postgresSession) proveGeneration(ctx context.Context, deadline time.Dur
 	if err != nil {
 		return err
 	}
-	return postgresbackend.RunAuthorityReadTransaction(ctx, s.lease.Session(), func(readCtx context.Context, tx *sql.Tx) error {
-		if deadline > 0 {
-			var cancel context.CancelFunc
-			readCtx, cancel = context.WithTimeout(readCtx, deadline)
-			defer cancel()
-		}
+	return s.lease.ProveCurrentWithRead(ctx, deadline, func(readCtx context.Context, tx *sql.Tx) error {
 		current, err := generationauthority.ReadProcessGeneration(readCtx, tx, false)
 		if err != nil {
 			return err
@@ -254,8 +246,8 @@ func (s *postgresSession) proveGeneration(ctx context.Context, deadline time.Dur
 }
 
 func (s *postgresSession) MonitorProveCurrent(ctx context.Context, deadline time.Duration) error {
-	if err := s.lease.MonitorProveCurrent(ctx, deadline); err != nil {
-		return err
+	if deadline <= 0 {
+		return errors.New("PostgreSQL possession monitor deadline must be positive")
 	}
 	return s.proveGeneration(ctx, deadline)
 }
