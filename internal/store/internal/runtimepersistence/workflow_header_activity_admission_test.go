@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -29,7 +30,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
 					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {}\n"}
 					if shape == "fields" {
-						files["entities.yaml"] = "default:\n  title: text\n"
+						files["entities.yaml"] = "default:\n  title: text\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					run := correlation.RunIDFromContext(f.ctx)
@@ -58,12 +59,22 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					if _, err := f.db.Exec(`UPDATE flow_instances SET accumulator=$3 WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID, string(raw)); err != nil {
 						t.Fatal(err)
 					}
-					if shape == "fields" {
-						// Corrupt the obsolete lifecycle shadow while keeping declared
-						// fields valid. No executing consumer may use that shadow.
-						if _, err := f.db.Exec(`UPDATE entity_state SET accumulator='{}' WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID); err != nil {
-							t.Fatal(err)
-						}
+					owner, err := plan.Readiness.FlowIdentity()
+					if err != nil {
+						t.Fatal(err)
+					}
+					stored, found, err := f.workflows.Load(f.ctx, owner)
+					if err != nil || !found || stored.EntityID != req.Instance.EntityID || stored.CurrentState != "review" ||
+						(shape == "fields" && stored.Fields["accumulator"] != "business-only") || (shape == "fieldless" && len(stored.Fields) != 0) {
+						t.Fatalf("independent activity header/business witness: found=%t instance=%+v err=%v", found, stored, err)
+					}
+					carrier, err := engine.StateCarrierFromPersisted(stored.Fields, stored.Bookkeeping, stored.Gates, stored.StateBuckets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ownedLoop, found, err := loopruntime.Load(carrier.StateBuckets, ".", "revision")
+					if err != nil || !found || !ownedLoop.Generation().Equal(loop.Generation()) {
+						t.Fatalf("business field replaced header loop evidence: found=%t loop=%+v err=%v", found, ownedLoop, err)
 					}
 					record := pipeline.ActivityAttemptRecord{
 						RequestEventID: uuid.NewString(), RunID: run, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath,
@@ -158,8 +169,12 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						t.Fatalf("persisted result: %+v %t %v", loaded, found, err)
 					}
 					var fields int
-					if err := f.db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID).Scan(&fields); err != nil || (shape == "fieldless" && fields != 0) {
-						t.Fatalf("fieldless activity synthesized fields: count=%d error=%v", fields, err)
+					if err := f.db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, req.Instance.EntityID).Scan(&fields); err != nil || (shape == "fieldless" && fields != 0) || (shape == "fields" && fields != 1) {
+						t.Fatalf("activity changed declared field presence: count=%d error=%v", fields, err)
+					}
+					after, found, err := f.workflows.Load(f.ctx, owner)
+					if err != nil || !found || !reflect.DeepEqual(after.Fields, stored.Fields) {
+						t.Fatalf("activity changed business fields: found=%t instance=%+v err=%v", found, after, err)
 					}
 				})
 			}
