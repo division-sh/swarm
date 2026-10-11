@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func CopyWorkflowStateDiagnostic(t testing.TB, stage string) string {
+	t.Helper()
+	if stage != "null" && stage != "unknown" {
+		t.Fatalf("unsupported diagnostic stage %q", stage)
+	}
+	root := t.TempDir()
+	writeClosedVariantFile(t, root, "schema.yaml", "name: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\npins:\n  inputs: [work.completed]\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "work.completed:\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed:\n      advances_to: done\n")
+	return root
+}
+
 func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 	t.Helper()
 	root := t.TempDir()

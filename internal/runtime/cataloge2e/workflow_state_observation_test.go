@@ -78,6 +78,47 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 			}
 		})
 	}
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		for _, tc := range []struct {
+			stage string
+			want  string
+		}{
+			{"null", `state:"null"`},
+			{"unknown", `state:"unknown"`},
+		} {
+			t.Run(string(backend)+"/literal-"+tc.stage, func(t *testing.T) {
+				h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyWorkflowStateDiagnostic(t, tc.stage), backend, true)
+				h.seedInitialState(catalogRuntimeRunID)
+				h.shutdown()
+				reader, err := h.catalogOperatorEventLister()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := testAuthorActivityContext(context.Background())
+				rows, err := storetest.ReadWorkflowStateObservationRows(ctx, reader)
+				if err != nil || len(rows) != 1 || rows[0].EntityID != catalogRuntimeRunID || rows[0].FlowInstance != catalogRuntimeRunID || rows[0].CurrentState == nil || *rows[0].CurrentState != tc.stage {
+					t.Fatalf("exact constructed diagnostic row=%+v err=%v", rows, err)
+				}
+				probe := storetest.CollectTransactions(t, reader, storetest.TransactionProbeOptions{})
+				prefix := "[{entity_id:" + catalogRuntimeRunID + " flow_instance:" + catalogRuntimeRunID + " "
+				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+tc.want+"}]" {
+					t.Fatalf("literal stage diagnostic=%q want=%q err=%v", dump, prefix+tc.want+"}]", err)
+				}
+				if proof := probe.Snapshot(); proof.Total.ReadCommits != 1 || proof.Total.WriteCommits != 0 || proof.Active != 0 {
+					t.Fatalf("literal diagnostic escaped original read owner: %+v", proof)
+				}
+				if changed, err := storetest.RemoveWorkflowProjectionHeader(ctx, reader, catalogRuntimeRunID, catalogRuntimeRunID); err != nil || changed != 1 {
+					t.Fatalf("exact missing-header diagnostic fault: rows=%d err=%v", changed, err)
+				}
+				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+"state:null}]" {
+					t.Fatalf("absent header diagnostic=%q want=%q err=%v", dump, prefix+"state:null}]", err)
+				}
+				if proof := probe.Snapshot(); proof.Total.ReadCommits != 2 || proof.Total.WriteCommits != 1 || proof.Active != 0 {
+					t.Fatalf("diagnostic reads or exact header fault escaped original owners: %+v", proof)
+				}
+			})
+		}
+	}
 	if rows, err := storetest.ReadWorkflowStateObservationRows(context.Background(), struct{}{}); err == nil || rows != nil {
 		t.Fatalf("foreign state owner yielded rows=%+v err=%v", rows, err)
 	}

@@ -94,7 +94,7 @@ func SetWorkflowProjectionNumericFlowPathForTest(ctx context.Context, tx *sql.Tx
 }
 
 func AddAmbiguousWorkflowProjectionFieldsForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state) SELECT run_id,$1,flow_instance,entity_type,current_state FROM entity_state WHERE run_id=$2 AND entity_id=$3`, uuid.NewString(), run, entity))
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type) SELECT run_id,$1,flow_instance,entity_type FROM entity_state WHERE run_id=$2 AND entity_id=$3`, uuid.NewString(), run, entity))
 }
 
 // Only the evidence of the single existing transition may change. This cut
