@@ -850,6 +850,10 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
           ref: ${{ needs.ci-plan.outputs.execution_sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
