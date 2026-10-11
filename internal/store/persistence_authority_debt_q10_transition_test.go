@@ -141,21 +141,28 @@ func TestPersistenceAuthorityDebtQ10NullableSourcePairIsExact(t *testing.T) {
 			t.Fatalf("live source does not reproduce the exact reviewed identity: want=%+v actual=%+v", test.want, actual)
 		}
 	}
-	for _, source := range []string{
-		strings.Replace(string(raw), from, "*periods[index].Entity.CurrentState", 1),
-		strings.Replace(string(raw), "\t\t\tfor index, expected := range", "\t\t\trt.DB.QueryContext(context.Background(), \"SELECT 1\")\n\t\t\tfor index, expected := range", 1),
+	for _, test := range []struct{ name, source string }{
+		{"nil-refusal-removed", strings.Replace(string(raw), from, "*periods[index].Entity.CurrentState", 1)},
+		{"authority-call-added", strings.Replace(string(raw), "\t\t\tfor index, expected := range", "\t\t\trt.DB.QueryContext(context.Background(), \"SELECT 1\")\n\t\t\tfor index, expected := range", 1)},
 	} {
-		file, err := parser.ParseFile(token.NewFileSet(), current.File, source, parser.ParseComments)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := authorityDebtSites(debtExcludedSourceFindings(t, current.File, file, &types.Info{}))
-		if actual[current.identity()] == current || actual[old.identity()] == old {
-			t.Fatal("real source mutation retained a reviewed declaration identity")
-		}
-		if failures := authorityDebtRatchet(actual, debtControlSet(current), debtControlSet(old), debtControlSet(old)); len(failures) == 0 {
-			t.Fatal("removed nil refusal or added authority call was accepted")
-		}
+		t.Run(test.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), current.File, test.source, parser.ParseComments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual := authorityDebtSites(debtExcludedSourceFindings(t, current.File, file, &types.Info{}))
+			for key, site := range actual {
+				if site.Declaration != current.Declaration {
+					delete(actual, key)
+				}
+			}
+			if len(actual) != 1 || actual[current.identity()] == current || actual[old.identity()] == old {
+				t.Fatal("real source mutation did not produce exactly one different declaration identity")
+			}
+			if failures := authorityDebtRatchet(actual, debtControlSet(current), debtControlSet(old), debtControlSet(old)); len(failures) == 0 {
+				t.Fatal("removed nil refusal or added authority call was accepted")
+			}
+		})
 	}
 }
 
