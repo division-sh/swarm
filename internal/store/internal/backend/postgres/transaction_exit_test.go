@@ -32,6 +32,7 @@ type exitProbeConnector struct {
 	beforeCommit                     func()
 	afterCommit                      func()
 	afterQuery                       func(context.Context, string)
+	afterExec                        func(context.Context, string)
 }
 
 func (p *exitProbeConnector) Driver() driver.Driver { return p.driver }
@@ -49,7 +50,11 @@ type exitProbeConn struct {
 }
 
 func (c *exitProbeConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	if c.probe.afterExec != nil {
+		c.probe.afterExec(ctx, query)
+	}
+	return result, err
 }
 func (c *exitProbeConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
