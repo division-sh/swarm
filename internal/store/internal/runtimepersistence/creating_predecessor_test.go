@@ -86,6 +86,14 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 				if blocked {
 					want = deliverylifecycle.ClaimDeferred
 				}
+				batch, err := store.ObserveDeliveryContinuations(ctx, before.Authority, []string{before.DeliveryID})
+				if err != nil || len(batch) != 1 || batch[0].DeliveryID != before.DeliveryID || batch[0].Disposition != want || batch[0].Invariant != nil {
+					t.Fatalf("durable %s batch observation: %+v err=%v", scenario, batch, err)
+				}
+				afterBatch, err := store.Snapshot(ctx, before.DeliveryID)
+				if err != nil || !reflect.DeepEqual(before, afterBatch) || afterBatch.Status != deliverylifecycle.StatusPending || afterBatch.ClaimVersion != 0 {
+					t.Fatalf("batch observation mutated the unclaimed follower: before=%+v after=%+v err=%v", before, afterBatch, err)
+				}
 				// A fresh native observation has no process-local predecessor cache.
 				for range 2 {
 					observation, err := store.ObserveDeliveryContinuation(ctx, before.Authority, before.DeliveryID)
@@ -127,6 +135,14 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 					}
 					if _, err := store.SettleSuccess(ctx, first.Claim, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatal(err)
+					}
+					batch, err = store.ObserveDeliveryContinuations(ctx, before.Authority, []string{before.DeliveryID})
+					if err != nil || len(batch) != 1 || batch[0].DeliveryID != before.DeliveryID || batch[0].Disposition != deliverylifecycle.ClaimAcquired || batch[0].Invariant != nil {
+						t.Fatalf("committed creator did not release batch follower: %+v err=%v", batch, err)
+					}
+					afterBatch, err = store.Snapshot(ctx, before.DeliveryID)
+					if err != nil || !reflect.DeepEqual(before, afterBatch) || afterBatch.Status != deliverylifecycle.StatusPending || afterBatch.ClaimVersion != 0 {
+						t.Fatalf("eligible batch observation claimed the follower: before=%+v after=%+v err=%v", before, afterBatch, err)
 					}
 					observation, err := store.ObserveDeliveryContinuation(ctx, before.Authority, before.DeliveryID)
 					if err != nil || observation.Disposition != deliverylifecycle.ClaimAcquired {
