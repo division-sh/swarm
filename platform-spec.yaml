@@ -41929,6 +41929,12 @@ llm_completion_execution_authority:
       Normal settlement checks the canonical terminal run and exact current completion authority before quiescing and
       closing execution. Process retirement cancels and joins serving, continuations and wakeups before releasing
       manager, gateway, generation grant and source projection. No second executor or callback-only success is permitted.
+      A continuing successor admits the exact source-scoped persisted dynamic-readiness inventory before starting
+      its selected Manager, then completes that inventory's process topology after Manager start and before recovered
+      delivery synchronization. Completed durable readiness is evidence for fresh attachment, not a surviving process
+      route or execution grant. Late-constructed child actors retain their current selected ownership, native readiness
+      attempt and provider admission; they are neither borrowed from the ordinary Manager nor added to the frozen
+      preparation census. No creation input or settled provider response is replayed by topology attachment.
     lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition. Runtime execution admission, claim, launch, and new child effects require an active fork run. Exact fenced quiescence/failure and terminal close are completion finalizers and remain available after accepted fork-local work terminalizes the run; they MUST NOT reuse the active-run admission guard or leave a live execution generation behind a completed run.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.

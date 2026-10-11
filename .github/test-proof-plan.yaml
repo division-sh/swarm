@@ -920,6 +920,7 @@ units:
       TestIssue642NewlyArmedTimerUsesSelectedDelayAndEffectBothStores: [sqlite/25ms, sqlite/1500ms, postgres/25ms, postgres/1500ms]
       TestIssue642StagedTimerCorruptionRefusesBeforeActivationBothStores: [sqlite/missing, sqlite/progressed, sqlite/foreign_origin, postgres/missing, postgres/progressed, postgres/foreign_origin]
       TestIssue642SustainedRecurringTimerForkExecutesTwoEffectsBothStores: [sqlite, postgres]
+      TestIssue642FutureProviderProcessDeathRecoveryBothStores: [keyed/sqlite, keyed/postgres, minted/sqlite, minted/postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
