@@ -10,12 +10,13 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
 func newServeChannelProviderOwners(manager *runtime.RuntimeContextManager, store channelonboarding.Store,
-	current *credentials.SnapshotOwner, directory string,
+	current *credentials.SnapshotOwner, directory string, invocationState *sessionprovider.InvocationState,
 ) (serveSessionBootstrapOwner, operatorchannel.CredentialCurrentness, error) {
-	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), store, current, directory)
+	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), store, current, directory, invocationState)
 	if err != nil {
 		var unsupported *operatorchannel.SessionProviderUnavailableError
 		if errors.As(err, &unsupported) {

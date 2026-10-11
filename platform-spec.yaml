@@ -11695,7 +11695,22 @@ tool_model:
         handles and possession remain owned until that full join and close succeed. An ended transaction context
         grants no new work. Destructive device deletion additionally requires explicit current logout and cannot use
         an inherited transaction to bypass retirement. Ordinary disconnect, provider-side unlink, pairing failure,
-        reset and source retirement do not authorize automatic local session deletion.
+        reset and source retirement do not authorize automatic local session deletion. Dev invocation retirement
+        deletes only its explicitly invocation-owned local namespace under session_dev_state_lifetime, never a
+        persistent session directory or a provider-side pairing.
+      session_dev_state_lifetime: >
+        Dev serve owns one fresh restrictive native-session namespace per invocation. It allocates that namespace
+        lazily only after exact selected reservation, source/plan admission and counted construction work; every
+        native bootstrap, resume and restored occurrence in that invocation consumes the same owner. Same-process
+        reset, unbind and rebind retain the namespace until invocation retirement. Cleanup closes admission and
+        joins construction, callbacks, private-store transactions and SDK work before complete process and selected
+        store retirement permits deletion of the exact possessed namespace. A canceled deadline is not a join
+        receipt; eventual complete joining may permit deletion while retaining the cancellation diagnostic.
+        Incomplete joining or cleanup failure retains the responsible owner and reports failure. Unsafe or substituted
+        namespace/connection members are refused, not followed or swept. Ordinary cleanup is local only and never
+        SDK logout or remote unlink. Persistent serve retains exact private pairing and capture state on both stores.
+        Dev remains SQLite-only. Hard process death does not promise immediate erasure: the next invocation selects
+        a fresh namespace without adopting, copying or purging any previous invocation's directory.
       session_response_waiter_ownership: >
         Response delivery, cancellation and disconnect cleanup arbitrate ownership of each exact SDK IQ or ACK
         waiter. Once the reader claims a response, late cancellation cannot close its channel; cancellation of an
