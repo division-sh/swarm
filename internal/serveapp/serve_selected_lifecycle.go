@@ -84,11 +84,15 @@ func (l *activatedServeLifecycle) Finalize(joinCtx context.Context, diagnostics 
 			}
 		}
 	}
-	sqlite2353.Record("process.join.enter", map[string]any{"active": l.process.ActiveCount(), "cause": fmt.Sprint(context.Cause(joinCtx))})
+	if sqlite2353.ShutdownEnabled() {
+		sqlite2353.Record("process.join.enter", map[string]any{"active": l.process.ActiveCount(), "cause": fmt.Sprint(context.Cause(joinCtx))})
+	}
 	receipt, joinErr := l.process.Join(joinCtx)
-	sqlite2353.Record("process.join.return", map[string]any{"active": l.process.ActiveCount(), "error": fmt.Sprint(joinErr), "cause": fmt.Sprint(context.Cause(joinCtx))})
+	if sqlite2353.ShutdownEnabled() {
+		sqlite2353.Record("process.join.return", map[string]any{"active": l.process.ActiveCount(), "error": fmt.Sprint(joinErr), "cause": fmt.Sprint(context.Cause(joinCtx))})
+	}
 	if joinErr != nil {
-		if sqlite2353.Enabled() {
+		if sqlite2353.ShutdownEnabled() {
 			sqlite2353.Sample("process.join_failed")
 		}
 		diagnostics = errors.Join(diagnostics, fmt.Errorf("process work join exceeded shutdown budget: %w", joinErr))
