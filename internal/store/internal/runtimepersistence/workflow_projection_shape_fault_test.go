@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"sync"
 	"testing"
@@ -51,6 +52,42 @@ func readProjectionShapeStorage(t *testing.T, f receiverConfigActivationFixture,
 	}
 	out[5] = entityType
 	return out
+}
+
+func TestWorkflowPrivateBookkeepingWitnessPreservesOtherFactsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, plan := newWorkflowTargetConstructionFixture(t, backend)
+			if committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil || !committed.Created || !committed.Acknowledged {
+				t.Fatalf("lawful construction: %+v err=%v", committed, err)
+			}
+			run, entity, path := correlation.RunIDFromContext(f.ctx), plan.Instance.EntityID, plan.Instance.StorageRef
+			before := readProjectionShapeStorage(t, f, run, entity)
+			for _, key := range [][2]string{{uuid.NewString(), path}, {run, "foreign/path"}} {
+				if changed, err := AddWorkflowProjectionPrivateBookkeepingForTest(f.ctx, f.store, key[0], key[1]); err == nil || changed != 0 {
+					t.Fatalf("bookkeeping witness changed a foreign scope: rows=%d err=%v", changed, err)
+				}
+			}
+			cancelled, cancel := context.WithCancel(f.ctx)
+			cancel()
+			if changed, err := AddWorkflowProjectionPrivateBookkeepingForTest(cancelled, f.store, run, path); !errors.Is(err, context.Canceled) || changed != 0 {
+				t.Fatalf("cancelled bookkeeping witness: rows=%d err=%v", changed, err)
+			}
+			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, before) {
+				t.Fatalf("refused witness changed unrelated facts: actual=%+v before=%+v", actual, before)
+			}
+			if changed, err := AddWorkflowProjectionPrivateBookkeepingForTest(f.ctx, f.store, run, path); err != nil || changed != 1 {
+				t.Fatalf("exact bookkeeping witness: rows=%d err=%v", changed, err)
+			}
+			expected := before
+			bookkeeping := maps.Clone(before[4].(map[string]any))
+			bookkeeping["private_fact"] = "must-not-leak"
+			expected[4] = bookkeeping
+			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("bookkeeping witness lost a kept fact: actual=%+v expected=%+v", actual, expected)
+			}
+		})
+	}
 }
 
 func TestWorkflowProjectionShapeFaultsKeepExactPayloadScopeAndNativeTransactionBothStores(t *testing.T) {
