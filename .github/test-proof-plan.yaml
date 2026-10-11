@@ -1101,6 +1101,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
     required_children:
+      TestA2JoinNativeCommitBoundaryOnBothStores: [sqlite/acknowledged, sqlite/commit_before_lost_ack, sqlite/rollback_before_lost_ack, sqlite/native_deferred_rejection, postgres/acknowledged, postgres/commit_before_lost_ack, postgres/rollback_before_lost_ack, postgres/native_deferred_rejection]
+      TestA2JoinHeaderOnlyReceiverRefusesClaimBothStores: [sqlite, postgres]
       TestAuthoredTurnTerminationCommitsWithExactStageBothStores: [committed/sqlite, committed/postgres, late_rollback/sqlite, late_rollback/postgres, stale_cas/sqlite, stale_cas/postgres, other_instance/sqlite, other_instance/postgres, prelaunch/sqlite, prelaunch/postgres, prelaunch_restart/sqlite, prelaunch_restart/postgres]
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
