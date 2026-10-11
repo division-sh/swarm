@@ -153,6 +153,20 @@ Vemew, Go1.25.0, GOMAXPROCS=2, GOFLAGS empty, short on-disk TMPDIR:
   This is archived-evidence admission, not a fresh successor execution. An
   initial API serialization mistake was INCOMPLETE and retained separately;
   only the corrected original API envelope was used for the complete replay.
+- CLI race controls at signed local code checkpoint 4669a4752: five roots /
+  27 PASS records; SHA256
+  308eecb12b317ef7607e3bd694c7d1a0d5600fc884dea67a38d06c923893a861.
+  Required/failed job, forged cadence tier and trusted-event controls retain
+  fatal incomplete/failed evidence rather than turning it advisory.
+- Tracked-source retirement inventory PASS after adding all audit artifacts.
+- Independent complexity against b7b046701 PASS at 4669a4752: cognitive
+  hotspots 557 -> 557, cyclomatic 259 -> 259; exact delta SHA256
+  aaacf959848885002b927cafbf640cb2b4902dd1ac165bdf378efa70e87feb1e.
+- Scoped native Linux U1000 for testplanning/testtiming/testcatalog PASS under
+  pinned Staticcheck v0.8.1 / Go1.26.8, default/race/issue2413 matrix. This is
+  scoped local evidence, not a claim of the final Linux/Darwin hosted union.
+  An initial Go1.25 invocation refused the analyzer's Go>=1.26 requirement;
+  that failed tooling invocation is retained and is not a U1000 result.
 
 No duplicate local tier, server2 run or speculative hosted retry. Unchanged
 mutation execution receipts carry. The original candidate RED is retained.
