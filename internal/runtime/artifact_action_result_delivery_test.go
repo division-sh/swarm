@@ -74,7 +74,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
-				SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
+				SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
