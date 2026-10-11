@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 110 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ef3a3675ec939449c1c41292a6a7ab464ff86d052e7530c489d9d99629bb5ca6" {
+	if err != nil || len(rows) != 114 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "cb45624dd2a352420ecf13756a172d8b68c190f593a73e055abd87b386bb3d39" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -144,7 +144,7 @@ func family145SemanticOwner(function string) bool {
 }
 
 func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {
-	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go", "operator_event_replay_test.go", "sqlite_observability_supported_surface_test.go", "operator_agent_control_test.go", "operator_runtime_context_test.go"} {
+	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go", "operator_event_replay_test.go", "sqlite_observability_supported_surface_test.go", "operator_agent_control_test.go", "operator_runtime_context_test.go", "operator_test_setup_test.go"} {
 		data, err := os.ReadFile(filepath.Join("../../..", "internal/apiv1", name))
 		if err != nil {
 			t.Fatal(err)

@@ -594,3 +594,43 @@ corpus976 rows /110 transitions, digest
 ef3a3675ec939449c1c41292a6a7ab464ff86d052e7530c489d9d99629bb5ca6.
 All893 immutable historical records and the repaired24-receipt pin are unchanged.
 No fresh census, baseline change, push, PR, tier or whole-family closure.
+
+## Scenario-Setup Native Construction And Exact Storage
+
+The complete operator_test_setup_test.go fixture now opens native PostgreSQL at
+the original location and propagates that selected owner through all persistence
+witnesses. Both supplied-pool admissions, the pool carrier and every SQL call in
+that file are gone. Run lifecycle, entity runtime and mutation-log owners retain
+the original four independent read cuts: strict status/origin/source; exact
+run/entity five-column PostgreSQL JSON-text row; fixed platform/test.setup_entities
+mutation cardinality; separately reloaded native field bytes. No NULL default,
+eligibility filter or aggregate snapshot substitutes for those physical reads.
+The global entity count is its own fixed original-coordinator operation on both
+stores, with nonzero evidence and closed/raw/cancelled-owner refusal controls.
+
+The API-idempotency owner consumes the original selected mutation attempt for
+the original whole-table receipt-removal fault. Both-store proof includes three
+expired receipts with different methods/actors, unchanged complete other-table
+history, cancellation rollback and exactly one unrevisioned write. This is not
+an expiry-policy, administrative-reset or generic cleanup capability. No API,
+production admission, workload, supported surface or assertion changed.
+
+scenario-setup-native-consumers-repaired.jsonl: four original API roots PASS
+25.831s under race/count1, including all11 invalid-contract cells and unchanged
+both-store cleanup-ack sibling. The first build receipt disclosed a backend
+package-name mismatch, fixed without runtime changes. scenario-setup-native-
+owner-controls-final.jsonl: three new owner roots and four relevant structural/
+writer inventory roots PASS40.983s, including strict late NULL refusal without
+partial evidence and four separately tracked reads. scenario-setup-finite-
+controls.jsonl PASS13.960s; affected original recipe replay PASS1.776s. U1000 is
+green across all eight affected packages; the codemod dry run is Changes=[].
+
+The finite corpus has978 rows /114 transitions, digest
+cb45624dd2a352420ecf13756a172d8b68c190f593a73e055abd87b386bb3d39.
+All893 immutable historical records and the approved24-receipt digest are
+unchanged; exact current successors and two new finite rows are added. Named
+admission inventory is149, or150 excluding the still-unqualified Docker candidate.
+No fresh global census/ratchet, whole-family/tier/closure receipt, push or PR.
+The previous600s aggregate codemod RED remains disclosed, not a zero-added-cost
+proof; this cohort uses separated affected roots, not another whole-package run.
+Docker remains unclassified and qualification-open under #2353.
