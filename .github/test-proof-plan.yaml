@@ -64,6 +64,7 @@ profiles:
     - codemod-pipeline-mutation
     - codemod-bus-mutation
     - serveapp-i-reporter
+    - conformance-2394-reporter-window
     - catalog-required-inventory
     - catalog-required-verify
     - catalog-oracle-guards
@@ -169,10 +170,12 @@ profiles:
     - conformance-2394-core
     - conformance-2394-pressure
     - conformance-2394-reporter
+    - conformance-2394-reporter-window
     - conformance-soak-sqlite
     - conformance-soak-postgres
     - serveapp-other
     - serveapp-i-reporter
+    - serveapp-i-reporter-all-commit
     - serveapp-other-late
     - serveapp-2564-h1
     - serveapp-2564-h2
@@ -452,6 +455,17 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
     run: '^TestIssue2394ReporterFiveHundredDelayedCommitsBothStores$'
+    required_children:
+      TestIssue2394ReporterFiveHundredDelayedCommitsBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  conformance-2394-reporter-window:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394ReporterFiveHundredServingWindowBothStores$'
+    required_children:
+      TestIssue2394ReporterFiveHundredServingWindowBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -924,7 +938,21 @@ units:
   serveapp-i-reporter:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$'
+    run: '^(TestIssue2394ServedOriginalReporterFiveHundredBothStores|TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores|TestIssue2394ServedReporterTransactionCensusBothStores)$'
+    required_children:
+      TestIssue2394ServedOriginalReporterFiveHundredBothStores: [sqlite, postgres]
+      TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores: [sqlite, postgres]
+      TestIssue2394ServedReporterTransactionCensusBothStores: [sqlite, postgres]
+    go_timeout: 15m
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-i-reporter-all-commit:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores$'
+    required_children:
+      TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores: [sqlite, postgres]
     go_timeout: 15m
     count_mode: count-1
     environment_ids: *postgres_gateway_empty

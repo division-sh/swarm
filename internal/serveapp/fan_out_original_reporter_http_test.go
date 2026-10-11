@@ -26,13 +26,19 @@ import (
 // not the separate six-row supported-consumer proof. Only surrounding fixture
 // wiring is adapted for fully verified serve boot by issue2394ServedReporterSource.
 func TestIssue2394ServedOriginalReporterFiveHundredBothStores(t *testing.T) {
-	runIssue2394OriginalReporterHTTP(t, storetest.TransactionProbeOptions{}, 10*time.Second)
+	runIssue2394OriginalReporterHTTP(t, storetest.TransactionProbeOptions{}, 10*time.Second, false)
 }
 
 func TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores(t *testing.T) {
 	runIssue2394OriginalReporterHTTP(t, storetest.TransactionProbeOptions{
 		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayAllCommits,
-	}, 2*time.Minute)
+	}, 2*time.Minute, false)
+}
+
+func TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores(t *testing.T) {
+	runIssue2394OriginalReporterHTTP(t, storetest.TransactionProbeOptions{
+		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayServingWrites,
+	}, 2*time.Minute, true)
 }
 
 func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
@@ -101,9 +107,25 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 	}
 }
 
-func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
+func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, servingWindow bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			var transactions, continuation *storetest.TransactionCollector
+			// Registered before the harness: inspect captured attempts only after
+			// serve and selected-store cleanup have joined, not immediately at Stop.
+			if servingWindow {
+				t.Cleanup(func() {
+					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
+						if collector != nil {
+							receipt := collector.Snapshot()
+							t.Logf("joined reporter collector: %+v", receipt)
+							if receipt.Active != 0 {
+								t.Errorf("reporter cleanup lost captured attempts: %+v", receipt)
+							}
+						}
+					}
+				})
+			}
 			mergeCeiling := issuanceBudget
 			validDrainCeiling := 5 * time.Minute
 			if backend == "postgres" && transactionOptions.Delay == 0 {
@@ -111,7 +133,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				// The lead authorized a 30% served-only allowance on 2026-10-02.
 				mergeCeiling = 26 * time.Second
 			}
-			if transactionOptions.Delay == 300*time.Millisecond && transactionOptions.DelayScope == storetest.DelayAllCommits {
+			if transactionOptions.Delay == 300*time.Millisecond && (transactionOptions.DelayScope == storetest.DelayAllCommits || servingWindow) {
 				// #2394 retains 120s issuance / 5m drain as performance objectives.
 				if backend == "postgres" {
 					mergeCeiling, validDrainCeiling = 150*time.Second, 6*time.Minute
@@ -156,7 +178,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			if err := json.Unmarshal(metadataRaw, &metadata); err != nil || metadata["portfolio_id"] != portfolio {
 				t.Fatalf("original portfolio metadata changed: %s err=%v", metadataRaw, err)
 			}
-			transactions := storetest.CollectTransactions(t, selected, transactionOptions)
+			transactions = storetest.CollectTransactions(t, selected, transactionOptions)
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("failed served reporter transaction snapshot: %+v", transactions.Snapshot())
@@ -210,6 +232,14 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			if transactionOptions.Delay > 0 && (chunks.DelayedCommits != 20 || chunks.InjectedDelay != 20*transactionOptions.Delay) {
 				t.Errorf("original all-commit delay not applied to every chunk: %+v", chunks)
 			}
+			if servingWindow {
+				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
+					t.Fatal(err)
+				}
+				transactions.Stop()
+				continuation = storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+			}
+			drainStarted := time.Now()
 			valid := waitIssue2394ReporterDiagnosisWithin(t, rt, runID, 500, validDrainCeiling)
 			assertIssue2394ReporterSummary(t, valid.FanOut, runID, false)
 			assertIssue2394ReporterHistory(t, rt.DB, runID)
@@ -240,6 +270,27 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				assertIssue2394ReporterEventGet(t, rt, finalEvents[id])
 			}
 			assertIssue2394ReporterClients(t, rt, runID, final.FanOut)
+			if transactionOptions.Delay > 0 {
+				observed := transactions
+				wantChunks := uint64(21)
+				if servingWindow {
+					observed, wantChunks = continuation, 1
+				}
+				for deadline := time.Now().Add(5 * time.Minute); observed.Snapshot().ByOperation[storetest.TransactionFanOutChunk].WriteCommits < wantChunks; {
+					if time.Now().After(deadline) {
+						t.Fatalf("missing mixed native receipt: %+v", observed.Snapshot())
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				if servingWindow {
+					if err := storetest.ValidateReporterContinuation(receipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("reporter serving window: issuance=%s drain_mixed_readback=%s detached=%+v successor=%+v", elapsed, time.Since(drainStarted), transactions.Snapshot(), continuation.Snapshot())
+				} else if err := storetest.ValidateReporterStress(receipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
+					t.Fatal(err)
+				}
+			}
 		})
 	}
 }

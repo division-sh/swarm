@@ -580,13 +580,19 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 }
 
 func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends(t *testing.T) {
-	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{}, 10*time.Second, false)
+	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{}, 10*time.Second, false, false)
 }
 
 func TestIssue2394ReporterFiveHundredDelayedCommitsBothStores(t *testing.T) {
 	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{
 		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayAllCommits,
-	}, 2*time.Minute, true)
+	}, 2*time.Minute, true, false)
+}
+
+func TestIssue2394ReporterFiveHundredServingWindowBothStores(t *testing.T) {
+	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{
+		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayServingWrites,
+	}, 2*time.Minute, true, true)
 }
 
 func numericReporterIssuanceMergeCeiling(backend string, delay, objective time.Duration) time.Duration {
@@ -622,7 +628,7 @@ func TestNumericReporterIssuanceMergeCeilingIsolation(t *testing.T) {
 	}
 }
 
-func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, parallelBackends bool) {
+func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, parallelBackends, servingWindow bool) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
@@ -649,6 +655,20 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				// Keep both complete workloads without serializing their injected waits.
 				t.Parallel()
 			}
+			var transactions, continuation *storetest.TransactionCollector
+			if servingWindow {
+				t.Cleanup(func() {
+					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
+						if collector != nil {
+							receipt := collector.Snapshot()
+							t.Logf("joined reporter collector: %+v", receipt)
+							if receipt.Active != 0 {
+								t.Errorf("reporter cleanup lost captured attempts: %+v", receipt)
+							}
+						}
+					}
+				})
+			}
 			selected, db := tc.setup(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows: true,
@@ -667,7 +687,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				"threshold":    75,
 			})
 			assertNotifyAllChildrenMetadata(t, validCtx, selected, "portfolio", "portfolio_id", "portfolio-numeric-valid")
-			transactions := storetest.CollectTransactions(t, selected, transactionOptions)
+			transactions = storetest.CollectTransactions(t, selected, transactionOptions)
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("failed 500-row attempt transaction-owner snapshot (may include active work): %+v", transactions.Snapshot())
@@ -720,6 +740,14 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			if !fanOutRaceBuild && issuanceElapsed > mergeCeiling {
 				t.Errorf("500-row issuance exceeded %s merge ceiling (original target %s): %s (transaction probe %+v)", mergeCeiling, issuanceBudget, issuanceElapsed, transactionOptions)
 			}
+			if servingWindow {
+				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
+					t.Fatal(err)
+				}
+				transactions.Stop()
+				continuation = storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+			}
+			drainStarted := time.Now()
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
 			assertNotifyAllChildrenRunEventCount(t, validCtx, db, validRunID)
 
@@ -818,6 +846,27 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				assertNumericRegistrationDelivery(t, accepted)
 			}
 			assertNotifyAllChildrenFanOutRunStatus(t, mixedCtx, selected, mixedRunID)
+			if transactionOptions.Delay > 0 {
+				observed := transactions
+				wantChunks := uint64(21)
+				if servingWindow {
+					observed, wantChunks = continuation, 1
+				}
+				for deadline := time.Now().Add(5 * time.Second); observed.Snapshot().ByOperation[storetest.TransactionFanOutChunk].WriteCommits < wantChunks; {
+					if time.Now().After(deadline) {
+						t.Fatalf("missing mixed native receipt: %+v", observed.Snapshot())
+					}
+					time.Sleep(time.Millisecond)
+				}
+				if servingWindow {
+					if err := storetest.ValidateReporterContinuation(receipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("reporter serving window: issuance=%s drain_mixed_readback=%s detached=%+v successor=%+v", issuanceElapsed, time.Since(drainStarted), transactions.Snapshot(), continuation.Snapshot())
+				} else if err := storetest.ValidateReporterStress(receipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
+					t.Fatal(err)
+				}
+			}
 		})
 	}
 }

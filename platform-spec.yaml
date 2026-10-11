@@ -23978,8 +23978,11 @@ test_specification:
       promoted_by: '#2544'
       owners: [internal/testplanning, internal/testtiming, cmd/swarm-test, cmd/swarm-test-timing, .github/workflows/ci.yml]
       admission: >-
-        The reviewer records one plain CI-Tier and one independent Local-Tier line in the PR body, each core,
-        lifecycle or full. CI reads its event JSON as data; an absent CI-Tier selects core feedback.
+        The reviewer records one plain CI-Tier (core, lifecycle or full) and one independent Local-Tier line
+        in the PR body. Local-Tier is core, lifecycle or full, or focused only under an explicit independent
+        reviewer ruling naming the complete affected source-bound receipts. Focused is proof metadata, not
+        a new swarm-test profile or permission to label supplements as a completed tier.
+        CI reads its event JSON as data; an absent CI-Tier selects core feedback.
         Malformed or duplicate declarations select conservative full; invalid event JSON refuses planning.
         Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
         A changed effective tier or extra-unit set requires new current-head qualifying execution; keep the PR non-mergeable until qualification.
@@ -24035,6 +24038,26 @@ test_specification:
         full-package coverage, command budgets and strict aggregate reference/allowances. The partition
         changes command granularity, not proof frequency or aggregate test cost credit; actual hosted
         wall time, runner-minutes and concurrency must be measured before claiming savings.
+      reporter_delay_qualification: >-
+        User approval of 2026-10-09 and issue #2535 comment 6105566063 distinguish bounded serving-write
+        progress from whole-journey all-commit stress. The served and conformance 500-row serving-window
+        roots use the existing selected-backend DelayServingWrites collector at 300ms, closing only after
+        exactly 20 acknowledged claim and 20 acknowledged chunk commits and zero separate release.
+        Cursor visibility is not acknowledgment; native final commit time and captured active/error receipts
+        remain authoritative after Collector.Stop detaches future capture. A separate zero-delay collector
+        must observe actual remaining drain and mixed-batch commits; stale cleanup cannot detach it.
+        Lifecycle retains served normal/census/window under serveapp-i-reporter and the conformance window
+        under conformance-2394-reporter-window. Full additionally retains the original served all-commit root
+        under serveapp-i-reporter-all-commit and original conformance all-commit root under
+        conformance-2394-reporter. These stress roots continue 300ms injection through complete drain,
+        mixed input and readback, not an environment-dependent rewrite of an existing root.
+        Both regimes retain both stores, original 500/504/502/2 accounting, identities, payloads, history,
+        public/CLI readback, exact native receipts and unchanged issuance/drain/transport/Go bounds.
+        The separate 64-row one-second cap-32 preservation root remains unchanged in lifecycle/full.
+        Complete-root/backend ownership, count-1, environment and per-unit workload remain exact in full,
+        manual/local full and supplemental selection. Original stress stays in this change's ordinary PR
+        qualification through explicit CI-Units until a fresh complete healthy master-nightly and strict
+        merge-time nightly blocking are attested; absent operational evidence holds the cutover at review.
       fixture_codemod_qualification: >-
         The pipeline-observations codemod package has an exhaustive explicit special-package partition.
         codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader
@@ -24187,6 +24210,10 @@ test_specification:
         A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
         approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
         Over-threshold host variance requires attribution/review rather than silent baseline widening or blind full reruns.
+        Reporter serving-window timing records native injected delay, acknowledgment-bounded issuance and
+        subsequent drain/mixed/readback separately. Reduced injected fault lifetime is not runtime throughput
+        improvement; full retains the original stress compute. New roots above 30 seconds still require measured
+        source-bound cost and an explicit finite reviewer placement decision; this split grants no timing waiver.
         Timing weights remain useful for partitioning, short-unit packing and ETA. Only exact successful full
         evidence and a model-only diff authorize the master-only publisher; both create/update PR bodies declare
         CI-Tier: core and Local-Tier: core, with ordinary native PR checks and no automatic duplicate dispatch.

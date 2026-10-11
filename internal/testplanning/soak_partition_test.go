@@ -70,6 +70,9 @@ func TestServedReporterTimeoutEnvelopeIsExact(t *testing.T) {
 	if err := validateSoakSelection(packages, run, "", timeout, count, budget); err != nil {
 		t.Fatalf("approved whole reporter proof rejected: %v", err)
 	}
+	if err := validateSoakSelection(packages, ServedReporterStressRun, "", timeout, count, budget); err != nil {
+		t.Fatalf("approved whole stress proof rejected: %v", err)
+	}
 	for _, tc := range []struct {
 		name                              string
 		packages                          []string
@@ -79,7 +82,8 @@ func TestServedReporterTimeoutEnvelopeIsExact(t *testing.T) {
 		{name: "long timeout", packages: packages, run: run, timeout: "22m", count: count, budget: budget},
 		{name: "wrong package", packages: []string{SoakPackage}, run: run, timeout: timeout, count: count, budget: budget},
 		{name: "partial test", packages: packages, run: run + "/sqlite", timeout: timeout, count: count, budget: budget},
-		{name: "narrowed selector", packages: packages, run: "^TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores$", timeout: timeout, count: count, budget: budget},
+		{name: "narrowed selector", packages: packages, run: "^TestIssue2394ServedOriginalReporterFiveHundredBothStores$", timeout: timeout, count: count, budget: budget},
+		{name: "old combined selector", packages: packages, run: "^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$", timeout: timeout, count: count, budget: budget},
 		{name: "skip", packages: packages, run: run, skip: "^TestIssue2394.*$", timeout: timeout, count: count, budget: budget},
 		{name: "cached", packages: packages, run: run, timeout: timeout, count: "cache-default", budget: budget},
 		{name: "wrong budget", packages: packages, run: run, timeout: timeout, count: count, budget: "broad"},

@@ -27,7 +27,7 @@ hard:
     conformance-2394-reporter:
       limit_seconds: 480
       justification: Exact 500-row reporter conformance proof measured 421s on CI; this bound retains every selected test without widening the broad tier.
-    serveapp-i-reporter:
+    serveapp-i-reporter-all-commit:
       limit_seconds: 780
       justification: Ratified two-store delayed served reporter and full readback measured 666s on CI; this bound leaves all per-store acceptance gates unchanged.
   mandatory_soak_command_seconds:

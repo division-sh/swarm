@@ -78,6 +78,11 @@ func TestServeappLateSplitPreservesOriginalRootPartition(t *testing.T) {
 				runs = append(runs, unit.Run)
 			}
 		}
+		var err error
+		runs, err = reporterSelectedAndDeferredRuns(policy, profile, runs)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := ValidateGoProofPartition(dir, runs); err != nil {
 			t.Fatalf("%s whole serveapp partition: %v", profile, err)
 		}
