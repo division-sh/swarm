@@ -193,9 +193,6 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 	if attempt == nil {
 		return fmt.Errorf("fork proposed-effect materialization requires private story ownership")
 	}
-	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
-		return err
-	}
 	var cardIDs []string
 	var forkActivations []loopruntime.Activation
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -227,6 +224,9 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 	}
 	if len(cardIDs) == 0 {
 		return nil
+	}
+	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
+		return err
 	}
 	for _, cardID := range cardIDs {
 		sourceCard, err := decisions.LoadTx(ctx, attempt, cardID, false)
