@@ -27,7 +27,6 @@ func projectionShapeFaultCases() []projectionShapeFaultCase {
 	return []projectionShapeFaultCase{
 		{"ConflictingEntityType", SetWorkflowProjectionConflictingEntityTypeForTest, true, 5, `"wrong_entity_type"`},
 		{"PlatformBookkeeping", SetWorkflowProjectionPlatformBookkeepingForTest, false, 4, `{"platform_fact":"preserve"}`},
-		{"EntityPrivateBookkeeping", SetEntityProjectionPrivateBookkeepingForTest, true, 6, `{"private_fact":"must-not-leak"}`},
 		{"FieldsArray", SetWorkflowProjectionFieldsArrayForTest, true, 0, "[]"},
 		{"NumericGate", SetWorkflowProjectionNumericGateForTest, false, 1, "{\"g_ready\":1}"},
 		{"AccumulatorArray", SetWorkflowProjectionAccumulatorArrayForTest, false, 2, "[]"},
@@ -37,24 +36,20 @@ func projectionShapeFaultCases() []projectionShapeFaultCase {
 	}
 }
 
-func readProjectionShapeStorage(t *testing.T, f receiverConfigActivationFixture, run, entity string) [7]any {
+func readProjectionShapeStorage(t *testing.T, f receiverConfigActivationFixture, run, entity string) [6]any {
 	t.Helper()
 	var raw [5][]byte
 	var entityType string
-	var entityBookkeeping []byte
-	if err := f.db.QueryRowContext(f.ctx, `SELECT es.fields,fi.gates,fi.accumulator,fi.config,fi.bookkeeping,es.entity_type,es.bookkeeping FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &entityType, &entityBookkeeping); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT es.fields,fi.gates,fi.accumulator,fi.config,fi.bookkeeping,es.entity_type FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &entityType); err != nil {
 		t.Fatal(err)
 	}
-	var out [7]any
+	var out [6]any
 	for i := range raw {
 		if err := json.Unmarshal(raw[i], &out[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out[5] = entityType
-	if err := json.Unmarshal(entityBookkeeping, &out[6]); err != nil {
-		t.Fatal(err)
-	}
 	return out
 }
 

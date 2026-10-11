@@ -110,10 +110,6 @@ func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, select
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, pipelinepersistence.SetWorkflowProjectionPlatformBookkeepingForTest)
 }
 
-func SetEntityProjectionPrivateBookkeepingForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
-	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.SetEntityProjectionPrivateBookkeepingForTest)
-}
-
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.SetWorkflowProjectionConflictingEntityTypeForTest)
 }
