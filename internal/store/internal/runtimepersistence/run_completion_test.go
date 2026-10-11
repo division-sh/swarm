@@ -60,13 +60,12 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, NULLIF($3,''), 'default', 'example', 'Example', $4,
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+			$1::uuid, $2::uuid, NULLIF($3,''), 'default', 'example', 'Example',
+			'{}'::jsonb, now(), now()
 		)
-	`, runID, entityID, flowInstance, state); err != nil {
+	`, runID, entityID, flowInstance); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 	return normalRunCompletionFixture{RunID: runID, EventID: eventID, EntityID: entityID}
@@ -301,9 +300,6 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTermi
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
 
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET current_state = 'done' WHERE run_id = $1::uuid`, fixture.RunID); err != nil {
-		t.Fatalf("advance entity terminal: %v", err)
-	}
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET current_state = 'done' WHERE run_id = $1::uuid`, fixture.RunID); err != nil {
 		t.Fatalf("advance canonical header terminal: %v", err)
 	}
