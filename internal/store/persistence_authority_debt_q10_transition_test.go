@@ -12,7 +12,7 @@ import (
 )
 
 // The destination is outside the hashed policy to avoid self-reference.
-const debtQ10CollectorTo = "b79822ba2b94a8df51f34ade3eefe3092e83453df3c4f68945d5577cc70795a7"
+const debtQ10CollectorTo = "4d882ee561d35b758007110843f2882c1796b9b4e1e5d8850d1d0524a59eacbb"
 
 func TestPersistenceAuthorityDebtQ10NullableTransitionIsExact(t *testing.T) {
 	old, current := debtQ10NullableUncertaintyTransition()
@@ -27,6 +27,7 @@ func TestPersistenceAuthorityDebtQ10NullableTransitionIsExact(t *testing.T) {
 		{"forward-unrefreshed", after, before, before, before, true},
 		{"forward-refreshed", after, after, before, before, true},
 		{"landed-inert", after, after, after, after, true},
+		{"stale-predecessor-baseline-after-landing", after, before, before, after, false},
 		{"reverse", before, before, after, after, false},
 		{"old-source-resurrection", before, before, before, after, false},
 		{"missing-trusted-predecessor", after, after, debtControlSet(unrelated), before, false},
@@ -77,6 +78,37 @@ func TestPersistenceAuthorityDebtQ10NullableTransitionIsExact(t *testing.T) {
 	if before[old.identity()] != old || before[current.identity()].Multiplicity != 0 {
 		t.Fatal("comparison mutated the trusted maps")
 	}
+	quiescenceOld, quiescenceCurrent := debtQuiescenceUncertaintyTransition()
+	if old != quiescenceCurrent {
+		t.Fatal("Q10 must start at the landed owned-quiescence site")
+	}
+	preQuiescence := debtControlSet(quiescenceOld, unrelated)
+	if failures := authorityDebtRatchet(after, after, preQuiescence, preQuiescence); len(failures) == 0 {
+		t.Fatal("pre-2604 predecessor acquired transitive Q10 permission")
+	}
+}
+
+func TestPersistenceAuthorityDebtQ10DownwardRefreshKeepsUncertaintyOccurrence(t *testing.T) {
+	old, current := debtQ10NullableUncertaintyTransition()
+	unrelated := debtControlSite("call:QueryRow", 3)
+	before, after := debtControlSet(old, unrelated), debtControlSet(current, unrelated)
+	normalized, _, _, failures := debtRunFixtureSignatureComparisons(after, before, before, before)
+	if len(failures) != 0 {
+		t.Fatal(failures)
+	}
+	normalized, _, _, failures = debtQ10NullableComparisons(after, normalized, before, before)
+	if len(failures) != 0 || normalized[current.identity()] != current || normalized[old.identity()].Multiplicity != 0 ||
+		authorityDebtCount(normalized) != authorityDebtCount(before) || len(authorityDebtSubset(after, normalized, "refresh")) != 0 {
+		t.Fatalf("refresh lost or changed a debt occurrence: %+v failures=%v", normalized, failures)
+	}
+	for key, site := range normalized {
+		if after[key].Multiplicity < site.Multiplicity {
+			t.Fatalf("exact identity rename was reported as removed debt: %s", key)
+		}
+	}
+	if before[old.identity()] != old || before[current.identity()].Multiplicity != 0 {
+		t.Fatal("refresh mutated its trusted input")
+	}
 }
 
 func TestPersistenceAuthorityDebtQ10NullableCollectorTransitionIsPinned(t *testing.T) {
@@ -124,6 +156,10 @@ func TestPersistenceAuthorityDebtQ10NullableSourcePairIsExact(t *testing.T) {
 	const from = "periods[index].Entity.CurrentState == nil || *periods[index].Entity.CurrentState"
 	if strings.Count(string(raw), from) != 1 {
 		t.Fatal("nullable assertion correction must have exactly one source occurrence")
+	}
+	if strings.Count(string(raw), "waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)") != 2 ||
+		strings.Contains(string(raw), "waitServedRunDeliveryQuiescence(t, rt.DB,") {
+		t.Fatal("Q10 must preserve both landed owned delivery-settlement reads")
 	}
 	for _, test := range []struct {
 		source string
@@ -207,6 +243,7 @@ func TestPersistenceAuthorityDebtQ10CommittedArtifactsSurviveLanding(t *testing.
 	}{
 		{"pre-landing", actual, baseline.Sites, before, before, true},
 		{"unchanged-successor", actual, baseline.Sites, baseline.Sites, actual, true},
+		{"stale-old-baseline-new-trusted-source", actual, before, before, actual, false},
 		{"independent-source-mismatch", actual, baseline.Sites, baseline.Sites, before, false},
 		{"reverse-resurrection", before, baseline.Sites, baseline.Sites, actual, false},
 	} {

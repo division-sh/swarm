@@ -575,4 +575,3 @@ func mustCanonicalJSONString(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
-
