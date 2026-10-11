@@ -67,6 +67,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
+			publication := newExactOriginPublicationProbe(t)
 			writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
 			rt, gatewayFault := startSelectedForkTransportProofRuntime(t, backend, root, options)
 			if reset {
@@ -116,6 +117,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
 			})
 			if nativeRead {
+				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+					t.Fatal(err)
+				}
 				t.Cleanup(func() {
 					if !t.Failed() {
 						return
@@ -141,12 +145,15 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				})
 			}
 			waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-request",
 			})
 			waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
 			frontier := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, seed.RunID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
+				t.Fatal(err)
+			}
 			sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 			targetRoot := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			body := "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}"

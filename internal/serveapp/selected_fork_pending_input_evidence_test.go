@@ -24,6 +24,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputOriginal))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 				waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
@@ -106,6 +107,9 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 					t.Fatal("fault did not change fixed input evidence")
 				}
 				if _, err := rt.DB.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND family='events' AND fact_key=$3 AND revision=$4`, string(changed), seed.RunID, point.EventID, revision); err != nil {
+					t.Fatal(err)
+				}
+				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
 					t.Fatal(err)
 				}
 				before := snapshotForkReceiverApplication(t, rt)

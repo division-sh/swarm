@@ -28,6 +28,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputMixedCompletion)
+			publication := newExactOriginPublicationProbe(t)
 			childStarted := make(chan struct{}, 1)
 			release := make(chan struct{})
 			var once sync.Once
@@ -104,6 +105,9 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			}
 			if !found {
 				t.Fatal("pending child disappeared from frontier")
+			}
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, input.EventID, marker.EventID); err != nil {
+				t.Fatal(err)
 			}
 			before := snapshotForkReceiverApplication(t, rt)
 			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "allow_source_freeze": true, "idempotency_key": "mixed-fork"})

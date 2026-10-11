@@ -29,6 +29,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				}
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				root := canonicalrouting.CopyForkLoopAccumulator(t, clearOnAdmit)
+				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
@@ -45,7 +46,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				if len(initial) != wantInitial {
 					t.Fatalf("first ordinary admission: %#v", initial)
 				}
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
 				})
@@ -74,6 +75,9 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				}
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='review/review.requested' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {
+					t.Fatal(err)
+				}
+				if err := waitExactOriginPublications(t.Context(), publication, started.EventID, repeated.EventID); err != nil {
 					t.Fatal(err)
 				}
 				before := readServedForkRecipientSourceDomain(t, rt, started.RunID)

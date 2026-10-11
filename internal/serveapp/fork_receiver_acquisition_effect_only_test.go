@@ -122,6 +122,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 			policy canonicalrouting.ForkReceiverPolicy
 		}{{"constructor_owned", canonicalrouting.ForkReceiverConstructorOwned}} {
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
+				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -154,6 +155,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
 				if sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producer.ID}) {
 					t.Fatalf("immutable source producer: %+v", sourceEvidence)
+				}
+				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID); err != nil {
+					t.Fatal(err)
 				}
 				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
 				defer func() {

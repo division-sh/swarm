@@ -36,6 +36,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			if err != nil || !found || role.LoopID() != "revision" || role.RevisionField() != "revision_id" {
 				t.Fatalf("original input declaration: %+v %v %v", role, found, err)
 			}
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
@@ -52,6 +53,9 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("ordinary source loop: %+v", source)
 			}
 			sourceRoute := requireForkLoopStateEffect(t, rt, started.RunID, frontier, source.RevisionID)
+			if err := waitExactOriginPublications(t.Context(), publication, started.EventID); err != nil {
+				t.Fatal(err)
+			}
 			sourceDomain := readServedForkRecipientSourceDomain(t, rt, started.RunID)
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, started.RunID)
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "loop-notice-fork"}

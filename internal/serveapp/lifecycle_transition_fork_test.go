@@ -39,8 +39,10 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleForkSource(t, gate)
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+			origins := []string{seed.EventID}
 			stage := "waiting"
 			if gate {
 				stage = "review"
@@ -50,7 +52,8 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if gate {
 				parentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			} else {
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
+				loopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
+				origins = append(origins, loopStart.EventID)
 				stage = "drafting"
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)
 			}
@@ -64,6 +67,10 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
 			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)
+			origins = append(origins, frontier.EventID)
+			if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
+				t.Fatal(err)
+			}
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult

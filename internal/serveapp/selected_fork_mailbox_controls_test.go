@@ -13,18 +13,22 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyForkReceiverMailboxGate(t)
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-seed",
 			})
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-request",
 			})
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			var frontier, sourceCard string
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
+				t.Fatal(err)
+			}
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}

@@ -29,6 +29,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					variant = canonicalrouting.PendingInputOrdinaryRoot
 				}
 				root := canonicalrouting.CopySelectedForkPendingInput(t, variant)
+				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "input-seed",
@@ -58,6 +59,9 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					wantDone = 1
 				}
 				if mode == "ordinary_child" || mode == "ordinary_root" {
+					if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+						t.Fatal(err)
+					}
 					before := snapshotForkReceiverApplication(t, rt)
 					response := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 					if response.Data["code"] != apiv1.EventNotDeclaredCode {
@@ -78,6 +82,9 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if mode == "ambiguous_artifact" {
 					// Duplicate endpoint identity is rejected by canonical artifact
 					// compilation, before a selectable artifact or fork can exist.
+					if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
+						t.Fatal(err)
+					}
 					before := snapshotForkReceiverApplication(t, rt)
 					candidate := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputDuplicateEndpoint)
 					_, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), candidate, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
@@ -165,6 +172,7 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputConnectedSiblings)
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "target-seed",
@@ -196,6 +204,9 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			replayed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if replayed.EventID != point.EventID || !reflect.DeepEqual(replayed.Deliveries, point.Deliveries) {
 				t.Fatalf("idempotent replay = %+v, want %+v", replayed, point)
+			}
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
+				t.Fatal(err)
 			}
 			before := snapshotForkReceiverApplication(t, rt)
 			invalid := map[string]any{
