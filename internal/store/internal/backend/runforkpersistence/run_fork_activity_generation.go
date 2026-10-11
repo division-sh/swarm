@@ -246,8 +246,9 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return event, err
 	}
-	if activityidentity.RequestEventID(sourceFact) != event.SourceEventID {
-		return event, fmt.Errorf("activity request identity contradicts its exact source coordinates")
+	requestID, continued, err := admitRunForkActivitySourceIdentity(ctx, tx, admission, sourceEvent, sourceFact)
+	if err != nil {
+		return event, err
 	}
 	flowID, err := admission.carriage.ExecutionFlow(sourceEvent.RoutingSource)
 	if err != nil {
@@ -296,15 +297,15 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
 	policy := runtimecontracts.ActivityForkPolicy(strings.TrimSpace(request.ForkPolicy))
-	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, event.SourceEventID)
+	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, requestID)
 	if err != nil {
 		return event, err
 	}
-	if proposed {
+	if proposed || (continued && policy == runtimecontracts.ActivityForkRequireConfirmation) {
 		if policy != runtimecontracts.ActivityForkRequireConfirmation {
 			return event, fmt.Errorf("approved activity request %s must retain require_manual_confirmation fork policy", event.SourceEventID)
 		}
-		evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
+		evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, requestID)
 		if err != nil {
 			return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
 		}
@@ -314,7 +315,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		if evidence.ExecutionMode != event.ExecutionMode {
 			return event, fmt.Errorf("approved proposed effect %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 		}
-		if err := validateSourceActivityEvidence(evidence, sourceRequest, state, event.SourceEventID); err != nil {
+		if err := validateSourceActivityEvidence(evidence, sourceRequest, state, requestID); err != nil {
 			return event, err
 		}
 		replyID, err := admission.projectReplyReference(evidence.ReplyContextID)
@@ -339,14 +340,14 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	default:
 		return event, fmt.Errorf("activity request %s fork policy %q is not executable", event.SourceEventID, policy)
 	}
-	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
+	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, requestID)
 	if err != nil {
 		return event, err
 	}
 	if evidence.ExecutionMode != event.ExecutionMode {
 		return event, fmt.Errorf("activity request %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 	}
-	if err := validateSourceActivityEvidence(evidence, sourceRequest, state, event.SourceEventID); err != nil {
+	if err := validateSourceActivityEvidence(evidence, sourceRequest, state, requestID); err != nil {
 		return event, err
 	}
 	replyID, err := admission.projectReplyReference(evidence.ReplyContextID)

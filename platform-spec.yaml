@@ -20981,6 +20981,15 @@ run_model:
       Selected-contract source preparation derives fork-local request/result identities from the fork-local frontier
       event and typed selected-fork lineage without rewriting historical request payload bytes. EventBus validates
       those bytes against the selected target contract and persists them unchanged with the target schema binding.
+      When a selected child is itself forked, an inherited activity publication retains its physical selected-lineage
+      identity, which is distinct from the activity owner's derived journal request identity. Source preparation must
+      verify the actual fixed-cut publication, its exact committed selected binding/lineage and publication frame,
+      and the activity owner's same-run execution coordinates before selecting the journal by that derived identity.
+      A manual-confirmation source already executed under that exact selected publication may transfer only its
+      complete, unambiguous recorded result; it does not authorize a new provider call or bypass confirmation for
+      ordinary source requests. Missing, duplicate or contradictory publication/lineage/journal evidence refuses.
+      No logical journal coordinate is minted as an event or accepted as a physical fork cut. Historical evidence
+      does not replace the new child's current selected execution authority.
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
       store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,
