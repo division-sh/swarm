@@ -27,11 +27,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -134,7 +136,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
 			fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
-			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
+			seedSelectedContractActivityLoop(t, fixture, loaded, sourceRunID, entityID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
@@ -539,29 +541,43 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	return semanticview.Wrap(bundle)
 }
 
-func seedSelectedContractActivityLoop(t *testing.T, db activityForkFixtureDB, runID, entityID, requestEventID string, activation loopruntime.Activation, at time.Time) {
+func seedSelectedContractActivityLoop(t *testing.T, fixture activityForkFixture, loaded LoadedSelectedContractSource, runID, entityID string, activation loopruntime.Activation, at time.Time) {
 	t.Helper()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatalf("store source loop activation: %v", err)
 	}
-	accumulator := selectedContractActivityJSON(t, buckets)
-	handlerLoops := selectedContractActivityJSON(t, buckets[loopruntime.BucketKey])
-	ctx := context.Background()
-	result, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID, accumulator)
+	ctx := effects.WithExecutionMode(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact), runID), executionmode.Live)
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute("flow_a", "flow_a", "flow_a"))
 	if err != nil {
-		t.Fatalf("seed source loop accumulator: %v", err)
+		t.Fatal(err)
 	}
-	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
-		t.Fatalf("seed source loop accumulator affected %d headers, want 1: %v", affected, err)
+	selected := fixture.owner.ports.fork.(pipeline.WorkflowPersistenceOwner)
+	before, err := selected.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(entityID))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event,
-			writer_type, writer_id, handler_step, created_at
-		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'activity-fork-proof', 'seed', $5)
-	`, runID, entityID, handlerLoops, requestEventID, at); err != nil {
-		t.Fatalf("seed source loop mutation: %v", err)
+	instance, err := before.DecodeComplete(owner.Route, identity.NormalizeEntityID(entityID))
+	if err != nil {
+		t.Fatalf("load exact source loop header: %v", err)
+	}
+	state := pipeline.WorkflowEngineStateRecord{
+		Identity: owner, EntityID: entityID, ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
+		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: instance.Mode, Status: instance.Status,
+		CurrentState: instance.CurrentState, StageDefined: instance.StageDefined, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
+		Fields: before.State.Fields, Bookkeeping: before.Lifecycle.State.Bookkeeping, Gates: before.Lifecycle.State.Gates,
+		Accumulator: json.RawMessage(selectedContractActivityJSON(t, buckets)), Config: before.Lifecycle.Config,
+		InitialFields:  json.RawMessage(selectedContractActivityJSON(t, instance.InitialFieldValues)),
+		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at,
+		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
+	}
+	committed, err := selected.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state})
+	if err != nil || !committed.Committed {
+		t.Fatalf("commit atomic source loop projection/history: committed=%v err=%v", committed.Committed, err)
+	}
+	after, found, err := selected.LoadWorkflowInstance(ctx, owner)
+	if err != nil || !found || after.Revision != instance.Revision+1 || !reflect.DeepEqual(after.StateBuckets, map[string]any{loopruntime.BucketKey: buckets[loopruntime.BucketKey]}) {
+		t.Fatalf("source loop exact header/readback: found=%v instance=%+v err=%v", found, after, err)
 	}
 }
 
