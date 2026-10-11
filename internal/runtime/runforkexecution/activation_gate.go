@@ -270,18 +270,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		ContractSwapBootResumeAdmission:    &contractSwapAdmission,
 		HistoricalReplayExecutionAdmission: &historicalReplayAdmission,
 	}
-	timerReadbackPending := selectedContractStagedTimerReadbackPending(replayAdmission)
-	if (replayAdmission.DeliveryEventReplayReady || timerReadbackPending && frontier.FrontierEventCount > 0) && routeRecovery == nil {
+	readbackPending := selectedContractStagedReadbackPending(replayAdmission)
+	if (replayAdmission.DeliveryEventReplayReady || readbackPending && frontier.FrontierEventCount > 0) && routeRecovery == nil {
 		return result, fmt.Errorf("selected-contract activation gate requires persisted route recovery before delivery replay")
 	}
-	if !plan.ExecutionReady && !timerReadbackPending {
+	if !plan.ExecutionReady && !readbackPending {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if err := req.ExecutionOwner.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
 		return result, err
 	}
 	timerRuntimeRequired := len(plan.WorkflowTimers) > 0 || len(loadedSource.Source.WorkflowTimers()) > 0
-	if replayAdmission.DeliveryEventReplayReady || timerReadbackPending || timerRuntimeRequired {
+	if replayAdmission.DeliveryEventReplayReady || readbackPending || timerRuntimeRequired {
 		executionPorts, err := req.ExecutionOwner.require()
 		if err != nil {
 			return result, fmt.Errorf("%s: %w", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, err)
@@ -480,35 +480,43 @@ func selectedContractStagedMaterializationAdmission(materialization runfork.RunF
 }
 
 // This permits reaching the native proof, not executing or discharging history.
-// Generic/uncertified timer history remains blocked by that canonical readback.
-func selectedContractStagedTimerReadbackPending(admission runfork.RunForkReplayResumeAdmission) bool {
+// Timer history and reply rows remain blocked until their canonical readback.
+func selectedContractStagedReadbackPending(admission runfork.RunForkReplayResumeAdmission) bool {
 	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !admission.ReplayResumeFactsPresent {
 		return false
 	}
-	blockers := 0
+	pending := make(map[string]string, 2)
 	for _, blocker := range admission.UnsupportedBlockers {
-		if blocker.Code != runfork.RunForkBlockerTimerHistoryUnproven {
+		var fact string
+		switch blocker.Code {
+		case runfork.RunForkBlockerTimerHistoryUnproven:
+			fact = runfork.RunForkReplayResumeFactTimerHistory
+		case runfork.RunForkBlockerOpenReplyContextUnsupported:
+			fact = runfork.RunForkReplayResumeFactOpenReplyContext
+		default:
 			return false
 		}
-		blockers++
+		if _, duplicate := pending[fact]; duplicate {
+			return false
+		}
+		pending[fact] = blocker.Code
 	}
-	if blockers != 1 {
+	if len(pending) == 0 {
 		return false
 	}
-	facts := 0
 	for _, disposition := range admission.Dispositions {
-		if disposition.Fact == runfork.RunForkReplayResumeFactTimerHistory {
-			if disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
+		if code, exists := pending[disposition.Fact]; exists {
+			if disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != code {
 				return false
 			}
-			facts++
+			delete(pending, disposition.Fact)
 			continue
 		}
 		if disposition.Disposition == runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != "" {
 			return false
 		}
 	}
-	return facts == 1
+	return len(pending) == 0
 }
 
 func selectedContractBlockerCodes(blockers []runfork.RunForkUnsupportedBlocker) string {

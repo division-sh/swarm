@@ -21,7 +21,7 @@ func stagedTimerBlockedAdmission() runfork.RunForkReplayResumeAdmission {
 
 func TestStagedWorkflowTimerGateDefersOnlyNativeReadbackWithoutGrantingReadiness(t *testing.T) {
 	admission := stagedTimerBlockedAdmission()
-	if !selectedContractStagedTimerReadbackPending(admission) {
+	if !selectedContractStagedReadbackPending(admission) {
 		t.Fatal("timer-only source blocker cannot reach its canonical native proof")
 	}
 	if !reflect.DeepEqual(admission, stagedTimerBlockedAdmission()) || admission.StateOnlyExecutionReady ||
@@ -68,7 +68,7 @@ func TestStagedWorkflowTimerGatePreservesOtherAndIncompleteBlockers(t *testing.T
 					Code: runfork.RunForkBlockerOpenReplyContextUnsupported,
 				})
 			}
-			if selectedContractStagedTimerReadbackPending(admission) {
+			if selectedContractStagedReadbackPending(admission) {
 				t.Fatal("incomplete timer evidence or unrelated blocker reached the retained mutation path")
 			}
 		})

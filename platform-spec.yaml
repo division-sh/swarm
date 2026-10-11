@@ -999,6 +999,11 @@ contract_formats:
         of the open-reply family only; it cannot discharge any other capability blocker.
         Ordinary activation revalidates the complete child inventory inside its mutation
         attempt before the existing historical-replay owner can authorize delivery work.
+        Selected activation may reach native require-only materialization readback while
+        exactly the timer-history or open-reply inventory blockers remain pending. This
+        routing step grants neither readiness nor reply authority: exact child/cut readback
+        must discharge every pending blocker before publication or execution. Unrelated,
+        duplicate or contradictory blockers still refuse before activation.
         Matching request/result IDs alone do not establish agreement. Conflicting
         evidence fails without overwriting the row or appending a lifecycle story;
         an unchanged repeat is a no-op. JSON evidence uses the canonical semantic
