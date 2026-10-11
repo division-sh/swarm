@@ -538,6 +538,9 @@ func commitWorkflowEngineMutation(
 				if err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
+				if command.FanOutIntent != nil && command.FanOutIntent.Capsule.Context.ReplyContextID() != settled.Route.Context.ReplyContextID() {
+					return fmt.Errorf("fan-out continuation differs from its exact native delivery settlement")
+				}
 				if !command.Lifecycle.RequestCompletionCandidate {
 					if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
 						return err
