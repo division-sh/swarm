@@ -33,6 +33,10 @@ func (a *Adapter) materializationEvent(ctx context.Context, q queryer, eventID s
 }
 
 func (a *Adapter) materializationReady(ctx context.Context, q queryer, record deliveryRecord, claimTx *sql.Tx) (bool, error) {
+	ready, err := a.creatingPredecessorReady(ctx, q, record)
+	if err != nil || !ready {
+		return ready, err
+	}
 	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() {
 		return true, nil
 	}
@@ -86,7 +90,7 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 			return deliverylifecycle.ClaimParked, deliverylifecycle.ContinuationWake{}, nil
 		}
 	}
-	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() || disposition == deliverylifecycle.ClaimTerminal || disposition == deliverylifecycle.ClaimInvariantInvalid {
+	if disposition == deliverylifecycle.ClaimTerminal || disposition == deliverylifecycle.ClaimInvariantInvalid {
 		return disposition, wake, nil
 	}
 	ready, err := a.materializationReady(ctx, q, record, nil)
@@ -94,8 +98,8 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 		return deliverylifecycle.ClaimInvariantInvalid, deliverylifecycle.ContinuationWake{}, err
 	}
 	if !ready {
-		// Materialization/readiness commits signal the existing continuation owner;
-		// absence is not a timed retry and must never acquire an agent claim.
+		// Construction/readiness and predecessor settlement signal the existing
+		// continuation owner; deferral never consumes a claim or starts a timer.
 		return deliverylifecycle.ClaimDeferred, deliverylifecycle.ContinuationWake{}, nil
 	}
 	return disposition, wake, nil

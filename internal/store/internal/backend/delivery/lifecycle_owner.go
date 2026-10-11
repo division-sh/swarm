@@ -24,6 +24,7 @@ type ReceiverExecutionAdmission interface {
 
 type ReceiverTargetPersistence interface {
 	ReceiverMaterializedTx(context.Context, *sql.Tx, events.DeliveryRoute) (bool, error)
+	ReceiverCreatingEventTx(context.Context, *sql.Tx, string, events.DeliveryRoute) (string, error)
 }
 
 func (s *DeliveryPostgresOwner) BindReceiverTargetPersistence(owner ReceiverTargetPersistence) error {

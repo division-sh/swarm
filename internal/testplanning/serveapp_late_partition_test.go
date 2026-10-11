@@ -50,6 +50,8 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 				"TestPublicFeedOnlyCompletionUnloadRestartBothStores":                  {"default_sqlite", "explicit_postgres"},
 				"TestPublicPublicationRetirementRecoveryBothStores":                    {"default_sqlite", "explicit_postgres"},
 				"TestPublicPublicationSixHubOriginalDeadlineBothStores":                {"sqlite", "postgres"},
+				"TestPublicPublicationCreatingTurnOrderBothStores":                     {"sqlite", "postgres"},
+				"TestPublicPublicationCreatingTurnRestartBothStores":                   {"sqlite", "postgres"},
 				"TestPublicPublicationInvalidAcknowledgedResultBothStores":             {"default_sqlite/completion", "default_sqlite/publication", "explicit_postgres/completion", "explicit_postgres/publication"},
 				"TestPublicFeedOnlyInvalidAcknowledgedResultBothStores":                {"default_sqlite", "explicit_postgres"},
 				"TestPublicCompletionPreAckRetirementBothStores":                       {"default_sqlite/event.publish", "default_sqlite/run.start", "explicit_postgres/event.publish", "explicit_postgres/run.start"},
