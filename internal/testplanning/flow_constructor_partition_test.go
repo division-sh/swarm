@@ -108,13 +108,13 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			},
 		},
 		"local-serveapp-canaries": {
-			"TestReleaseReceiverInitializationBothStores":    {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"},
+			"TestReleaseReceiverInitializationBothStores":    {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "default_sqlite/connected_restart/before_restart", "default_sqlite/connected_restart/after_restart", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema", "explicit_postgres/connected_restart/before_restart", "explicit_postgres/connected_restart/after_restart"},
 			"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"},
 		},
 		"serveapp-other-late": {"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}},
 		"local-catalog-smoke": {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
 		"catalog-runtime":     {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
-		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema"}},
+		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "default_sqlite/connected_restart/before_restart", "default_sqlite/connected_restart/after_restart", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema", "explicit_postgres/connected_restart/before_restart", "explicit_postgres/connected_restart/after_restart"}},
 	} {
 		unit := policy.Units[id]
 		pattern := regexp.MustCompile(unit.Run)
