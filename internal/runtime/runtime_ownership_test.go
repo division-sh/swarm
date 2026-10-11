@@ -44,9 +44,9 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	}, "runtime_test")
+	})
 	if err != nil {
 		t.Fatalf("new cold authority: %v", err)
 	}

@@ -4,18 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
 func TestSelectedStopValidatesExactForkPointUnion(t *testing.T) {
-	process, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: "selected-stop-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
+	process := startupownership.Authority{AuthorityID: uuid.NewString(), AuthorityGeneration: 1,
+		OwnerID: "selected-stop-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}
 	base := SelectedStopRequest{
 		Transition: TransitionRequest{RunID: uuid.NewString()},
 		Binding: runfork.RunForkSelectedContractBinding{

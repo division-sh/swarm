@@ -142,7 +142,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	expected := map[string]bool{
 		"selected_store_access": false, "selected_store_schema": false, "startup_process_possession": false,
 		"pinned_source_admission": false, "retained_source_integrity": false, "startup_recovery_admission": false,
-		"startup_authority_lineage": false, "pending_reset_admission": false, "retained_route_admission": false,
+		"startup_process_generation": false, "pending_reset_admission": false, "retained_route_admission": false,
 		"retained_channel_admission": false, "selected_fork_recovery_admission": false, "retained_actor_admission": false,
 		"selected_fork_source_dependencies": false, "retained_actor_provider_dependencies": false,
 	}

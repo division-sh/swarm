@@ -99,8 +99,6 @@ type serveLifecyclePresenter struct {
 	runtimeFailureName string
 	ownershipTerminal  string
 	shutdownErr        error
-	recoveredSession   bool
-	recoveryWritten    bool
 	warningsWritten    bool
 	bootWritten        bool
 	terminalWritten    bool
@@ -366,15 +364,6 @@ func (p *serveLifecyclePresenter) recordClosedUnavailableWork() {
 	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeUnavailableClosed})
 }
 
-func (p *serveLifecyclePresenter) recordRecoveredPreviousSession() {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	p.recoveredSession = true
-	p.mu.Unlock()
-}
-
 func (p *serveLifecyclePresenter) ownershipLost(result runtimestartupownership.TerminalResult) {
 	if p == nil {
 		return
@@ -416,7 +405,6 @@ func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, pu
 	if publish != nil {
 		publish()
 	}
-	p.writeRecoveredSessionLocked()
 	if !p.verbose {
 		p.writeConciseReadyLocked(facts)
 	} else {
@@ -643,14 +631,6 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 	}
 	p.writeStandingIngressLocked(facts.Standing)
 	fmt.Fprintln(p.out)
-}
-
-func (p *serveLifecyclePresenter) writeRecoveredSessionLocked() {
-	if !p.recoveredSession || p.recoveryWritten {
-		return
-	}
-	p.recoveryWritten = true
-	fmt.Fprintln(p.out, "✓ Recovered previous session")
 }
 
 func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleReadyFacts) {

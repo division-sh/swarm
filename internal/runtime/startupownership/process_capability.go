@@ -13,6 +13,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
@@ -63,6 +64,10 @@ type GrantEvidence struct {
 	State              GrantState                `json:"state"`
 	ProbeSurfaceIDs    []string                  `json:"probe_surface_ids,omitempty"`
 	SelectedFork       *SelectedForkGrantBinding `json:"selected_fork,omitempty"`
+}
+
+func (e GrantEvidence) ProcessCoordinates() processbinding.LeaseCoordinates {
+	return processbinding.LeaseCoordinates{LeaseID: e.ProcessAuthorityID, OwnerID: e.ProcessOwnerID, BootID: e.ProcessBootID}
 }
 
 func (e GrantEvidence) Validate() error {

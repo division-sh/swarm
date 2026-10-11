@@ -257,11 +257,11 @@ func currentFanOutGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) ([]runt
 	if sqlite {
 		backend = "sqlite_retained_owner"
 	}
-	authority, exists, err := loadAuthorityHeadModeTx(ctx, tx, backend, sqlite, false)
+	authority, exists, err := loadProcessAuthorityTx(ctx, tx, backend, sqlite, false)
 	if err != nil {
 		return nil, err
 	}
-	if !exists || authority.State != runtimeownership.StateActive {
+	if !exists {
 		return nil, nil
 	}
 	_, current, err := observeFanOutGrantFamilyTx(ctx, tx, authority, sqlite)

@@ -67,11 +67,24 @@ type runtimeTestRetainedSession struct {
 	released        bool
 }
 
+// In-memory Runtime controls need immutable attribution, not a native lease.
+// Native admission and possession are exercised by the selected-store proofs.
+func runtimeTestProcessAttribution(req runtimestartupownership.AcquireRequest) (runtimestartupownership.Authority, error) {
+	if err := req.Validate(); err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
+	authority := runtimestartupownership.Authority{
+		AuthorityID: uuid.NewString(), AuthorityGeneration: 1, OwnerID: req.OwnerID,
+		BootID: req.BootID, RuntimeInstanceID: req.RuntimeInstanceID, Backend: "sqlite_retained_owner",
+	}
+	return authority, authority.Validate()
+}
+
 func newRuntimeTestRetainedSession(t testing.TB) *runtimeTestRetainedSession {
 	t.Helper()
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	}, "runtime_test")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,9 +366,9 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 		return nil, nil, err
 	}
 	if session == nil {
-		authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 			OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-		}, "runtime_test")
+		})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -724,9 +737,9 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 		}
 	}
 	if installTestGrant && retainedSession == nil && deps.ManagerStore == nil {
-		authority, authorityErr := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		authority, authorityErr := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 			OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: deps.Options.RuntimeInstanceID,
-		}, "runtime_test")
+		})
 		if authorityErr != nil {
 			return nil, authorityErr
 		}

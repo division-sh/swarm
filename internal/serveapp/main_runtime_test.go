@@ -7073,7 +7073,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 		}
 		bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), true)
+		seedServeRuntimeReleasedProcess(t, selected)
 		if err := selected.Close(); err != nil {
 			t.Fatalf("close seeded SQLite store: %v", err)
 		}
@@ -7082,7 +7082,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		storetest.BootstrapPostgresRuntimeStore(t, selected)
-		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), false)
+		seedServeRuntimeReleasedProcess(t, selected)
 		run(t, writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), ""))
 	})
 }
@@ -7106,8 +7106,8 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		writeStaleServeContextDescriptor(t, opts.SwarmDir, canonicalProject, storePath)
 		serve := startServeRuntimeTestProcess(t, opts)
 		serve.waitForReadyLine()
-		if !strings.Contains(serve.outputString(), "✓ Recovered previous session") {
-			t.Fatalf("serve omitted abandoned-session recovery:\n%s", serve.outputString())
+		if strings.Contains(serve.outputString(), "Recovered previous session") {
+			t.Fatalf("serve inferred recovery from an old stamp or context descriptor:\n%s", serve.outputString())
 		}
 		if code := serve.stop(); code != 0 {
 			t.Fatalf("serve code=%d output:\n%s", code, serve.outputString())
@@ -7131,7 +7131,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 		}
 		bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), true)
+		seedServeRuntimeReleasedProcess(t, selected)
 		if err := selected.Close(); err != nil {
 			t.Fatalf("close seeded SQLite store: %v", err)
 		}
@@ -7140,7 +7140,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		storetest.BootstrapPostgresRuntimeStore(t, selected)
-		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), false)
+		seedServeRuntimeReleasedProcess(t, selected)
 		run(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), ""), storebackend.BackendPostgres.String(), t.TempDir()), "")
 	})
 }
@@ -7167,29 +7167,20 @@ func writeStaleServeContextDescriptor(t *testing.T, swarmDir, projectRoot, store
 	}
 }
 
-func seedServeRuntimeAbandonedAuthority(t *testing.T, db *sql.DB, sqlite bool) {
+func seedServeRuntimeReleasedProcess(t *testing.T, selected runtimestartupownership.Store) {
 	t.Helper()
-	backend := "postgres_retained_session"
-	if sqlite {
-		backend = "sqlite_retained_owner"
-	}
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "abandoned-process", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, backend)
+	ctx := context.Background()
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "previous-process", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
 	if err != nil {
-		t.Fatalf("construct abandoned authority: %v", err)
+		t.Fatal(err)
 	}
-	snapshot, err := canonicaljson.Bytes(authority)
-	if err != nil {
-		t.Fatalf("encode abandoned authority: %v", err)
+	if err := capability.ProveCurrent(ctx); err != nil {
+		t.Fatal(err)
 	}
-	query := `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?)`
-	args := []any{uuid.NewString(), authority.AuthorityID, authority.AuthorityGeneration, authority.TransitionOrdinal, authority.StateVersion, authority.State, authority.OwnerID, authority.BootID, authority.RuntimeInstanceID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind, string(snapshot), authority.RecordedAt.UTC()}
-	if !sqlite {
-		query = `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9::uuid,$10,$11::uuid,$12,$13,NULL,NULL,$14::jsonb,$15)`
-	}
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
-		t.Fatalf("seed abandoned authority: %v", err)
+	if err := capability.Release(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
