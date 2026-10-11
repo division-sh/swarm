@@ -2798,8 +2798,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, selected
 }
 
 func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	container := buildSelectedForkProofContainer(t, ctx, selected)
 	proof := container.Proof()
@@ -2881,18 +2880,8 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		t.Fatalf("selected-fork authored HTTP requests = %d, want 1", requests.Load())
 	}
 
-	var persisted int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runtime_external_effect_attempts a
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id = $1::uuid
-		  AND o.authority_kind = 'selected_contract_fork'
-		  AND o.effect_kind = 'http_tool_target'
-		  AND a.adapter = 'authored_http_tool'
-		  AND a.capability_surface_id = $2::uuid
-		  AND a.state = 'settled'
-	`, proof.RuntimeExecutionID, surface.ID).Scan(&persisted); err != nil {
+	persisted, err := storetest.CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorage(ctx, selected, proof.RuntimeExecutionID, surface.ID)
+	if err != nil {
 		t.Fatalf("count selected-fork HTTP effect evidence: %v", err)
 	}
 	if persisted != 1 {
@@ -2903,8 +2892,8 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	if _, err := executor.Execute(runtimeactors.WithActor(effectCtx, forgedActor), "compute_only", map[string]any{"value": 1}); err == nil {
 		t.Fatal("forged module call acquired selected-fork authority")
 	}
-	var effectCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE o.selected_execution_id = $1::uuid`, proof.RuntimeExecutionID).Scan(&effectCount); err != nil || effectCount != 1 {
+	effectCount, err := storetest.CountSelectedExecutionAttemptsStorage(ctx, selected, proof.RuntimeExecutionID)
+	if err != nil || effectCount != 1 {
 		t.Fatalf("module refusal created an effect: count=%d err=%v", effectCount, err)
 	}
 
@@ -2944,14 +2933,8 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	if requests.Load() != 1 {
 		t.Fatalf("hostile cross-run selected-fork dispatch reached HTTP target; requests=%d", requests.Load())
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runtime_external_effect_attempts a
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id = $1::uuid
-		  AND o.effect_kind = 'http_tool_target'
-		  AND a.adapter = 'authored_http_tool'
-	`, proof.RuntimeExecutionID).Scan(&persisted); err != nil {
+	persisted, err = storetest.CountSelectedAuthoredHTTPAttemptsStorage(ctx, selected, proof.RuntimeExecutionID)
+	if err != nil {
 		t.Fatalf("count selected-fork HTTP effect evidence after hostile cross-run attempt: %v", err)
 	}
 	if persisted != 1 {

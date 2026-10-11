@@ -23,6 +23,24 @@ func CountCompletionAttemptBudgetReservationsStorageTx(ctx context.Context, tx *
 	return count, err
 }
 
+func CountSelectedExecutionAttemptsStorageTx(ctx context.Context, tx *sql.Tx, executionID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1`, executionID).Scan(&count)
+	return count, err
+}
+
+func CountSelectedAuthoredHTTPAttemptsStorageTx(ctx context.Context, tx *sql.Tx, executionID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1 AND o.effect_kind='http_tool_target' AND a.adapter='authored_http_tool'`, executionID).Scan(&count)
+	return count, err
+}
+
+func CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageTx(ctx context.Context, tx *sql.Tx, executionID, surfaceID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1 AND o.authority_kind='selected_contract_fork' AND o.effect_kind='http_tool_target' AND a.adapter='authored_http_tool' AND a.capability_surface_id=$2 AND a.state='settled'`, executionID, surfaceID).Scan(&count)
+	return count, err
+}
+
 func (s *EffectPostgresOwner) ReadExternalAttemptStorageForTest(ctx context.Context) ([]ExternalAttemptStorage, error) {
 	if s == nil || s.backend == nil || !s.backend.Valid() || s.requireCurrent == nil {
 		return nil, fmt.Errorf("external attempt observation requires the original postgres owner")

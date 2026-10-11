@@ -62,6 +62,65 @@ func TestSelectedCompetitionStorageCountsUseOriginalReadOwnerBothStores(t *testi
 	}
 }
 
+func TestSelectedAuthoredHTTPCountsUseOriginalOwnerAndRefuseInvalidSurfaceBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			selected, ctx := backend.open(t).store, context.Background()
+			execution, surface := uuid.NewString(), uuid.NewString()
+			probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			readers := []func(context.Context, any, string) (int, error){
+				CountSelectedExecutionAttemptsStorageForTest,
+				CountSelectedAuthoredHTTPAttemptsStorageForTest,
+				func(ctx context.Context, owner any, id string) (int, error) {
+					return CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageForTest(ctx, owner, id, surface)
+				},
+			}
+			for _, read := range readers {
+				if got, err := read(ctx, selected, execution); err != nil || got != 0 {
+					t.Fatalf("absent authored HTTP fact supplied evidence: %d/%v", got, err)
+				}
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 3 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("authored HTTP reads escaped original coordinator or collapsed temporal cuts: %+v", counts)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			for _, read := range readers {
+				if got, err := read(cancelled, selected, execution); !errors.Is(err, context.Canceled) || got != 0 {
+					t.Fatalf("cancelled authored HTTP read supplied evidence: %d/%v", got, err)
+				}
+				for _, owner := range []any{nil, struct{}{}, &sql.DB{}} {
+					if got, err := read(ctx, owner, execution); err == nil || got != 0 {
+						t.Fatalf("foreign/raw authored HTTP owner supplied evidence: %T/%d/%v", owner, got, err)
+					}
+				}
+				for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
+					if got, err := read(ctx, selected, invalid); err == nil || got != 0 {
+						t.Fatalf("invalid authored HTTP execution supplied evidence: %q/%d/%v", invalid, got, err)
+					}
+				}
+			}
+			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
+				if got, err := CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageForTest(ctx, selected, execution, invalid); err == nil || got != 0 {
+					t.Fatalf("invalid authored HTTP surface supplied evidence: %q/%d/%v", invalid, got, err)
+				}
+			}
+			if err := selected.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			for _, read := range readers {
+				if got, err := read(ctx, selected, execution); err == nil || got != 0 {
+					t.Fatalf("closed authored HTTP owner supplied evidence: %d/%v", got, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSelectedRuntimeOutcomeScalarsPreservePhysicalScopeAndOriginalCoordinatorBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {

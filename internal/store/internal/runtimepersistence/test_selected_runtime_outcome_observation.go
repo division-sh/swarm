@@ -9,6 +9,57 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
 
+func CountSelectedExecutionAttemptsStorageForTest(ctx context.Context, selected any, executionID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, executionID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = effectpersistence.CountSelectedExecutionAttemptsStorageTx(ctx, tx, executionID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func CountSelectedAuthoredHTTPAttemptsStorageForTest(ctx context.Context, selected any, executionID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, executionID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = effectpersistence.CountSelectedAuthoredHTTPAttemptsStorageTx(ctx, tx, executionID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageForTest(ctx context.Context, selected any, executionID, surfaceID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, executionID); err != nil {
+		return 0, err
+	}
+	if err := validateStandaloneStorageEvent(selected, surfaceID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = effectpersistence.CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageTx(ctx, tx, executionID, surfaceID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
 func CountClosedFirstSelectedRuntimeExecutionStorageForTest(ctx context.Context, selected any, forkRunID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, forkRunID); err != nil {
 		return 0, err

@@ -1829,3 +1829,73 @@ checked separately. Named admissions126 ->123 (124 excluding unqualified Docker)
 Not a fresh global census, zero-additions assertion, restart proof or parent closure.
 Existing watchlist/architecture disposition stands. M01/Docker stay qualification-open
 under #2353. No push, PR, tier, server2 run or broader production semantic change.
+
+## Authored HTTP witness and native-opening cohort
+
+The remaining ordinary opening and all three pool-based readbacks in the authored
+HTTP supported component root are migrated. Its actual container helper already
+uses native materialization at approved 4d658cc08; no pool remains in this root,
+so its original opening becomes StartPostgresRuntimeStore. Every original tool,
+surface, actor, session, frame, mode and identity input remains; the intentionally
+forged module/cross-run/managed-admission controls still refuse at their original
+gates. No legacy supplied-pool, callback, generic query or raw getter substitute
+is retained in the root or its container-construction helper.
+
+Existing effectpersistence owns all three closed scalar SQL operations. They are
+deliberately distinct physical scopes, not interchangeable success/eligibility
+readers: initial exact execution/selected-contract authority/http_tool_target/
+authored_http_tool/surface/settled join; all attempt/operation rows at exact
+execution after module refusal; exact execution/http kind/HTTP adapter only after
+cross-run refusal. Public ports expose identity coordinates and scalars only.
+Three original selected read transactions remain in order; no grouping, narrowing,
+DISTINCT, decoding, inferred live authority or native-admission filter hides residue.
+
+The complete native root and distinct-scope predicate guards preserve all original
+fatal/error/refusal/dispatch/count calls. Hostile controls reject foreign surface,
+reader substitution, lost zero-mutation checks and weakened exact-one dispatch.
+Private backend query-unit rows cover duplicate joined attempts plus mismatched
+authority/effect/adapter/surface/state/execution and orphan operations. Those bounded
+physical-schema units never manufacture runtime authority or escape a backend owner.
+Native both-store controls prove three original read commits, zero writes, absence,
+invalid execution/surface, raw/foreign/absent ownership, cancellation and closed-owner
+failure with no provisional scalar.
+
+Systematic consumption: all three original authored HTTP witness occurrences now
+consume these native owners. The competition's settled-only attempt scope remains
+with its existing distinct owner because it does not have these HTTP/surface predicates.
+Sibling source probing found private discard counts additionally scoped by fork/run
+and completion evidence additionally scoped by exact attempt; neither is the same
+physical predicate. Broader provider/capability/alias observers and constructor chains
+remain explicit family145/#2542/#2151 debt, not closure credit for this cohort.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Ordinary authored HTTP supplied-pool construction and three raw observations | reproduced and fixed | Original complete TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission under race, native opening, same one real HTTP request and all original success/refusal/no-additional-effect assertions |
+| Distinct initial/module-refusal/cross-run physical scopes | execution-proven through the same corrected path | Backend scope/multiplicity matrix, native three-read both-store controls and exact caller tuple/condition guard with hostile reader/identity/assertion substitutions |
+| Selected-contract authority filter accidentally lost | reproduced and fixed | Actual native SQL mutation removes authority_kind predicate: expected RED at exact count (3 vs2), restore GREEN; original HTTP root remains GREEN |
+| Original query/count/assertion ownership and historical source preservation | execution-proven through the same corrected path | Complete cheap family145/historical/finite/successor/native-run-setup set; all five affected owner guards, source-pinned candidate mapping and unchanged original recipe tuples/receipts |
+
+Vemew: original complete race root GREEN7.627s. Native ownership/refusal controls
+both stores GREEN12.261s; physical predicate/multiplicity root GREEN6.239s(package).
+Actual SQL authority-filter mutation RED0.165s, restore GREEN1.148s. Complete cheap
+family plus historical/finite/successor/native-run-setup guards GREEN14.380s; native
+projection/closed-delivery/revision-inventory guards GREEN1.229s(store)/8.970s(private).
+Affected U1000/diff clean; codemod Changes=[]. No skip, retry, timeout change or
+weakened assertion. Committed-head complexity is checked separately.
+
+Receipts in ~/.cache/swarm-2542-family145/authored-http-*:
+root d00ed5590f30d69ecf597255909b37d000d05ea567ca8ddf25be53afccdf66ea;
+native controls d1386c7e8dd1f97c27e8c82e514037feadfbc14fa7293e36060451fd36be2d9a;
+actual mutant 7baf57314822a5579eeb4aa9b241ee032a6b5c8f3cd70c643c391dae6b9ebd66;
+restore c4f8b44c59a509177f1560462a725f5db5b85adf1c1b6dd4d208fcb6e56f1050;
+family guards 28dff189a40e128e03f53e276c5b15323034338d7744598f88cea98e9fba442e;
+owner guards 20cd255f444be5382b09e3059ee51814b2eda2197e2f2fe35c79f020cc0d60f9.
+
+Corpus1055/199 transitions, digest
+f7ca5ce5e7005b0fb337e53df4c6ed4aadb26e49145198c247048c5038c47cb7.
+Original893 tuples/24 receipts stay unchanged. Named ordinary admissions123 ->122
+(123 excluding Docker's unqualified removal); no fresh global debt/ratchet, zero-added
+sites, restart or parent closure claim. platform-spec.yaml records these exact physical
+scopes. Existing watchlist/architecture disposition remains appropriate: use the original
+native construction and effect owner, not a new fixture framework. M01/Docker remain
+qualification-open in #2353. No push, PR, tier or server2 run.

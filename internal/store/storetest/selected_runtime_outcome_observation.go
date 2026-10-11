@@ -6,6 +6,18 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
+func CountSelectedExecutionAttemptsStorage(ctx context.Context, selected any, executionID string) (int, error) {
+	return private.CountSelectedExecutionAttemptsStorageForTest(ctx, selected, executionID)
+}
+
+func CountSelectedAuthoredHTTPAttemptsStorage(ctx context.Context, selected any, executionID string) (int, error) {
+	return private.CountSelectedAuthoredHTTPAttemptsStorageForTest(ctx, selected, executionID)
+}
+
+func CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorage(ctx context.Context, selected any, executionID, surfaceID string) (int, error) {
+	return private.CountSelectedAuthoredHTTPSettledSurfaceAttemptsStorageForTest(ctx, selected, executionID, surfaceID)
+}
+
 func CountClosedFirstSelectedRuntimeExecutionStorage(ctx context.Context, selected any, forkRunID string) (int, error) {
 	return private.CountClosedFirstSelectedRuntimeExecutionStorageForTest(ctx, selected, forkRunID)
 }
