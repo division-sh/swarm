@@ -27,16 +27,18 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -56,11 +58,17 @@ type forkJoinNativeScheduleOwner interface {
 }
 
 type forkJoinNativeFixture struct {
-	db       *sql.DB
-	postgres *postgresbackend.Backend
-	sqlite   *sqlitebackend.Backend
-	generic  forkJoinNativeScheduleOwner
-	pipeline forkJoinNativePipelineOwner
+	db        *sql.DB
+	postgres  *postgresbackend.Backend
+	sqlite    *sqlitebackend.Backend
+	generic   forkJoinNativeScheduleOwner
+	pipeline  forkJoinNativePipelineOwner
+	lifecycle interface {
+		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+	}
+	artifact interface {
+		EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+	}
 }
 
 // Persistence-only proof: the positive typed cut is command provenance, not a
@@ -166,8 +174,20 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent, &storerunlifecycle.RunLifecyclePostgresOwner{})
-		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: &storerunlifecycle.RunLifecyclePostgresOwner{}}
+		lifecycle, err := storerunlifecycle.NewPostgres(f.postgres, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.lifecycle = lifecycle
+		f.artifact, err = sourceartifactstore.NewPostgres(f.postgres, schema.RequireCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent, lifecycle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: lifecycle}
 	} else {
 		dbPath := filepath.Join(t.TempDir(), "fork-join.db")
 		dsn := url.URL{Scheme: "file", Opaque: dbPath}
@@ -192,8 +212,20 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent, &storerunlifecycle.RunLifecycleSQLiteOwner{})
-		f.pipeline = &pipelinepersistence.PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &storerunlifecycle.RunLifecycleSQLiteOwner{}}
+		lifecycle, err := storerunlifecycle.NewSQLite(f.sqlite, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.lifecycle = lifecycle
+		f.artifact, err = sourceartifactstore.NewSQLite(f.sqlite, schema.RequireCurrent, time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent, lifecycle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.pipeline = &pipelinepersistence.PipelineSQLiteOwner{RunLifecycleSQLiteOwner: lifecycle}
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -206,14 +238,15 @@ func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID stri
 	fact := sourceartifactfixture.Fact()
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
-	fixture := runlifecyclefixture.Fixture{
-		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: fact,
-		Artifact: sourceartifactfixture.Artifact(), BundleHash: fact.BundleHash(), StartedAt: runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-2 * time.Hour)),
+	if _, err := f.artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+		t.Fatal(err)
 	}
-	if f.postgres != nil {
-		runlifecyclefixture.RequirePostgres(t, ctx, f.db, fixture)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, f.db, fixture)
+	disposition, err := f.lifecycle.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact,
+		StartedAt: runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-2 * time.Hour)),
+	})
+	if err != nil || disposition != runtimerunlifecycle.MutationApplied {
+		t.Fatalf("canonical native join run setup: disposition=%s err=%v", disposition, err)
 	}
 	return ctx
 }
