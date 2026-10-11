@@ -1699,11 +1699,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		if am.workspaceGatewayAdmission != nil {
 			admissionCtx := runtimeactors.WithActor(loopCtx, candidate.Config)
-			if err := am.workspaceGatewayAdmission(admissionCtx, candidate.Config); err != nil {
-				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
-				return replaceExecutionResult{}, errors.Join(err, abortErr, cleanupPrepared())
-			}
-			if err := am.ProveUnpublishedActivation(token); err != nil {
+			if err := am.observeUnpublishedActivation(admissionCtx, token, candidate.Config); err != nil {
 				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 				return replaceExecutionResult{}, errors.Join(err, abortErr, cleanupPrepared())
 			}

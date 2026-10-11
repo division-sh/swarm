@@ -41528,7 +41528,12 @@ managed_external_effect_authority:
     activation_gateway_observation: >
       A fresh initialize/list-only observation precedes publication of every exact executable receiver occurrence.
       It consumes the current normal grant or the process-owned frozen selected-preparation catalog, together with
-      the exact unpublished lifecycle token. It cannot reuse a startup receipt as current network proof, authorize
+      the exact unpublished lifecycle token. Before and after observation, the lifecycle owner also checks the
+      candidate actor's exact run-independent configuration revision against that occurrence's admitted revision;
+      identity equality alone cannot hide configuration drift. Cancellation, configuration change or a stale
+      occurrence refuses before route publication. This observation does not mint a durable run grant: ephemeral
+      process-only receivers and durable selected/readiness receivers retain their distinct existing authority
+      owners. It cannot reuse a startup receipt as current network proof, authorize
       tools/call or /tools, start a model, advance readiness, or impersonate a provider turn. Foreign, retired and
       already-published lifecycle tokens refuse. Existing lifecycle compensation owns failure; a current-occurrence
       replay or same-plan restamp does not create another attempt. Concrete actors observe their selected workspace
