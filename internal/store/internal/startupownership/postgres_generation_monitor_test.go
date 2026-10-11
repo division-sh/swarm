@@ -97,9 +97,18 @@ func (t *generationMonitorTx) Rollback() error {
 	return t.Tx.Rollback()
 }
 
-func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession, *sql.DB, *generationMonitorConnector) {
+func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession, *sql.Conn, *generationMonitorConnector) {
 	t.Helper()
-	dsn, observer, _ := testutil.StartEmptyPostgres(t)
+	dsn, observerDB, _ := testutil.StartEmptyPostgres(t)
+	observer, err := observerDB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := observer.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	native, err := pq.NewConnector(dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +216,7 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				default:
 				}
 				var acquired bool
-				if err := observer.QueryRow("SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || acquired {
+				if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || acquired {
 					t.Fatalf("outstanding proof lost native successor exclusion: acquired=%t err=%v", acquired, err)
 				}
 				control.unblock()
@@ -231,10 +240,10 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				if err := session.lease.Release(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := observer.QueryRow("SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
+				if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
 					t.Fatalf("joined disposal retained native possession: acquired=%t err=%v", acquired, err)
 				}
-				if _, err := observer.Exec("SELECT pg_advisory_unlock(hashtext($1))", runtimeSharedStoreOwnershipLock); err != nil {
+				if _, err := observer.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", runtimeSharedStoreOwnershipLock); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -361,7 +370,7 @@ func TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin(t *testing
 	default:
 	}
 	var acquired bool
-	if err := observer.QueryRow("SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || acquired {
+	if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || acquired {
 		t.Fatalf("withdrawal released outstanding native possession: acquired=%t err=%v", acquired, err)
 	}
 	control.unblock()
