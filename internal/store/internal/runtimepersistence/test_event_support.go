@@ -602,6 +602,26 @@ func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, nam
 	})
 }
 
+type ArtifactCallbackEventContextStorage = eventrecord.ArtifactCallbackEventContextStorage
+
+func ReadPostgresArtifactCallbackEventContextForTest(ctx context.Context, selected any, event string) (ArtifactCallbackEventContextStorage, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return ArtifactCallbackEventContextStorage{}, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (ArtifactCallbackEventContextStorage, error) {
+		return eventrecord.ReadPostgresArtifactCallbackEventContextTx(ctx, tx, event)
+	})
+}
+
+func ReadPostgresArtifactCallbackSourceRouteForTest(ctx context.Context, selected any, event string) (string, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadPostgresArtifactCallbackSourceRouteTx(ctx, tx, event)
+	})
+}
+
 func ReadTemplateNamedEventIdentityForTest(ctx context.Context, selected any, name string) (string, error) {
 	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		return eventrecord.ReadTemplateNamedEventIdentityTx(ctx, tx, name)

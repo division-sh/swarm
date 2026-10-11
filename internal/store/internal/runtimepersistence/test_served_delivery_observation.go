@@ -89,6 +89,55 @@ func CountTemplateNodeReceiptForTest(ctx context.Context, selected any, event, n
 		return pipelinepersistence.CountTemplateNodeReceiptTx(ctx, tx, event, node)
 	})
 }
+
+func CountPostgresArtifactCallbackSettledTargetForTest(ctx context.Context, selected any, event, target, node string) (int, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return 0, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountPostgresArtifactCallbackSettledTargetTx(ctx, tx, event, target, node)
+	})
+}
+
+func ReadPostgresArtifactCallbackTargetDiagnosticsForTest(ctx context.Context, selected any, event string) (string, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadPostgresArtifactCallbackTargetDiagnosticsTx(ctx, tx, event)
+	})
+}
+
+func ReadPostgresArtifactCallbackDeliveriesForTest(ctx context.Context, selected any, event string) (string, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadPostgresArtifactCallbackDeliveriesTx(ctx, tx, event)
+	})
+}
+
+func ReadPostgresArtifactCallbackReceiptsForTest(ctx context.Context, selected any, event string) (string, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return pipelinepersistence.ReadPostgresArtifactCallbackReceiptsTx(ctx, tx, event)
+	})
+}
+
+func ReadPostgresArtifactCallbackSettlementDiagnosticsForTest(ctx context.Context, selected any, event string) (string, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		receipts, err := pipelinepersistence.ReadPostgresArtifactCallbackReceiptsTx(ctx, tx, event)
+		if err != nil {
+			return "", err
+		}
+		return delivery.ReadPostgresArtifactCallbackSettlementDiagnosticsTx(ctx, tx, event, receipts)
+	})
+}
 func CountTemplateSubscribedReplayScopeForTest(ctx context.Context, selected any, event string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return pipelinepersistence.CountTemplateSubscribedReplayScopeTx(ctx, tx, event)

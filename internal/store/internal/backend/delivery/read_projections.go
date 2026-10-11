@@ -221,6 +221,49 @@ func CountPostgresTemplateDeliveredNodeTargetTx(ctx context.Context, tx *sql.Tx,
 	return count, err
 }
 
+func CountPostgresArtifactCallbackSettledTargetTx(ctx context.Context, tx *sql.Tx, event, target, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $3 AND status = 'delivered' AND settled_at IS NOT NULL AND delivery_target_route @> $2::jsonb`, event, target, node).Scan(&count)
+	return count, err
+}
+
+func ReadPostgresArtifactCallbackTargetDiagnosticsTx(ctx context.Context, tx *sql.Tx, event string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object(
+		'subscriber_type', subscriber_type, 'subscriber_id', subscriber_id,
+		'status', status, 'reason_code', reason_code, 'delivery_target_route', delivery_target_route
+	))::text, '[]') FROM event_deliveries WHERE event_id = $1::uuid`, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func ReadPostgresArtifactCallbackDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(d))::text, '[]') FROM event_deliveries d WHERE event_id = $1::uuid`, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// Receipt storage remains with its owner. The selected coordinator supplies its
+// detached aggregate within the same read transaction as the delivery snapshot.
+func ReadPostgresArtifactCallbackSettlementDiagnosticsTx(ctx context.Context, tx *sql.Tx, event, receipts string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT jsonb_build_object(
+		'deliveries', COALESCE(jsonb_agg(jsonb_build_object(
+			'status', d.status, 'target', d.delivery_target_route, 'claim_version', d.claim_version,
+			'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id = d.delivery_id)
+		)), '[]'::jsonb), 'receipts', $2::jsonb
+	)::text FROM event_deliveries d WHERE d.event_id = $1::uuid`, event, receipts).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 type FanInDiagnosticDeliveryStorage struct {
 	EventID, SubscriberID, Status, Reason, Failure string
 }

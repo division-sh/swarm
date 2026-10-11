@@ -2955,3 +2955,55 @@ recorded with the receipts. This closes this whole bus construction/observation
 family, not the parent. Parent/M01/Docker/drain/D3/M07/rollback qualifications
 remain open and unwaived; no process-restart claim or new architecture framework,
 tracking issue, watchlist node, push, PR, tier, budget or server2 use.
+
+## Whole artifact-result callback construction and observation chain
+
+Both supplied-pool callback roots and all four shared read/wait helpers are
+retired together. The complete file has no supplied-pool admission, raw getter,
+database/transaction carrier, SQL query or variadic query-argument capability.
+Native selected construction retains its original location and joined cleanup
+ledger. Real compiled template/static source, structural-parent construction,
+activation/publication and the actual handler-start hook remain unchanged.
+
+| Canonical owner | Exhaustive changed consumption / precise original contract |
+| --- | --- |
+| Native construction, source-aware workflow and bus/pipeline lifecycle owners | Two roots / six original PostgreSQL cases, including both connected-child ingress cases. All source, parent/child identity, payload-kind, actual handler-start, target containment, exact count and durable delivery-outcome assertions remain. |
+| eventrecord | The independent source-route scalar and four-column result context retain original event equality, NULL defaults and native PostgreSQL JSON text. Both bridges stay in test_event_support.go. No canonical decoder reconstructs their physical evidence. |
+| Closed delivery projection | Existing exact event/node/target count is reused. The separate settled count also requires delivered status and non-NULL settled_at. Five-field route diagnostics, whole physical delivery rows and every settled attempt field retain their original scope and aggregate shape. |
+| Pipeline receipt persistence | Whole physical receipt-row aggregation remains here, not with delivery or eventrecord. Handler-timeout delivery and receipt reads remain independent original cuts. The combined settlement diagnostic supplies this detached receipt aggregate to the delivery owner inside one original repeatable-read transaction; no cross-owner receipt SQL survives in delivery. |
+| Original selected read coordinator and finite codemod | PostgreSQL-specific observations remain PostgreSQL-specific and refuse SQLite/raw/foreign ownership. Missing rows retain sql.ErrNoRows; invalid identities, cancellation, closed ownership and read failure provide no provisional evidence. Both five-second waits and the 25-millisecond polls are unchanged. Original behavioral assertions and every physical query are compared with immutable predecessors; hostile loss of native construction, exact helper arguments, handlers, timing or assertions fails. Only the fixed count's failed-query label changes, explicitly and exactly. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Template callback success and failure preserve actual handler and settled target | reproduced and fixed: TestRuleResultEventsFlowThroughDurableCallbackDelivery, original PostgreSQL cases under race PASS9.030s |
+| Static callback success/failure and connected-child success/failure preserve source/parent ownership | reproduced and fixed: TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery, all four original cases under race PASS5.640s |
+| Physical NULL/JSON rendering, pending vs settled/dead-letter scope, detached aggregates and ownership refusals | execution-proven through the same corrected path: TestArtifactCallbackObservationsKeepPhysicalScopeAndRefuseForeignOwners, real native PostgreSQL publication/route/terminalization plus foreign SQLite refusal under race PASS12.150s; no raw seed or fabricated lease |
+| Nonempty timeout diagnostics and exact receipt/settled-attempt identity | execution-proven through the same corrected path: supplemental readback in all six original race cases, including the real pipeline receipt and delivered attempt; no failure path is waived |
+| Complete immutable source, original assertions, query and timing consumption | execution-proven through the same corrected path: TestFamily145ArtifactCallbackWholeChainPreservesOriginalAssertionsAndCuts and all family145/finite/historical/idempotency controls PASS8.872s; whole-file authority absence and every mapped cut hostile-controlled |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/native-artifact-callback-*.
+The initial supplemental readback incorrectly expected a node receipt; native
+rows show the independent platform/pipeline receipt. That additional assertion
+was corrected to its exact actual event/subscriber/outcome. Original callback
+assertions were never weakened. The source-query ordinal and finite corpus pins
+were repaired after the controls caught them; generic assertion checking now
+delegates this exact chain to its stronger hostile-controlled proof, not a skip.
+Historical Before/After inputs and all24 mechanical receipts remain immutable;
+only their current successor commitment changes. Corpus334 / recipes1157.
+
+Boundary/revision/writer guards PASS4.522s, retirement guards PASS6.839s,
+dry-run Changes=[], affected U1000 clean. Unchanged wider backend/overlay and
+counterexample receipts carry. platform-spec.yaml names the bounded read contract.
+No timeout, workload, production behavior or backend support expansion is made.
+
+Ratchet PASS287.550s:8980 ->8944,36 removals,0 additions; confirmed raw-operation
+debt6478 ->6450, excluded uncertainty67 unchanged. Broader collector54751/39048
+includes legitimate owners and is not debt. Supplied pools92 ->90 =88 external
++2 private, M0/D53/S37; cumulative qualified openings44. Collector, policy and
+one-way transitions unchanged. Signed-head complexity is recorded with receipts.
+This closes the complete callback dependency, not the parent class or process
+restart qualification. Existing watchlist/architecture disposition remains
+original owners and narrow detached evidence; parent and M01/Docker/drain/D3/
+M07/rollback holds remain unwaived. No new framework, tracker, PR, push, tier,
+budget or server2 use. The next ready shared chain is gate-recovery construction,
+physical observations and its existing exact named fault cuts.

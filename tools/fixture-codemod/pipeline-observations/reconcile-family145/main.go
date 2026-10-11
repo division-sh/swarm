@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "7619257a32fff7581a419472bea37df62ee4bb821240aa037b82660b67052849"
+const targetDigest = "431a50903d864dc034f6b1664df846f809da20087f0c1a84f5fcb100f08ecd32"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -185,6 +185,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 				return after[successor], false
 			}
 		}
+	}
+	if path == "internal/runtime/artifact_action_result_delivery_test.go" && key == "waitArtifactActionResultDBCount" && after["waitArtifactActionResultSettledCount"] != "" {
+		return after["waitArtifactActionResultSettledCount"], false
 	}
 	if path == "internal/runtime/runforkadmission/revision_source_route_test.go" && key == "captureRunForkRevision" {
 		return "", true

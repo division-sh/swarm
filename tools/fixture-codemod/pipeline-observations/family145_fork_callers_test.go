@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 330 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "7619257a32fff7581a419472bea37df62ee4bb821240aa037b82660b67052849" {
+	if err != nil || len(rows) != 334 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "431a50903d864dc034f6b1664df846f809da20087f0c1a84f5fcb100f08ecd32" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -113,6 +113,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if _, ok := family145NativeBusRoutingCalls[row.Function]; ok {
 			if err := family145NativeBusRoutingProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145ArtifactCallbackCuts[row.Function]; ok {
+			if err := family145ArtifactCallbackProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
