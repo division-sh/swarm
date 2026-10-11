@@ -144,7 +144,7 @@ func observeMergedQualification(ctx context.Context, cfg config) (testplanning.R
 	if err := api(root+"/branches/master", &branch); err != nil {
 		return plan, run, err
 	}
-	plan, err = mergedRunPlan(ctx, runPath, details.Started)
+	plan, err = mergedRunPlan(ctx, cfg.repository, run)
 	if err != nil {
 		return plan, run, err
 	}
@@ -236,19 +236,23 @@ func mergedRequiredChecks(ctx context.Context, repository string, jobs []testpla
 	return checks, nil
 }
 
-func mergedRunPlan(ctx context.Context, runPath string, started time.Time) (testplanning.RunPlan, error) {
+func mergedRunPlan(ctx context.Context, repository string, run testplanning.QualifiedRun) (testplanning.RunPlan, error) {
 	var plan testplanning.RunPlan
-	raw, err := ghRead(ctx, runPath+"/artifacts?per_page=100")
+	if repository != "division-sh/swarm" || run.ID <= 0 || run.RunAttempt <= 0 {
+		return plan, fmt.Errorf("invalid observed PR run/attempt")
+	}
+	root := "repos/" + repository
+	name := fmt.Sprintf("ci-plan-%d-%d", run.ID, run.RunAttempt)
+	raw, err := ghRead(ctx, fmt.Sprintf("%s/actions/runs/%d/artifacts?name=%s&per_page=100", root, run.ID, name))
 	if err != nil {
 		return plan, err
 	}
 	var list struct {
 		Total     int `json:"total_count"`
 		Artifacts []struct {
-			ID      int64     `json:"id"`
-			Name    string    `json:"name"`
-			Expired bool      `json:"expired"`
-			Created time.Time `json:"created_at"`
+			ID      int64  `json:"id"`
+			Name    string `json:"name"`
+			Expired bool   `json:"expired"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal(raw, &list); err != nil {
@@ -257,51 +261,85 @@ func mergedRunPlan(ctx context.Context, runPath string, started time.Time) (test
 	if list.Total != len(list.Artifacts) {
 		return plan, fmt.Errorf("incomplete artifacts page")
 	}
-	var id int64
-	for _, artifact := range list.Artifacts {
-		if artifact.Name != "ci-plan" || artifact.Created.Before(started) {
-			continue
-		}
-		if id != 0 || artifact.Expired {
-			return plan, fmt.Errorf("ambiguous or expired plan artifact")
-		}
-		id = artifact.ID
+	if len(list.Artifacts) != 1 || list.Artifacts[0].ID <= 0 || list.Artifacts[0].Name != name || list.Artifacts[0].Expired {
+		return plan, fmt.Errorf("missing, ambiguous, foreign or expired current-attempt plan artifact")
 	}
-	if id <= 0 {
-		return plan, fmt.Errorf("no current-attempt plan artifact")
-	}
-	parts := strings.Split(runPath, "/")
-	raw, err = ghRead(ctx, strings.Join(parts[:3], "/")+"/actions/artifacts/"+strconv.FormatInt(id, 10)+"/zip")
+	raw, err = ghRead(ctx, root+"/actions/artifacts/"+strconv.FormatInt(list.Artifacts[0].ID, 10)+"/zip")
 	if err != nil {
 		return plan, err
 	}
+	plan, report, err := mergedPlanArchive(raw)
+	if err != nil {
+		return plan, err
+	}
+	expected, err := plan.CISelectionReport(run.ID, run.RunAttempt)
+	if err != nil {
+		return plan, err
+	}
+	actualJSON, err := json.Marshal(report)
+	if err != nil {
+		return plan, err
+	}
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return plan, err
+	}
+	if !bytes.Equal(actualJSON, expectedJSON) {
+		return plan, fmt.Errorf("foreign current-attempt CI selection report")
+	}
+	return plan, nil
+}
+
+func mergedPlanArchive(raw []byte) (testplanning.RunPlan, testplanning.CISelectionReport, error) {
+	var plan testplanning.RunPlan
+	var report testplanning.CISelectionReport
 	archive, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
-		return plan, err
+		return plan, report, err
 	}
-	count := 0
+	seen := map[string]bool{}
 	for _, entry := range archive.File {
-		if entry.Name != "proof-plan.json" {
+		var target any
+		switch entry.Name {
+		case "proof-plan.json":
+			target = &plan
+		case "ci-selection.json":
+			target = &report
+		default:
 			continue
 		}
-		count++
+		if seen[entry.Name] {
+			return plan, report, fmt.Errorf("duplicate %s in plan artifact", entry.Name)
+		}
+		seen[entry.Name] = true
 		reader, err := entry.Open()
 		if err != nil {
-			return plan, err
+			return plan, report, err
 		}
-		data, err := io.ReadAll(io.LimitReader(reader, 32<<20))
-		_ = reader.Close()
+		data, err := io.ReadAll(io.LimitReader(reader, (32<<20)+1))
+		closeErr := reader.Close()
 		if err != nil {
-			return plan, err
+			return plan, report, err
 		}
-		if err := json.Unmarshal(data, &plan); err != nil {
-			return plan, err
+		if closeErr != nil {
+			return plan, report, closeErr
+		}
+		if len(data) > 32<<20 {
+			return plan, report, fmt.Errorf("oversized %s in plan artifact", entry.Name)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(target); err != nil {
+			return plan, report, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return plan, report, fmt.Errorf("trailing data in %s", entry.Name)
 		}
 	}
-	if count != 1 {
-		return plan, fmt.Errorf("missing/duplicate plan in artifact")
+	if !seen["proof-plan.json"] || !seen["ci-selection.json"] {
+		return plan, report, fmt.Errorf("missing plan or CI selection in artifact")
 	}
-	return plan, plan.Validate()
+	return plan, report, plan.Validate()
 }
 
 func validateCurrentPlan(plan testplanning.RunPlan, cfg config) error {
