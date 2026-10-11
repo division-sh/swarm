@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 type orderingTransactionKey struct{}
@@ -59,7 +61,8 @@ func (m *Mutation) lock(ctx context.Context, story bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if scope.held {
+	reused := scope.held
+	if reused {
 		// Native PostgreSQL may drain an admitted SQL operation with a separate
 		// context. Reuse still observes the original caller's cancellation.
 		if err := scope.caller.Err(); err != nil {
@@ -67,9 +70,12 @@ func (m *Mutation) lock(ctx context.Context, story bool) error {
 		}
 		m.last = scope.last
 	} else {
+		acquisition := transactiontest.BeginOrderingAcquisition(ctx)
 		if err := m.acquire(ctx); err != nil {
+			acquisition.End(err)
 			return err
 		}
+		acquisition.End(nil)
 		scope.last = m.last
 		scope.held = true
 	}
@@ -78,6 +84,9 @@ func (m *Mutation) lock(ctx context.Context, story bool) error {
 			return errors.New("author activity transaction already owns its story batch")
 		}
 		scope.story = true
+	}
+	if reused {
+		transactiontest.OrderingReused(ctx)
 	}
 	return nil
 }

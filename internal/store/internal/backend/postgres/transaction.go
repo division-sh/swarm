@@ -117,7 +117,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		if tx != nil {
 			probe.RollbackAttempted()
 		}
-		rollbackErr := joinTransactionRollback(tx, stopReadRollback, readRollbackDone)
+		rollbackErr := joinTransactionRollback(tx, stopReadRollback, readRollbackDone, probe)
 		releaseOrdering()
 		if tx != nil {
 			rolledBack = rollbackErr == nil
@@ -178,7 +178,11 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		readTx := tx
 		done := make(chan error, 1)
 		readRollbackDone = done
-		stopReadRollback = context.AfterFunc(ctx, func() { done <- readTx.Rollback() })
+		stopReadRollback = context.AfterFunc(ctx, func() {
+			rollbackErr := readTx.Rollback()
+			probe.OrderingRolledBack(rollbackErr)
+			done <- rollbackErr
+		})
 	}
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	if err := ctx.Err(); err != nil {
@@ -201,17 +205,20 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		discard = true
 		return false, commitErr
 	}
+	probe.OrderingCommitted()
 	probe.Committed()
 	tx = nil
 	return true, nil
 }
 
-func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error) error {
+func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error, probe *transactiontest.Attempt) error {
 	if stopReadRollback != nil && !stopReadRollback() {
 		return <-readRollbackDone
 	}
 	if tx == nil {
 		return nil
 	}
-	return tx.Rollback()
+	err := tx.Rollback()
+	probe.OrderingRolledBack(err)
+	return err
 }

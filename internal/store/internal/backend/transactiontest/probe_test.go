@@ -9,6 +9,51 @@ import (
 	"time"
 )
 
+func TestOrderingReceiptMissingAndOverlappingCutsStayUnknown(t *testing.T) {
+	start := time.Unix(123, 0)
+	for _, outcome := range []orderingSettlement{0, orderingCommit, orderingRollback} {
+		a := &Attempt{ordering: orderingObservation{
+			counts:     OrderingCounts{AcquisitionAttempts: 1, Acquired: 1},
+			acquiredAt: start, settledAt: start.Add(-time.Nanosecond), settlement: outcome,
+		}}
+		got := a.orderingCounts()
+		if got.UnresolvedHolders != 1 || got.CommittedHolders != 0 || got.RolledBackHolders != 0 ||
+			got.CommitHoldDuration != 0 || got.RollbackHoldDuration != 0 {
+			t.Fatalf("missing/overlapping cut became a measured hold: %+v", got)
+		}
+	}
+	a := &Attempt{ordering: orderingObservation{counts: OrderingCounts{AcquisitionAttempts: 1}}}
+	if got := a.orderingCounts(); got.IncompleteAcquisitions != 1 || got.Acquired != 0 || got.UnresolvedHolders != 0 {
+		t.Fatalf("interrupted acquisition became acknowledged: %+v", got)
+	}
+}
+
+func TestOrderingDisabledAndDuplicateSettlement(t *testing.T) {
+	ctx := context.Background()
+	span := BeginOrderingAcquisition(ctx)
+	if span.attempt != nil || !span.started.IsZero() {
+		t.Fatal("disabled acquisition started an observation")
+	}
+	span.End(nil)
+	OrderingReused(ctx)
+	var disabled *Attempt
+	disabled.OrderingCommitted()
+	disabled.OrderingRolledBack(nil)
+
+	a := &Attempt{ordering: orderingObservation{counts: OrderingCounts{AcquisitionAttempts: 1, Acquired: 1}, acquiredAt: time.Now()}}
+	a.OrderingRolledBack(errors.New("physical rollback not acknowledged"))
+	if got := a.orderingCounts(); got.UnresolvedHolders != 1 {
+		t.Fatalf("failed rollback was acknowledged: %+v", got)
+	}
+	a.OrderingCommitted()
+	first := a.orderingCounts()
+	a.OrderingRolledBack(nil)
+	a.OrderingCommitted()
+	if got := a.orderingCounts(); got != first || got.CommittedHolders != 1 {
+		t.Fatalf("later cleanup replaced the native commit cut: first=%+v later=%+v", first, got)
+	}
+}
+
 func TestCollectorStopJoinsCapturedAttemptRegistration(t *testing.T) {
 	var slot Slot
 	collector, _, err := slot.Install(Options{})

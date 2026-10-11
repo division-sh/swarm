@@ -816,7 +816,7 @@ func runAuthorityTransaction(
 			releaseOrdering()
 			cleanupStarted := time.Now()
 			probe.RollbackAttempted()
-			rolledBack, cleanupErr := rollbackSessionTransactionOutcome(tx, session)
+			rolledBack, cleanupErr := rollbackSessionTransactionOutcome(tx, session, probe)
 			probe.RecordCleanup(time.Since(cleanupStarted))
 			if cleanupErr != nil {
 				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
@@ -841,6 +841,9 @@ func runAuthorityTransaction(
 	}
 	probe.BeforeCommit()
 	commitErr := tx.Commit()
+	if commitErr == nil {
+		probe.OrderingCommitted()
+	}
 	releaseOrdering()
 	if commitErr != nil {
 		probe.CommitFailed()
@@ -880,15 +883,16 @@ func (l *AdvisoryLockLease) RunTransaction(
 }
 
 func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
-	_, err := rollbackSessionTransactionOutcome(tx, session)
+	_, err := rollbackSessionTransactionOutcome(tx, session, nil)
 	return err
 }
 
-func rollbackSessionTransactionOutcome(tx *sql.Tx, session *SessionAuthority) (bool, error) {
+func rollbackSessionTransactionOutcome(tx *sql.Tx, session *SessionAuthority, probe *transactiontest.Attempt) (bool, error) {
 	if tx == nil || session == nil {
 		return false, errors.New("PostgreSQL session transaction is missing")
 	}
 	rollbackErr := tx.Rollback()
+	probe.OrderingRolledBack(rollbackErr)
 	settledElsewhere := rollbackErr == sql.ErrTxDone
 	if settledElsewhere {
 		rollbackErr = nil
