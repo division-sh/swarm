@@ -11,6 +11,12 @@ import (
 // The constructor's first authored turn precedes later turns from its sender
 // to that concrete receiver. ACK and source_event_id are not turn settlement.
 func (a *Adapter) creatingPredecessorReady(ctx context.Context, q queryer, record deliveryRecord) (bool, error) {
+	if !record.Route.Initialization.Empty() && record.Route.Initialization.CreatingEventID() == "" {
+		// The initialization owner validates explicit no-creating-publication
+		// evidence, including historical fixed cuts. Never invent or look up a
+		// native creating event for that dependency.
+		return true, nil
+	}
 	if record.Route.Target.Empty() {
 		return true, nil
 	}
