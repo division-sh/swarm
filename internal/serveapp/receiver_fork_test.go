@@ -99,20 +99,22 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					seedEventID = seed.EventID
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				}
 				request := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if surface == "pending_refusal" {
 					select {
-					case <-reached:
-					case <-time.After(10 * time.Second):
-						t.Fatal("missing fork frontier barrier")
-					}
-					select {
 					case <-publication.entered:
 					case <-time.After(10 * time.Second):
 						t.Fatal("missing source publication barrier")
+					}
+					publication.unblock()
+					select {
+					case <-reached:
+					case <-time.After(10 * time.Second):
+						t.Fatal("missing fork frontier barrier")
 					}
 				} else if !admitted {
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.RunID)
@@ -170,18 +172,15 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						time.Sleep(25 * time.Millisecond)
 					}
 				}
-				if surface == "pending_refusal" {
-					// Join only the source publications, not the still-blocked node.
-					// Their diagnostic tails must finish before freezing the fingerprint.
-					publication.unblock()
-					deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
-					probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
-					remaining := time.Until(deadline)
-					if remaining <= 0 {
-						t.Fatal("source publication consumed the complete fingerprint deadline")
-					}
-					probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
+				// Join the exact publications, not the independently held node.
+				// Completed publication includes its diagnostic tail.
+				deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
+				probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					t.Fatal("source publication consumed the complete fingerprint deadline")
 				}
+				probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
 				before := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
 				checkSource := func(boundary string) {
 					after := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)

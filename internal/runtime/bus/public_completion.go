@@ -67,6 +67,10 @@ func (eb *EventBus) dispatchPublicPublication(ctx context.Context, prepared Prep
 	if !eb.canTransferPreparedNodeDeliveries(prepared) {
 		// This worker retains the reservation until the actual coordinated/mixed
 		// dispatch disposition; a second asynchronous spawn would release it early.
+		if prepared.dispatchQueued || prepared.targetFailure {
+			eb.notifyTestPostCommitDispatchStarted(ctx, prepared.Event)
+			defer eb.notifyTestPostCommitDispatchCompleted(ctx, prepared.Event)
+		}
 		return eb.DispatchPreparedPublish(ctx, prepared)
 	}
 	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)

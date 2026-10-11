@@ -296,11 +296,12 @@ func (p *PreparedStandingServicePublication) Discard() error {
 // RuntimeContextUse is the only execution-bearing result produced by the
 // runtime selector. Metadata lookups never expose a raw Runtime pointer.
 type RuntimeContextUse struct {
-	Context BundleContext
-	runtime *Runtime
-	lease   *worklifetime.Lease
-	leases  []*worklifetime.Lease
-	once    sync.Once
+	Context          BundleContext
+	runtime          *Runtime
+	lease            *worklifetime.Lease
+	leases           []*worklifetime.Lease
+	releaseAdmission func()
+	once             sync.Once
 }
 
 func (u *RuntimeContextUse) Runtime() *Runtime {
@@ -335,6 +336,9 @@ func (u *RuntimeContextUse) Done() error {
 		}
 		for i := len(leases) - 1; i >= 0; i-- {
 			err = errors.Join(err, leases[i].Done())
+		}
+		if u.releaseAdmission != nil {
+			u.releaseAdmission()
 		}
 	})
 	return err
@@ -1459,12 +1463,17 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}
 	owner := entry.workOwner
+	ctx, releaseAdmission, admitted := entry.runtime.shutdownGate.BeginContext(ctx)
+	if !admitted {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	ctx = worklifetime.WithOccurrence(ctx, owner)
 	lease, err := owner.Begin(ctx)
 	if err != nil {
+		releaseAdmission()
 		return nil, fmt.Errorf("admit runtime context use: %w", err)
 	}
-	return &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease}, nil
+	return &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease, releaseAdmission: releaseAdmission}, nil
 }
 
 func (m *RuntimeContextManager) AcquireBundleHash(ctx context.Context, bundleHash string) (*RuntimeContextUse, RuntimeContextLookup, error) {
@@ -2849,13 +2858,14 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		runtimeToShutdown = entry.runtime
 		if runtimeToShutdown != nil {
 			runtimeToShutdown.CloseAdmission()
-			runtimeToShutdown.deliveryContinuations.BeginRetirement()
+			if runtimeToShutdown.shutdownGate.closedAndDrained() {
+				runtimeToShutdown.deliveryContinuations.BeginRetirement()
+			}
 		}
 		for _, occurrence := range entry.standing {
 			occurrence.Retire()
 			standingToRetire = append(standingToRetire, occurrence)
 		}
-		entry.standing = nil
 	}
 	m.mu.Unlock()
 	if releasePreparation != nil {
@@ -2863,10 +2873,17 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		releasePreparation = nil
 	}
 	joinStanding := func() {
+		joined := true
 		for _, occurrence := range standingToRetire {
 			if err := occurrence.RetireAndWait(context.Background()); err != nil {
+				joined = false
 				result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
 			}
+		}
+		if joined {
+			m.mu.Lock()
+			entry.standing = nil
+			m.mu.Unlock()
 		}
 	}
 	if runtimeToShutdown == nil {
@@ -2879,6 +2896,11 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		joinStanding()
 		return result
 	}
+	remaining, drainErr := runtimeToShutdown.drainIngressForContextWithdrawal(opts)
+	result.ShutdownErr = errors.Join(result.ShutdownErr, drainErr)
+	if remaining.Grace <= 0 {
+		return result
+	}
 	// A continuation may retain a standing authorization lease while its
 	// receiver executes under the independent runtime owner. Return those
 	// carriers before joining standing children; their parent leases must then
@@ -2887,7 +2909,7 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.deliveryContinuations.Retire(context.Background()))
 	}
 	joinStanding()
-	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(opts))
+	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(remaining))
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true
 	}
@@ -2938,7 +2960,9 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 		}
 		if entry.runtime != nil {
 			entry.runtime.CloseAdmission()
-			entry.runtime.deliveryContinuations.BeginRetirement()
+			if entry.runtime.shutdownGate.closedAndDrained() {
+				entry.runtime.deliveryContinuations.BeginRetirement()
+			}
 		}
 		for _, occurrence := range entry.standing {
 			occurrence.Retire()

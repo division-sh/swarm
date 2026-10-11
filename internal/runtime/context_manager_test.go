@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -239,6 +240,61 @@ func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibi
 	result := <-done
 	if !result.Changed || !contextDef.Runtime.shutdownAdmissionClosed() {
 		t.Fatalf("deactivation result/gate = %#v/%v", result, contextDef.Runtime.shutdownAdmissionClosed())
+	}
+}
+
+func TestRuntimeContextUseOwnsOneIngressFrameUntilDone(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	if err != nil || first == nil {
+		t.Fatalf("first context admission: %v", err)
+	}
+	t.Cleanup(func() { _ = first.Done() })
+	second, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	if err != nil || second == nil {
+		t.Fatalf("second context admission: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Done() })
+	gate := &contextDef.Runtime.shutdownGate
+	gate.Close()
+	if gate.closedAndDrained() {
+		t.Fatal("loaded context uses are absent from ingress drain")
+	}
+	if err := errors.Join(first.Done(), first.Done()); err != nil {
+		t.Fatal(err)
+	}
+	if gate.closedAndDrained() || contextDef.WorkOwner.ActiveCount() != 1 {
+		t.Fatal("duplicate first settlement consumed the second context use")
+	}
+	if err := second.Done(); err != nil || !gate.closedAndDrained() || contextDef.WorkOwner.ActiveCount() != 0 {
+		t.Fatalf("last context use did not settle exact ingress and work ownership: %v", err)
+	}
+	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("closed ingress admitted a new context use: %v", err)
+	}
+}
+
+func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := contextDef.WorkOwner.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("fenced occurrence acquired execution ownership: %v", err)
+	}
+	contextDef.Runtime.shutdownGate.Close()
+	if !contextDef.Runtime.shutdownGate.closedAndDrained() || contextDef.WorkOwner.ActiveCount() != 0 {
+		t.Fatal("owner refusal leaked a provisional ingress frame or execution lease")
 	}
 }
 
