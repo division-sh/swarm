@@ -32,9 +32,11 @@ type recipientBoundaryAllowance struct {
 func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 	return map[string]recipientBoundaryAllowance{
 		"runtime/runforkadmission::AdmitContractFrontier/evidence_field:Recipient":                                       {1, "node diagnostics projected only from the narrowed admitted input frontier"},
-		"runtime/runforkadmission::completedInputRecipient/evidence_field:Recipient":                                     {2, "historical completed-slot exclusion, never creation of selected authority"},
-		"runtime/runforkadmission::completedInputRecipient/evidence_field:Path":                                          {1, "exact historical flow-instance completion correspondence"},
-		"runtime/runforkadmission::completedInputRecipient/evidence_field:AgentPlan":                                     {1, "complete runless agent identity after verifying the source run"},
+		"runtime/runforkadmission::matchesHistoricalRecipient/evidence_field:Recipient":                                  {2, "exact retained-slot correspondence for subtraction; never creation of selected authority"},
+		"runtime/runforkadmission::matchesHistoricalRecipient/evidence_field:Path":                                       {1, "exact historical flow-instance completion correspondence"},
+		"runtime/runforkadmission::matchesHistoricalRecipient/evidence_field:AgentPlan":                                  {1, "complete runless agent identity after verifying the source run"},
+		"runtime/bus::deliveryPlanner.planIndependentPubsubBranch/evidence_field:Recipient":                              {1, "classify already-admitted exact selected agent evidence when narrowing pubsub delivery candidates"},
+		"runtime/bus::deliveryPlanner.planIndependentPubsubBranch/evidence_field:AgentPlan":                              {1, "match the full concrete candidate plan to admitted selected evidence; no new recipient or grant"},
 		"runtime/runforkexecution::prepareSelectedFork/evidence_field:Recipient":                                         {1, "choose node or agent schema owner for selected input validation"},
 		"runtime/runforkexecution::prepareSelectedFork/evidence_field:AgentPlan":                                         {1, "schema and construction validation through the exact admitted agent and fixed header owners"},
 		"runtime/bus::SelectedInputValidation.SelectRecipients/evidence_field:Recipient":                                 {1, "agent construction corroboration after canonical fixed-frontier recipient selection"},
