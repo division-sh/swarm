@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -301,27 +302,28 @@ func publicationAuditParams(hash, key string) map[string]any {
 }
 
 type publicationCompletionAudit struct {
-	mu           sync.Mutex
-	native       runtimebus.APIEventPublicationCommitOwner
-	workflow     pipeline.WorkflowPersistenceOwner
-	plan         pipeline.DynamicFlowRuntimeReadinessPlan
-	process      *worklifetime.Process
-	request      apiidempotency.Request
-	committed    runtimebus.CommittedAPIEventPublication
-	deployment   *runtimebus.CommittedDeploymentRunCreation
-	deployments  int
-	heldRuns     map[string]pipeline.DynamicFlowRuntimeReadinessPlan
-	commits      int
-	run          string
-	hold         bool
-	resultFault  string
-	holdRelease  bool
-	entered      chan struct{}
-	release      chan struct{}
-	enterOnce    sync.Once
-	releaseOnce  sync.Once
-	beforeCommit func(context.Context)
-	afterCommit  func(context.Context, bool)
+	mu                  sync.Mutex
+	native              runtimebus.APIEventPublicationCommitOwner
+	workflow            pipeline.WorkflowPersistenceOwner
+	plan                pipeline.DynamicFlowRuntimeReadinessPlan
+	process             *worklifetime.Process
+	request             apiidempotency.Request
+	committed           runtimebus.CommittedAPIEventPublication
+	deployment          *runtimebus.CommittedDeploymentRunCreation
+	deployments         int
+	heldRuns            map[string]pipeline.DynamicFlowRuntimeReadinessPlan
+	commits             int
+	run                 string
+	hold                bool
+	resultFault         string
+	holdRelease         bool
+	entered             chan struct{}
+	release             chan struct{}
+	enterOnce           sync.Once
+	releaseOnce         sync.Once
+	beforeCommit        func(context.Context)
+	afterCommit         func(context.Context, bool)
+	holdBeforeReadiness bool
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
@@ -421,6 +423,21 @@ func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, comm
 type publicationAuditReadiness struct {
 	pipeline.WorkflowPersistenceOwner
 	probe *publicationCompletionAudit
+}
+
+func (s *publicationAuditReadiness) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route flowidentity.Route) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
+	s.probe.mu.Lock()
+	acknowledged := s.probe.committed.Acknowledged || s.probe.deployment != nil && s.probe.deployment.Acknowledged
+	hold := s.probe.holdBeforeReadiness && acknowledged && runID == s.probe.run
+	s.probe.mu.Unlock()
+	if hold {
+		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
+		select {
+		case <-s.probe.release:
+		case <-ctx.Done():
+		}
+	}
+	return s.WorkflowPersistenceOwner.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
 func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
