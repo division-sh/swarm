@@ -504,19 +504,20 @@ func selectedContractStagedReadbackPending(admission runfork.RunForkReplayResume
 	if len(pending) == 0 {
 		return false
 	}
+	seen := make(map[string]bool, len(pending))
 	for _, disposition := range admission.Dispositions {
 		if code, exists := pending[disposition.Fact]; exists {
-			if disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != code {
+			if seen[disposition.Fact] || disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != code {
 				return false
 			}
-			delete(pending, disposition.Fact)
+			seen[disposition.Fact] = true
 			continue
 		}
 		if disposition.Disposition == runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != "" {
 			return false
 		}
 	}
-	return len(pending) == 0
+	return len(seen) == len(pending)
 }
 
 func selectedContractBlockerCodes(blockers []runfork.RunForkUnsupportedBlocker) string {

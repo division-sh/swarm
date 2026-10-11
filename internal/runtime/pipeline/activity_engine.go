@@ -1616,10 +1616,11 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	}
 	intent.Attempt = rec.Attempt
 	intent.Generation = rec.Generation
+	intent.Context = events.DeliveryContext{}
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}
-	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
+	return d.publishActivityResultWithID(events.WithoutDeliveryContext(ctx), intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
 }
 
 func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash string) ActivityAttemptRecord {

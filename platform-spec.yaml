@@ -994,6 +994,10 @@ contract_formats:
         journaled-result publication. Missing, foreign or contradictory captured reply
         evidence fails closed; a projected reference never reopens a terminal context or
         grants execution authority.
+        Recorded result publication rebuilds reply-only output from the journal, including
+        recorded absence, on both direct and deferred paths. It explicitly masks ambient
+        delivery facts while preserving caller cancellation and other ownership bindings;
+        incoming references and consumed joins never substitute for an empty journal.
         Ordinary and selected materialization consume the same exact captured-row
         projection and native readback. Prospective validation can admit reconstruction
         of the open-reply family only; it cannot discharge any other capability blocker.

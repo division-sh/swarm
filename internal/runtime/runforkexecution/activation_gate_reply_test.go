@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -23,6 +24,45 @@ func stagedReplyBlockedAdmission(withTimer bool) runfork.RunForkReplayResumeAdmi
 		admission.UnsupportedBlockers = append(admission.UnsupportedBlockers, timer.UnsupportedBlockers...)
 	}
 	return admission
+}
+
+func TestStagedReadbackRejectsContradictoryDuplicateFactsInBothOrders(t *testing.T) {
+	for _, variant := range []string{"reply", "timer", "combined"} {
+		count := 1
+		if variant == "combined" {
+			count = 2
+		}
+		for index := 0; index < count; index++ {
+			for _, first := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/fact_%d/reconstruct_first_%t", variant, index, first), func(t *testing.T) {
+					admission := stagedReplyBlockedAdmission(variant == "combined")
+					if variant == "timer" {
+						admission = stagedTimerBlockedAdmission()
+					}
+					conflict := admission.Dispositions[index]
+					conflict.Disposition, conflict.BlockerCode = runfork.RunForkReplayResumeDispositionReconstruct, ""
+					if first {
+						admission.Dispositions = append([]runfork.RunForkReplayResumeDisposition{conflict}, admission.Dispositions...)
+					} else {
+						admission.Dispositions = append(admission.Dispositions, conflict)
+					}
+					if selectedContractStagedReadbackPending(admission) {
+						t.Fatal("contradictory singleton inventory reached native preparation")
+					}
+				})
+			}
+		}
+		admission := stagedReplyBlockedAdmission(variant == "combined")
+		if variant == "timer" {
+			admission = stagedTimerBlockedAdmission()
+		}
+		admission.Dispositions = append(admission.Dispositions,
+			runfork.RunForkReplayResumeDisposition{Fact: runfork.RunForkReplayResumeFactEntityStateSnapshot, Disposition: runfork.RunForkReplayResumeDispositionReconstruct},
+			runfork.RunForkReplayResumeDisposition{Fact: runfork.RunForkReplayResumeFactHistoricalReplayExecution, Disposition: runfork.RunForkReplayResumeDispositionSplitSibling})
+		if !selectedContractStagedReadbackPending(admission) {
+			t.Fatalf("legitimate unrelated dispositions prevented %s inventory readback", variant)
+		}
+	}
 }
 
 func TestStagedReplyGateReachesOnlyNativeReadback(t *testing.T) {
