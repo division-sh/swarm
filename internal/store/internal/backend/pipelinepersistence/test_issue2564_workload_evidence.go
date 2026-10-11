@@ -8,6 +8,7 @@ import (
 	"time"
 
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 type H1FlowAccountingEvidence struct{ FieldlessRoots, RootEntities, ActiveHubs int }
@@ -433,14 +434,12 @@ func observeH1BumpHistoryForTest(ctx context.Context, tx *sql.Tx, runID string) 
 }
 
 type H2HubsEvidence struct {
-	Entity         string
-	Instance       string
-	Stage          string
-	Fields         []byte
-	Revision       int64
-	HeaderState    string
-	HeaderRevision int64
-	Config         []byte
+	Entity   string
+	Instance string
+	Stage    string
+	Fields   []byte
+	Revision int64
+	Config   []byte
 }
 
 func (s *PipelinePostgresOwner) ObserveH2HubsForTest(ctx context.Context, runID string) ([]H2HubsEvidence, error) {
@@ -476,7 +475,11 @@ func (s *PipelineSQLiteOwner) ObserveH2HubsForTest(ctx context.Context, runID st
 }
 
 func observeH2HubsForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2HubsEvidence, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT s.entity_id,s.flow_instance,s.current_state,s.fields,s.revision,f.current_state,f.revision,f.config FROM entity_state s JOIN flow_instances f ON f.run_id=s.run_id AND f.entity_id=s.entity_id WHERE s.run_id=$1`, runID)
+	var fieldedHeaders int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND entity_type IS NOT NULL`, runID).Scan(&fieldedHeaders); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+`,es.fields,fi.config `+workflowheader.DataReadFrom+` WHERE es.run_id=$1`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -484,13 +487,22 @@ func observeH2HubsForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2Hu
 	var out []H2HubsEvidence
 	for rows.Next() {
 		var row H2HubsEvidence
-		if err := rows.Scan(&row.Entity, &row.Instance, &row.Stage, &row.Fields, &row.Revision, &row.HeaderState, &row.HeaderRevision, &row.Config); err != nil {
+		view, err := workflowheader.ScanData(rows, sqliteTimeValue, &row.Fields, &row.Config)
+		if err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
+		if view.Entity.CurrentState == nil || view.Entity.Revision == nil {
+			return nil, errors.Join(fmt.Errorf("H2 hub %s lacks named lifecycle evidence", view.Entity.EntityID), rows.Close())
+		}
+		row.Entity, row.Instance = view.Entity.EntityID, view.Entity.FlowInstance
+		row.Stage, row.Revision = *view.Entity.CurrentState, *view.Entity.Revision
 		out = append(out, row)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
+	}
+	if len(out) != fieldedHeaders {
+		return nil, fmt.Errorf("H2 fielded header/data cardinality disagreement: headers=%d data=%d", fieldedHeaders, len(out))
 	}
 	return out, nil
 }
