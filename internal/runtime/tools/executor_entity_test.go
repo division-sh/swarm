@@ -515,14 +515,14 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
-	seedEntityStateRow(t, db, currentID, "validation/inst-1", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, currentID, "validation/inst-1", "validation_case", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "run-root", "default", map[string]any{
+	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "other_case", map[string]any{
 		"status": "root",
 	}, time.Now().UTC())
 
@@ -547,7 +547,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		0,
 		entityToolTestRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, foreignID), "run-root"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, foreignID), "other/inst-1"),
 		time.Time{},
 	))
 
@@ -696,11 +696,11 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, siblingID, "validation/inst-sibling", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, siblingID, "validation/inst-sibling", "validation_case", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "other/inst-1", "other_case", map[string]any{
+	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "other_case", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances
@@ -780,12 +780,12 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	entityID := uuid.NewString()
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
 	specApproach := strings.Repeat("technical approach ", 900)
-	seedEntityStateRow(t, db, entityID, "validation/inst-1", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, entityID, "validation/inst-1", "validation_case", map[string]any{
 		"status": "open",
 		"business_brief": map[string]any{
 			"summary":    brief,
@@ -1770,14 +1770,14 @@ signal:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "researcher",
 		Role:          "researcher",
 		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
-	seedEntityStateRow(t, db, uuid.NewString(), "discovery/run-1", "campaign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, uuid.NewString(), "signal-search/run-1", "signal", map[string]any{
+	seedEntityStateRow(t, ctx, uuid.NewString(), "discovery/run-1", "campaign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, uuid.NewString(), "signal-search/run-1", "signal", map[string]any{
 		"signal_strength": 80,
 		"processed":       false,
 		"status":          "new",
@@ -1882,14 +1882,14 @@ child_subject:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	rootID := uuid.NewString()
 	childID := uuid.NewString()
-	seedEntityStateRow(t, db, rootID, ".", "root_subject", map[string]any{
+	seedEntityStateRow(t, ctx, rootID, ".", "root_subject", map[string]any{
 		"status": "root",
 		"score":  7,
 	}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, childID, "child/run-1", "child_subject", map[string]any{
+	seedEntityStateRow(t, ctx, childID, "child/run-1", "child_subject", map[string]any{
 		"status": "child",
 		"score":  99,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2221,14 +2221,14 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -2268,7 +2268,7 @@ foreign:
 	_, db, _ := testutil.StartPostgres(t)
 	bus := &entityToolRuntimeLogBus{}
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ensureEntityToolTestRun(t, pg)
+	ctx := seedEntityToolSourceRun(t, pg, bundle)
 	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		EntityWriter:                   newEntityToolPipeline(t, pg, semanticview.Wrap(bundle)),
@@ -2276,7 +2276,7 @@ foreign:
 		AllowInternalLegacyEntityTools: true,
 	})
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	actor = entityToolFixtureActor(t, semanticview.Wrap(bundle), actor, entityToolTestRunID, "analyzer-flow", "analyzer-flow/inst-1")
 	_, err := exec.Execute(selectedForkEntityToolRuntimeContext(actor), "save_entity_field", map[string]any{
@@ -2382,14 +2382,14 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
 		Tools:         []string{"get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	re, ok := runtimefailures.As(err)
@@ -2424,7 +2424,7 @@ operating_case:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	firstID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
@@ -2441,7 +2441,7 @@ operating_case:
 		},
 	})
 	deepID := uuid.NewString()
-	seedEntityStateRow(t, db, deepID, "validation/nested/case-3", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, deepID, "validation/nested/case-3", "validation_case", map[string]any{
 		"status": "open",
 		"score":  30,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2661,7 +2661,7 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
@@ -2669,7 +2669,7 @@ foreign:
 	}, bundle)
 
 	scoringID := uuid.NewString()
-	seedEntityStateRow(t, db, scoringID, "other-flow/score-1", "foreign", map[string]any{
+	seedEntityStateRow(t, ctx, scoringID, "other-flow/score-1", "foreign", map[string]any{
 		"name":            "Example Vertical",
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -3183,26 +3183,30 @@ func entityToolKeyedFixtureYAML(entities string) string {
 	return entities
 }
 
-// This retained hostile/read projection fixture seeds data only, not a header
-// or lifecycle evidence. Constructed witnesses use constructEntityToolFixture.
-func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, flowInstance, entityType string, fields map[string]any, dataAt time.Time) {
+// Read-only counterparts use the admitted import owner and retain history;
+// constructed witnesses use constructEntityToolFixture instead.
+func seedEntityStateRow(t *testing.T, ctx context.Context, entityID, flowInstance, entityType string, fields map[string]any, dataAt time.Time) {
 	t.Helper()
 	if dataAt.IsZero() {
 		dataAt = time.Now().UTC()
 	}
-	fieldsJSON, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatalf("json.Marshal(fields): %v", err)
+	fixture, ok := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	if !ok {
+		t.Fatal("data-only fixture requires its exact source and import owner")
 	}
-	if _, err := db.Exec(`
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, '', $5::jsonb, $6, $6
-		)
-	`, entityToolTestRunID, entityID, flowInstance, entityType, string(fieldsJSON), dataAt); err != nil {
-		t.Fatalf("seed entity_state(%s): %v", entityID, err)
+	contract, ok := entityruntime.ResolveForRuntimeInstance(fixture.source, entityToolTestRunID, flowInstance)
+	if !ok || contract.EntityType != entityType {
+		t.Fatalf("data-only fixture declaration mismatch: path=%s type=%s contract=%+v", flowInstance, entityType, contract)
+	}
+	initialized, err := entityruntime.Initialize(contract, fields)
+	if err != nil {
+		t.Fatalf("initialize data-only fixture fields: %v", err)
+	}
+	if _, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
+		RunID: entityToolTestRunID, CreatedAt: dataAt,
+		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: entityID, EntityID: entityID, FlowInstance: flowInstance, EntityType: entityType, Fields: initialized}},
+	}); err != nil {
+		t.Fatalf("import data-only entity %s: %v", entityID, err)
 	}
 }
 
