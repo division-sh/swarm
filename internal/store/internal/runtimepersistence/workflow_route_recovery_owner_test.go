@@ -79,9 +79,9 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 
 			insertOwner := func(runID, entityID string) {
 				t.Helper()
-				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'review_entity', 'active')"
+				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES (?, ?, ?, 'review_entity')"
 				if !tc.sqlite {
-					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, $3, 'review_entity', 'active')"
+					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES ($1::uuid, $2::uuid, $3, 'review_entity')"
 				}
 				if _, err := db.ExecContext(ctx, query, runID, entityID, instancePath); err != nil {
 					t.Fatalf("seed route owner %s/%s: %v", runID, entityID, err)
