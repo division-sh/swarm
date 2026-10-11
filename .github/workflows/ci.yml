@@ -337,7 +337,7 @@ jobs:
     if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 19
     steps:
       - uses: actions/checkout@v4
         with:
