@@ -2260,6 +2260,10 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
+	routePlan, err = restoreSelectedForkRecipientContexts(ctx, evt, routePlan)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, routePlan); err != nil {
 		return RoutePlan{}, err
 	}

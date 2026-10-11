@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -117,5 +118,87 @@ func TestSelectedFanOutPartitionRejectsExtraSettledAndSubstitutedRecipients(t *t
 				t.Fatal("refusal repaired or mutated cut/child evidence")
 			}
 		})
+	}
+}
+
+func TestSelectedFanOutPartitionRetainsOnlyCapturedReplyContexts(t *testing.T) {
+	snapshot, replay, publication, _ := selectedFanOutPartitionFixture(t)
+	_, _, record := runForkReplyPlanFixture(t, replycontext.StateOpen, true, false)
+	record.RunID, record.SourceRunID = snapshot.RunID, snapshot.RunID
+	record.Origin = events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID, EntityID: snapshot.RunID}
+	record.ReturnJoins = nil
+	record.ID = replycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin,
+		record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+	snapshot.ReplyContexts = []runForkRevisionReplyContext{{runForkHistoricalReplyFact: runForkHistoricalReplyFact{
+		runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 1, Revision: 5}, Record: record,
+	}}}
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceEvent, err := cut.event(replay.SourceEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routes []events.DeliveryRoute
+	for i := range snapshot.Deliveries {
+		delivery := &snapshot.Deliveries[i].Snapshot
+		if delivery.Terminal() {
+			continue
+		}
+		oldID := delivery.DeliveryID
+		delivery.Route.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
+		delivery.RouteIdentity, err = delivery.Route.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		delivery.DeliveryID, err = deliverylifecycle.DeliveryID(sourceEvent.ID(), delivery.Route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j, id := range replay.SourceDeliveryIDs {
+			if id == oldID {
+				replay.SourceDeliveryIDs[j] = delivery.DeliveryID
+			}
+		}
+		route, err := projectSelectedFanOutRecipient(snapshot, sourceEvent, *delivery, publication.Event().RunID())
+		if err != nil || route.Context.ReplyContextID() != deterministicRunForkReplyContextID(publication.Event().RunID(), record.ID) {
+			t.Fatalf("node/agent receiver did not consume its captured child context: route=%+v error=%v", route, err)
+		}
+		routes = append(routes, route)
+	}
+	before := projectionJSON(t, snapshot)
+	if err := requireSelectedFanOutRecipientPartition(snapshot, replay, publication, routes); err != nil {
+		t.Fatal(err)
+	}
+	for _, fault := range []string{"lost", "source", "sibling", "missing_row", "foreign_row", "duplicate_row"} {
+		t.Run(fault, func(t *testing.T) {
+			bad := *snapshot
+			bad.ReplyContexts = append([]runForkRevisionReplyContext(nil), snapshot.ReplyContexts...)
+			changed := make([]events.DeliveryRoute, len(routes))
+			for i, route := range routes {
+				changed[i] = route.Normalized()
+			}
+			switch fault {
+			case "lost":
+				changed[0].Context = events.DeliveryContext{}
+			case "source":
+				changed[0].Context.Reply.ID = record.ID
+			case "sibling":
+				changed[0].Context.Reply.ID = deterministicRunForkReplyContextID(uuid.NewString(), record.ID)
+			case "missing_row":
+				bad.ReplyContexts = nil
+			case "foreign_row":
+				bad.ReplyContexts[0].Record.RunID = uuid.NewString()
+			case "duplicate_row":
+				bad.ReplyContexts = append(bad.ReplyContexts, bad.ReplyContexts[0])
+			}
+			if err := requireSelectedFanOutRecipientPartition(&bad, replay, publication, changed); err == nil {
+				t.Fatal("uncaptured receiver reply binding passed the final partition fence")
+			}
+		})
+	}
+	if projectionJSON(t, snapshot) != before {
+		t.Fatal("receiver projection or refusal changed source evidence")
 	}
 }

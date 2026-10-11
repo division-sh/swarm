@@ -672,6 +672,12 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 		if err != nil {
 			return err
 		}
+		if len(sourceEvent.ContinuedFanOutRoutes) != 0 {
+			eventCtx, err = runtimebus.WithSelectedForkRecipientContexts(eventCtx, evt, sourceEvent.ContinuedFanOutRoutes)
+			if err != nil {
+				return err
+			}
+		}
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
 			if err != nil {

@@ -1432,15 +1432,16 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	InputPublication   InputPublication                          `json:"-"`
-	PublishedJoin      genericschedule.PublishedJoinContinuation `json:"-"`
-	PublishedJoinRoute events.DeliveryRoute                      `json:"-"`
-	SourceEventID      string                                    `json:"source_event_id"`
-	EventName          string                                    `json:"event_name"`
-	ExecutionMode      executionmode.Mode                        `json:"execution_mode"`
-	Scope              string                                    `json:"scope,omitempty"`
-	RoutingSource      events.RoutingSource                      `json:"routing_source"`
-	Payload            json.RawMessage                           `json:"payload,omitempty"`
+	InputPublication      InputPublication                          `json:"-"`
+	PublishedJoin         genericschedule.PublishedJoinContinuation `json:"-"`
+	PublishedJoinRoute    events.DeliveryRoute                      `json:"-"`
+	ContinuedFanOutRoutes []events.DeliveryRoute                    `json:"-"`
+	SourceEventID         string                                    `json:"source_event_id"`
+	EventName             string                                    `json:"event_name"`
+	ExecutionMode         executionmode.Mode                        `json:"execution_mode"`
+	Scope                 string                                    `json:"scope,omitempty"`
+	RoutingSource         events.RoutingSource                      `json:"routing_source"`
+	Payload               json.RawMessage                           `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {

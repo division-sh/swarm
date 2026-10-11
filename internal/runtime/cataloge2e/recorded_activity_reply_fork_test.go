@@ -190,6 +190,23 @@ func waitCopiedActivityRequesterReturn(t *testing.T, ctx context.Context, select
 		if count > 1 {
 			t.Fatalf("child produced %d requester completions", count)
 		}
+		run, err := storetest.ReadRuntimeLogRunSnapshot(ctx, selected, runID)
+		if err != nil {
+			t.Fatalf("read requester return lifecycle: %v", err)
+		}
+		if run.State.Terminal() {
+			// Completion can commit between the two reads above. Confirm the
+			// durable result again before classifying a terminal run as failure.
+			final, readErr := storetest.ReadLifecycleEventCardinality(ctx, selected, runID, "request.finished")
+			if readErr != nil {
+				t.Fatalf("read terminal requester completion: %v", readErr)
+			}
+			if final == 1 {
+				return
+			}
+			logCopiedActivityReturnPhase(t, ctx, selected, runID)
+			t.Fatalf("child terminalized without its requester return: state=%s failure=%+v", run.State, run.Failure)
+		}
 		select {
 		case <-ctx.Done():
 			logCopiedActivityReturnPhase(t, ctx, selected, runID)

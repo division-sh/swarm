@@ -224,6 +224,51 @@ func requireSelectedFanOutRecipientPartition(snapshot *runForkRevisionSnapshot, 
 	return nil
 }
 
+// Transfer the exact unfinished receiver bindings through the existing native
+// projector. The publication fence independently checks them at commit.
+func projectContinuedFanOutSourceRoutes(snapshot *runForkRevisionSnapshot, eventID, childRun string) ([]events.DeliveryRoute, error) {
+	if snapshot == nil {
+		return nil, fmt.Errorf("continued source preparation lacks its fixed cut")
+	}
+	if len(snapshot.FanOutFacts) == 0 {
+		return nil, nil
+	}
+	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	obligations, err := loadRunForkFanOutObligationsFromRevision(snapshot, pending)
+	if err != nil {
+		return nil, err
+	}
+	plan := runfork.RunForkPlan{SourceRunID: snapshot.RunID, PendingWork: pending, FanOutObligations: obligations}
+	partition, found, err := plan.FanOutPendingRecipientPartition(eventID)
+	if err != nil || !found {
+		return nil, err
+	}
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	event, err := cut.event(eventID)
+	if err != nil {
+		return nil, err
+	}
+	routes := make([]events.DeliveryRoute, 0, len(partition.SourceDeliveryIDs))
+	for _, id := range partition.SourceDeliveryIDs {
+		delivery, err := cut.delivery(eventID, id)
+		if err != nil {
+			return nil, err
+		}
+		route, err := projectSelectedFanOutRecipient(snapshot, event, delivery, childRun)
+		if err != nil {
+			return nil, err
+		}
+		routes = append(routes, route)
+	}
+	return routes, nil
+}
+
 func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event events.Event, delivery deliverylifecycle.Snapshot, childRun string) (events.DeliveryRoute, error) {
 	if snapshot == nil || event.RunID() != snapshot.RunID || delivery.RunID != snapshot.RunID || delivery.EventID != event.ID() || delivery.Terminal() {
 		return events.DeliveryRoute{}, fmt.Errorf("continued fan-out requires exact unfinished cut evidence")

@@ -998,6 +998,13 @@ contract_formats:
         recorded absence, on both direct and deferred paths. It explicitly masks ambient
         delivery facts while preserving caller cancellation and other ownership bindings;
         incoming references and consumed joins never substitute for an empty journal.
+        Published fan-out continuation carries the exact unfinished receiver routes from
+        the fixed-cut native projection, including each child's own reply/return context,
+        into selected publication. The existing selected-recipient scope restores context
+        only after canonical resolution produces the same complete routes, independently
+        of recipient kind; it never creates a second route or chooses a receiver.
+        The native publication fence still checks the complete
+        projected source-delivery partition; transferred evidence is not execution authority.
         Ordinary and selected materialization consume the same exact captured-row
         projection and native readback. Prospective validation can admit reconstruction
         of the open-reply family only; it cannot discharge any other capability blocker.

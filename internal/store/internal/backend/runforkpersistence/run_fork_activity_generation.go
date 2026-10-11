@@ -360,6 +360,11 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 }
 
 func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
+	var err error
+	projected.ContinuedFanOutRoutes, err = projectContinuedFanOutSourceRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
+	if err != nil {
+		return projected, err
+	}
 	if projected.EventName == "platform.join_complete" || projected.EventName == "platform.join_timeout" {
 		payload, err := canonicaljson.Decode(source.Payload)
 		if err != nil {
