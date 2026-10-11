@@ -24035,6 +24035,11 @@ test_specification:
         collector. Named native delivery-settlement receipts must prove outstanding post-issuance drain,
         or the existing public/selected summary must prove descendants already settled before handoff.
         Stale cleanup cannot detach the successor.
+        Both regimes revalidate final native receipts after joined runtime/store teardown;
+        an active pre-teardown snapshot cannot provide final stress or serving-window credit.
+        Serving claims/chunks require zero Failed; all collectors require zero CommitFailures
+        and CleanupFailures. Non-serving Failed/RollbackAttempts remain raw unacknowledged
+        evidence, never successful or declared harmless; global Failed-zero is not the oracle.
         Lifecycle retains served normal/census/window under serveapp-i-reporter and the conformance window
         under conformance-2394-reporter-window. Full additionally retains the original served all-commit root
         under serveapp-i-reporter-all-commit and original conformance all-commit root under
