@@ -44,3 +44,11 @@ func ReadConnectorLatestActivityReceiptDiagnostic(ctx context.Context, selected 
 func CountConnectorRunActivityAttempts(ctx context.Context, selected any, runID string) (int, error) {
 	return runtimepersistence.CountConnectorRunActivityAttemptsForTest(ctx, selected, runID)
 }
+
+func CountChannelSucceededToolAttempts(ctx context.Context, selected any, runID, tool string) (int, error) {
+	return runtimepersistence.CountChannelSucceededToolAttemptsForTest(ctx, selected, runID, tool)
+}
+
+func ReadChannelFirstActivitySourceRoute(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return runtimepersistence.ReadChannelFirstActivitySourceRouteForTest(ctx, selected, runID)
+}

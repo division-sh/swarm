@@ -115,6 +115,22 @@ func ReadConnectorEventChronologyForTest(ctx context.Context, selected any, runI
 	return out, nil
 }
 
+func ReadChannelFirstActivitySourceRouteForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return nil, err
+	}
+	var route []byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		route, err = eventrecord.ReadChannelFirstActivitySourceRouteTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return route, nil
+}
+
 type SelectedCausalDiagnosticStorage struct {
 	Events     []eventrecord.LifecycleDiagnosticEventLineage
 	Projection []byte

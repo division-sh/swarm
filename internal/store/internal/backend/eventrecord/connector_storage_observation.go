@@ -54,3 +54,11 @@ func ReadConnectorEventChronologyTx(ctx context.Context, tx *sql.Tx, postgres bo
 	}
 	return out, nil
 }
+
+func ReadChannelFirstActivitySourceRouteTx(ctx context.Context, tx *sql.Tx, run string) ([]byte, error) {
+	var route []byte
+	if err := tx.QueryRowContext(ctx, `SELECT source_route FROM events WHERE run_id=$1 AND event_name='platform.activity_requested' ORDER BY created_at,event_id LIMIT 1`, run).Scan(&route); err != nil {
+		return nil, err
+	}
+	return route, nil
+}

@@ -127,6 +127,14 @@ func TestConnectorStorageObservationsRefuseForeignCancelledAndClosedOwnersBothSt
 					v, err := CountConnectorRunActivityAttempts(ctx, owner, run)
 					return v == 0, err
 				}, false},
+				{"channel_succeeded", func(ctx context.Context, owner any) (bool, error) {
+					v, err := CountChannelSucceededToolAttempts(ctx, owner, run, "channel.compiled_tool")
+					return v == 0, err
+				}, false},
+				{"channel_first_source", func(ctx context.Context, owner any) (bool, error) {
+					v, err := ReadChannelFirstActivitySourceRoute(ctx, owner, run)
+					return v == nil, err
+				}, true},
 			}
 			for _, read := range reads {
 				t.Run(read.name, func(t *testing.T) {

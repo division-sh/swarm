@@ -34,6 +34,8 @@ func TestFamily145ConnectorReadQueriesRetainExactHistoricalPredicates(t *testing
 		{"delivery/read_projections.go", "ReadConnectorLatestEntityDeadLetterDiagnosticTx", "telegramConnectorSupportedSurfaceDiagnostics"},
 		{"activityjournal/fork_observation.go", "CountConnectorRunActivityAttemptsTx", "telegramConnectorSupportedSurfaceDiagnostics"},
 		{"pipelinepersistence/connector_receipt_observation.go", "ReadConnectorLatestActivityReceiptDiagnosticTx", "telegramConnectorSupportedSurfaceDiagnostics"},
+		{"eventrecord/connector_storage_observation.go", "ReadChannelFirstActivitySourceRouteTx", "assertConfiguredChannelJournal"},
+		{"activityjournal/fork_observation.go", "CountChannelSucceededToolAttemptsTx", "assertConfiguredChannelJournal"},
 	} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", row.file))
 		if err != nil {
@@ -91,10 +93,31 @@ func family145ConnectorSQL(t testing.TB, source string) []string {
 			value = strings.Replace(value, "?", "$"+strconv.Itoa(i), 1)
 		}
 		value = strings.ReplaceAll(value, "::uuid", "")
-		queries = append(queries, strings.ToLower(strings.Join(strings.Fields(value), "")))
+		var compact strings.Builder
+		quoted := false
+		for _, character := range value {
+			if character == '\'' {
+				quoted = !quoted
+			}
+			if !quoted && (character == ' ' || character == '\n' || character == '\t' || character == '\r') {
+				continue
+			}
+			compact.WriteRune(character)
+		}
+		queries = append(queries, compact.String())
 		return true
 	})
 	return queries
+}
+
+func TestFamily145ConnectorSQLCorrespondencePreservesQuotedCaseAndSpaces(t *testing.T) {
+	original := family145ConnectorSQL(t, "package proof; const query = \"SELECT status FROM attempts WHERE status='succeeded'\"")[0]
+	for _, hostile := range []string{"SUCCEEDED", "suc ceeded"} {
+		query := family145ConnectorSQL(t, "package proof; const query = \"SELECT status FROM attempts WHERE status='"+hostile+"'\"")[0]
+		if original == query {
+			t.Fatalf("SQL correspondence hid changed quoted value: %s", hostile)
+		}
+	}
 }
 
 var family145ConnectorCalls = map[string][]string{

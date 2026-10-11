@@ -2747,3 +2747,40 @@ Signed-head complexity is recorded with the receipts. Parent scope and all M01,
 Docker, drain, D3, M07 and rollback qualifications remain open and unwaived.
 No new architecture owner/framework, issue, watchlist node, push, PR, server2 or
 local tier. Next ready dependency: configured-channel journal/carrier chain.
+
+## Whole configured-channel journal and native carrier
+
+The entire assertConfiguredChannelJournal chain is retired: all three observation
+checkpoints and the configured-channel actor fixture use the original selected
+native owner, with no DB local/parameter/getter, supplied PostgreSQL pool or
+dialect argument. Canonical runtime/source/activation and live execution setup is
+unchanged; no compatibility producer, fake lease or second close owner is added.
+
+| Owner | Exhaustive changed consumption / precise original contract |
+| --- | --- |
+| native selected construction | Both backend arms retain their original location and existing joined coordinator/runtime-before-store/sandbox cleanup. |
+| eventrecord | Request count reuses the existing exact run/name physical owner. First activity-request source_route is an independent fixed physical byte read, exact run/name, ORDER BY created_at,event_id LIMIT 1; consumer decoding and complete normalized route comparison remain. No canonical event decode, eligibility filter or inferred route replaces the original witness. |
+| activityjournal | Fixed succeeded-attempt count retains exact run/compiled private tool/status, without a request join or hidden history/eligibility filter. All three original independent counts/source reads remain separate snapshots. |
+| finite codemod and source correspondence | Original behavioral conditions and counts/routing/lost-ack/replacement/held-dispatch cuts remain hostile-controlled; entire caller file rejects restored raw authority. Both new SQL shapes are compared against immutable original queries. Quote-case/space hostile controls strengthen that comparison rather than folding literal values. Corpus325 transitions /1151 recipes retains all historical Before inputs. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Complete configured-channel dispatch, lost ack, stale plans, replacement fence and predecessor settlement | reproduced and fixed: TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores on both stores under race, PASS17.710s; every original cardinality, complete route and real lifecycle assertion retained |
+| New physical count/source ports reject absent/raw/cancelled/closed owners | execution-proven through the same corrected path: expanded TestConnectorStorageObservationsRefuseForeignCancelledAndClosedOwnersBothStores, both stores under race PASS10.125s; no provisional count/bytes on error |
+| Exact source/order/status and original independent read scopes | execution-proven through the same corrected path: immutable historical SQL comparison and channel finite/caller/hostile controls PASS, including preserved quoted values; no claim based only on a shared helper |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/channel-journal-*.
+Affected event/delivery/lifecycle/revision/writer boundary guards PASS3.827s;
+affected U1000 clean and dry-run Changes=[]. Unchanged unrelated behavior and
+full corpus-overlay receipts carry; this target package actually compiles and
+executes the native replacements under race on both stores. No broader local tier.
+
+Authoritative ratchet PASS168.660s:9051 ->9033,18 removals,0 additions; confirmed
+raw-operation debt6530 ->6518, excluded uncertainty67 unchanged. Global collector
+54683 findings /38995 raw sites includes legitimate owners, not the debt
+denominator. Supplied-pool queue97 ->96 =94 external +2 private, M0/D59/S37,
+cumulative qualified openings38. Collector/policy and retained one-way debt stay
+unchanged; signed-head complexity is recorded alongside these receipts.
+This closes only this whole caller/observer carrier. Parent and M01/Docker/drain/
+D3/M07/rollback qualifications remain open, unwaived. Existing architecture and
+watchlist tracking remains sufficient. No new issue/framework, push, PR or server2.

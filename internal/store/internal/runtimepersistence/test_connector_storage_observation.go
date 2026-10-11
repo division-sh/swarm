@@ -118,3 +118,22 @@ func CountConnectorRunActivityAttemptsForTest(ctx context.Context, selected any,
 	}
 	return out, nil
 }
+
+func CountChannelSucceededToolAttemptsForTest(ctx context.Context, selected any, runID, tool string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return 0, err
+	}
+	if tool == "" || strings.TrimSpace(tool) != tool {
+		return 0, fmt.Errorf("channel journal requires exact compiled tool")
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = activityjournal.CountChannelSucceededToolAttemptsTx(ctx, tx, runID, tool)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
