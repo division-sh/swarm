@@ -252,24 +252,28 @@ func (o *clientOccurrence) send(ctx context.Context, to types.JID, message *waE2
 	return response, err
 }
 
-func (o *clientOccurrence) logout(ctx context.Context) error {
+func (o *clientOccurrence) prepareLogout(ctx context.Context) (context.Context, func(), error) {
 	workCtx, release, err := o.reserveLogout(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer release()
 	o.mu.Lock()
 	callbacks := o.callbacks
 	o.mu.Unlock()
 	if callbacks != nil {
 		if err := callbacks.join(workCtx); err != nil {
-			return err
+			release()
+			return nil, nil, err
 		}
 	}
 	if err := o.stores.fence.quiesceForLogout(workCtx); err != nil {
-		return err
+		release()
+		return nil, nil, err
 	}
-	workCtx = context.WithValue(workCtx, explicitLogoutKey{}, o.stores.fence)
+	return context.WithValue(workCtx, explicitLogoutKey{}, o.stores.fence), release, nil
+}
+
+func (o *clientOccurrence) unlink(workCtx context.Context) error {
 	if err := o.client.Logout(workCtx); err != nil {
 		return err
 	}

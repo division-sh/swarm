@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +40,32 @@ type SessionLogoutLifecycle interface {
 	DispatchSessionLogout(context.Context, TeardownOperation) error
 }
 
+// Pending logout retains the original transport while refusing business use.
+// Ordinary inactive-session cleanup must not disconnect before unlink settles.
+func RetainedSessionLogoutPending(ctx context.Context, store Store, retained Operation) (bool, error) {
+	if ctx == nil || store == nil || retained.Posture != ActivationSessionConnection || retained.ValidateSessionAccount() != nil {
+		return false, ErrInvalidRequest
+	}
+	rows, err := store.ListChannelTeardowns(ctx)
+	if err != nil {
+		return false, err
+	}
+	matched, pending := false, false
+	for _, op := range rows {
+		if op.Kind != TeardownLogout || op.Logout == nil || op.Logout.Account.ConnectionID != retained.SessionConnectionID {
+			continue
+		}
+		if matched || op.Logout.Validate() != nil || op.PrincipalID != retained.PrincipalID || op.Logout.Account != retained.SessionAccount {
+			return false, ErrConflict
+		}
+		matched = true
+		if op.Phase == TeardownAuthorityRetired {
+			pending = true
+		}
+	}
+	return pending, ctx.Err()
+}
+
 type SessionLogoutReadback struct {
 	OperationID       string            `json:"operation_id"`
 	ExpectedRevision  int64             `json:"expected_revision"`
@@ -47,7 +74,7 @@ type SessionLogoutReadback struct {
 }
 
 func (r SessionLogoutReadback) Validate() error {
-	effectID, err := SessionLogoutEffectOperationID(r.Teardown.TeardownID)
+	effectID, err := effects.ChannelLogoutOperationID(r.Teardown.TeardownID)
 	if err != nil || effectID != r.EffectOperationID || uuid.Validate(r.OperationID) != nil || r.ExpectedRevision < 1 ||
 		r.Teardown.Kind != TeardownLogout || uuid.Validate(r.Teardown.PrincipalID) != nil || r.Teardown.Revision < 1 ||
 		!r.Teardown.Phase.Valid() || r.Teardown.Scope.Validate(TeardownLogout) != nil || r.Teardown.Scope.BundleHash != "" ||
@@ -58,19 +85,11 @@ func (r SessionLogoutReadback) Validate() error {
 	return nil
 }
 
-func SessionLogoutEffectOperationID(teardownID string) (string, error) {
-	id, err := uuid.Parse(teardownID)
-	if err != nil || id == uuid.Nil {
-		return "", fmt.Errorf("%w: logout requires its teardown identity", ErrInvalidRequest)
-	}
-	return uuid.NewSHA1(id, []byte("channel.logout")).String(), nil
-}
-
 func NewSessionLogoutReadback(op TeardownOperation) (SessionLogoutReadback, error) {
 	if op.Kind != TeardownLogout || op.Logout == nil || op.Logout.Validate() != nil {
 		return SessionLogoutReadback{}, fmt.Errorf("%w: logout readback has no exact retained target", ErrConflict)
 	}
-	effectID, err := SessionLogoutEffectOperationID(op.TeardownID)
+	effectID, err := effects.ChannelLogoutOperationID(op.TeardownID)
 	if err != nil {
 		return SessionLogoutReadback{}, err
 	}
