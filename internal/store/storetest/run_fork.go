@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 )
 
 type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
@@ -40,6 +41,15 @@ func CaptureRunForkSnapshot(t testing.TB, ctx context.Context, selected any, run
 	if err := private.CaptureRunForkSnapshotForTest(ctx, selected, runID); err != nil {
 		t.Fatalf("capture canonical run-fork snapshot: %v", err)
 	}
+}
+
+func CaptureSelectedRunForkRevision(t testing.TB, ctx context.Context, selected any, runID string, families ...runforkrevisionfixture.Family) int64 {
+	t.Helper()
+	revision, err := private.CaptureSelectedRunForkRevisionForTest(ctx, selected, runID, families...)
+	if err != nil {
+		t.Fatalf("capture selected run-fork revision: %v", err)
+	}
+	return revision
 }
 
 // RequireRunForkReplayResumeBlocker inspects the store's typed refusal without

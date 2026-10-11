@@ -1208,6 +1208,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^TestSelected.*$
     required_children:
+      TestSelectedForkSourceEntityFixtureUsesOriginalCoordinatorBothStores: [sqlite, postgres]
+      TestSelectedForkSourceEntityFixtureRefusalsAndRollbackBothStores: [sqlite, postgres]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
       TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
       TestSelectedRetriedTurnCancellationBothStores: [unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout_recovery/sqlite, timeout_recovery/postgres]

@@ -149,7 +149,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			entityID := uuid.NewString()
 			seedSelectedExecutionSourceRunWithPrimaryRoute(
 				t,
-				db,
+				pg,
 				sourceRunID,
 				entityID,
 				sourceEventID,
@@ -516,7 +516,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002215, 0).UTC()
 			if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+				seedSelectedExecutionStateOnlySourceRun(t, pg, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
@@ -2778,9 +2778,8 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 	return response, runtimellm.ValidateCLIProviderCapabilitySurface(observed, response)
 }
 
-func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB) selectedContractForkLocalRuntimeContainer {
+func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -2862,8 +2861,9 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 
 func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	container := buildSelectedForkProofContainer(t, ctx, db)
+	container := buildSelectedForkProofContainer(t, ctx, db, selected)
 	proof := container.Proof()
 	var requests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -2928,7 +2928,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.Plan{},
 		FlowInstance: actorIdentity.FlowInstance(),
 	})
-	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
+	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(selected))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
 	effectCtx = managedcapabilities.WithContext(effectCtx, surface)
 	for _, definition := range executor.ToolDefinitionsForActorInContext(effectCtx, actor) {
@@ -5415,7 +5415,7 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 
 func seedSelectedExecutionStateOnlySourceRun(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, sourceEventID, eventName string,
 	at time.Time,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
@@ -5431,8 +5431,7 @@ func seedSelectedExecutionStateOnlySourceRun(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
-	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	admitSelectedExecutionSourceArtifact(t, ctx, selected, sourceFact)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5461,7 +5460,7 @@ func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5474,7 +5473,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	routingSource := events.NoRoutingSource()
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
+		t, selected, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
@@ -5486,7 +5485,7 @@ type selectedExecutionInputFixture struct {
 
 func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5513,12 +5512,11 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
-	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
+	admitSelectedExecutionSourceArtifact(t, ctx, selected, sourceFact)
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	if len(input.payload) != 0 {
 		payload = input.payload
 	}
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5533,46 +5531,24 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	}
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
 	commitRunForkTestEvent(t, ctx, selected, event, routes)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-execution-test', 'seed', $4)
-	`, sourceRunID, entityID, sourceEventID, at); err != nil {
-		t.Fatalf("seed source mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$4, $4, $4
-		)
-	`, sourceRunID, entityID, entityType, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
+	if err := storetest.SeedSelectedSourceEntity(ctx, selected, storetest.SelectedSourceEntityFixture{
+		RunID: sourceRunID, EntityID: entityID, EventID: sourceEventID, EntityType: entityType, CreatedAt: at,
+	}); err != nil {
+		t.Fatalf("seed source entity history: %v", err)
 	}
 	return event
 }
 
-func admitSelectedExecutionSourceArtifact(t testing.TB, ctx context.Context, db *sql.DB, bundleHash string) {
+func admitSelectedExecutionSourceArtifact(t testing.TB, ctx context.Context, selected *store.PostgresStore, source runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
-	if artifact := selectedExecutionSourceArtifactIfKnown(t, bundleHash); artifact != nil {
-		if _, err := storetest.AdmitPostgresRuntimeStore(t, db).EnsureSourceArtifact(ctx, artifact); err != nil {
+	if artifact := selectedExecutionSourceArtifactIfKnown(t, source.BundleHash()); artifact != nil {
+		if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
 			t.Fatalf("admit selected-execution source artifact: %v", err)
 		}
 		return
 	}
-	var present bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`, bundleHash).Scan(&present); err != nil {
+	if err := storetest.RequireSelectedSourceArtifactPresence(ctx, selected, source); err != nil {
 		t.Fatalf("check selected-execution source artifact: %v", err)
-	}
-	if !present {
-		t.Fatalf("selected-execution source artifact %s must be persisted explicitly", bundleHash)
 	}
 }
 

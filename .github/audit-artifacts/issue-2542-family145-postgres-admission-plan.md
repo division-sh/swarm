@@ -1,8 +1,9 @@
 # Whole-family PostgreSQL supplied-pool admission plan
 
-Local branch: agent-b/2542-native-postgres-admission-tail, stacked on approved
-#2604 accb585faa3a2d179a4e5714743c80731353209b. No push, new PR or edits to the
-approved landing ref. This is preparation, not a completed migration or proof.
+Local branch: agent-b/2542-native-postgres-admission-tail, started on approved
+#2604 8c49141715ff08f4ebb28ae86e92b58c7a1671fb and aligning with its actual
+master landing. No push, new PR or edits to the approved landing ref. This is
+local implementation in progress, not a completed whole-family migration.
 Binding plan: #2542 comments 6104238422 and 6104282775; independent scope
 amendment and implementation authorization: comment 6104317052. The approved
 class is ordinary selected-persistence construction/lifetime authority, not a
@@ -115,3 +116,20 @@ Stop only for genuinely new production ownership/semantic decisions. Routine
 native fixture substitution and replacing invalid incidental setup are already
 authorized. After #2604 lands, rebase this local branch onto its actual landing.
 No removal credit, zero-debt closure or integrated qualification is claimed now.
+
+## Local Implementation In Progress
+
+Orchestrator correction authorizes starting on 8c4914171 before merge. Initial
+shared-owner repair propagates the existing selected instance through both
+source-run seed helpers, artifact admission and the authored HTTP proof/effect
+controller. The paired historical entity setup has moved to a fixed original-
+coordinator operation; it retains header absence, exact fields/clocks and the
+late-error rollback cut. Artifact fallback consumes the existing source-
+admission presence owner, deliberately not GetSourceArtifact's stronger decode.
+
+The existing snapshot owner now returns the acknowledged canonical revision
+adapter result when needed, without a second read of a possibly advanced head
+or another effects allocator. Public bridges carry detached data/receipts only.
+No constructor/caller codemod or complete-family retirement is claimed yet.
+The first cluster's native opening/readback propagation and the remaining
+ordinary constructor chains still need implementation and final census proof.
