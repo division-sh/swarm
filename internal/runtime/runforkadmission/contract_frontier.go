@@ -484,33 +484,14 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out := contractFrontierEvaluatedRoute{}
 	seenNodes := map[string]struct{}{}
 	for _, plan := range graph.MatchingSourceEvent(sourceEvent) {
-		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && reply != nil && !plan.MatchesReplyRecord(*reply) {
+		targets, matched, err := contractFrontierPlanTargets(selectedSource, runID, plan, reply)
+		if err != nil {
+			return contractFrontierEvaluatedRoute{}, err
+		}
+		if !matched {
 			continue
 		}
 		out.connectMatched = true
-		var targets []events.RouteIdentity
-		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
-			if reply != nil {
-				targets = []events.RouteIdentity{reply.Origin}
-			}
-		} else if plan.ReceiverEndpoint().IsRoot() {
-			coordinate, err := semanticview.AdmitRootExecutionCoordinate(selectedSource, runID)
-			if err != nil {
-				return contractFrontierEvaluatedRoute{}, err
-			}
-			// This is a selection coordinate, not persisted entity ownership.
-			// The evaluator retains root declaration paths and runless agent plans.
-			targets = []events.RouteIdentity{{FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID()}}
-		} else if !plan.RequiresRuntimeResolution() {
-			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
-			if !materialized.Failure.Empty() {
-				return contractFrontierEvaluatedRoute{}, fmt.Errorf("selected static connect materialization: %s", materialized.Failure.Code())
-			}
-			targets = append(targets, materialized.TargetSet...)
-			if !materialized.Target.Empty() {
-				targets = append(targets, materialized.Target)
-			}
-		}
 		evaluation := routeTable.EvaluateConnectPlan(runID, plan, targets)
 		if _, err := evaluation.Ledger(); err != nil {
 			return contractFrontierEvaluatedRoute{}, err
@@ -538,6 +519,39 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out.nodeIDs = sortedSet(seenNodes)
 	out.recipients, err = forkrecipient.CanonicalSet(out.recipients)
 	return out, err
+}
+
+func contractFrontierPlanTargets(source semanticview.Source, runID string, plan runtimepinrouting.ConnectRoutePlan, reply *replycontext.Record) ([]events.RouteIdentity, bool, error) {
+	if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
+		if reply == nil {
+			return nil, true, nil
+		}
+		if !plan.MatchesReplyRecord(*reply) {
+			return nil, false, nil
+		}
+		return []events.RouteIdentity{reply.Origin}, true, nil
+	}
+	if plan.ReceiverEndpoint().IsRoot() {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+		if err != nil {
+			return nil, false, err
+		}
+		// A selection coordinate, not persisted entity ownership. The evaluator
+		// retains root declaration paths and runless agent plans.
+		return []events.RouteIdentity{{FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID()}}, true, nil
+	}
+	if plan.RequiresRuntimeResolution() {
+		return nil, true, nil
+	}
+	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
+	if !materialized.Failure.Empty() {
+		return nil, false, fmt.Errorf("selected static connect materialization: %s", materialized.Failure.Code())
+	}
+	targets := append([]events.RouteIdentity(nil), materialized.TargetSet...)
+	if !materialized.Target.Empty() {
+		targets = append(targets, materialized.Target)
+	}
+	return targets, true, nil
 }
 
 func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ...string) []string {
