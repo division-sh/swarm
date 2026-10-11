@@ -11738,7 +11738,13 @@ tool_model:
         same frozen evidence and projection, abandoning authorized work or marking launched work uncertain without
         reconnect, deletion, success fabrication or redispatch. Terminal exact replay cannot create another attempt.
         Destructive startup recovery preserves the logout responsibility without SDK dispatch; it cannot require
-        or reconstruct the dead process's occurrence before effect-journal recovery.
+        or reconstruct the dead process's occurrence before effect-journal recovery. A never-authorized reservation
+        closes as failed/not-launched only after the existing durable process-authority owner proves that the exact
+        original runtime authority is irreversibly released or superseded. That proof, the absence of journal evidence
+        and terminal teardown settlement share the generation/authorization transaction fences. Missing observations,
+        temporary cache absence and a still-live authorizer cannot justify settlement. Existing journal evidence stays
+        with its effect recovery owner. Exact failed replay preserves the target and pairing, emits no unlink and no
+        new attempt, and cannot leave an orphan blocking subsequent context retirement.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
@@ -43116,8 +43122,12 @@ managed_external_effect_authority:
       operation to remain retired by that reservation and no executable activation of the connection. The actual
       private SDK owner drains work before launch and sends at most one unlink. Settlement verifies original journal
       evidence, not current execution authority, and atomically projects the retained teardown. Success requires
-      unlink, device deletion and complete original join evidence. Prelaunch failure retains pairing; launched failure
-      and startup recovery report uncertainty without another attempt, automatic reconnect or local force deletion.
+      unlink, device deletion and complete original join evidence. Prelaunch failure and authorized startup abandonment
+      retain pairing as not-launched; launched failure and launched startup recovery report uncertainty without another
+      attempt, automatic reconnect or local force deletion. A reservation with no journal authorization may close as
+      not-launched only through the existing selected teardown owner, with transaction-fenced proof that the original
+      durable process authority is released or superseded and journal evidence remains absent. A live or unobserved
+      original is not such proof. This path retains the frozen target, creates no attempt and cannot authorize SDK work.
     gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. Managed Claude CLI MCP tools/call requests MUST carry the provider-owned non-empty params._meta["claudecode/toolUseId"] call-occurrence coordinate. The gateway refines the preserved provider-turn identity with that coordinate and fails closed before executor admission when it is absent. JSON-RPC id, progressToken, method, tool name, arguments, and other request content are correlation or fingerprint evidence, never occurrence identity; identical sibling calls remain distinct while replay of one provider call remains stable across transport-correlation replacement.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
@@ -43191,6 +43201,9 @@ managed_external_effect_authority:
       sharing recovery code adds no channel capability to forks. Callback ACK is not card/intent
       completion authority, text completion keeps its canonical transaction, and specialized
       provider-turn accounting/recovery remains distinct. No automatic-redispatch permission changes.
+      Reservation-only logout recovery precedes this journal pass: the selected teardown owner may close a proven
+      withdrawn, never-authorized original as not-launched under the same authority/authorization fences, without
+      fabricating journal rows. Existing authorization always remains with the journal settlement owner.
   invariant_ids:
     runtime.provider_attempt.origin_exact:
       owner_ref: platform-spec.yaml#managed_external_effect_authority
