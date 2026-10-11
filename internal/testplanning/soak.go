@@ -12,7 +12,8 @@ const (
 	SoakRun                  = "^" + SoakTest + "$"
 	SoakGoTimeout            = "22m"
 	ServedReporterPackage    = "github.com/division-sh/swarm/internal/serveapp"
-	ServedReporterRun        = "^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$"
+	ServedReporterRun        = "^(TestIssue2394ServedOriginalReporterFiveHundredBothStores|TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores|TestIssue2394ServedReporterTransactionCensusBothStores)$"
+	ServedReporterStressRun  = "^TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores$"
 	ServedReporterGoTimeout  = "15m"
 	ServedPreservationTest   = "TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores"
 	ServedPreservationRun    = "^" + ServedPreservationTest + "$"
@@ -39,7 +40,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 		}
 		return nil
 	}
-	if timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage && run == ServedReporterRun && skip == "" && count == "count-1" && budget == "full" {
+	if timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage && (run == ServedReporterRun || run == ServedReporterStressRun) && skip == "" && count == "count-1" && budget == "full" {
 		return nil
 	}
 	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {

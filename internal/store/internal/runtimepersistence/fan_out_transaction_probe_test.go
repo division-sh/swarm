@@ -69,6 +69,9 @@ func TestFanOutGrantedActualCommitCountBothStores(t *testing.T) {
 			if claimReceipt.Revision.Finalizations != 0 || loadReceipt.Revision.Finalizations != 0 || snapshot.Total.Revision != revision {
 				t.Fatalf("revision receipt leaked into non-finalizing work: %+v", snapshot)
 			}
+			if err := transactiontest.ValidateReporterIssuance(snapshot, started, 1, delay); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := owner.LoadFanOutEvaluation(ctx, claim); err == nil {
 				t.Fatal("closed claim unexpectedly loaded")
 			}
@@ -96,12 +99,20 @@ func TestFanOutGrantedActualCommitCountBothStores(t *testing.T) {
 				t.Fatalf("retained acknowledgement timestamp missing: %+v", retired.Retained)
 			}
 			restore()
-			restore()
+			successor, stopSuccessor, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(stopSuccessor)
+			restore() // A stale restoration must not detach the replacement collector.
 			if _, err := selected.FanOutRunSummary(ctx, fixture.runID, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if after := collector.Snapshot(); after.Total != retired.Total {
 				t.Fatal("probe remained installed after cleanup")
+			}
+			if after := successor.Snapshot(); after.Active != 0 || after.Total.ReadCommits != 1 || after.Total.Failed != 0 || after.Total.DelayedCommits != 0 || after.Total.InjectedDelay != 0 {
+				t.Fatalf("native zero-delay successor lost real readback: %+v", after)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 4, 4)
 		})
