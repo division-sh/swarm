@@ -516,11 +516,11 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
-	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, currentID, "validation/inst-1", "validation_case", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{
+	seedEntityStateRow(t, db, foreignID, "run-root", "default", map[string]any{
 		"status": "root",
 	}, time.Now().UTC())
 
@@ -596,7 +596,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}
 
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, entityID, "validation/inst-1", "validation_case", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
@@ -659,11 +659,11 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, siblingID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, siblingID, "validation/inst-sibling", "validation_case", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, foreignID, "other/inst-1", "other_case", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances
@@ -748,7 +748,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
 	specApproach := strings.Repeat("technical approach ", 900)
-	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, entityID, "validation/inst-1", "validation_case", map[string]any{
 		"status": "open",
 		"business_brief": map[string]any{
 			"summary":    brief,
@@ -1743,9 +1743,8 @@ signal:
 		Role:          "researcher",
 		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
-	subjectID := uuid.NewString()
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "signal-search/run-1", "signal", "active", map[string]any{
+	seedEntityStateRow(t, db, uuid.NewString(), "discovery/run-1", "campaign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, uuid.NewString(), "signal-search/run-1", "signal", map[string]any{
 		"signal_strength": 80,
 		"processed":       false,
 		"status":          "new",
@@ -1853,11 +1852,11 @@ child_subject:
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	rootID := uuid.NewString()
 	childID := uuid.NewString()
-	seedEntityStateRow(t, db, rootID, rootID, ".", "root_subject", "active", map[string]any{
+	seedEntityStateRow(t, db, rootID, ".", "root_subject", map[string]any{
 		"status": "root",
 		"score":  7,
 	}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, childID, childID, "child/run-1", "child_subject", "active", map[string]any{
+	seedEntityStateRow(t, db, childID, "child/run-1", "child_subject", map[string]any{
 		"status": "child",
 		"score":  99,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2196,7 +2195,7 @@ foreign:
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -2244,7 +2243,7 @@ foreign:
 		AllowInternalLegacyEntityTools: true,
 	})
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	actor = entityToolFixtureActor(t, semanticview.Wrap(bundle), actor, entityToolTestRunID, "analyzer-flow", "analyzer-flow/inst-1")
 	_, err := exec.Execute(selectedForkEntityToolRuntimeContext(actor), "save_entity_field", map[string]any{
@@ -2357,7 +2356,7 @@ foreign:
 		Tools:         []string{"get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	re, ok := runtimefailures.As(err)
@@ -2409,7 +2408,7 @@ operating_case:
 		},
 	})
 	deepID := uuid.NewString()
-	seedEntityStateRow(t, db, deepID, deepID, "validation/nested/case-3", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, db, deepID, "validation/nested/case-3", "validation_case", map[string]any{
 		"status": "open",
 		"score":  30,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2447,6 +2446,12 @@ operating_case:
 	}
 	if got := strings.TrimSpace(asString(deepOut.(map[string]any)["entity_id"])); got != deepID {
 		t.Fatalf("get_entity deep descendant entity_id = %q, want %s", got, deepID)
+	}
+	deepEntity := deepOut.(map[string]any)
+	for _, key := range []string{"current_state", "stage_defined", "revision", "entered_state_at"} {
+		if value, present := deepEntity[key]; !present || value != nil {
+			t.Fatalf("deep data-only member acquired lifecycle %s: %#v", key, deepEntity)
+		}
 	}
 
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
@@ -2524,8 +2529,33 @@ operating_case:
 	if err != nil {
 		t.Fatalf("search_entities declared root: %v", err)
 	}
-	if total := searchOut.(map[string]any)["total"].(int); total != 3 {
-		t.Fatalf("search_entities root total = %d, want 3", total)
+	if total := searchOut.(map[string]any)["total"].(int); total != 2 {
+		t.Fatalf("search_entities staged root total = %d, want the two constructed members", total)
+	}
+	stagedRows := searchOut.(map[string]any)["results"].([]map[string]any)
+	stagedIDs := map[string]bool{}
+	for _, row := range stagedRows {
+		id := asString(row["entity_id"])
+		if (id != firstID && id != secondID) || stagedIDs[id] || row["current_state"] != "queued" {
+			t.Fatalf("stage filter changed constructed membership or selected the import: %#v", stagedRows)
+		}
+		stagedIDs[id] = true
+	}
+	if len(stagedRows) != 2 || !stagedIDs[firstID] || !stagedIDs[secondID] {
+		t.Fatalf("stage filter lost a constructed member: %#v", stagedRows)
+	}
+	unfiltered, err := exec.Execute(ctx, "search_entities", map[string]any{"flow_instance": "validation", "limit": 10})
+	if err != nil {
+		t.Fatalf("search_entities unfiltered declared root: %v", err)
+	}
+	allRows := unfiltered.(map[string]any)["results"].([]map[string]any)
+	members := map[string]bool{}
+	for _, row := range allRows {
+		members[asString(row["entity_id"])] = true
+	}
+	if unfiltered.(map[string]any)["total"].(int) != 3 || len(allRows) != 3 || len(members) != 3 ||
+		!members[firstID] || !members[secondID] || !members[deepID] {
+		t.Fatalf("unfiltered root search lost the original three-entity scope: %#v", unfiltered)
 	}
 	searchExactOut, err := exec.Execute(ctx, "search_entities", map[string]any{
 		"flow_instance": "validation/case-1",
@@ -2606,8 +2636,7 @@ foreign:
 	}, bundle)
 
 	scoringID := uuid.NewString()
-	subjectID := uuid.NewString()
-	seedEntityStateRow(t, db, scoringID, subjectID, "other-flow/score-1", "foreign", "shortlisted", map[string]any{
+	seedEntityStateRow(t, db, scoringID, "other-flow/score-1", "foreign", map[string]any{
 		"name":            "Example Vertical",
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -3121,10 +3150,12 @@ func entityToolKeyedFixtureYAML(entities string) string {
 	return entities
 }
 
-func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstance, entityType, currentState string, fields map[string]any, enteredAt time.Time) {
+// This retained hostile/read projection fixture seeds data only, not a header
+// or lifecycle evidence. Constructed witnesses use constructEntityToolFixture.
+func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, flowInstance, entityType string, fields map[string]any, dataAt time.Time) {
 	t.Helper()
-	if enteredAt.IsZero() {
-		enteredAt = time.Now().UTC()
+	if dataAt.IsZero() {
+		dataAt = time.Now().UTC()
 	}
 	fieldsJSON, err := json.Marshal(fields)
 	if err != nil {
@@ -3132,16 +3163,12 @@ func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstan
 	}
 	if _, err := db.Exec(`
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, '',
-			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
-			$7, $7, $7
+			$1::uuid, $2::uuid, $3, $4, '', $5::jsonb, $6, $6
 		)
-	`, entityToolTestRunID, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
+	`, entityToolTestRunID, entityID, flowInstance, entityType, string(fieldsJSON), dataAt); err != nil {
 		t.Fatalf("seed entity_state(%s): %v", entityID, err)
 	}
 }
