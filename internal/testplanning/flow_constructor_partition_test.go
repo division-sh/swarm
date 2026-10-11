@@ -98,6 +98,14 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		}
 	}
 	for id, proofs := range map[string]map[string][]string{
+		"store-runtime-flow-lifecycle": {
+			"TestFlowAttachmentCleanupRetainsExactPredecessorBothStores": {
+				"postgres/abandonment/fail_once", "postgres/abandonment/persistent", "postgres/abandonment_response_loss/fail_once", "postgres/abandonment_response_loss/persistent",
+				"postgres/agent_fence/fail_once", "postgres/agent_join/fail_once", "postgres/agent_join/persistent", "postgres/timer/fail_once", "postgres/timer/persistent",
+				"sqlite/abandonment/fail_once", "sqlite/abandonment/persistent", "sqlite/abandonment_response_loss/fail_once", "sqlite/abandonment_response_loss/persistent",
+				"sqlite/agent_fence/fail_once", "sqlite/agent_join/fail_once", "sqlite/agent_join/persistent", "sqlite/timer/fail_once", "sqlite/timer/persistent",
+			},
+		},
 		"store-runtime-full-05": {
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores": {
 				"sqlite/unchanged", "sqlite/run_stopped", "sqlite/source_replaced", "sqlite/stored_winner", "sqlite/terminal_winner",
