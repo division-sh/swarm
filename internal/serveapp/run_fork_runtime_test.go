@@ -17,11 +17,15 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
@@ -555,7 +559,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	}
 	// Prove historical lifecycle through real declared construction; the
 	// independent import supplies business fields, not a fictional stage.
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
+	seedRunForkCLIConstruction(t, pg, runID, bundleHash, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
 	var buf bytes.Buffer
@@ -602,13 +606,16 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if err := json.Unmarshal(evidence.Fields, &forkFields); err != nil || !reflect.DeepEqual(forkFields, map[string]any{"name": "CLI Entity"}) {
 		t.Fatalf("fork import fields changed: %s err=%v", evidence.Fields, err)
 	}
-	var forkPath, forkType, forkName string
-	var forkCreated, forkUpdated time.Time
-	if err := db.QueryRowContext(ctx, `SELECT flow_instance,entity_type,name,created_at,updated_at FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid`, result.ForkRunID, entityID).Scan(&forkPath, &forkType, &forkName, &forkCreated, &forkUpdated); err != nil {
+	importOwner, err := flowidentity.NewRunScopedFlowInstance(result.ForkRunID, flowidentity.StoredRoute("flow-a", "1", "flow-a/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := pg.LoadWorkflowTargetPersistence(ctx, importOwner, identity.NormalizeEntityID(entityID))
+	if err != nil || imported.Presence != pipeline.WorkflowTargetPersistenceStateOnly {
 		t.Fatalf("load independent physical fork import: %v", err)
 	}
-	if forkPath != "flow-a/1" || forkType != "default" || forkName != "CLI Entity" || !forkCreated.Equal(at) || !forkUpdated.Equal(at) {
-		t.Fatalf("fork import changed identity/display/data clocks: path=%s type=%s name=%s created=%s updated=%s", forkPath, forkType, forkName, forkCreated, forkUpdated)
+	if imported.State.FlowInstance != "flow-a/1" || imported.State.EntityType != "default" || imported.State.Name != "CLI Entity" || !imported.State.CreatedAt.Equal(at) || !imported.State.UpdatedAt.Equal(at) {
+		t.Fatalf("fork import changed identity/display/data clocks: %+v", imported.State)
 	}
 	var records []mutationlog.ProjectionMutation
 	for _, mutation := range evidence.Mutations {
@@ -622,9 +629,13 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if err != nil || historical.CurrentState != nil || !reflect.DeepEqual(historical.Fields, forkFields) {
 		t.Fatalf("fork historical cut changed: %+v err=%v", historical, err)
 	}
-	var forkRootStage string
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM flow_instances WHERE run_id=$1::uuid AND entity_id=$1::uuid AND instance_path=$2`, result.ForkRunID, result.ForkRunID).Scan(&forkRootStage); err != nil || forkRootStage != "idle" {
-		t.Fatalf("fork lost the actual declared root's fixed stage: stage=%q err=%v", forkRootStage, err)
+	rootOwner, err := flowidentity.NewRunScopedFlowInstance(result.ForkRunID, flowidentity.StoredRoute(".", result.ForkRunID, result.ForkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkRoot, found, err := pg.LoadWorkflowInstance(ctx, rootOwner)
+	if err != nil || !found || forkRoot.CurrentState != "idle" {
+		t.Fatalf("fork lost the actual declared root's fixed stage: stage=%q found=%v err=%v", forkRoot.CurrentState, found, err)
 	}
 	var persistedBindingMode string
 	if err := db.QueryRowContext(ctx, `
@@ -917,7 +928,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
+	seedRunForkCLIConstruction(t, selected.(*store.PostgresStore), runID, bundleHash, at)
 }
 
 func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash string, at time.Time) {
