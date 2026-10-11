@@ -2,6 +2,8 @@ package serveapp
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -61,8 +63,9 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	expectedUnrelatedTextCounts := map[string]int{
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                          8,
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                          12,
 		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":            4,
+		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":            6,
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
 		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
 		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go": 1,
@@ -221,7 +224,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
-	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 8 {
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 12 {
 		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
 	}
 	for _, candidate := range recipeCandidates {
@@ -231,7 +234,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	}
 	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
 	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
-	if extraErr != nil || len(extraCandidates) != 9 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[8].text) {
+	if extraErr != nil || len(extraCandidates) != 13 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[12].text) {
 		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
 	}
 	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
@@ -254,6 +257,34 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 		got, err := retiredBuilderCandidates(transitionPath, candidate)
 		if err != nil || len(got) != 5 {
 			t.Fatalf("additional transition escaped exact four-reference inventory: %+v, %v", got, err)
+		}
+	}
+	const family145Path = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
+	family145Bytes, err := os.ReadFile(filepath.Join(repoRootForTest(), family145Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	family145Candidates, err := retiredBuilderCandidates(family145Path, family145Bytes)
+	if err != nil || len(family145Candidates) != 6 {
+		t.Fatalf("exact family145 text-reference inventory changed: count%d/%v", len(family145Candidates), err)
+	}
+	for _, candidate := range family145Candidates {
+		if !isExplicitUnrelatedBuilderText(family145Path, candidate.text) {
+			t.Fatal("family145 snapshot lost exact source/field disposition")
+		}
+	}
+	for _, path := range []string{recipePath, family145Path} {
+		for _, candidate := range family145Candidates {
+			for index, mutate := range []func(string) string{
+				func(line string) string { return strings.Replace(line, `"Before":`, `"Unreviewed":`, 1) },
+				func(line string) string { return strings.Replace(line, "func Test", "func ForeignTest", 1) },
+				func(line string) string { return strings.Replace(line, `\n`, `\n _ = \"builder\"\n`, 1) },
+			} {
+				changed := mutate(candidate.text)
+				if changed != candidate.text && isExplicitUnrelatedBuilderText(path, changed) {
+					t.Fatalf("changed snapshot field/function/source or extra reference inherited disposition: %s/mutant%d/prefix%.120s", path, index, changed)
+				}
+			}
 		}
 	}
 	const path = "internal/store/persistence_authority_debt_test.go"
@@ -323,13 +354,17 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case isExactFamily145ReferenceSnapshot(relative, line):
+		return true
 	case (relative == "tools/fixture-codemod/pipeline-observations/recipes.json" ||
 		relative == "tools/fixture-codemod/pipeline-observations/family144-transitions.json") &&
-		isExplicitRunFixtureSnapshot(line):
+		isExplicitRunFixtureSnapshot(line) &&
+		(relative != "tools/fixture-codemod/pipeline-observations/recipes.json" || !strings.Contains(line, "func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(")):
 		return true
 	case relative == "tools/fixture-codemod/pipeline-observations/recipes.json" &&
 		strings.HasPrefix(strings.TrimSpace(line), `"Successor": `) &&
-		isExplicitRunFixtureSnapshot(strings.Replace(line, `"Successor":`, `"After":`, 1)):
+		isExplicitRunFixtureSnapshot(strings.Replace(line, `"Successor":`, `"After":`, 1)) &&
+		!strings.Contains(line, "func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority("):
 		return true
 	case relative == "tools/fixture-codemod/pipeline-observations/recipes.json" &&
 		(strings.HasPrefix(strings.TrimSpace(line), `"Before": "func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(`) ||
@@ -365,6 +400,43 @@ func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	default:
 		return false
 	}
+}
+
+func isExactFamily145ReferenceSnapshot(path, line string) bool {
+	corpus := strings.TrimPrefix(path, "tools/fixture-codemod/pipeline-observations/")
+	if corpus != "recipes.json" && corpus != "family145-transitions.json" {
+		return false
+	}
+	var field map[string]string
+	if err := json.Unmarshal([]byte("{"+strings.TrimSuffix(strings.TrimSpace(line), ",")+"}"), &field); err != nil || len(field) != 1 {
+		return false
+	}
+	for name, source := range field {
+		for _, row := range family145ReferenceSnapshots {
+			if row.corpus == corpus && row.field == name && strings.HasPrefix(source, "func "+row.function+"(") && fmt.Sprintf("%x", sha256.Sum256([]byte(source))) == row.digest {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Exact approved source/field evidence: buildErr and strings.Builder, not the
+// retired product. Historical bodies are neither edited nor broadly exempted.
+var family145ReferenceSnapshots = []struct{ corpus, function, field, digest string }{
+	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Before", "0095c88157da39be35aba627ff3991757f724e15a0d0c95b3843670d92b05c1f"},
+	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "After", "8bd9808550c6259b25b91fa5ac5fa8f102ea2706ed1dc538a7c73d580258368f"},
+	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Successor", "91095150b46600d260565161d127d1d47bf017e10379e79e960fc6428ab01662"},
+	{"recipes.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "Before", "a26913c407b7fe2b278d6ee991f092d6881d947256eca14510f3ccf67e8ffaeb"},
+	{"recipes.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "After", "a6af0a0d3cdceef57df96324ec9a187db0e963888f7172946806f3e34d7b64f5"},
+	{"recipes.json", "TestRuntimeLogFilterSupportedConsumersBothStores", "Before", "e155647b462d71fda709645ec1b7de4af90e5700b9a18c24ccf20aeaa532b237"},
+	{"recipes.json", "TestRuntimeLogFilterSupportedConsumersBothStores", "After", "c1120aaa65b9cf697306792d94af7194e7f61b7143be41d74dfe78f1a357fe2a"},
+	{"family145-transitions.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Before", "247707110fb19b1ee87f200e2c16fa574479f71dbb46d0f82105cc71b4c731fb"},
+	{"family145-transitions.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "After", "91095150b46600d260565161d127d1d47bf017e10379e79e960fc6428ab01662"},
+	{"family145-transitions.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "Before", "a26913c407b7fe2b278d6ee991f092d6881d947256eca14510f3ccf67e8ffaeb"},
+	{"family145-transitions.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "After", "a6af0a0d3cdceef57df96324ec9a187db0e963888f7172946806f3e34d7b64f5"},
+	{"family145-transitions.json", "TestRuntimeLogFilterSupportedConsumersBothStores", "Before", "e155647b462d71fda709645ec1b7de4af90e5700b9a18c24ccf20aeaa532b237"},
+	{"family145-transitions.json", "TestRuntimeLogFilterSupportedConsumersBothStores", "After", "c1120aaa65b9cf697306792d94af7194e7f61b7143be41d74dfe78f1a357fe2a"},
 }
 
 func isExplicitRunFixtureSnapshot(line string) bool {

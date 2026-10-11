@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "2b2593a909d77d46abb8ef78733bb6a3d449ee5711cf60089d6d40c7d29925af"
+const targetDigest = "f477b4ae1e28bd282a85d09bf9def6de9c8c8fb764205edbced9866e9f127b72"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -71,6 +71,7 @@ var files = []string{
 	"internal/runtime/manager/terminal_retirement_store_test.go",
 	"internal/runtime/node_delivery_startup_recovery_test.go",
 	"internal/runtime/workflow_timer_startup_recovery_test.go",
+	"internal/runtime/runforkadmission/revision_source_route_test.go",
 	"internal/runtime/runforkexecution/activity_fork_execution_test.go",
 	"internal/runtime/runforkexecution/agent_runtime_materialization_test.go",
 	"internal/runtime/runforkexecution/operation_lifetime_parity_test.go",
@@ -142,6 +143,9 @@ func main() {
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
 	if replacement := after[key]; replacement != "" {
 		return replacement, false
+	}
+	if path == "internal/runtime/runforkadmission/revision_source_route_test.go" && key == "captureRunForkRevision" {
+		return "", true
 	}
 	if path == "internal/apiv1/operator_event_publish_test.go" {
 		if key == "sqliteEventDeliveryTargetRoutes" {

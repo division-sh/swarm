@@ -2049,3 +2049,86 @@ zero-added-site/closure/restart claim. Existing watchlist/architecture dispositi
 remains existing owners and component-vs-executable authority; the consolidated
 inventory decision stays on #2542, with no new issue or framework. M01/Docker remain
 qualification-open in #2353. No push or PR.
+
+## Delivery-reset scheduling table (f69b8f8c6)
+
+Ruling6110072417 replaces leaf-by-leaf review. Scheduling inspection began14:35Z
+and used the existing AST/call inventory, not a new global census. The136-call
+reference at674aa134e is now135 actual call lines:120 outside runtimepersistence
+plus15 private; the preflight checkpoint removed one more. Docker's removed but
+unqualified call remains a separate qualification debit, not a live call. These
+are provisional work-order classes, not permission to weaken any test or exclude
+private sources. M requires exact existing operations and no raw substitute; D
+must remove its complete named carrier/helper closure. S keeps genuinely distinct
+fault/reopen/capacity cuts separate rather than blocking independent groups.
+
+| Current cohort | Calls | M / D / S | Blocking dependency, existing destination and last-caller deletion |
+| --- | ---: | --- | --- |
+| runforkexecution |23|1 /15 /7|M is retained pack root: native opening + existing exact CountRunNamedEventStorage. D: selected source/readback, cleanup and lineage helper chain -> existing runfork/event/session/delivery owners, delete DB args and cleanup SQL after all callers. S: control/operation replacement, two real crash/process roots, workspace preparation and two trigger-fault roots; preserve original lifetimes and cuts. |
+| runforkadmission |2|1 /1 /0|M: first revision_source_route root -> existing CaptureSelectedRunForkRevision with same ctx/run and AllFamilies. The matrix also consumes that capture owner, deleting the complete begin/capture/commit helper, but its ordinary constructor remains D until its two raw event writers preserve the no-construction/historical cuts through native owners. All routing/history assertions remain. |
+| runtime connector roots |6|0 /6 /0|slackManagedConnectorBackend and seedTelegramConnectorSupportedSurfaceWorkflowVersion unlock all six connector roots/twelve backend arms -> existing activityjournal/eventrecord/workflow projection owners; delete db/dialect carrier, duplicate version mutation and raw observer chain at last caller. |
+| runtime template roots |9|0 /9 /0|Seven template-instance roots + pilot + final authoring -> seedTemplateInstanceDeliveryRouteOwner plus existing delivery/pipeline/event owners; retire assertRuntimeDBCount selector, waitRuntimeNodeDeliveryOutcome, replay-scope and identity dump helpers together. |
+| other runtime roots |12|0 /8 /4|D: inboundAcknowledgedSelectedFixture, operator-channel helper, assertConfiguredChannelJournal, callback and budget fixture chains -> existing inbound/activity/pipeline/run owners; delete returned db and dialect/query carriers. S: four startup/recovery roots retain claim expiry, poison-write and runtime lifetime cuts. |
+| conformance |25|0 /14 /11|D: dumpFanInBarrierEvents and semantic/nested/serving/supplemental fixture chains -> existing native lifecycle recipes and diagnostic/event/pipeline owners; delete db fields/arguments and setup callbacks only after all dependent roots. S: two independent delivery peers, expiry/live SQL and selected-fork faults, rollback, four persisted-session/malformed/replay cases and stage restart remain exact temporal contexts. |
+| serveapp |17|0 /12 /5|D: seedRunForkCLIConstruction/registerRunForkCLIContractCatalog/seedRunForkSelectedExecutionSourceEvent/seedServedJoinForkFrontier and CLI readers -> existing source admission, native construction/capture/fork and closed read owners; delete reconstruction and DB parameter chain together. S: retained-stage restart, Claude attempt backend, two active-work run-state cases and empty-authority schema gate. |
+| apiv1 |11|0 /6 /5|D: agentSnapshotBackends/newConversationForkCommitFixture + ordinary supported readers -> existing run/session/delivery/API-idempotency owners, delete DB return carriers and duplicated physical observers. S: three administrative custom-capacity/lease tests and two same-location data-run peers. |
+| runtime/tools |5|0 /5 /0|newEntityToolTestHarnessWithBundleAndLegacyAccess and fork/resource witnesses -> existing semantic fixture, projection/fork/resource owners; delete returned DB plus independent fork mutation/readback only at last caller. |
+| cataloge2e |4|0 /2 /2|D: assertion/source-history and newRuntimeHarnessWithTerminalProvider setup -> existing native lifecycle + event/activity owners, delete raw harness field. S: reopenFromTranscript and recovered receiver readiness retain location/lease/epoch/restart proof. |
+| bus + pipeline |4|0 /4 /0|Three bus roots plus openPostgresGateRecoveryStore -> existing native publication/construction/delivery/pipeline owners; delete event/header seed/query carriers and recovery-case DB field. |
+| cliapp + store |2|0 /0 /2|Empty-store-status/catalog-negative control and forEachDurableDataStore hostile data family: exact selected/schema roles and named live faults, not constructor-only mechanical rewrites. |
+| private runtimepersistence |15|0 /14 /1|Ten descriptor/topology/activation calls share seedExactFlowInstanceDescriptorOwner/seedFlowInstanceDescriptorAuthorityCase; two workflow-route recovery calls + rebind share readiness/route seeds; contextual lineage has selectedDatabase/direct fixture write. Reuse native flow/lifecycle/event owners and retire every DB/dialect seed/read carrier. Dynamic-flow atomicity is a separate exact transaction fault. |
+| Total live Admit calls |135|2 /96 /37|No ordinary caller or private family is dropped from the deletion denominator. |
+| Sibling NewPostgresStoreForTest chain |7 calls,2 definitions|D/S, additional|Five consumers: empty-schema teaching (S), two reconstructed restart controls (S), CLI activation (D), private author-activity fixture (D). Two facade/implementation links disappear with the last caller; a legitimate backend/schema qualification role needs exact named proof, never an ordinary escape exemption. |
+
+Order: bulk M2 together using the existing finite source-pinned codemod/overlay,
+then D conformance shared setup (26 direct helper call occurrences across the
+semantic/nested/serving/supplemental roots, plus fan-in), template9, private
+descriptor/readiness13, connector6/twelve arms, served/fork chains and remaining
+observers. Counts are construction sites, not bugs or execution cells. The37 S
+sites remain in explicit package groups above; none serializes unrelated M/D work.
+The40-removal first experiment cannot be met by M alone (only2 presently proven);
+the high-fan-out fixture capability retirement is the alternative delivery target.
+One owner repair plus every dependent caller is one review/qualification batch,
+not a review per scalar. Inventory repairs under6110140502 fold into this batch.
+
+### First delivery-reset batch: inventories plus all current M rewrites
+
+The isolated event query fixture remains one executed backend-query writer, pinned
+to its exact path/function/full source hash and one INSERT occurrence. No file or
+import permission grows. Hostile extra/altered INSERT, function, native setup and
+foreign-path controls reject reclassification. Four historical writer census rows
+now name their original owners and proofs: two separate unrevisioned activity cuts,
+one enclosing RevisionOnly diagnostic pair, and unrevisioned exact replay clocks.
+Unchanged both-store owner receipts carry. Finite snapshot references preserve the
+12 recipe and6 family145 lines by exact source/field/function, with family144
+unchanged. The competition match is buildErr, correcting earlier audit wording.
+An injected changed-source control exposed an older broad competition fallback;
+that fallback is removed, not replaced with another allowance. RED and GREEN
+receipts are both retained. The diagnostic F1 move and inline scenario SQL loan
+from f69b8f8c6 remain unchanged, and their full dependency guards now pass.
+
+Both mechanical admissions move together: retained-pack storage uses its existing
+exact native event count; revision-source routing uses native AllFamilies capture.
+Both routing roots consume that capture owner, deleting the entire handwritten
+begin/capture/commit helper. The matrix's two raw event writers remain explicit D
+debt; its constructor is not credited as removed. Routing, recipient exclusion,
+blocked/whitespace history, immutable pack/source/provenance and repeated readback
+assertions remain. Finite mappings preserve all893 historical tuples and24 receipts.
+Current corpus1060/204, digest
+f477b4ae1e28bd282a85d09bf9def6de9c8c8fb764205edbced9866e9f127b72.
+
+Deduplicated Vemew receipts reset-bulk-*: changed original roots under race
+GREEN8.410s/13.219s; exact inventories/hostile controls GREEN3.228s/0.056s/5.512s;
+cheap complete family guards GREEN13.741s; one complete candidate overlay
+GREEN159.830s; full80-root unit GREEN, extra persistence sweep98 roots GREEN;
+U1000 clean, dry-run Changes=[], no retries, weakened assertions, tier or server2.
+Local signed commit and complexity evidence are separate from independent review.
+Live ordinary calls120 ->118 plus15 private, provisionally133 total (134 including
+Docker's unqualified debit). M0/D96/S37 remain. No fresh global census, downward
+baseline, parent closure, process-restart or zero-added-site claim is made.
+
+Next shared group is the complete fan-in carrier/diagnostic/route-read/fault closure
+across both files and four constructors. It requires fewer distinct semantic repairs
+per caller than the larger fan-out chains with held transactions and process-loss
+faults; those chains remain explicit D/S, not postponed unnamed debt. Scheduling
+table posted at6110431613. No leaf review request, push or PR.

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 201 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "2b2593a909d77d46abb8ef78733bb6a3d449ee5711cf60089d6d40c7d29925af" {
+	if err != nil || len(rows) != 204 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f477b4ae1e28bd282a85d09bf9def6de9c8c8fb764205edbced9866e9f127b72" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,27 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext" {
+		before, beforeErr := runSetupAssertions(beforeSource)
+		after, afterErr := runSetupAssertions(afterSource)
+		var preserved []string
+		transport := map[string]bool{
+			`t.Fatalf("begin revision capture: %v", err)`: true,
+			`t.Fatalf("capture revision: %v", err)`:       true,
+			`t.Fatalf("commit revision: %v", err)`:        true,
+		}
+		for _, assertion := range before {
+			if !transport[assertion] {
+				preserved = append(preserved, assertion)
+			}
+		}
+		if beforeErr != nil || afterErr != nil || strings.Join(preserved, "\n") != strings.Join(after, "\n") ||
+			strings.Count(afterSource, "storetest.CaptureSelectedRunForkRevision(t, ctx, pg, runID, runforkrevision.AllFamilies()...)") != 1 ||
+			strings.Count(afterSource, "storetest.StartPostgresRuntimeStore(t)") != 1 || strings.Contains(afterSource, "db.") {
+			t.Fatal("native revision capture lost original owner/context/families or routing/history assertions")
+		}
+		return
+	}
 	if function == "proveSelectedForkPreparedPreflight" {
 		if err := family145ProspectivePreflightError(beforeSource, afterSource); err != nil {
 			t.Fatal(err)
@@ -235,6 +256,8 @@ func family145SemanticOwner(function string) bool {
 	case "selectedContractTestRuntimeAuthority":
 		return true
 	case "proveSelectedForkPreparedPreflight":
+		return true
+	case "TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext":
 		return true
 	case "buildSelectedForkProofContainer", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority":
 		return true

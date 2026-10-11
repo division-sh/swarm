@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -366,6 +367,7 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
 	markers := loadEventObservationMarkers(t)
 	got := map[string]int{}
+	backendQueryWriters := 0
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
 		if _, err := os.Stat(root); os.IsNotExist(err) {
@@ -394,12 +396,20 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			writers, err := classifyBackendQueryEventFixtureWriter(relative, path, file)
+			if err != nil {
+				return err
+			}
+			backendQueryWriters += len(writers)
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {
 					return true
 				}
 				if observations[literal.Pos()] {
+					return true
+				}
+				if writers[literal.Pos()] {
 					return true
 				}
 				raw, err := strconv.Unquote(literal.Value)
@@ -415,6 +425,9 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 			t.Fatalf("walk %s: %v", root, err)
 		}
 	}
+	if backendQueryWriters != 1 {
+		t.Fatalf("backend query fixture writer census=%d, want one exact source-pinned INSERT", backendQueryWriters)
+	}
 	for path, want := range directEventSQLTestFixtures {
 		if count := got[path]; count != want {
 			t.Fatalf("%s contains %d direct event inserts, want %d exact corruption/guard fixtures", path, count, want)
@@ -424,6 +437,93 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 		if _, ok := directEventSQLTestFixtures[path]; !ok {
 			t.Fatalf("%s contains %d unclassified direct event inserts; use class-specific semantic fixtures", path, count)
 		}
+	}
+}
+
+const backendQueryEventFixturePath = "internal/store/internal/backend/eventrecord/run_source_event_cardinality_test.go"
+const backendQueryEventFixtureSource = "dd07575cfc0a78be8d85913bdb54a079407bb1b35a86b92cd741701152e9daa6"
+
+// This is an executed, isolated backend-query writer, not an observation marker.
+// Pinning the complete setup prevents its role moving into native runtime setup.
+func classifyBackendQueryEventFixtureWriter(path, diskPath string, file *ast.File) (map[token.Pos]bool, error) {
+	if path != backendQueryEventFixturePath {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(diskPath)
+	if err != nil {
+		return nil, err
+	}
+	return classifyBackendQueryEventFixtureSource(path, file, raw)
+}
+
+func classifyBackendQueryEventFixtureSource(path string, file *ast.File, raw []byte) (map[token.Pos]bool, error) {
+	if path != backendQueryEventFixturePath {
+		return nil, nil
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != backendQueryEventFixtureSource {
+		return nil, fmt.Errorf("backend query event fixture source/setup changed: %s", path)
+	}
+	writers := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err == nil && eventInsertSQL.MatchString(value) && eventBoundaryEnclosingScope(file, literal.Pos()) == "TestRunEventOrSourceEventCountPreservesUnionRunAndMultiplicity" {
+			writers[literal.Pos()] = true
+		}
+		return true
+	})
+	if len(writers) != 1 {
+		return nil, fmt.Errorf("backend query event fixture requires one exact scoped INSERT, got%d", len(writers))
+	}
+	return writers, nil
+}
+
+func TestBackendQueryEventFixtureWriterClassificationPinsExactIsolatedSetup(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(eventBoundaryRepositoryRoot(t), backendQueryEventFixturePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", raw, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var insert string
+	ast.Inspect(file, func(node ast.Node) bool {
+		if literal, ok := node.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+			value, err := strconv.Unquote(literal.Value)
+			if err == nil && eventInsertSQL.MatchString(value) {
+				insert = value
+			}
+		}
+		return true
+	})
+	if insert == "" {
+		t.Fatal("reviewed backend query fixture lost its executed INSERT")
+	}
+	for _, candidate := range []struct {
+		name, path, source string
+		want               int
+	}{
+		{"reviewed", backendQueryEventFixturePath, string(raw), 1},
+		{"extra-insert", backendQueryEventFixturePath, string(raw) + "\nfunc extra() { _ = " + strconv.Quote(insert) + " }\n", 0},
+		{"changed-insert", backendQueryEventFixturePath, strings.Replace(string(raw), "'event-a',NULL", "'foreign',NULL", 1), 0},
+		{"changed-scope", backendQueryEventFixturePath, strings.Replace(string(raw), "TestRunEventOrSourceEventCountPreservesUnionRunAndMultiplicity", "TestNativeEventSetup", 1), 0},
+		{"native-setup", backendQueryEventFixturePath, strings.Replace(string(raw), "sql.Open(\"sqlite\",", "openNativeRuntimeStore(", 1), 0},
+		{"foreign-path", "internal/store/internal/runtimepersistence/foreign_setup_test.go", string(raw), 0},
+	} {
+		t.Run(candidate.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", candidate.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writers, err := classifyBackendQueryEventFixtureSource(candidate.path, file, []byte(candidate.source))
+			if len(writers) != candidate.want || (candidate.want != 0 && err != nil) {
+				t.Fatalf("backend-query writer disposition changed or escaped: count%d err%v", len(writers), err)
+			}
+		})
 	}
 }
 
