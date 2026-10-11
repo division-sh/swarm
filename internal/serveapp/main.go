@@ -58,6 +58,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -404,6 +405,7 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 }
 
 func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRuntimePersistence, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.SourceArtifactFact, error) {
+	defer sqlite2353.Phase(ctx, "source.artifact_preparation")()
 	if loaded.dbLoaded {
 		if dev {
 			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("stored source reconstruction cannot replace development scratch state")
@@ -424,6 +426,7 @@ func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRunt
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (result serveRuntimeBundleContext, retErr error) {
+	defer sqlite2353.Phase(req.Ctx, "serve.bundle_context")()
 	if !req.ExecutionPosture.Valid() {
 		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
@@ -444,11 +447,13 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("prepare bundle source: %w", err)
 	}
+	finishProjection2353 := sqlite2353.Phase(req.Ctx, "source.effective_projection")
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		WorkflowModule: loaded.module, SourceArtifactFact: sourceArtifactFact,
 		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
 		ChannelPlans:           req.ChannelPlans,
 	})
+	finishProjection2353()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
 	}
@@ -481,9 +486,12 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
 			return serveRuntimeBundleContext{}, fmt.Errorf("validate workspaces: %w", err)
 		}
+		finishPrereqs2353 := sqlite2353.Phase(req.Ctx, "workspace.prereqs")
 		if err := workspaces.EnsurePrereqs(req.Ctx); err != nil {
+			finishPrereqs2353()
 			return serveRuntimeBundleContext{}, fmt.Errorf("prepare workspaces: %w", err)
 		}
+		finishPrereqs2353()
 		if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
 			return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
 		}
@@ -678,6 +686,7 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 }
 
 func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+	defer sqlite2353.Lifetime(ctx)()
 	publicListener := opts.PublicWebhookListener
 	defer func() {
 		if publicListener != nil {
@@ -906,6 +915,7 @@ type runtimeCompositionRequest struct {
 // buildRuntimeComposition owns the common acquisition/start/ready/close path for
 // live serving and private test execution. Existing owners retain all semantics.
 func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
+	defer sqlite2353.Phase(ctx, "serve.composition")()
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
 	defer func() {
@@ -933,7 +943,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
 		return 2
 	}
+	finishStore2353 := sqlite2353.Phase(ctx, "store.open")
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
+	finishStore2353()
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) {
@@ -1807,6 +1819,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 	}
 	readyAfter := time.Since(bootStartedAt)
+	sqlite2353.Record("serve.ready", map[string]any{"boot_elapsed_ns": readyAfter.Nanoseconds()})
 	presenter.boot(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", readyAfter.Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	flowCount, agentCount, toolCount := serveLifecycleSourceCounts(runtimeContexts)
 	feedEnabled := opts.Dev && !opts.NoFeed
@@ -2565,6 +2578,7 @@ func prepareResetServeRuntimeContexts(ctx context.Context, contexts []serveRunti
 }
 
 func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) (_ func() error, prepareErr error) {
+	defer sqlite2353.Phase(ctx, "runtime.startup_preparation")()
 	// Own every candidate from entry, including ones that never prepare or
 	// register. Only this boundary can fence siblings before any parent join.
 	prepared := make([]*runtime.Runtime, 0, len(contexts))
@@ -2824,6 +2838,7 @@ func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (stri
 }
 
 func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+	defer sqlite2353.Phase(ctx, "schema.workflow")()
 	if bundle == nil {
 		return "store wiring ready", nil
 	}
@@ -2842,6 +2857,7 @@ func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper,
 }
 
 func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper, platformSpecPath string) (string, error) {
+	defer sqlite2353.Phase(ctx, "schema.platform")()
 	spec, err := loadServePlatformSpecDocument(platformSpecPath)
 	if err != nil {
 		return "", err
@@ -2861,6 +2877,7 @@ func initializeServePlatformStateStores(ctx context.Context, schema store.Schema
 }
 
 func initializeLoadedServeRuntimeStateStores(ctx context.Context, schema store.SchemaBootstrapper, loaded []serveRuntimeBundle) ([]string, error) {
+	defer sqlite2353.Phase(ctx, "schema.loaded_sources")()
 	summaries := make([]string, len(loaded))
 	for i, bundle := range loaded {
 		summary, err := initializeStateStores(ctx, schema, bundle.bundle)

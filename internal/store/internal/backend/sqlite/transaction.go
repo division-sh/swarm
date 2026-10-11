@@ -266,8 +266,10 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 }
 
 func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	b.diagnostic2353.Record("connection_checkout.enter")
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
+	b.diagnostic2353.Record("connection_checkout.exit")
 	if err != nil {
 		return false, err
 	}
@@ -304,7 +306,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
 	beginStarted := time.Now()
+	b.diagnostic2353.Record("native_begin.enter")
 	tx, err = conn.BeginTx(ctx, opts)
+	b.diagnostic2353.Record("native_begin.exit")
 	probe.RecordAdmission(permitWait, poolWait, time.Since(beginStarted))
 	if err != nil {
 		discard = true

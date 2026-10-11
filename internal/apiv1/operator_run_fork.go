@@ -16,6 +16,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 	"github.com/google/uuid"
 )
 
@@ -148,7 +149,9 @@ func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandle
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return map[string]MethodHandler{
-		"run.fork": func(ctx context.Context, req Request) (any, error) {
+		"run.fork": func(ctx context.Context, req Request) (result any, err error) {
+			finish2353 := sqlite2353.Request(ctx, "run.fork")
+			defer func() { finish2353(err) }()
 			return executeRunFork(ctx, req, opts, now().UTC())
 		},
 	}

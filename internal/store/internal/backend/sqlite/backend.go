@@ -14,6 +14,7 @@ import (
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
+	diagnostic2353   *transactiontest.Diagnostic2353Observer
 	db               *sql.DB
 	testTransactions transactiontest.Slot
 	readStatements   struct {
@@ -47,6 +48,7 @@ func New(db *sql.DB) (*Backend, error) {
 	}
 	backend := &Backend{db: db, mutationToken: make(chan struct{}, 1)}
 	backend.mutationToken <- struct{}{}
+	backend.diagnostic2353 = transactiontest.NewDiagnostic2353(&backend.testTransactions, "sqlite", func() any { return db.Stats() })
 	return backend, nil
 }
 
@@ -72,6 +74,7 @@ func (b *Backend) Close() error {
 	if !b.Valid() {
 		return nil
 	}
+	defer b.diagnostic2353.Stop()
 	closeErr := b.closeOwnershipProofs()
 	b.readStatements.Lock()
 	b.readStatements.closed = true

@@ -88,10 +88,11 @@ type Snapshot struct {
 }
 
 type Collector struct {
-	mu       sync.Mutex
-	options  Options
-	slot     *Slot
-	snapshot Snapshot
+	mu             sync.Mutex
+	diagnostic2353 *Diagnostic2353Observer
+	options        Options
+	slot           *Slot
+	snapshot       Snapshot
 }
 
 // Stop detaches future transactions; already captured attempts still settle
@@ -181,6 +182,7 @@ func (s *Slot) Begin(readOnly, retained bool) *Attempt {
 	}
 	a := &Attempt{collector: c, readOnly: readOnly, retained: retained}
 	a.operation.Store(Other)
+	a.observe2353("attempt.captured")
 	a.activeClass = ActiveClass{Operation: Other, Phase: PhaseBeginning, ReadOnly: readOnly, Retained: retained}
 	// Slot -> collector is the only nested lock order: detachment cannot
 	// overtake a captured attempt before its Active registration is visible.
@@ -211,6 +213,7 @@ func Mark(ctx context.Context, operation Operation) {
 }
 
 func (a *Attempt) Begun() {
+	a.observe2353("attempt.begun")
 	if a != nil {
 		a.begun = true
 		a.reclassify(PhaseOperation)
@@ -226,6 +229,7 @@ func (a *Attempt) RecordAdmission(permitWait, poolWait, beginDuration time.Durat
 }
 
 func (a *Attempt) RecordCleanup(duration time.Duration) {
+	a.observe2353("attempt.cleanup_recorded")
 	if a != nil {
 		a.cleanupDuration = duration
 	}
@@ -235,6 +239,7 @@ func (a *Attempt) RecordCleanup(duration time.Duration) {
 // admission checks. The delay represents commit transport cost, not a new
 // command clock or admission point; the owner still performs the real Commit.
 func (a *Attempt) BeforeCommit() {
+	a.observe2353("attempt.before_commit")
 	if a == nil {
 		return
 	}
@@ -256,6 +261,7 @@ func (a *Attempt) BeforeCommit() {
 }
 
 func (a *Attempt) Committed() {
+	a.observe2353("attempt.commit_acknowledged")
 	if a != nil {
 		a.committedAt = time.Now()
 		if !a.commitStarted.IsZero() {
@@ -267,6 +273,7 @@ func (a *Attempt) Committed() {
 }
 
 func (a *Attempt) RollbackAttempted() {
+	a.observe2353("attempt.rollback_enter")
 	if a != nil {
 		a.rollbackAttempted = true
 		a.reclassify(PhaseRollbackCleanup)
@@ -274,6 +281,7 @@ func (a *Attempt) RollbackAttempted() {
 }
 
 func (a *Attempt) Finish(finalErr error) {
+	a.observe2353("attempt.finish")
 	if a == nil {
 		return
 	}
