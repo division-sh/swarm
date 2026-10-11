@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -57,16 +58,27 @@ func TestIssue2564H2AcknowledgmentPrecedesAdmissionObservationBothStores(t *test
 				t.Fatalf("H2 exact observation/process owners missing: %T", served.selected)
 			}
 			rt := issue2564H2Fixture{Endpoint: served.Endpoint, Backend: backend, BundleHash: served.BundleHash, selected: reader}
+			ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
+			defer cancel()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h05"}, "idempotency_key": "observation-start",
 			})
 			rt.waitDeliveries(t, seed.RunID)
+			// Delivery settlement alone does not join the seed's publication log.
+			// Establish zero before attributing one exact slot to the held bump.
+			tick := time.NewTicker(25 * time.Millisecond)
+			defer tick.Stop()
+			for owner.PublicCompletionCount() != 0 {
+				select {
+				case <-tick.C:
+				case <-ctx.Done():
+					t.Fatal("seed publication did not release its reservation")
+				}
+			}
 			bump := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "hub.bump", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"hub_id": "h05", "n": 1}, "idempotency_key": "observation-bump",
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
-			defer cancel()
 			select {
 			case signal := <-gate.held:
 				if signal.EventID != bump.EventID || bump.RunID != seed.RunID || gate.count.Load() != 0 || owner.PublicCompletionCount() != 1 {

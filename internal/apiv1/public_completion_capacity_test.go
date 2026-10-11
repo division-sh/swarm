@@ -276,13 +276,14 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		go func() { responses[32] <- publicCompletionObservedRPC(t, handlers[0], bodies[32], testToken) }()
+		readmit := worklifetime.PublicCompletionLimit
+		go func() { responses[readmit] <- publicCompletionObservedRPC(t, handlers[0], bodies[readmit], testToken) }()
 		select {
 		case key := <-cut.entered:
-			if key != keys[32] {
+			if key != keys[readmit] {
 				t.Fatalf("readmit exact request=%s", key)
 			}
-		case response := <-responses[32]:
+		case response := <-responses[readmit]:
 			t.Fatalf("released slot unavailable: %+v", response)
 		case <-time.After(5 * time.Second):
 			t.Fatal("released slot did not reach native ACK")

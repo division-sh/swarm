@@ -37200,7 +37200,7 @@ api_specification:
         A same-key replay with the same request returns the recorded completion before current bundle or endpoint admission
         is re-evaluated. First response and replay return its recorded initial delivery snapshot, never a mutable post-commit
         operator readback. Post-commit activation or dispatch failure uses durable recovery and cannot replace that result.
-        Before construction, claim acquisition or COMMIT, reserve one of 32 process-wide public-completion
+        Before construction, claim acquisition or COMMIT, reserve one of 128 process-wide public-completion
         slots coupled to the exact authorized occurrence. At capacity refuse immediately with retryable
         EVENT_PUBLISH_FAILED and reason public_completion_capacity_busy, without any durable effect or
         server-side waiting queue. Pure keyed replay/conflict precedes this reservation. Acknowledged
@@ -39998,10 +39998,12 @@ process_local_work_lifetime_authority:
   admission_and_settlement:
     begin: Every enqueue, spawn, callback registration, channel send, or buffer escape acquires its opaque occurrence lease before the work becomes reachable. Admission after a fence or retirement fails closed. The same gate admits a fixed standing class only for generation-long machinery such as a Manager execution loop, retry loop, child occurrence, or reserved transition executor; standing classification is typed at the owner API and never inferred from a free-string label.
     public_completion: >-
-      The existing Process owner admits at most 32 concurrent public event.publish/run.start completion
+      The existing Process owner admits at most 128 concurrent public event.publish/run.start completion
       responsibilities across all its runtimes, including precommit reservations and acknowledged consequences.
       Admission is nonblocking, linearized against fencing/retirement and precedes construction, exact
       publication claim acquisition and native COMMIT. Native store capacity can impose a stricter bound.
+      This finite bound is ratified by #2612 comment 6105707381 after unchanged both-store H2
+      workload measurement; it is not inferred from a worker count or raised by native pool enlargement.
       A slot owns an existing exact occurrence lease detached from caller cancellation before escape;
       both original request cancellation and exact occurrence retirement cancel preparation and COMMIT.
       This precommit cancellation bridge is stopped or joined on every return, before unused lease
