@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -543,13 +545,11 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Entity',
-			'ready', '{}'::jsonb, '{"name":"CLI Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{"name":"CLI Entity"}'::jsonb, $3, $3
 		)
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
@@ -589,16 +589,36 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		result.SelectedContractBinding.ContractSelection.BundleHash != bundleHash {
 		t.Fatalf("selected contract binding = %#v", result.SelectedContractBinding)
 	}
-	var forkState string
-	if err := db.QueryRowContext(ctx, `
-		SELECT current_state
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, result.ForkRunID, entityID).Scan(&forkState); err != nil {
-		t.Fatalf("load fork entity_state: %v", err)
+	evidence, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, pg, result.ForkRunID, entityID)
+	if err != nil {
+		t.Fatalf("load fork import and immutable history: %v", err)
 	}
-	if forkState != "ready" {
-		t.Fatalf("fork state = %q, want ready", forkState)
+	if evidence.CurrentState != nil || evidence.Revision != nil || evidence.Gates != nil || evidence.Bookkeeping != nil || evidence.Accumulator != nil {
+		t.Fatalf("materialize-only import acquired native lifecycle: %+v", evidence)
+	}
+	var forkFields map[string]any
+	if err := json.Unmarshal(evidence.Fields, &forkFields); err != nil || !reflect.DeepEqual(forkFields, map[string]any{"name": "CLI Entity"}) {
+		t.Fatalf("fork import fields changed: %s err=%v", evidence.Fields, err)
+	}
+	var forkPath, forkType, forkName string
+	var forkCreated, forkUpdated time.Time
+	if err := db.QueryRowContext(ctx, `SELECT flow_instance,entity_type,name,created_at,updated_at FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid`, result.ForkRunID, entityID).Scan(&forkPath, &forkType, &forkName, &forkCreated, &forkUpdated); err != nil {
+		t.Fatalf("load independent physical fork import: %v", err)
+	}
+	if forkPath != "flow-a/1" || forkType != "default" || forkName != "CLI Entity" || !forkCreated.Equal(at) || !forkUpdated.Equal(at) {
+		t.Fatalf("fork import changed identity/display/data clocks: path=%s type=%s name=%s created=%s updated=%s", forkPath, forkType, forkName, forkCreated, forkUpdated)
+	}
+	var records []mutationlog.ProjectionMutation
+	for _, mutation := range evidence.Mutations {
+		var value any
+		if err := json.Unmarshal(mutation.NewValue, &value); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, mutationlog.ProjectionMutation{Domain: mutationlog.Domain(mutation.Domain), Path: mutation.Path, NewValue: value})
+	}
+	historical, err := mutationlog.ReconstructEntityStateProjection(records)
+	if err != nil || historical.CurrentState == nil || *historical.CurrentState != "ready" || !reflect.DeepEqual(historical.Fields, forkFields) {
+		t.Fatalf("fork historical cut changed: %+v err=%v", historical, err)
 	}
 	var persistedBindingMode string
 	if err := db.QueryRowContext(ctx, `

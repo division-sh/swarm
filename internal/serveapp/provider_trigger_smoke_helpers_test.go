@@ -235,11 +235,10 @@ func seedProviderTriggerSmokeRuntime(
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'default', ?, 'Customer A', 'active',
-			'{}', '{}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
+			run_id, entity_id, flow_instance, entity_type, slug, name,
+			fields, created_at, updated_at
+		) VALUES (?, ?, ?, 'default', ?, 'Customer A', '{}', ?, ?)
+	`, runID, entityID, flowInstance, entitySlug, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	const fixtureBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
