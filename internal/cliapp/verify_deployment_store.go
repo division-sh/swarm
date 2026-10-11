@@ -189,7 +189,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	retained := &verifyRetainedAdmissionInventory{}
 	hash := result.BootReport.SourceArtifactHash
 	subject := "source:" + hash
-	verifyDeploymentObservation(ctx, result, "startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+	verifyDeploymentObservation(ctx, result, "startup_process_generation", "internal/runtime/startupownership.AdmitAuthorityInspection", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		inspection, err := snapshot.InspectAuthority(ctx)
 		if err != nil {
 			return err

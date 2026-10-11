@@ -166,9 +166,9 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	ctx := context.Background()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	}, "runtime_test")
+	})
 	if err != nil {
 		t.Fatalf("new cold authority: %v", err)
 	}

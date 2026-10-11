@@ -43,12 +43,8 @@ func TestAdministrativeTopologyMutationIDsSurviveRepeatedSourceCycles(t *testing
 
 func newTopologyOperationTestCapability(t *testing.T) (runtimestartupownership.ProcessCapability, *supervisorTestRetainedSession) {
 	t.Helper()
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "topology-operation-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "topology_operation_test")
-	if err != nil {
-		t.Fatalf("construct process authority: %v", err)
-	}
+	authority := runtimestartupownership.Authority{AuthorityID: uuid.NewString(), AuthorityGeneration: 1,
+		OwnerID: "topology-operation-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: "sqlite_retained_owner"}
 	session := &supervisorTestRetainedSession{authority: authority}
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {

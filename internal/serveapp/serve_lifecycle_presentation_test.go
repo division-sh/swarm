@@ -395,14 +395,12 @@ func TestServeLifecyclePresenterFailureUsesDiagnosticChannel(t *testing.T) {
 }
 
 func TestServeOwnershipTranscriptUsesOnlyHumanProjectLanguage(t *testing.T) {
-	t.Run("automatic recovery", func(t *testing.T) {
+	t.Run("no metadata-only recovery teaching", func(t *testing.T) {
 		var out bytes.Buffer
 		presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &out})
-		presenter.recordRecoveredPreviousSession()
-		presenter.recordRecoveredPreviousSession()
 		presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
-		if got := strings.Count(out.String(), "✓ Recovered previous session"); got != 1 {
-			t.Fatalf("recovery line count = %d, want 1\n%s", got, out.String())
+		if strings.Contains(out.String(), "Recovered previous session") {
+			t.Fatalf("serving presentation inferred old process recovery:\n%s", out.String())
 		}
 	})
 
@@ -438,20 +436,6 @@ func TestServeOwnershipTranscriptUsesOnlyHumanProjectLanguage(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestServeOwnershipAcquisitionTranscriptNamesOnlyRealResolution(t *testing.T) {
-	err := serveOwnershipAcquisitionError(&runtimestartupownership.AcquisitionError{
-		Failure:    runtimestartupownership.AcquisitionTakeoverRequired,
-		RecordedAt: time.Now().Add(-2*time.Hour - time.Minute),
-	})
-	want := "Another swarm serve is already running for this project (started 2h ago). Stop it first, or serve a different project."
-	if err == nil || err.Error() != want {
-		t.Fatalf("acquisition transcript = %v, want %q", err, want)
-	}
-	if strings.Contains(err.Error(), "--context") {
-		t.Fatalf("same-store refusal advertised context as a store selector: %v", err)
 	}
 }
 

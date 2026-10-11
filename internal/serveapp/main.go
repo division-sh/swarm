@@ -985,7 +985,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) {
-			presenter.fail(3, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
+			presenter.fail(3, "startup_ownership_lease", err)
 			return 3
 		}
 		presenter.fail(3, "db_connection", err)
@@ -1105,20 +1105,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
+		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
 	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
-	}
-	processAuthority, err := processCapability.Evidence()
-	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
-	}
-	if processAuthority.AcquisitionKind == runtimestartupownership.AcquisitionCrashTakeover {
-		presenter.recordRecoveredPreviousSession()
 	}
 	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
 	cancelOwnershipWatch = watchCancel
@@ -1943,41 +1935,6 @@ func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecy
 		facts = append(facts, fact)
 	}
 	return facts
-}
-
-func serveOwnershipAcquisitionError(err error) error {
-	var acquisitionErr *runtimestartupownership.AcquisitionError
-	if !errors.As(err, &acquisitionErr) {
-		return err
-	}
-	switch acquisitionErr.Failure {
-	case runtimestartupownership.AcquisitionTakeoverRequired:
-		started := ""
-		if !acquisitionErr.RecordedAt.IsZero() {
-			started = fmt.Sprintf(" (started %s ago)", conciseOwnershipAge(time.Since(acquisitionErr.RecordedAt)))
-		}
-		return fmt.Errorf("Another swarm serve is already running for this project%s. Stop it first, or serve a different project.", started)
-	case runtimestartupownership.AcquisitionPriorOwnerAmbiguous:
-		return errors.New("Swarm cannot verify who owns this project. Run `swarm store repair-authority` to inspect and repair it.")
-	default:
-		return err
-	}
-}
-
-func conciseOwnershipAge(age time.Duration) string {
-	if age < 0 {
-		age = 0
-	}
-	switch {
-	case age < time.Minute:
-		return "less than 1m"
-	case age < time.Hour:
-		return fmt.Sprintf("%dm", int(age/time.Minute))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(age/time.Hour))
-	default:
-		return fmt.Sprintf("%dd", int(age/(24*time.Hour)))
-	}
 }
 
 func startServeOwnershipWatch(

@@ -616,11 +616,11 @@ func TestRuntimeShutdownRetiresGrantAfterCompletionPersistenceSettles(t *testing
 		t.Fatalf("start run lifecycle executor: %v", err)
 	}
 
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID:           "runtime-shutdown-completion-test",
 		BootID:            uuid.NewString(),
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	}, "runtime_test")
+	})
 	if err != nil {
 		t.Fatalf("construct runtime shutdown authority: %v", err)
 	}
