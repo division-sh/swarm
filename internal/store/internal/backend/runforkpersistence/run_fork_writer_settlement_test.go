@@ -14,11 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
@@ -144,7 +146,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 		t.Run(cut, func(t *testing.T) {
 			dsn, db, _ := testutil.StartEmptyPostgres(t)
 			s, probe, _ := selectedWriterProbeDatabase(t, dsn, db)
-			runs := selectedClaimNativeRunOwner(t, s)
+			runs, lease := selectedClaimNativeRunOwner(t, s, db)
 			// Minimal relational fixture; the existing selected-store matrix covers
 			// schema/admission parity. Here the real claim SQL and COMMIT are used.
 			if _, err := db.Exec(`
@@ -156,14 +158,6 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 					actor_census_fingerprint text, effective_config_fingerprint text,
 					preparation_binding jsonb, preparation_fingerprint text,
 					declaration_plan_fingerprint text, executable_coordinate_fingerprint text
-				);
-				CREATE TABLE runtime_startup_authority_facts (
-					authority_id uuid, authority_generation bigint, transition_ordinal bigint,
-					state_version bigint, state text, owner_id text, boot_id uuid,
-					runtime_instance_id uuid, backend text, acquisition_id uuid,
-					acquisition_request_hash text, acquisition_kind text,
-					predecessor_authority_id uuid, successor_authority_id uuid,
-					snapshot jsonb, created_at timestamptz
 				)`); err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +190,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			preparation := selectedClaimPreparationFixture(t, db, issued, hash)
+			preparation := selectedClaimPreparationFixture(t, lease, issued, hash)
 			issued.PreparationFingerprint, err = preparation.Fingerprint()
 			if err != nil {
 				t.Fatal(err)
@@ -266,8 +260,19 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 
 // Only valid run/source setup is shared here. The prepared-execution rows remain
 // an explicit lower-storage claim/acknowledgment oracle, not issued runtime proof.
-func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner) *runstore.RunLifecyclePostgresOwner {
+func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, observer *sql.DB) (*runstore.RunLifecyclePostgresOwner, *postgresbackend.AdvisoryLockLease) {
 	t.Helper()
+	// Keep the claim/ack oracle's one-connection writer unchanged. Its existing
+	// independent observer holds the real native process lease through cleanup.
+	lease, err := postgresbackend.AcquireBlockingAdvisoryLockLease(context.Background(), observer, "swarm:runtime:shared-store-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -279,15 +284,18 @@ func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner) *
 	var runPlans []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
+		case "runtime_store_metadata", "runtime_process_generation", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			runPlans = append(runPlans, plan)
 		}
 	}
-	if len(runPlans) != 8 {
-		t.Fatalf("native selected-claim run plans=%d, want 8", len(runPlans))
+	if len(runPlans) != 9 {
+		t.Fatalf("native selected-claim run plans=%d, want 9", len(runPlans))
 	}
 	schema, err := schemastore.NewPostgres(selected.backend)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.BindProcessLease(lease); err != nil {
 		t.Fatal(err)
 	}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
@@ -308,27 +316,26 @@ func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runs
+	return runs, lease
 }
 
-func selectedClaimPreparationFixture(t *testing.T, db *sql.DB, issued runfork.SelectedContractRuntimeExecution, hash string) runfork.SelectedForkPreparationBinding {
+func selectedClaimPreparationFixture(t *testing.T, lease *postgresbackend.AdvisoryLockLease, issued runfork.SelectedContractRuntimeExecution, hash string) runfork.SelectedForkPreparationBinding {
 	t.Helper()
-	authority, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: "selected-claim-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "postgres_retained_session")
-	if err != nil {
+	var stamp processbinding.LeaseStamp
+	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		stamp, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
+			LeaseID: uuid.NewString(), OwnerID: "selected-claim-proof", BootID: uuid.NewString(),
+			RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend,
+		}, false)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(authority)
-	if err != nil {
+	if err := lease.ProveCurrent(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO runtime_startup_authority_facts VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL,NULL,$13,$14)`,
-		authority.AuthorityID, authority.AuthorityGeneration, authority.TransitionOrdinal, authority.StateVersion,
-		authority.State, authority.OwnerID, authority.BootID, authority.RuntimeInstanceID, authority.Backend,
-		authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind, string(raw), time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
+	authority := startupownership.AuthorityFromLease(stamp)
 	fingerprint := strings.Repeat("a", 64)
 	return runfork.SelectedForkPreparationBinding{
 		ForkRunID: issued.ForkRunID,
