@@ -3753,7 +3753,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "e549a0ce9b478db2fddce141170901e8b24cf4fee58863952a7d14f955b6f522"
+    "body_sha256": "5a23731cf719ea620c6af673982c5778a3dc8661770184716bff79ae70163b64"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
@@ -3777,7 +3777,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "8cb44dfcf7c7004b3af7fdf4dc56c6291de14efeb31c723b8167ecf27ffca0fc"
+    "body_sha256": "a4146d55d1f18722266b87a1669a604e7feab7660ac641fff7c9a05084401fb4"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
