@@ -4,6 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,5 +140,74 @@ func TestPersistenceAuthorityDebtQ10NullableSourcePairIsExact(t *testing.T) {
 		if actual[test.want.identity()] != test.want {
 			t.Fatalf("live source does not reproduce the exact reviewed identity: want=%+v actual=%+v", test.want, actual)
 		}
+	}
+	for _, source := range []string{
+		strings.Replace(string(raw), from, "*periods[index].Entity.CurrentState", 1),
+		strings.Replace(string(raw), "\t\t\tfor index, expected := range", "\t\t\trt.DB.QueryContext(context.Background(), \"SELECT 1\")\n\t\t\tfor index, expected := range", 1),
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), current.File, source, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := authorityDebtSites(debtExcludedSourceFindings(t, current.File, file, &types.Info{}))
+		if actual[current.identity()] == current || actual[old.identity()] == old {
+			t.Fatal("real source mutation retained a reviewed declaration identity")
+		}
+		if failures := authorityDebtRatchet(actual, debtControlSet(current), debtControlSet(old), debtControlSet(old)); len(failures) == 0 {
+			t.Fatal("removed nil refusal or added authority call was accepted")
+		}
+	}
+}
+
+func TestPersistenceAuthorityDebtQ10CommittedArtifactsSurviveLanding(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	read := func(path string) []byte {
+		t.Helper()
+		raw, err := debtGit(root, "show", "HEAD:"+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	raw := read(debtBaselinePath)
+	if _, err := debtParseCollectorMetadata(read(debtCollectorSidecarPath), raw, debtQ10CollectorTo); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := parseAuthorityDebtBaseline(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, current := debtQ10NullableUncertaintyTransition()
+	if baseline.Sites[current.identity()] != current || baseline.Sites[old.identity()].Multiplicity != 0 {
+		t.Fatal("committed baseline must retain exactly the current unresolved occurrence")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), current.File, read(current.File), parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := authorityDebtSites(debtExcludedSourceFindings(t, current.File, file, &types.Info{}))
+	if source[current.identity()] != current || source[old.identity()].Multiplicity != 0 {
+		t.Fatal("committed source does not match the retained snapshot identity")
+	}
+	actual := maps.Clone(baseline.Sites)
+	before := maps.Clone(baseline.Sites)
+	delete(before, current.identity())
+	before[old.identity()] = old
+	for _, test := range []struct {
+		name                       string
+		actual, head, base, source map[string]authorityDebtSite
+		accept                     bool
+	}{
+		{"pre-landing", actual, baseline.Sites, before, before, true},
+		{"unchanged-successor", actual, baseline.Sites, baseline.Sites, actual, true},
+		{"independent-source-mismatch", actual, baseline.Sites, baseline.Sites, before, false},
+		{"reverse-resurrection", before, baseline.Sites, baseline.Sites, actual, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			failures := authorityDebtRatchet(test.actual, test.head, test.base, test.source)
+			if (len(failures) == 0) != test.accept {
+				t.Fatalf("accept=%v failures=%v", test.accept, failures)
+			}
+		})
 	}
 }
