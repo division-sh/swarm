@@ -960,7 +960,8 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	at := time.Unix(1700003610, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -968,6 +969,10 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	beforeRecovery, found, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, materialized.ForkRunID)
+	if err != nil || !found || beforeRecovery.SourceRunID != sourceRunID || beforeRecovery.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("canonical materialization recovery: record=%#v found=%t err=%v", beforeRecovery, found, err)
+	}
 	unrelatedRunID := uuid.NewString()
 	bundle := loadCanonicalSelectedContractStoreSource(t)
 	unrelatedCtx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
@@ -985,6 +990,11 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		ForkRunID:             materialized.ForkRunID,
 		AllowSourceFreeze:     true,
 		AllowedSourceEventIDs: []string{eventID},
+		DataPins:              materialized.DataPins,
+		ExecutionSource:       semanticview.Wrap(bundle),
+		FrontierAdmission:     request.FrontierAdmission,
+		RouteTopology:         request.RouteTopology,
+		RecipientPlanning:     request.RecipientPlanning,
 	})
 	if err != nil {
 		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
@@ -1039,8 +1049,12 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	`, materialized.ForkRunID).Scan(&routeRecoveryRows); err != nil {
 		t.Fatalf("count route recovery rows: %v", err)
 	}
-	if branchRows != 0 || unrelatedInstances != 1 || routeRecoveryRows != 0 {
-		t.Fatalf("branch rows=%d fork delivery rows=%d unrelated instances=%d route recovery rows=%d, want no divergence, one untouched unrelated owner, and no invented recovery", branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows)
+	if branchRows != 0 || unrelatedInstances != 1 || routeRecoveryRows != 1 {
+		t.Fatalf("branch rows=%d fork delivery rows=%d unrelated instances=%d route recovery rows=%d, want no divergence, one untouched unrelated owner, and only the original recovery", branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows)
+	}
+	afterRecovery, found, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, materialized.ForkRunID)
+	if err != nil || !found || !reflect.DeepEqual(afterRecovery, beforeRecovery) {
+		t.Fatalf("unrelated native construction changed fixed recovery: before=%#v after=%#v found=%t err=%v", beforeRecovery, afterRecovery, found, err)
 	}
 	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

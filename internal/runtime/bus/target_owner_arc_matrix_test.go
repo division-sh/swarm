@@ -93,10 +93,6 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID: "one", EntityID: selectedEntityID, FlowInstance: "account/one", FlowTemplate: "account",
-				AddressFields: map[string]string{"entity.account_id": "acct-1"},
-			}},
 		},
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
@@ -781,10 +777,6 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	}.Normalized()
 	store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{
-			{InstanceID: "left", EntityID: leftRoute.EntityID, FlowInstance: leftRoute.FlowInstance, FlowTemplate: "branch", AddressFields: map[string]string{"entity.branch_id": "left"}},
-			{InstanceID: "right", EntityID: rightRoute.EntityID, FlowInstance: rightRoute.FlowInstance, FlowTemplate: "branch", AddressFields: map[string]string{"entity.branch_id": "right"}},
-		},
 	}}
 	staticRoute := events.RouteIdentity{FlowID: "branch/worker/result-static", FlowInstance: "branch/worker/result-static", EntityID: runtimeflowidentity.EntityID("branch/worker/result-static")}
 	singletonRoute := events.RouteIdentity{FlowID: "branch/worker/result", FlowInstance: "branch/worker/result", EntityID: runtimeflowidentity.EntityID("branch/worker/result")}
