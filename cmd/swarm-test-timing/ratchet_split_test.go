@@ -34,7 +34,7 @@ func TestEvaluateBudgetPRRetainedDriftIsAdvisory(t *testing.T) {
 }
 
 func TestEvaluateBudgetCadenceRejectsForgedTier(t *testing.T) {
-	for _, event := range []string{"schedule", "workflow_dispatch", "push", "", "unknown"} {
+	for _, event := range []string{"schedule", "workflow_dispatch", "push"} {
 		for _, profile := range []string{"core", "lifecycle"} {
 			t.Run(event+"/"+profile, func(t *testing.T) {
 				cfg := ratchetCLIConfig(t, profile, 0, false)
@@ -198,7 +198,7 @@ func writeRatchetCLIProof(t *testing.T, cfg config, plan testplanning.RunPlan, p
 }
 
 func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
-	for _, event := range []string{"pull_request", "schedule", "workflow_dispatch", "push", "", "PULL_REQUEST", "pull_request "} {
+	for _, event := range []string{"pull_request", "schedule", "workflow_dispatch", "push"} {
 		t.Run(event, func(t *testing.T) {
 			cfg := ratchetCLIConfig(t, "full", 2000, false)
 			cfg.event = event
@@ -223,6 +223,24 @@ func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
 			for _, tier := range result.TestTime.Tiers {
 				if tier.AddedSeconds != 0 || tier.Retained != len(tier.RetainedCells) || tier.RetainedDelta != 2000 || tier.StrictStatus != testtiming.BudgetFail {
 					t.Fatalf("CLI JSON lost exact decomposition: %+v", tier)
+				}
+			}
+		})
+	}
+}
+
+func TestEvaluateBudgetRejectsUnknownEventsBeforePolicySelection(t *testing.T) {
+	for _, event := range []string{"", "unknown", "PULL_REQUEST", "pull_request ", " pull_request", "push ", "schedule\n", "workflow_dispatch\t", "pull_request_target"} {
+		t.Run(event, func(t *testing.T) {
+			for _, growth := range []float64{0, 2000} {
+				cfg := ratchetCLIConfig(t, "full", growth, false)
+				cfg.event = event
+				if err := run(cfg); err == nil || !strings.Contains(err.Error(), "INCOMPLETE") {
+					t.Fatalf("invalid event %q selected a policy: %v", event, err)
+				}
+				result := readRatchetCLIResult(t, cfg)
+				if result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 || result.TestTime != nil || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], "unsupported workflow event") {
+					t.Fatalf("invalid event earned a timing comparison: %+v", result)
 				}
 			}
 		})

@@ -24160,7 +24160,9 @@ test_specification:
         Count a root and its direct children once and separately executed original soak backend cells separately.
         Complete source/plan/run/attempt/root/child/build/environment/count evidence is admitted before either timing decision.
         Only the exact trusted pull_request event selects PR cost enforcement; tier names, body text or plan reasons do not.
-        Missing or unknown events never grant advisory treatment. Non-PR evaluation requires a full hosted cadence plan;
+        The CLI admits only exact pull_request, push, schedule or workflow_dispatch events. Missing, unknown or
+        malformed events report INCOMPLETE before either timing policy is selected and never grant advisory treatment.
+        Supported non-PR evaluation requires a full hosted cadence plan;
         a supplied core/lifecycle cadence plan is refused even if ordinary planning would never produce it.
         PRs hard-charge the independent sum of added/promoted-cell seconds under both five percent of the pinned tier cost
         and 600 test-seconds. Retained speedups and removed/renamed cells cannot subsidize that new-work charge.
