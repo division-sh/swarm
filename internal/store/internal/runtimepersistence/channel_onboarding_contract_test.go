@@ -242,6 +242,9 @@ func (retiredOnboardingIdentities) ExpireOperation(context.Context, string, int6
 func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
 }
+func (retiredOnboardingIdentities) RetainedCurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
 func (retiredOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
 	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
 }

@@ -291,7 +291,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Unbind",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
-    "body_sha256": "035bf661ebc5fc9b87e2a90c43dd035ef7ebc6a44d59b0218f0f9e3aecbfe3df"
+    "body_sha256": "01089078603c5b17b8e3e621f7cbc4d268b66ff5ad0c7eca4d69b0b8ba3f019e"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.complete",
@@ -315,7 +315,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
-    "body_sha256": "c2b04a454fbe712df25fc51b59e2230f3de27a1df0199e284c193305a7e7bc8a"
+    "body_sha256": "f0df3fc09d20b9dc53bedbccc2119d6573047a76f372d8c3d864a1f1165e205a"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
