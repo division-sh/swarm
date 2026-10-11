@@ -656,6 +656,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Parallel()
 			}
 			var transactions, continuation *storetest.TransactionCollector
+			var issuanceReceipt storetest.TransactionSnapshot
 			if servingWindow {
 				t.Cleanup(func() {
 					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
@@ -665,6 +666,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 							if receipt.Active != 0 {
 								t.Errorf("reporter cleanup lost captured attempts: %+v", receipt)
 							}
+						}
+					}
+					if transactions != nil && continuation != nil {
+						if err := storetest.ValidateReporterJoined(issuanceReceipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+							t.Error(err)
 						}
 					}
 				})
@@ -740,15 +746,28 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			if !fanOutRaceBuild && issuanceElapsed > mergeCeiling {
 				t.Errorf("500-row issuance exceeded %s merge ceiling (original target %s): %s (transaction probe %+v)", mergeCeiling, issuanceBudget, issuanceElapsed, transactionOptions)
 			}
+			settledBeforeHandoff := false
 			if servingWindow {
 				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
 					t.Fatal(err)
 				}
-				transactions.Stop()
-				continuation = storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+				issuanceReceipt = receipt
+				atCut, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				settledBeforeHandoff = atCut.Settled == 500 && atCut.Unsettled == 0 && atCut.Owed == 0
+				t.Logf("pre-handoff descendant disposition: settled=%d unsettled=%d owed=%d native_settlements=%d", atCut.Settled, atCut.Unsettled, atCut.Owed, receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits)
+				continuation = storetest.ReplaceTransactions(t, transactions, storetest.TransactionProbeOptions{})
 			}
 			drainStarted := time.Now()
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
+			if servingWindow {
+				if err := storetest.ValidateReporterDrain(receipt, transactions.Snapshot(), continuation.Snapshot(), settledBeforeHandoff); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("post-issuance descendant settlement receipts: detached=%+v successor=%+v", transactions.Snapshot().ByOperation[storetest.TransactionDeliverySettle], continuation.Snapshot().ByOperation[storetest.TransactionDeliverySettle])
+			}
 			assertNotifyAllChildrenRunEventCount(t, validCtx, db, validRunID)
 
 			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
