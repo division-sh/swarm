@@ -62,6 +62,7 @@ func TestSelectedForkReceiverOwnershipBoundary(t *testing.T) {
 func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 	const model = "write:runtime/runfork."
 	const backend = "store/internal/backend/runforkpersistence::"
+	const metadata = "write:store/internal/backend/runforkpersistence.runForkEntityMetadata."
 	return map[string]recipientBoundaryAllowance{
 		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.EntityID":                                                     {1, "compare canonical source ownership before shared primitive timer projection"},
 		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.FlowInstance":                                                 {1, "compare canonical source ownership before shared primitive timer projection"},
@@ -96,6 +97,7 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.EnteredStateAt":                 {1, "retain the constructed stage-entry clock from the paired revision"},
 		backend + "loadExactRunForkMaterialization/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":                  {1, "compare the canonical ProjectEntityOwnership result against exact persisted fork materialization for idempotent reuse"},
 		backend + "materializeRunForkForSelectedContractExecution/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.PreparedHeader": {1, "attach the validated selected historical header before the named atomic materialization operation; no handler construction"},
+		backend + "materializeRunForkForSelectedContractExecution/" + metadata + "RemovedArrivalRefs":                                                   {1, "carry only exact child references admitted by projectRunForkRemovedArrivalRefs into both dependent-state projections; never derive receiving ownership"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":                        {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.EntityType":                          {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.Slug":                                {1, "copy presentation metadata into SQL adapter"},
@@ -335,6 +337,10 @@ func surprise(a e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
  return f.RunForkMaterializedEntitySnapshotMetadata{FlowInstance: a.FlowInstance(), EntityType: "invented"}
 }
 `, []string{"surprise/write:", "event_receiver_projection_to_owner"}},
+		{"removed_arrival_refs_do_not_authorize_other_writers", "store/internal/backend/runforkpersistence", "run_fork_selected_contract_materialization_owner.go", `package runforkpersistence
+type runForkEntityMetadata struct { RemovedArrivalRefs bool }
+func alternate(p *runForkEntityMetadata) { p.RemovedArrivalRefs = true }
+`, []string{"alternate/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.RemovedArrivalRefs"}},
 		{"source_carrier_reconstruction", "runtime/runforkexecution", "recipient_planning.go", `package runforkexecution
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func unexpected(a e.Event) f.RunForkSelectedContractSourceEvent {

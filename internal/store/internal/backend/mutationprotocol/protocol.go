@@ -141,6 +141,22 @@ func (a *Attempt) WithSQL(ctx context.Context, writer func(context.Context, *sql
 	return writer(ctx, a.tx)
 }
 
+// RequireExistingSQLFrame checks the already-lent native frame without binding
+// a missing frame or lending transaction authority to a continuation adapter.
+func (a *Attempt) RequireExistingSQLFrame(ctx context.Context) error {
+	if err := a.requireActive(); err != nil {
+		return err
+	}
+	current, err := runAdmissionAttempt(ctx, a.tx)
+	if err != nil {
+		return err
+	}
+	if current != a {
+		return errors.New("mutation SQL context requires an existing native SQL frame for this attempt")
+	}
+	return nil
+}
+
 func (a *Attempt) Record(ctx context.Context, draft runtimeactivity.Draft) error {
 	if err := a.requireActive(); err != nil {
 		return err
