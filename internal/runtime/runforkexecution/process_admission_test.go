@@ -93,7 +93,7 @@ func TestSelectedForkProcessAdmissionBothStores(t *testing.T) {
 			}{
 				{"authority", func(a *startupownership.Authority) { a.AuthorityID = uuid.NewString() }},
 				{"generation", func(a *startupownership.Authority) { a.AuthorityGeneration++ }},
-				{"acquisition", func(a *startupownership.Authority) { a.AcquisitionID = uuid.NewString() }},
+				{"lease_and_generation", func(a *startupownership.Authority) { a.AuthorityID = uuid.NewString(); a.AuthorityGeneration++ }},
 				{"owner", func(a *startupownership.Authority) { a.OwnerID += "-foreign" }},
 				{"boot", func(a *startupownership.Authority) { a.BootID = uuid.NewString() }},
 				{"runtime", func(a *startupownership.Authority) { a.RuntimeInstanceID = uuid.NewString() }},

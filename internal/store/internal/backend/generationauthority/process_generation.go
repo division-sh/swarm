@@ -12,26 +12,6 @@ import (
 
 var ErrProcessGenerationMissing = errors.New("initialized store has no process-generation singleton")
 
-type processGenerationSeedWriter interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-// SeedProcessGeneration belongs exclusively to fresh schema creation. It is not
-// an initialized-store repair or a process acquisition operation.
-func SeedProcessGeneration(ctx context.Context, q processGenerationSeedWriter) error {
-	if ctx == nil || q == nil {
-		return errors.New("fresh process-generation context and writer are required")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	_, err := q.ExecContext(ctx, `INSERT INTO runtime_process_generation (singleton_id, generation) VALUES (1, 0)`)
-	if err != nil {
-		return fmt.Errorf("seed fresh process generation: %w", err)
-	}
-	return nil
-}
-
 type processGenerationReader interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
