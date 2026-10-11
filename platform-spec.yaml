@@ -11749,10 +11749,12 @@ tool_model:
         authorization and does not reacquire execution or completion admission from a retired runtime; SDK dispatch
         remains separately fenced by its original runtime, source and private occurrence. Complete success requires
         SDK unlink, original device deletion and the original callback/socket/private-store join. Failure after launch
-        is uncertain, even if remote unlink
-        may have succeeded. Journal settlement and teardown result commit atomically. Startup recovery consumes the
+        is uncertain, even if remote unlink may have succeeded. Journal settlement and teardown result commit
+        atomically. Startup recovery consumes the
         same frozen evidence and projection, abandoning authorized work or marking launched work uncertain without
         reconnect, deletion, success fabrication or redispatch. Terminal exact replay cannot create another attempt.
+        Destructive startup recovery preserves the logout responsibility without SDK dispatch; it cannot require
+        or reconstruct the dead process's occurrence before effect-journal recovery.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
