@@ -271,8 +271,8 @@ func seedServeDynamicTopologyReadiness(
 		VALUES ($1::uuid, $2, $3, $4::uuid, 'worker', 'idle', 'template', '{}'::jsonb, 'active', TRUE, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())
 	`
 	entityInsert := `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, 'worker', 'idle', '{}'::jsonb, NOW(), NOW())
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, 'worker', '{}'::jsonb, NOW(), NOW())
 	`
 	readinessInsert := `
 		INSERT INTO flow_instance_runtime_readiness (
@@ -285,8 +285,8 @@ func seedServeDynamicTopologyReadiness(
 			VALUES ($1, $2, $3, $4, 'worker', 'idle', 'template', '{}', 'active', 1, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`
 		entityInsert = `
-			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-			VALUES ($1, $2, $3, 'worker', 'idle', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+			VALUES ($1, $2, $3, 'worker', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`
 		readinessInsert = `
 			INSERT INTO flow_instance_runtime_readiness (

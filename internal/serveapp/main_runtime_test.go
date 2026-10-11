@@ -987,7 +987,9 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 	var executionState string
 	err := db.QueryRowContext(context.Background(), `
 			SELECT
-					(SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state='waiting'),
+					(SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
+					 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+					 WHERE es.run_id=$1 AND fi.current_state='waiting'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
