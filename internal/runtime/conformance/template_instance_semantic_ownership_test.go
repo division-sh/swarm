@@ -359,6 +359,8 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		t.Fatalf("retired template lifecycle interpreter survived or could not be checked: %v", err)
 	}
 	retiredFunctions := map[string]struct{}{
+		"connectRoutePlanResolutionKind":                 {},
+		"descriptorRoute":                                {},
 		"InstanceKeyDescriptorRoutesForConnectRoutePlan": {},
 		"materializeInstanceKeyConnectRoutePlan":         {},
 		"ConnectInstanceKeyDescriptorMatches":            {},
