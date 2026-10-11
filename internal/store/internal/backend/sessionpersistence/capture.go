@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"runtime/trace"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	capturedata "github.com/division-sh/swarm/internal/sessioncapture"
@@ -24,6 +25,7 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 		return nil, fmt.Errorf("WhatsApp incoming Capture requires its private database and stable connection")
 	}
 	db.SetMaxOpenConns(1)
+	region := trace.StartRegion(ctx, "whatsapp.private.capture-schema")
 	_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_incoming_capture (
 		sequence INTEGER PRIMARY KEY,
 		connection_id TEXT NOT NULL,
@@ -44,6 +46,7 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 		      (publication_request IS NOT NULL AND publication_digest IS NOT NULL AND length(publication_digest) = 32)),
 		UNIQUE(connection_id, account_ref, conversation_ref, event_id, event_kind)
 	)`)
+	region.End()
 	if err != nil {
 		return nil, err
 	}
@@ -54,12 +57,14 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 	if err := columns.Close(); err != nil {
 		return nil, err
 	}
+	region = trace.StartRegion(ctx, "whatsapp.private.failure-schema")
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_callback_failures (
 		connection_id TEXT NOT NULL,
 		occurrence_id TEXT NOT NULL,
 		reason TEXT NOT NULL CHECK(reason IN ('crash','capture_failed')),
 		PRIMARY KEY(connection_id,occurrence_id,reason)
 	)`)
+	region.End()
 	if err != nil {
 		return nil, err
 	}
