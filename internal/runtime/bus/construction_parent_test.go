@@ -317,11 +317,6 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 				coordinate := testRunScopedFlowRoute(instance.Route())
 				store.installConstructionReceipt(coordinate, pipeline.FlowConstructionPublicationEvidence{Identity: instance})
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
-				store.flowInstances = append(store.flowInstances, ActiveFlowInstanceDescriptor{
-					Identity: instance, RunID: busInternalTestRunID, InstanceID: instance.InstanceID,
-					EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: instance.TemplateID,
-					AddressFields: map[string]string{"entity.id": key},
-				})
 			}
 			add(parent, "parent-key")
 			add(middle, "")
