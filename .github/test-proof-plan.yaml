@@ -917,6 +917,7 @@ units:
     run: '^TestServed[A-C].*$'
     required_children:
       TestServedCanceledTurnRecoveryBothStores: [default_sqlite, explicit_postgres]
+      TestServedCompiledTransitionSeedSettlementFenceBothStores: [default_sqlite, explicit_postgres]
       TestServedConstructedDecisionCardDeferralBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
