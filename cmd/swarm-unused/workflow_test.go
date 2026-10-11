@@ -51,8 +51,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			if strings.Contains(step.Run, "./cmd/swarm-unused") {
 				collect = step.Run == "go run ./cmd/swarm-unused -collect -out test-results/unused/"+owner.platform && step.If == "" && step.ContinueOnError == nil
 			}
-			if strings.Contains(step.Uses, "actions/upload-artifact@") && step.With["name"] == "unused-"+owner.platform {
-				upload = step.If == "always()" && step.With["path"] == "test-results/unused/"+owner.platform && step.With["if-no-files-found"] == "error"
+			if strings.Contains(step.Uses, "actions/upload-artifact@") && step.With["name"] == "unused-"+owner.platform+"-${{ github.run_id }}-${{ github.run_attempt }}" {
+				upload = step.If == "always()" && step.With["path"] == "test-results/unused/"+owner.platform && step.With["if-no-files-found"] == "error" && step.With["overwrite"] == nil
 			}
 		}
 		if !checkout || !collect || !upload {
@@ -84,7 +84,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 			merge = step.Run == "go run ./cmd/swarm-unused -merge -in test-results/unused" && step.If == "" && step.ContinueOnError == nil
 		}
 		for _, platform := range []string{"linux", "darwin"} {
-			if strings.Contains(step.Uses, "actions/download-artifact@") && step.With["name"] == "unused-"+platform {
+			if strings.Contains(step.Uses, "actions/download-artifact@") && step.With["name"] == "unused-"+platform+"-${{ github.run_id }}-${{ github.run_attempt }}" {
 				downloads[platform] = step.With["path"] == "test-results/unused/"+platform && step.If == "" && step.With["run-id"] == nil
 			}
 		}

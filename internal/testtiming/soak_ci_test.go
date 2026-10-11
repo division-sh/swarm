@@ -219,7 +219,7 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 		t.Fatal("soak checkout is not exact-head")
 	}
 	upload := findWorkflowStep(job.Steps, "Upload proof evidence")
-	if upload == nil || upload.If != "always()" || upload.With["name"] != "proof-${{ matrix.unit }}-timing" || upload.With["if-no-files-found"] != "error" {
+	if upload == nil || upload.If != "always()" || upload.With["name"] != "proof-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.unit }}-timing" || upload.With["if-no-files-found"] != "error" {
 		t.Fatal("soak evidence upload missing/fail-open")
 	}
 	summary := findWorkflowStep(workflow.Jobs["required-tests"].Steps, "Summarize required checks")

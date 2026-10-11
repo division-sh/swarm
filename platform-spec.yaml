@@ -24133,7 +24133,16 @@ test_specification:
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
-        remains independent. Build-product reuse requires exact clean source, toolchain, native platform, dependency,
+        remains independent. Execution-credit artifacts use immutable exact run_id and run_attempt namespaces:
+        ci-plan, physical-batch proof receipts, and required Linux/Darwin native-unused products. Every workflow
+        consumer and protected publisher acquires only its own current namespace, never retained needs coordinates.
+        Proof downloads preserve separate artifact directories so duplicate logical inputs remain observable.
+        Native master replay instead acquires the observed successful PR run/attempt's single unexpired plan and
+        exact corresponding selection report. Creation times, artifact-ID order and equal source bytes cannot
+        substitute for attempt identity. Missing current producers or partners fail closed on partial reruns;
+        no cross-attempt carry or old-name fallback is permitted. Existing source/header/native/result/union,
+        job and selection checks remain required; transport names grant no execution credit by themselves.
+        Build-product reuse requires exact clean source, toolchain, native platform, dependency,
         policy, profile and flags identity plus byte integrity; a miss or mismatch rebuilds, never supplies test credit.
         Persistence-authority debt analysis may reuse immutable exact-source base findings only with complete analyzer,
         dependency and toolchain identity and canonical checksummed records. Candidate sources always scan fresh;

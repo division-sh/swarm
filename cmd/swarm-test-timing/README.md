@@ -9,7 +9,7 @@ evidence without making a passing receipt or changing required checks:
 
 ```sh
 go run ./cmd/swarm-test-timing -observe-full-cadence \
-  -plan artifacts/ci-plan/proof-plan.json -evidence-root artifacts \
+  -plan artifacts/plan/proof-plan.json -evidence-root artifacts/evidence \
   -workflow-run-id 123 -workflow-attempt 1 \
   -result-json artifacts/full-cadence.json -markdown artifacts/full-cadence.md
 ```
@@ -40,12 +40,19 @@ not guess attribution or a prior core run. Enrichment happens after independent
 review through this same report entrance, not a new dispatcher or metrics service.
 
 Select the actual full run/attempt and the preceding successful **core** run/attempt
-from the CI artifacts. Use `gh run download` with `-n ci-plan` and
-`-p 'proof-*-timing'`, into separate `full/` and `core/` directories. Preserve the
-original files; do not edit identity, profile, outcomes or missing evidence to make
-them comparable. Obtain core metadata from the exact attempt API:
+from the CI artifacts. Each execution-credit artifact is immutable and names its
+exact run and attempt. Never use the old unscoped names, choose by timestamp or
+artifact ID, or combine a failed-only rerun with earlier successful producers.
+Preserve separate evidence directories so duplicate inputs remain visible to the
+native validator. Preserve the original files; do not edit identity, profile,
+outcomes or missing evidence to make them comparable. Obtain core metadata from
+the exact attempt API:
 
 ```sh
+gh run download "$FULL_RUN" -n "ci-plan-$FULL_RUN-$FULL_ATTEMPT" -D full/plan
+gh run download "$FULL_RUN" -p "proof-$FULL_RUN-$FULL_ATTEMPT-*-timing" -D full/evidence
+gh run download "$CORE_RUN" -n "ci-plan-$CORE_RUN-$CORE_ATTEMPT" -D core/plan
+gh run download "$CORE_RUN" -p "proof-$CORE_RUN-$CORE_ATTEMPT-*-timing" -D core/evidence
 gh api "repos/division-sh/swarm/actions/runs/$CORE_RUN/attempts/$CORE_ATTEMPT" > core-run.json
 git fetch origin '+refs/heads/master:refs/remotes/origin/master'
 # If this checkout is shallow, fetch its complete history before replay.
@@ -53,9 +60,9 @@ if test "$(git rev-parse --is-shallow-repository)" = true; then
   git fetch --unshallow origin
 fi
 go run ./cmd/swarm-test-timing -observe-full-cadence \
-  -plan full/ci-plan/proof-plan.json -evidence-root full \
+  -plan full/plan/proof-plan.json -evidence-root full/evidence \
   -workflow-run-id "$FULL_RUN" -workflow-attempt "$FULL_ATTEMPT" \
-  -prior-core-plan core/ci-plan/proof-plan.json -prior-core-evidence-root core \
+  -prior-core-plan core/plan/proof-plan.json -prior-core-evidence-root core/evidence \
   -prior-core-run core-run.json -prior-core-landing-sha "$CORE_MASTER_LANDING" \
   -cadence-classifications reviewed-findings.json \
   -result-json full/reviewed-cadence.json -markdown full/reviewed-cadence.md
@@ -77,6 +84,17 @@ protected checks, latest successful run/attempt and unchanged plan digest agains
 read-only GitHub/Git facts. The original core plan and command SHAs remain intact;
 only this verified landing is used for master first-parent position. A direct
 same-source master core proof does not require the landing flag.
+
+Master replay queries `ci-plan-<observed-PR-run>-<observed-PR-attempt>` and requires
+one unexpired artifact with the exact valid plan and corresponding `ci-selection.json`.
+It never uses the observing master push's coordinates or creation-time heuristics.
+Ordinary consumers and the protected publisher use their own current workflow
+coordinates, not retained `needs` outputs from an earlier attempt. Required native
+artifacts use `unused-linux-<run>-<attempt>` and `unused-darwin-<run>-<attempt>`;
+both current native collectors and the real union must succeed. Names do not replace
+any existing source, config, platform, result-integrity or complete-job validation.
+A failed-only, union-only, timing-only or publisher-only rerun with missing current
+producers is unqualified; perform a complete new attempt rather than relabel evidence.
 
 Foreign branches, retired/unavailable artifact schemas, wrong attempts, superseded
 runs, expired artifacts and unverified source aliases do not gain master lineage

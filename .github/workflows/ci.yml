@@ -199,7 +199,7 @@ jobs:
       - name: Upload proof plan
         uses: actions/upload-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             test-results/go-packages.txt
             test-results/changed-files.txt
@@ -352,7 +352,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unused-linux
+          name: unused-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/unused/linux
           if-no-files-found: error
 
@@ -377,7 +377,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unused-darwin
+          name: unused-darwin-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/unused/darwin
           if-no-files-found: error
 
@@ -398,12 +398,12 @@ jobs:
       - name: Download native Linux unused analysis from this run
         uses: actions/download-artifact@v4
         with:
-          name: unused-linux
+          name: unused-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/unused/linux
       - name: Download native Darwin unused analysis from this run
         uses: actions/download-artifact@v4
         with:
-          name: unused-darwin
+          name: unused-darwin-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/unused/darwin
       - name: Check source-bound native union
         run: go run ./cmd/swarm-unused -merge -in test-results/unused
@@ -429,7 +429,7 @@ jobs:
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/plan
       - name: Restore shared Go modules
         uses: actions/cache/restore@v4
@@ -486,7 +486,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: proof-${{ matrix.unit }}-timing
+          name: proof-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.unit }}-timing
           path: test-results/evidence
           if-no-files-found: error
 
@@ -568,16 +568,16 @@ jobs:
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/plan
       - name: Download all proof evidence
         if: always()
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          pattern: proof-*-timing
+          pattern: proof-${{ github.run_id }}-${{ github.run_attempt }}-*-timing
           path: test-results/evidence
-          merge-multiple: true
+          merge-multiple: false
       - name: Evaluate complete plan-bound evidence
         if: always()
         env:
@@ -662,7 +662,7 @@ jobs:
         if: needs.ci-plan.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/plan
       - name: Revalidate current PR tier
         if: github.event_name == 'pull_request' && needs.ci-plan.result == 'success'
@@ -738,7 +738,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results
       - name: Record same-run tier selection and proof outcome
         env:
@@ -853,19 +853,19 @@ jobs:
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
-          name: ci-plan
+          name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/plan
       - name: Download successful proof evidence
         uses: actions/download-artifact@v4
         with:
-          pattern: proof-*-timing
+          pattern: proof-${{ github.run_id }}-${{ github.run_attempt }}-*-timing
           path: test-results/evidence
-          merge-multiple: true
+          merge-multiple: false
       - name: Generate and publish model-only PR
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          SOURCE_RUN_ID: github-actions-${{ github.run_id }}
+          SOURCE_RUN_ID: github-actions-${{ github.run_id }}-${{ github.run_attempt }}
           EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
         run: |
           set -euo pipefail
