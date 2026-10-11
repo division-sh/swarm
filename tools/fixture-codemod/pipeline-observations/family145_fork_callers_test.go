@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 236 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "96b64ef0b6e56464e82219966713393cd99b69390e2a3cd37aa02ac320e9d20b" {
+	if err != nil || len(rows) != 259 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "528f8d8674c91ba9e4edf0a0a348491c8261c1ec18026c1b0cd29c72e1d9e039" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -77,6 +77,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.File == "internal/runtime/conformance/notify_all_children_runtime_conformance_test.go" && row.Function == "runNumericFanOutReporterShape" {
 			if err := family145ReporterRebaseProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/runtime/template_instance_delivery_test.go" && (row.Function == "waitRuntimeDBCount" || row.Function == "assertRuntimeDBCount" || row.Function == "waitRuntimeEventID") {
+			if err := family145TemplateWaitAssertions(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

@@ -22,6 +22,83 @@ type PreparedTargetConflictStorage struct {
 	SubscriberID, RouteIdentity, TargetEncoding string
 }
 
+type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Status, Reason, Failure, Target string }
+
+func ReadTemplateEventDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, event string) (out []TemplateDeliveryDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_type,subscriber_id,status,COALESCE(reason_code,''),COALESCE(CAST(failure AS TEXT),''),COALESCE(CAST(delivery_target_route AS TEXT),'') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id`, event)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row TemplateDeliveryDiagnosticStorage
+		if err := rows.Scan(&row.SubscriberType, &row.SubscriberID, &row.Status, &row.Reason, &row.Failure, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountTemplateNodeDeliveryTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountTemplateNodeDeliveryChronologyTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2 AND settled_at IS NOT NULL AND created_at<settled_at`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountTemplateNodeDeliveredAttemptTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_attempts o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version WHERE o.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type='node' AND d.subscriber_id=$2 AND d.status='delivered' AND d.settled_at IS NOT NULL AND o.outcome='delivered'`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountTemplateAgentDeliveryTx(ctx context.Context, tx *sql.Tx, event, agent string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='agent' AND subscriber_id=$2`, event, agent).Scan(&count)
+	return count, err
+}
+
+func CountTemplatePlaceholderDeliveryTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_id='ceo-{product_id}'`, event).Scan(&count)
+	return count, err
+}
+
+func CountTemplateEventDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1`, event).Scan(&count)
+	return count, err
+}
+
+func CountTemplateCarrierDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_id IN ('workflow-runtime','raw-source-listener')`, event).Scan(&count)
+	return count, err
+}
+
+func CountPostgresTemplateNodeTargetTx(ctx context.Context, tx *sql.Tx, event, target, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$3 AND delivery_target_route @> $2::jsonb`, event, target, node).Scan(&count)
+	return count, err
+}
+
+func CountPostgresTemplateDeliveredNodeTargetTx(ctx context.Context, tx *sql.Tx, event, node, target string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2 AND status='delivered' AND delivery_target_route @> $3::jsonb`, event, node, target).Scan(&count)
+	return count, err
+}
+
 type FanInDiagnosticDeliveryStorage struct {
 	EventID, SubscriberID, Status, Reason, Failure string
 }

@@ -17,6 +17,115 @@ import (
 
 type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
 
+type TemplateReceiptDiagnosticStorage = pipelinepersistence.TemplateReceiptDiagnosticStorage
+
+type TemplateDeliveryDiagnosticStorage = delivery.TemplateDeliveryDiagnosticStorage
+
+func ReadTemplateEventDeliveryDiagnosticsForTest(ctx context.Context, selected any, event string) ([]TemplateDeliveryDiagnosticStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) ([]TemplateDeliveryDiagnosticStorage, error) {
+		return delivery.ReadTemplateEventDeliveryDiagnosticsTx(ctx, tx, event)
+	})
+}
+
+func ReadTemplateEventReceiptDiagnosticsForTest(ctx context.Context, selected any, event string) ([]TemplateReceiptDiagnosticStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) ([]TemplateReceiptDiagnosticStorage, error) {
+		return pipelinepersistence.ReadTemplateEventReceiptDiagnosticsTx(ctx, tx, event)
+	})
+}
+
+func CountTemplateNodeDeliveryForTest(ctx context.Context, selected any, event, node string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateNodeDeliveryTx(ctx, tx, event, node)
+	})
+}
+func CountTemplateNodeDeliveryChronologyForTest(ctx context.Context, selected any, event, node string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateNodeDeliveryChronologyTx(ctx, tx, event, node)
+	})
+}
+func CountTemplateNodeDeliveredAttemptForTest(ctx context.Context, selected any, event, node string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateNodeDeliveredAttemptTx(ctx, tx, event, node)
+	})
+}
+func CountTemplateAgentDeliveryForTest(ctx context.Context, selected any, event, agent string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateAgentDeliveryTx(ctx, tx, event, agent)
+	})
+}
+func CountTemplatePlaceholderDeliveryForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplatePlaceholderDeliveryTx(ctx, tx, event)
+	})
+}
+func CountTemplateEventDeliveriesForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateEventDeliveriesTx(ctx, tx, event)
+	})
+}
+func CountTemplateCarrierDeliveriesForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountTemplateCarrierDeliveriesTx(ctx, tx, event)
+	})
+}
+func CountPostgresTemplateNodeTargetForTest(ctx context.Context, selected any, event, target, node string) (int, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return 0, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountPostgresTemplateNodeTargetTx(ctx, tx, event, target, node)
+	})
+}
+func CountPostgresTemplateDeliveredNodeTargetForTest(ctx context.Context, selected any, event, node, target string) (int, error) {
+	if err := validatePostgresPublicationIdentities(selected, event); err != nil {
+		return 0, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountPostgresTemplateDeliveredNodeTargetTx(ctx, tx, event, node, target)
+	})
+}
+func CountTemplateNodeReceiptForTest(ctx context.Context, selected any, event, node string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplateNodeReceiptTx(ctx, tx, event, node)
+	})
+}
+func CountTemplateSubscribedReplayScopeForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplateSubscribedReplayScopeTx(ctx, tx, event)
+	})
+}
+func CountTemplateInstancesForTest(ctx context.Context, selected any, template string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplateInstancesTx(ctx, tx, template)
+	})
+}
+func CountRunOperatingInstancesForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountRunOperatingInstancesTx(ctx, tx, run)
+	})
+}
+
+type TemplateInstanceFieldsStorage = pipelinepersistence.TemplateInstanceFieldsStorage
+
+func ReadRunOperatingInstanceFieldsForTest(ctx context.Context, selected any, run string) (TemplateInstanceFieldsStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (TemplateInstanceFieldsStorage, error) {
+		return pipelinepersistence.ReadRunOperatingInstanceFieldsTx(ctx, tx, run)
+	})
+}
+func CountTemplateActiveAgentRoutesForTest(ctx context.Context, selected any, agent, path string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplateActiveAgentRoutesTx(ctx, tx, agent, path)
+	})
+}
+func CountTemplatePlaceholderRoutesForTest(ctx context.Context, selected any, path string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplatePlaceholderRoutesTx(ctx, tx, path)
+	})
+}
+func CountPhysicalRoutingRulesForTest(ctx context.Context, selected any) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, pipelinepersistence.CountPhysicalRoutingRulesTx)
+}
+
 type FanOutSourceProgressStorage = delivery.FanOutSourceProgressStorage
 type FanOutSemanticOutcomeStorage = delivery.FanOutSemanticOutcomeStorage
 type FanOutBlockedSourceStorage = delivery.FanOutBlockedSourceStorage
@@ -121,6 +230,9 @@ func CountNestedContinuationHandoffsForTest(ctx context.Context, selected any, e
 
 func readFanOutSemanticStorage[T any](ctx context.Context, selected any, ids []string, query func(context.Context, *sql.Tx) (T, error)) (T, error) {
 	var empty, out T
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return empty, err
+	}
 	for _, id := range ids {
 		if err := validateStandaloneStorageEvent(selected, id); err != nil {
 			return empty, err

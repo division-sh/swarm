@@ -2338,3 +2338,100 @@ checks. The timing/catalog envelope and the selected classifier control are
 also recorded. Cheap native binding joins the per-batch sweep whenever proof
 roots or partition intersections change. Template9 changes remain separate,
 uncommitted and unqualified by this planner-only checkpoint.
+
+### Template9 ordinary construction and shared observation closure
+
+Eight ordinary openings now consume native PostgreSQL construction. The one
+connect-publication rollback root retains its exact late SQL-trigger setup and
+supplied-pool admission as explicit S debt; no relocation, exemption, false
+completion credit or admission-wait substitute. The two artifact-result roots
+retain their own independent raw observation/fault tail, but all their uses of
+the shared event-ID and settled-node wait helpers now consume native ports.
+Their existing success/failure cases and handler-start ordering are unchanged.
+
+The three generic query/pool helpers are retired from live code: fixed-port
+count and event-ID observations replace caller SQL; all12 shared helper bodies
+lose their pool. Local polling callbacks carry detached scalar reads only and
+never cross a public fixture boundary. Existing deadlines,25ms spacing, query
+errors, absence handling and exact cardinalities remain. A finite conservation
+oracle accounts for all42 original count calls, matching every owner, context,
+coordinate, SQL shape and asserted value. Changed coordinates/cardinalities,
+lost refusals, inflated deadlines and raw helper reintroduction are rejected.
+The existing finite codemod is the committed transformation/preflight owner;
+the temporary bulk-edit prototype is not shipped as a second tool/framework.
+
+Canonical owners and complete consumer families:
+
+| Owner | Consumers and conserved physical seam |
+| --- | --- |
+| eventrecord | All three template files and both indirect artifact-result roots: exact identity/payload and global named first-row discovery; exact source parent with NULL not inferred; existing named-event count remains its original owner. |
+| closed delivery projections | All node/agent/unselected-carrier assertions, exact event multiplicity, strict creation-before-settlement, settled-attempt claim_version join, PostgreSQL target containment and final event-specific diagnostic rows. |
+| pipelinepersistence | Node receipts versus separate subscribed replay scopes; global template/route counts, exact run/operating construction-field join, active agent route versus unfiltered placeholder route, event-specific receipt diagnostics. |
+| entityruntime | Global account-prefix counts, original latest-created identity/limit, PostgreSQL reviewed-field containment and ordered account diagnostic rows; whole-store entity count reuses its existing owner. |
+| original selected native read coordinator | All27 new fixed observations return detached rows/scalars at independent original read cuts. Native validation occurs even without identity parameters; typed-nil owners no longer panic. No second coordinator, public query/callback selector or writable handle is introduced. |
+| existing diagnostic observation | Timeout-only global diagnostic logging consumes the existing native owner, not another raw four-table walker. Its richer format is non-closure-bearing; no success/cardinality assertion depends on it. |
+
+The three PostgreSQL containment witnesses retain the actual PostgreSQL
+operator semantics and fail closed for unsupported ownership; no SQLite JSON
+compatibility interpretation or public platform capability is invented.
+Portable physical reads are exercised on both stores. Required sqlite/postgres
+children for the three new owner controls are selected by the existing S-Z unit;
+its exact reviewed child-map digest expands without dropping any original cell.
+
+Manifestation coverage (original supported PostgreSQL posture):
+
+| Manifestation | Exact proof and disposition |
+| --- | --- |
+| no-target receipt versus replay scope | TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately: execution-proven through the same corrected path |
+| authority before handler execution | TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandlerExecution: execution-proven through the same corrected path |
+| auto-emit/local handler/side effect | TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect: execution-proven through the same corrected path |
+| rendered route and delivery rows | TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows: execution-proven through the same corrected path |
+| acknowledged routed execution | TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect: execution-proven through the same corrected path |
+| durable root outbox execution | TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect: execution-proven through the same corrected path |
+| template pilot identity and target | TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersistedDeliveryRoute: execution-proven through the same corrected path |
+| final-flow identity, fields and delivered target | TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance: execution-proven through the same corrected path |
+| late publication rollback trigger | TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute: split / escalated as separate class; original root PASS, exact trigger ownership migration still S and not credited |
+| indirect durable/static artifact callback waits | Both TestRuleResultEventsFlowThroughDurableCallbackDelivery and TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery: execution-proven through the same corrected path; their separate raw-reader tail remains D |
+| nil/global selected read ownership | TestTemplateStorageObservationsRefuseRawCancelledAndClosedOwnersBothStores: reproduced and fixed; actual validation-removal mutant panics, restored owner controls PASS both stores |
+
+template9-original-workloads.jsonl: all11 affected roots PASS under race22.236s,
+including the retained rollback workload and original artifact success/failure
+cases. template9-shared-owner-final-controls.jsonl PASS23.201s covers new27
+observations plus affected fan-out/nested ownership refusals. Absent required
+rows retain sql.ErrNoRows; empty counts stay zero; failed ownership supplies no
+provisional data. The actual nil-validation mutant is RED and restored controls
+PASS16.458s. One candidate overlay PASS131.827s; finite/current/historical/caller
+guards PASS5.315s; affected owner guards PASS7.800s; current native binding and
+S-Z child-conservation PASS17.445s; source correspondence PASS1.562s. U1000 is
+clean. The finite corpus is1100 rows /259 transitions; all893 immutable tuples
+and24 historical receipts remain, with exact current Successor/After mappings
+and the combined receipt digest re-pinned rather than historical evidence lost.
+Current codemod is inert. Final complexity and one global downward ratchet are
+recorded at the signed checkpoint, not an integrated/full-tier qualification.
+
+Admission spelling drops126 to118 =103 external +15 private. Eight additional
+ordinary removals are execution-qualified; cumulative delivery-reset qualified
+credit16. Provisional queue M0/D81/S37, not a fresh global class closure. D3
+SQL-order, M07 possession loss, rollback trigger, M01, Docker and semantic-drain
+holds remain explicit and unwaived. No new issue/watchlist node or broader
+runtime contract is needed; existing #2542/#2151 and OPEN#2353 tracking applies.
+The architecture improvement is whole shared escape retirement, not a claim
+that dozens of scalar ports eliminate the parent class. Next ready dependency:
+private descriptor/readiness13, keeping its remaining two private S calls apart.
+
+Checkpoint qualification limits: the one fresh global ratchet is RED181.424s,
+actual9232 versus trusted/head10688, on one new SQLite concrete-construction
+identity in the earlier stage-completion cohort. Its independently owned native
+reopen closure moved construction into the root; PostgreSQL already returns
+the opaque owned fixture. This is not a Template9 addition, nor one of the
+previously authorized signature transitions. Baseline/collector unchanged;
+bounded aperture-versus-exact-transition disposition requested on #2542. No
+retry, baseline payment, general allowance or parent-closure claim.
+
+The text-retirement inventory also finds four new immutable/current diagnostic
+snapshot references to the Go standard-library formatting accumulator. These
+receive only exact function/field/body-digest entries in both finite corpora,
+with the existing extra-reference/changed-field/body hostile controls retained.
+No whole-file or prefix exemption, code restoration or historical-text edit.
+Expected reference multiplicity grows by two per corpus, not authority debt.
+The global ratchet blocker remains separate from this lexical classification.

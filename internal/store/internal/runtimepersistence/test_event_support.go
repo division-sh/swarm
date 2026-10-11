@@ -449,6 +449,27 @@ func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, nam
 	})
 }
 
+func ReadTemplateNamedEventIdentityForTest(ctx context.Context, selected any, name string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadTemplateNamedEventIdentityTx(ctx, tx, name)
+	})
+}
+func ReadTemplateSourceNamedEventIdentityForTest(ctx context.Context, selected any, name, source string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{source}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadTemplateSourceNamedEventIdentityTx(ctx, tx, name, source)
+	})
+}
+func ReadTemplateEventPayloadTextForTest(ctx context.Context, selected any, event string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadTemplateEventPayloadTextTx(ctx, tx, event)
+	})
+}
+func CountTemplateEventIdentityForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountTemplateEventIdentityTx(ctx, tx, event)
+	})
+}
+
 func ReadNestedRunNamedEventIDsForTest(ctx context.Context, selected any, run, name string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadNestedRunNamedEventIDsTx(ctx, tx, run, name)

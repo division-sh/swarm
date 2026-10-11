@@ -6914,6 +6914,21 @@ engine:
                 runtime-log payloads by descending insertion sequence. Real native insert faults, immutable captured
                 sources, partition equivalence, retry/blocked isolation, receiver drain and joined cleanup remain
                 mandatory execution proofs; source-spelling migration alone is not their qualification.
+              template_delivery_fixture_storage: >-
+                Template delivery, pilot and final-flow witnesses use native selected construction and fixed physical
+                eventrecord, closed delivery, pipeline and entity read ports, not pools or caller-authored SQL.
+                Preserve exact event/node/agent identity, unfiltered versus delivered status, strict creation-before-settlement,
+                the settled attempt at the delivery's original claim_version, node receipt and subscribed replay-scope counts.
+                Global template, account-prefix and route counts retain their original scopes without inferred run, eligibility,
+                latest-claim or status narrowing. Named-event discovery keeps the original unordered first-row posture;
+                parent discovery requires exact source_event_id and never treats NULL as self-parent. Payload text, initialized
+                instance fields and latest account identity retain native bytes, exact joins and existing order/limit semantics.
+                Existing PostgreSQL JSON-containment witnesses remain explicitly PostgreSQL physical observations, with
+                unsupported ownership refused rather than a compatibility parser or semantic fallback. Every independent
+                count/read uses the original selected read coordinator; raw, invalid, cancelled or closed ownership and read
+                failures provide no provisional evidence. Public ports expose detached scalars or rows only. Polling keeps its
+                original deadline, spacing, cardinality and error refusals; diagnostic observations cannot grant success.
+                The exact rollback SQL-trigger fixture remains separately tracked until its original live-fault owner is proven.
               nested_fan_out_fixture_observation: >-
                 Nested serving and repeated-trigger fixtures retain the original selected owner, not a returned pool,
                 in every constructor, readback helper and execution-boundary observer. Event identity discovery

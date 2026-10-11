@@ -13,7 +13,9 @@ import (
 )
 
 const originalRuntimeSZRun = `^Test[S-Z].*$`
-const originalRuntimeSZChildren = "948ca28d566a020c6689516404b061fa4bde16aa1250fa34ea630c622a4682e2"
+
+// Original full-06 children plus the three new native template storage controls.
+const pinnedRuntimeSZChildren = "25840bbce41c6d0d95a48e754309feaed1d8f2afc573407925e8147337ad51da"
 
 var runtimeSZUnits = []string{"store-runtime-selected", "store-runtime-s-z-rest"}
 
@@ -75,14 +77,14 @@ func validateRuntimeSZChildren(policy Policy) error {
 			children[root] = cells
 		}
 	}
-	// Freeze the original backend/fault obligations, including their order,
+	// Freeze the original and added backend/fault obligations, including their order,
 	// without maintaining a second executable child inventory.
 	data, err := json.Marshal(children)
 	if err != nil {
 		return err
 	}
-	if actual := fmt.Sprintf("%x", sha256.Sum256(data)); actual != originalRuntimeSZChildren {
-		return fmt.Errorf("original full-06 required children changed: %s", actual)
+	if actual := fmt.Sprintf("%x", sha256.Sum256(data)); actual != pinnedRuntimeSZChildren {
+		return fmt.Errorf("pinned S-Z required children changed: %s", actual)
 	}
 	return nil
 }

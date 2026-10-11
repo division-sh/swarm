@@ -63,9 +63,9 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	expectedUnrelatedTextCounts := map[string]int{
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                          12,
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                          14,
 		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":            4,
-		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":            6,
+		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":            8,
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
 		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
 		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go": 1,
@@ -224,7 +224,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
-	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 12 {
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 14 {
 		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
 	}
 	for _, candidate := range recipeCandidates {
@@ -234,7 +234,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	}
 	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
 	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
-	if extraErr != nil || len(extraCandidates) != 13 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[12].text) {
+	if extraErr != nil || len(extraCandidates) != 15 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[14].text) {
 		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
 	}
 	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
@@ -265,7 +265,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	family145Candidates, err := retiredBuilderCandidates(family145Path, family145Bytes)
-	if err != nil || len(family145Candidates) != 6 {
+	if err != nil || len(family145Candidates) != 8 {
 		t.Fatalf("exact family145 text-reference inventory changed: count%d/%v", len(family145Candidates), err)
 	}
 	for _, candidate := range family145Candidates {
@@ -424,6 +424,10 @@ func isExactFamily145ReferenceSnapshot(path, line string) bool {
 // Exact approved source/field evidence: buildErr and strings.Builder, not the
 // retired product. Historical bodies are neither edited nor broadly exempted.
 var family145ReferenceSnapshots = []struct{ corpus, function, field, digest string }{
+	{"recipes.json", "runtimeTestEventDiagnostics", "Before", "222818632cfa7253d1988a057dd751dfb29245ac1ff53049a2473976bef16455"},
+	{"recipes.json", "runtimeTestEventDiagnostics", "After", "ef3a68977a3aec247d33de356d4fed2cc02fc072ac6533cd7996bd163dae1814"},
+	{"family145-transitions.json", "runtimeTestEventDiagnostics", "Before", "222818632cfa7253d1988a057dd751dfb29245ac1ff53049a2473976bef16455"},
+	{"family145-transitions.json", "runtimeTestEventDiagnostics", "After", "ef3a68977a3aec247d33de356d4fed2cc02fc072ac6533cd7996bd163dae1814"},
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Before", "0095c88157da39be35aba627ff3991757f724e15a0d0c95b3843670d92b05c1f"},
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "After", "8bd9808550c6259b25b91fa5ac5fa8f102ea2706ed1dc538a7c73d580258368f"},
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Successor", "91095150b46600d260565161d127d1d47bf017e10379e79e960fc6428ab01662"},

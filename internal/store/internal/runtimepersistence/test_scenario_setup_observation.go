@@ -14,6 +14,29 @@ import (
 type ScenarioSetupRunStorage = runlifecycle.ScenarioSetupRunStorage
 type PostgresScenarioSetupEntityStorage = entitystore.PostgresScenarioSetupEntityStorage
 
+type TemplateAccountIdentityStorage = entitystore.TemplateAccountIdentityStorage
+
+type TemplateAccountDiagnosticStorage = entitystore.TemplateAccountDiagnosticStorage
+
+func ReadTemplateAccountDiagnosticsForTest(ctx context.Context, selected any) ([]TemplateAccountDiagnosticStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, entitystore.ReadTemplateAccountDiagnosticsTx)
+}
+
+func CountTemplateAccountEntitiesForTest(ctx context.Context, selected any) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, entitystore.CountTemplateAccountEntitiesTx)
+}
+func CountPostgresReviewedTemplateAccountForTest(ctx context.Context, selected any, fields string) (int, error) {
+	if err := validatePostgresPublicationIdentities(selected); err != nil {
+		return 0, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return entitystore.CountPostgresReviewedTemplateAccountTx(ctx, tx, fields)
+	})
+}
+func ReadLatestTemplateAccountIdentityForTest(ctx context.Context, selected any) (TemplateAccountIdentityStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, entitystore.ReadLatestTemplateAccountIdentityTx)
+}
+
 type NestedFanOutEntityStorage = entitystore.NestedFanOutEntityStorage
 
 func ReadNestedRunEntityStateFieldsForTest(ctx context.Context, selected any, run string) ([]NestedFanOutEntityStorage, error) {

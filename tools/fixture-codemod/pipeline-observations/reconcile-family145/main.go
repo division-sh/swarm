@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "96b64ef0b6e56464e82219966713393cd99b69390e2a3cd37aa02ac320e9d20b"
+const targetDigest = "528f8d8674c91ba9e4edf0a0a348491c8261c1ec18026c1b0cd29c72e1d9e039"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -79,6 +79,10 @@ var files = []string{
 	"internal/runtime/manager/terminal_retirement_store_test.go",
 	"internal/runtime/node_delivery_startup_recovery_test.go",
 	"internal/runtime/workflow_timer_startup_recovery_test.go",
+	"internal/runtime/template_instance_delivery_test.go",
+	"internal/runtime/template_flow_pilot_runtime_test.go",
+	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
+	"internal/runtime/artifact_action_result_delivery_test.go",
 	"internal/runtime/runforkadmission/revision_source_route_test.go",
 	"internal/runtime/runforkexecution/activity_fork_execution_test.go",
 	"internal/runtime/runforkexecution/agent_runtime_materialization_test.go",
@@ -151,6 +155,13 @@ func main() {
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
 	if replacement := after[key]; replacement != "" {
 		return replacement, false
+	}
+	if path == "internal/runtime/template_instance_delivery_test.go" {
+		for previous, successor := range map[string]string{"waitRuntimeDBCount": "waitRuntimeStorageCount", "waitRuntimeEventID": "waitRuntimeStoredEventID", "assertRuntimeDBCount": "assertRuntimeStorageCount"} {
+			if key == previous && after[successor] != "" {
+				return after[successor], false
+			}
+		}
 	}
 	if path == "internal/runtime/runforkadmission/revision_source_route_test.go" && key == "captureRunForkRevision" {
 		return "", true

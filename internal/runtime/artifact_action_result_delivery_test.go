@@ -128,11 +128,9 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
-			resultEventID := waitRuntimeEventID(t, ctx, db, `
-				SELECT event_id::text
-				FROM events
-				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{resultEventType, tc.requestEventID})
+			resultEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+				return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, resultEventType, tc.requestEventID)
+			})
 			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1", artifactActionResultEntityID)
 			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1", artifactActionResultEntityID)
 			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
@@ -146,7 +144,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
 			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1", artifactActionResultEntityID), repoNodeID)
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, pg, resultEventID, repoNodeID)
 		})
 	}
 }
@@ -317,8 +315,9 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 
 			requestEventID := tc.requestEventID
 			if childRequest {
-				requestEventID = waitRuntimeEventID(t, ctx, db, `SELECT event_id::text FROM events WHERE event_name=$1 AND source_event_id=$2::uuid`,
-					[]any{"repo-scaffold/child-1/repo_scaffold.repo_commit_requested", tc.requestEventID})
+				requestEventID = waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+					return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, "repo-scaffold/child-1/repo_scaffold.repo_commit_requested", tc.requestEventID)
+				})
 				var rawSource string
 				if err := db.QueryRowContext(ctx, `SELECT source_route::text FROM events WHERE event_id=$1::uuid`, requestEventID).Scan(&rawSource); err != nil {
 					t.Fatal(err)
@@ -331,11 +330,9 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 					t.Fatalf("child request borrowed parent state ownership: %s", rawSource)
 				}
 			}
-			resultEventID := waitRuntimeEventID(t, ctx, db, `
-				SELECT event_id::text
-				FROM events
-				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{resultEventType, requestEventID})
+			resultEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+				return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, resultEventType, requestEventID)
+			})
 			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath, parent.EntityID)
 			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath, parent.EntityID)
 			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
@@ -349,7 +346,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
 			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath, parent.EntityID), repoNodeID)
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, pg, resultEventID, repoNodeID)
 		})
 	}
 }
