@@ -21,13 +21,14 @@ const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred
 const selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
 
 type selectedContractDeferredWorkAdmission struct {
-	owner           string
-	sourceRunID     string
-	forkPoint       runfork.RunForkPoint
-	workflowName    string
-	workflowVersion string
-	fanOutPlanRefs  []runtimecontracts.FanOutPlanRef
-	fanOutPlans     semanticview.FanOutPlanCarriage
+	owner                       string
+	sourceRunID                 string
+	forkPoint                   runfork.RunForkPoint
+	workflowName                string
+	workflowVersion             string
+	fanOutPlanRefs              []runtimecontracts.FanOutPlanRef
+	fanOutPlans                 semanticview.FanOutPlanCarriage
+	dynamicConstructionRequired bool
 }
 
 func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
@@ -63,13 +64,14 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 		)
 	}
 	return selectedContractDeferredWorkAdmission{
-		owner:           runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		sourceRunID:     sourceRunID,
-		forkPoint:       plan.ForkPoint,
-		workflowName:    workflowName,
-		workflowVersion: workflowVersion,
-		fanOutPlanRefs:  fanOutPlanRefs,
-		fanOutPlans:     fanOutPlans,
+		owner:                       runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+		sourceRunID:                 sourceRunID,
+		forkPoint:                   plan.ForkPoint,
+		workflowName:                workflowName,
+		workflowVersion:             workflowVersion,
+		fanOutPlanRefs:              fanOutPlanRefs,
+		fanOutPlans:                 fanOutPlans,
+		dynamicConstructionRequired: selectedContractSourceCanCreateDynamicFlow(source),
 	}, nil
 }
 
@@ -86,6 +88,9 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, poin
 	}
 	if a.workflowName != strings.TrimSpace(source.WorkflowName()) || a.workflowVersion != strings.TrimSpace(source.WorkflowVersion()) {
 		return fmt.Errorf("selected-contract deferred-work admission workflow identity does not match selected source")
+	}
+	if a.dynamicConstructionRequired != selectedContractSourceCanCreateDynamicFlow(source) {
+		return fmt.Errorf("selected-contract deferred-work construction requirement no longer matches selected source")
 	}
 	wantFanOutPlanRefs, err := selectedContractCompiledFanOutPlans(source)
 	if err != nil {
@@ -208,11 +213,16 @@ func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
 
 func selectedContractDeferredWorkCapabilities(source semanticview.Source) []string {
 	capabilities := make([]string, 0, 4)
-	// Workflow, arrival and delivery-barrier schedules have retained owners. Availability
-	// does not discharge their fixed-cut evidence or native inventory admission.
+	// The retained manager owns construction and readiness for current compiled
+	// resolution modes. Source capability is not execution permission: the normal
+	// container sequence still admits current authority before starting that owner.
 	if source != nil {
-		if selectedContractSourceCanCreateDynamicFlow(source) {
-			capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
+		graph := runtimepinrouting.CompileConnectGraph(source)
+		for _, plan := range graph.Plans() {
+			if key := plan.InstanceKey(); key != nil && !key.Mode().Valid() {
+				capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
+				break
+			}
 		}
 	}
 	sort.Strings(capabilities)

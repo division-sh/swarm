@@ -78,39 +78,14 @@ import (
 
 func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *testing.T) {
 	for _, test := range []struct {
-		name            string
-		fixture         string
-		eventName       string
-		seedSourceTimer bool
-		wantCode        string
-		wantCapability  string
+		name      string
+		fixture   string
+		eventName string
 	}{
 		{
-			name:            "source timer lacks fixed-revision owner metadata",
-			fixture:         "tests/tier5-flow-lifecycle/test-timer-fire",
-			eventName:       "timer.scheduled",
-			seedSourceTimer: true,
-		},
-		{
-			name:           "timed join composition still requires dynamic flow creation owner",
-			fixture:        "examples/routing/fan-in/barrier",
-			eventName:      "portfolio.setup",
-			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
-		},
-		{
-			name:           "selected connect can create dynamic flow",
-			fixture:        "examples/routing/template-create-minted-key",
-			eventName:      "validation.triggered",
-			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
-		},
-		{
-			name:           "selected connect can select or create missing dynamic flow",
-			fixture:        "examples/routing/template-select-or-create",
-			eventName:      "producer/account.requested",
-			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:      "source timer lacks fixed-revision owner metadata",
+			fixture:   "tests/tier5-flow-lifecycle/test-timer-fire",
+			eventName: "timer.scheduled",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -128,23 +103,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002210, 0).UTC()
 			entityID := uuid.NewString()
-			if test.seedSourceTimer {
-				seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "test_entity",
-					selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil)
-			} else {
-				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
-				if err != nil {
-					t.Fatal(err)
-				}
-				entityID = sourceRunID
-				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
-				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID})
-				seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route})
-			}
+			seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "test_entity",
+				selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil)
 
-			sourceTimerID := ""
-			if test.seedSourceTimer {
-				sourceTimerID = uuid.NewString()
+			sourceTimerID := uuid.NewString()
+			{
 				ref := timeridentity.WorkflowTimerActivationRef{
 					ActivationID:        sourceTimerID,
 					DeclarationKey:      "test-node.check_timer",
@@ -174,9 +137,6 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 
 			owner := selectedContractExecutionOwnerForTest(t, pg)
 			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork, t: t, resolve: pg.ResolveAuthorActivityEventDescriptor}
-			if test.fixture == "examples/routing/fan-in/barrier" {
-				catalog.want = []string{"platform.join_complete", "platform.join_timeout"}
-			}
 			owner.ports.fork = catalog
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID:       sourceRunID,
@@ -189,22 +149,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				},
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 			})
-			failure, ok := runtimefailures.EnvelopeFromError(err)
-			if test.seedSourceTimer {
-				// This hostile fixture has no immutable constructor receipt. It
-				// must fail at that owner, not an obsolete timer capability gate.
-				if err == nil || !strings.Contains(err.Error(), "admit original atomic construction tree") ||
-					!strings.Contains(err.Error(), "requires exact fixed-revision owner metadata") {
-					t.Fatalf("hostile timer owner metadata was not refused exactly: %v", err)
-				}
-			} else {
-				if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != test.wantCode {
-					t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want %s rejection", result, err, test.wantCode)
-				}
-				capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-				if !ok || !slices.Contains(capabilities, test.wantCapability) {
-					t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], test.wantCapability)
-				}
+			// This hostile fixture has no immutable constructor receipt. It
+			// must fail at that owner, not an obsolete timer capability gate.
+			if err == nil || !strings.Contains(err.Error(), "admit original atomic construction tree") ||
+				!strings.Contains(err.Error(), "requires exact fixed-revision owner metadata") {
+				t.Fatalf("hostile timer owner metadata was not refused exactly: %v", err)
 			}
 			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.Materialization.ForkRunID != "" {
 				t.Fatalf("rejected result = %#v, want owner and no materialization", result)
@@ -232,7 +181,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			if sourceStatusAfter != sourceStatusBefore {
 				t.Fatalf("source status changed from %q to %q during rejected deferred-work fork", sourceStatusBefore, sourceStatusAfter)
 			}
-			if sourceTimerID != "" {
+			{
 				var status string
 				if err := db.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = $1::uuid AND run_id = $2::uuid`, sourceTimerID, sourceRunID).Scan(&status); err != nil {
 					t.Fatalf("load rejected source timer: %v", err)
@@ -415,52 +364,48 @@ func (p *selectedContractWorkspaceReleaseProbe) ReleaseSourceProjection(context.
 }
 
 func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutation(t *testing.T) {
+	// These admitted declarations still require the exact bound process owner,
+	// before either state-only activation or delivery replay can mutate the child.
 	for _, test := range []struct {
-		name           string
-		fixture        string
-		eventName      string
-		inputFlow      string
-		inputPayload   string
-		stateOnly      bool
-		wantCapability string
+		name         string
+		fixture      string
+		eventName    string
+		inputFlow    string
+		inputPayload string
+		stateOnly    bool
 	}{
 		{
-			name:           "delivery replay timed join composition requires dynamic owner",
-			fixture:        "examples/routing/fan-in/barrier",
-			eventName:      "portfolio/portfolio.setup",
-			inputFlow:      "portfolio",
-			inputPayload:   `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:         "delivery replay timed join lacks bound process capability",
+			fixture:      "examples/routing/fan-in/barrier",
+			eventName:    "portfolio/portfolio.setup",
+			inputFlow:    "portfolio",
+			inputPayload: `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
 		},
 		{
-			name:           "state only timed join composition requires dynamic owner",
-			fixture:        "examples/routing/fan-in/barrier",
-			eventName:      "portfolio.setup",
-			stateOnly:      true,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:      "state only timed join lacks bound process capability",
+			fixture:   "examples/routing/fan-in/barrier",
+			eventName: "portfolio.setup",
+			stateOnly: true,
 		},
 		{
-			name:           "delivery replay dynamic flow creation",
-			fixture:        "examples/routing/template-create-minted-key",
-			eventName:      "producer/validation.triggered",
-			inputFlow:      "producer",
-			inputPayload:   `{"candidate":"candidate-1"}`,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:         "delivery replay creation lacks bound process capability",
+			fixture:      "examples/routing/template-create-minted-key",
+			eventName:    "producer/validation.triggered",
+			inputFlow:    "producer",
+			inputPayload: `{"candidate":"candidate-1"}`,
 		},
 		{
-			name:           "delivery replay select or create missing dynamic flow",
-			fixture:        "examples/routing/template-select-or-create",
-			eventName:      "producer/account.requested",
-			inputFlow:      "producer",
-			inputPayload:   `{"account_id":"account-1"}`,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:         "delivery replay select or create lacks bound process capability",
+			fixture:      "examples/routing/template-select-or-create",
+			eventName:    "producer/account.requested",
+			inputFlow:    "producer",
+			inputPayload: `{"account_id":"account-1"}`,
 		},
 		{
-			name:           "state only select or create missing dynamic flow",
-			fixture:        "examples/routing/template-select-or-create",
-			eventName:      "producer/account.requested",
-			stateOnly:      true,
-			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+			name:      "state only select or create lacks bound process capability",
+			fixture:   "examples/routing/template-select-or-create",
+			eventName: "producer/account.requested",
+			stateOnly: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -525,14 +470,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader:      loader,
 			})
-			failure, ok := runtimefailures.EnvelopeFromError(err)
-			if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable ||
-				failure.Detail.Code != selectedContractDeferredWorkOwnerUnavailable {
-				t.Fatalf("ActivateSelectedContractRunFork result=%#v error=%v, failure=%#v", result, err, failure)
-			}
-			capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-			if !ok || !slices.Contains(capabilities, test.wantCapability) {
-				t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], test.wantCapability)
+			if err == nil || err.Error() != "selected preparation requires its bound process capability" || result.Activated {
+				t.Fatalf("activation did not require exact process owner before mutation: result=%#v err=%v", result, err)
 			}
 			after := selectedForkExecutableMutationSnapshotForTest(t, ctx, db, materialized.ForkRunID)
 			for fact, want := range before {
@@ -1168,14 +1107,8 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
-	failure, ok := runtimefailures.EnvelopeFromError(err)
-	if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable ||
-		failure.Detail.Code != selectedContractDeferredWorkOwnerUnavailable {
-		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want dynamic creation owner rejection", result, err)
-	}
-	capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-	if !ok || !slices.Contains(capabilities, selectedContractDeferredWorkDynamicFlowCreation) {
-		t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], selectedContractDeferredWorkDynamicFlowCreation)
+	if err == nil || err.Error() != `receiver target owner is missing for flow instance "producer"` || result.Materialization.ForkRunID != "" {
+		t.Fatalf("synthetic event route substituted for canonical construction: result=%#v err=%v", result, err)
 	}
 	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
 }
