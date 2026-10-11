@@ -40040,6 +40040,14 @@ process_local_work_lifetime_authority:
     reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. A snapshotted sender either completes admission before retirement drains it or observes the retired handle and admits nothing. Clearing memory never manufactures quiescence.
   durable_handoff:
     rule: Local publication ownership may end before execution only after the private selected-store adapter commits and returns the exact event and exact delivery route obligations. The publication transfers each returned delivery identity to one carrier or the one normal runtime-generation continuation coordinator before release.
+    accepted_coordinator_dispatch: >-
+      Normal-runtime continuation scanning and direct committed-publication dispatch consume the
+      coordinator's exact pre-admitted runtime standing lease when admitting their finite children.
+      Both use RuntimeOccurrence.BeginAcceptedDescendant, not fresh occurrence admission after a fence.
+      The existing work-lifetime owner validates a live same-gate ancestor; a missing, foreign or settled
+      ancestor grants no fence bypass, and actual retirement still cancels and joins these children.
+      Selected execution retains its existing selected occurrence admission and retirement rules.
+      This does not advance coordinator retirement ahead of admitted ingress or producer draining.
     recovery_metadata_reads: >
       Continuation dispatch and claimed pipeline recovery admit origin and standing-disposition
       reads under their exact existing process-work occurrence. These synchronous metadata reads
