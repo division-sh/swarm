@@ -198,6 +198,74 @@ Receipts are under ~/.cache/swarm-2542-family145 on vemew. The latest named-call
 shape survey was 182 remaining supplied-pool PostgreSQL calls before the
 pinned-source opening (181 now by exact source delta), down from 202. The two
 other constructor-spelling removals are additional, not counted in that 202.
+
+## API Publication Dependency Cohort
+
+The original selected owner now reaches all publication and run-start readback
+helpers. Thirteen publication openings and three run-start openings use native
+construction at the original resource-opening point. Neither test file retains
+an Admit/NewPostgres wrapper, raw SQL, raw getter, SQL import or raw pool carrier.
+The named AST survey now records 165 remaining Admit calls (202 initially);
+the two separately removed constructor spellings remain outside that count.
+This is not the whole-family/global census or a zero-added ratchet receipt.
+
+Fixed physical read owners are runlifecycle (the distinct strict/coalesced run
+headers), eventrecord (publication projection/identity/reference and the original
+PostgreSQL run/name queries), the existing private API storage observation owner
+(fixed event.publish stored response), and delivery/read_projections (all target
+encodings in subscriber-type/subscriber-ID/delivery-ID order). Public storetest
+bridges accept only native selected ownership and exact data coordinates; they
+return detached facts, never SQL, pools, callbacks or table/predicate authority.
+Route/JSON decoding and all behavioral caller assertions remain in the tests.
+Run-start's composite returns no earlier header if a later read fails.
+
+The PostgreSQL identity-lookalike update and deliberately headerless unroutable
+entity insert are named entityruntime physical cuts under the original native
+mutation coordinator. They retain the exact maps, pending/widget defaults,
+revision 1 and database now() clocks without manufacturing construction,
+attachment, readiness or historical revision evidence. Their writer-census row
+names both exact operations and original refusal proofs. The pre-commit database
+health assertion consumes the existing typed Ping capability, not a new query.
+The renamed-connected-creation counts consume existing fixed cardinality owners;
+all four original rejection and valid-publication assertions remain unchanged.
+
+The finite recipe owner now records 89 exact transitions, including one explicit
+SQLite helper retirement and one named PostgreSQL-to-shared helper replacement.
+The corpus has 960 rows: 67 additions to the 893 immutable historical records;
+existing Before/After/Mechanical inputs are unchanged. Digest:
+374ca389648e7424111250dc5b18b59839c1f3523eac0da7ddbb16d036917b5e.
+The reconciler rejects every other disappearance. Family-specific hostile controls
+reject changed workloads, ambiguous owner bindings and new raw publication calls;
+the existing complete preflight/type-owner machinery remains unchanged.
+
+Focused Go1.25.0 / race / count1 / GOMAXPROCS=2, on vemew:
+- api-canonical-provenance.jsonl: both-store canonical class/producer/reference
+  readback passed, 18.243s.
+- api-shared-publication-callers.jsonl: ten roots executed; nine PostgreSQL
+  roots passed, SQLite exposed the new projection's string-to-RawMessage scan
+  defect. The repair scans native bytes without decoding; no assertion changed.
+  This aggregate is RED and is not claimed as a whole-run pass.
+- api-publication-tail.jsonl: all eight selected roots passed, including the
+  repaired SQLite scope/root and both-store connected-constructor cells, 25.085s.
+- api-publication-owner.jsonl: two both-store native observation roots plus
+  closed delivery ownership and writer-census guards passed, 25.140s. Six exact
+  read commits/zero writes on each original coordinator; strict NULL, physical
+  defaults and cancelled/foreign/closed no-partial-evidence controls passed.
+- api-publication-seed-owner.jsonl: original-writer, exact hostile maps/state/
+  revision/clocks, no readiness and cancelled/foreign/invalid controls passed,
+  16.271s. No production semantic or admission change was required.
+- api-assertion-preservation-final.jsonl: final count/error-assertion shape and
+  repaired SQLite root passed, including both backends, 16.551s.
+- api-codemod-controls.jsonl: all four then-current family controls passed,
+  1.040s; api-current-recipes-dry.json reported zero changes. The added publication
+  escape control and final finite-record controls are qualified separately.
+- api-unused.log: targeted native U1000 passed for all affected owners, bridges,
+  callers and codemod packages. This is not cross-platform union qualification.
+
+All evidence is local. No tier/server2 run, push, new PR, broad parent closure or
+fresh global census is claimed. Remaining selected-fork constructor callers,
+the other ordinary/private sibling chains, reopened peers, deliberate unadmitted
+schema roles and final retirement/ratchet proof remain mandatory family145 work.
 No fresh global census, zero additions, lowered baseline or final systematic
 consumption closure is asserted; those belong to the single whole-family
 checkpoint. The committed 10698/7754/67 census remains the last qualified global

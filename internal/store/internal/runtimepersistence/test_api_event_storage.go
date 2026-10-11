@@ -186,6 +186,20 @@ func CountAPICommandReceiptsForTest(ctx context.Context, selected any) (int, err
 
 type APIPublicationCardinalityStorage struct{ Runs, Events, APICompletions int }
 
+func ReadEventPublicationStoredResponseForTest(ctx context.Context, selected any, key string) ([]byte, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT response FROM api_idempotency WHERE method='event.publish' AND idempotency_key=$1`, key).Scan(&out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadAPIFlowPublicationRefusalStorageForTest(ctx context.Context, selected any) (APIPublicationCardinalityStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return APIPublicationCardinalityStorage{}, err

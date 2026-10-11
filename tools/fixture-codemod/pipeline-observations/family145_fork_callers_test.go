@@ -18,16 +18,29 @@ import (
 var family145TransitionBytes []byte
 
 func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
+	var rows []struct {
+		File, Function, Before, After string
+		Removed                       bool `json:"Removed,omitempty"`
+	}
 	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 57 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e0d8cf4859c9e4edfcbab552509100177905f79a7176027f2cf3bf5fe9e43eb4" {
+	if err != nil || len(rows) != 89 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "374ca389648e7424111250dc5b18b59839c1f3523eac0da7ddbb16d036917b5e" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
 		finite := recipe{File: row.File, Function: row.Function, Before: row.Before, After: row.After}
+		if row.Removed {
+			finite.After, finite.Removed = row.Before, true
+			if _, err := checkpointRecipes([]byte("package proof\n"+row.Before), []recipe{finite}); err == nil {
+				t.Fatalf("retired raw helper survived: %s", row.Function)
+			}
+			if remaining, err := checkpointRecipes([]byte("package proof\n"), []recipe{finite}); err != nil || len(remaining) != 0 {
+				t.Fatalf("exact helper retirement failed: %s/%v", row.Function, err)
+			}
+			continue
+		}
 		source := []byte("package proof\n" + row.Before)
 		after, changed, err := rewriteFunction(row.File, source, finite)
 		if err != nil || !changed {
@@ -56,10 +69,54 @@ func family145SemanticOwner(function string) bool {
 	case "captureSelectedExecutionSourceRevision", "admitSelectedExecutionSourceArtifact",
 		"seedSelectedExecutionStateOnlySourceRun", "seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource",
 		"selectedForkExecutableMutationSnapshotForTest", "selectedContractDynamicRuntimeGlobalSnapshot",
-		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation":
+		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
+		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
+		"assertRunStartPersistence":
 		return true
 	}
 	return false
+}
+
+func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {
+	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go"} {
+		data, err := os.ReadFile(filepath.Join("../../..", "internal/apiv1", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := family145PublicationRawEscape(data); err != nil {
+			t.Fatalf("%s retained a raw publication dependency: %v", name, err)
+		}
+	}
+	for _, expression := range []string{"storetest.AdmitPostgresRuntimeStore(t, db)", "storetest.DatabaseForTest(selected)", "db.QueryRow(query)", "db.Exec(query)"} {
+		source := []byte("package proof\nfunc witness() { " + expression + " }")
+		if err := family145PublicationRawEscape(source); err == nil {
+			t.Fatalf("publication escape control passed: %s", expression)
+		}
+	}
+}
+
+func family145PublicationRawEscape(source []byte) error {
+	file, err := parser.ParseFile(token.NewFileSet(), "publication.go", source, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		member, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch member.Sel.Name {
+		case "AdmitPostgresRuntimeStore", "NewPostgresStoreForTest", "DatabaseForTest", "Database", "QueryRow", "QueryRowContext", "Query", "QueryContext", "Exec", "ExecContext", "Begin", "BeginTx":
+			err = fmt.Errorf("raw call %s", member.Sel.Name)
+			return false
+		}
+		return err == nil
+	})
+	return err
 }
 
 func TestFamily145ForkCallerRewritePreservesExactWorkload(t *testing.T) {

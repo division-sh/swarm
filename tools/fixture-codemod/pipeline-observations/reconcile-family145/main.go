@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "e0d8cf4859c9e4edfcbab552509100177905f79a7176027f2cf3bf5fe9e43eb4"
+const targetDigest = "374ca389648e7424111250dc5b18b59839c1f3523eac0da7ddbb16d036917b5e"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -27,11 +27,16 @@ type recipe struct {
 	Mechanical                            *snapshot `json:"Mechanical,omitempty"`
 }
 type snapshot struct{ SourceCommit, BeforeSHA256, After string }
-type transition struct{ File, Function, Before, After string }
+type transition struct {
+	File, Function, Before, After string
+	Removed                       bool `json:"Removed,omitempty"`
+}
 
 var files = []string{
 	"internal/apiv1/operator_agent_control_test.go",
 	"internal/apiv1/operator_data_test.go",
+	"internal/apiv1/operator_event_publish_test.go",
+	"internal/apiv1/operator_run_start_test.go",
 	"internal/cliapp/data_show_selected_test.go",
 	"internal/cliapp/runtime_log_filter_supported_test.go",
 	"internal/runtime/conformance/reply_resolution_conformance_test.go",
@@ -63,14 +68,12 @@ func main() {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			original, replacement := before[key], after[key]
+			original := before[key]
+			replacement, removed := currentReplacement(path, key, after)
 			if original == replacement {
 				continue
 			}
-			if replacement == "" {
-				panic("unreviewed retirement: " + path + "/" + key)
-			}
-			change := transition{path, functionName(original), original, replacement}
+			change := transition{File: path, Function: functionName(original), Before: original, After: replacement, Removed: removed}
 			changes = append(changes, change)
 			rows = extend(rows, change)
 		}
@@ -93,6 +96,21 @@ func main() {
 	}
 }
 
+func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if replacement := after[key]; replacement != "" {
+		return replacement, false
+	}
+	if path == "internal/apiv1/operator_event_publish_test.go" {
+		if key == "sqliteEventDeliveryTargetRoutes" {
+			return "", true
+		}
+		if key == "postgresEventDeliveryTargetRoutes" && after["publicationDeliveryTargetRoutes"] != "" {
+			return after["publicationDeliveryTargetRoutes"], false
+		}
+	}
+	panic("unreviewed retirement: " + path + "/" + key)
+}
+
 func extend(rows []recipe, change transition) []recipe {
 	match := -1
 	for i, row := range rows {
@@ -105,6 +123,9 @@ func extend(rows []recipe, change transition) []recipe {
 		match = i
 	}
 	if match < 0 {
+		if change.Removed {
+			return append(rows, recipe{Family: "native-postgres-admission-family145", File: change.File, Function: change.Function, Before: change.Before, After: change.Before, Removed: true})
+		}
 		return append(rows, recipe{Family: "native-postgres-admission-family145", File: change.File, Function: change.Function, Before: change.Before, After: change.After})
 	}
 	row := &rows[match]
@@ -115,7 +136,11 @@ func extend(rows []recipe, change transition) []recipe {
 	if node(parseFunction(current)) != change.Before || row.Removed {
 		panic("noncanonical predecessor: " + change.File + "/" + change.Function)
 	}
-	row.Successor = change.After
+	if change.Removed {
+		row.Successor, row.Removed = "", true
+	} else {
+		row.Successor = change.After
+	}
 	return rows
 }
 

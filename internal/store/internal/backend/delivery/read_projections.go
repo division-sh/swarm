@@ -22,6 +22,30 @@ type PreparedTargetConflictStorage struct {
 	SubscriberID, RouteIdentity, TargetEncoding string
 }
 
+func ReadPublicationDeliveryTargetEncodingsTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
+	query := `SELECT COALESCE(delivery_target_route,'{}') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id,delivery_id`
+	if postgres {
+		query = `SELECT COALESCE(delivery_target_route::text,'{}') FROM event_deliveries WHERE event_id=$1::uuid ORDER BY subscriber_type,subscriber_id,delivery_id`
+	}
+	rows, err := tx.QueryContext(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Physical cardinality witnesses deliberately include every delivery status.
 // They grant no eligibility or claim authority and do not decode route data.
 func CountSelectedForkDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
