@@ -31,7 +31,7 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 				Identity: flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", "h01", "hub/h01")},
 				EntityID: entity, EntityType: "hub", WorkflowName: "hub", Mode: "template", Status: "active", StageDefined: true,
 				CurrentState: "active", Fields: []byte(`{"hub_id":"h01","count":0,"c1":0,"c2":0}`),
-				Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{}`),
+				Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{"instance_id":"h01"}`),
 				CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
 			}
 			tx, err := db.BeginTx(ctx, nil)
@@ -46,6 +46,7 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 			root.Identity.Route = flowidentity.StoredRoute(".", run, run)
 			root.EntityID, root.EntityType, root.WorkflowName = run, "", "."
 			root.Mode, root.Fields = "static", nil
+			root.Config = []byte(`{}`)
 			if _, err := commitWorkflowHeaderAndFields(ctx, tx, postgres, root, workflowEngineStateDecision{createState: true}); err != nil {
 				t.Fatal(err)
 			}
@@ -97,8 +98,15 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 						if err := json.Unmarshal(record.Fields, &wantFields); err != nil {
 							t.Fatal(err)
 						}
-						if err := json.Unmarshal(got[0].Fields, &gotFields); err != nil || !reflect.DeepEqual(wantFields, gotFields) || string(got[0].Config) != "{}" {
+						if err := json.Unmarshal(got[0].Fields, &gotFields); err != nil || !reflect.DeepEqual(wantFields, gotFields) {
 							t.Fatalf("H2 field/config evidence changed: %+v err=%v", got, err)
+						}
+						var wantConfig, gotConfig map[string]any
+						if err := json.Unmarshal(record.Config, &wantConfig); err != nil {
+							t.Fatal(err)
+						}
+						if err := json.Unmarshal(got[0].Config, &gotConfig); err != nil || !reflect.DeepEqual(wantConfig, gotConfig) {
+							t.Fatalf("H2 full configuration changed: %+v err=%v", got, err)
 						}
 					}
 					if err := tx.Rollback(); err != nil {
