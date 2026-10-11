@@ -1054,3 +1054,106 @@ admission credit beyond the four factory removals above. The remaining named
 count stays135/136; global census/downward-baseline qualification stays reserved
 for whole-family closure. Existing #2151/#2542 tracking and watchlist mapping
 remain sufficient; no new issue or deeper architecture decision required.
+
+## Historical Source Outcomes And Returned-Outcome Matrix
+
+The entire seven-call seedSourceOutcomeThatMustNotSuppressFork dependency now
+consumes the already classified SeedSelectedSourceOutcome native fixture owner.
+It no longer receives a pool, opens an unscoped context or independently inserts
+the predecessor receipt/dead-letter pair. Each caller supplies its original
+selected instance, exact source/run/event/entity coordinates and original Unix
+timestamp; the exact normalized failure expression is unchanged. The existing
+owner verifies persisted source/event ownership and commits the same physical
+pair without manufacturing executable authority or advancing source revision.
+All seven callers are propagated; other raw SQL in their larger parent fixtures
+remains explicitly in the tail, not hidden by this helper migration.
+
+The complete TestSelectedForkRuntimeConsumersSettleReturnedOutcomes fixture
+now opens both backends natively and carries no pool/getter/SQL. Its shared
+source helper also loses the pool and duplicate SQLite BeginTx/Capture/Commit
+protocol, consuming the existing native snapshot owner on both stores. The
+original asymmetric predecessor setup is retained: this matrix adds the
+historical outcome pair only on PostgreSQL; SQLite still receives its original
+source history and snapshot, not a silently widened workload.
+
+Five exact scalar observations consume existing domain owners: runforkpersistence
+owns the original global binding count, fork-scoped execution count and unfiltered
+QueryRow state; eventrecord owns the exact run/event physical count; and
+pipelinepersistence owns the run-scoped flow-instance count. Their bridges use
+the original selected coordinator. Eventrecord consumption remains in the
+existing closed test_event_support owner. The existing run-lifecycle status
+read stays separate from state, preserving independent missing-row evidence.
+No combined state/status snapshot, current-generation or eligibility filter,
+ordering, mode inference, row reconstruction, table selector or public callback.
+Invalid/raw/uninitialized/cancelled/closed owners yield no provisional evidence.
+
+Every original case, provider workload, call-count vector, returned authority,
+typed error, cancellation, acknowledgment, cleanup tombstone, retained owner,
+construction removal, no-duplicate event/execution and owner-reconstruction
+assertion remains. The finite corpus pins complete caller successors and exact
+source preparation calls. The reconstruction path reuses one selected store;
+it is not independent-store reopen or process-restart qualification.
+
+| Manifestation | Disposition | Named proof |
+| --- | --- | --- |
+| Historical predecessor pair does not suppress selected execution | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage; original source failure/identity and successful fork assertions |
+| Native agent runtime and provider-turn execution | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime; TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames, all three original API provider cases |
+| Provider failure retains evidence through cleanup | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup |
+| Replay-ready activation and post-T replay-scope refusal | execution-proven through the same corrected path | TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSelectedRecipients; TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker |
+| Returned-outcome handling, native setup and separate physical read cuts | execution-proven through the same corrected path | TestSelectedForkRuntimeConsumersSettleReturnedOutcomes on both stores and execute/activation_gate, six selected relevant cases:22 cells |
+| Exact predecessor fields, failure and historical clocks | execution-proven through the same corrected path | TestSelectedSourceOutcomeFixturePreservesHistoricalPairAndOriginalWriterBothStores, native physical receipt/dead-letter rows, exact failure, original writer and unchanged-pair refusals |
+| Exact scalar scope and fail-closed ownership | execution-proven through the same corrected path | TestSelectedRuntimeOutcomeScalarsPreservePhysicalScopeAndOriginalCoordinatorBothStores; expanded TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores |
+
+Receipts on vemew, all count1: source-outcome-native-pilot.jsonl PASS8.693s under
+race (lineage root only; the compound selector did not select the intended
+matrix cells, so no matrix credit from it). The redundant explicit lineage
+receipt is also retained, not counted as extra coverage. The corrected exact
+healthy-cell selector passed PostgreSQL execute/activation_gate in9.901s.
+Final source-outcome-native-selected-cuts.jsonl PASS70.978s under race,22 cells:
+healthy, issue_refused, materialization_missing_ack, claim_acknowledged_cancel,
+issue_discard_error and source_events_acknowledged_cleanup across both stores
+and supported execute/activation cuts. This is a focused branch selection,
+not a claim that the entire historical matrix was rerun during migration.
+source-outcome-native-execution-consumers.jsonl PASS20.916s under race, all five
+other roots and all three provider variants. All seven helper callsites thus
+have actual execution evidence in addition to finite source/type proof.
+
+source-outcome-native-scalars.jsonl PASS14.081s under race: exact event/run/foreign
+scope, real missing-state ErrNoRows (never status-derived), empty binding/runtime/
+construction evidence, seven original selected read commits and all five added
+ports raw/uninitialized/cancelled/closed refusal. source-outcome-native-pair.jsonl
+PASS12.047s verifies physical pair fields, exact normalized failure, original
+historical clocks, one native write/no revision finalization, and duplicate,
+foreign-event, missing-source, wrong-source and cancelled refusal with unchanged
+stored rows. These are metadata facts, not promoted historical execution claims.
+
+Shifting only the dead-letter clock by one second at the actual native owner
+produces source-outcome-clock-counterexample.jsonl expected RED11.122s on both
+stores. The exact owner is restored with no lasting production change;
+source-outcome-clock-restored.jsonl PASS12.889s. No relaxed timestamp comparison,
+timeout inflation, skip, retry-until-green or raw replacement seed.
+
+source-outcome-finite-controls.jsonl PASS1.148s: exact current/historical recipes,
+all original caller assertions, exact normalized failure and historical input
+coordinates, unchanged source preparation and no pool/duplicate protocol in
+the complete matrix file. The first affected guard command failed in setup:
+Go1.25 reported standard-library packages not in std; no guard tests ran.
+Installation files existed unchanged, explicit standard/package Go list probes
+then passed. No installation mutation or pressure/root-cause claim. The final
+source-outcome-owner-guards-after-stdlib-probe.jsonl is GREEN for all five roots
+(runtimepersistence3.815s, events1.776s, canonicalrouting18.158s). The initial
+setup-only RED remains disclosed, not erased or called a code regression.
+
+Seven-package U1000 and the complete codemod dry run Changes=[] are green. The
+finite corpus is1020 rows/160 transitions, inspected digest
+e54d4e6bcd80ea2a1c6a34a9d14ee113a40a66bc645ed449b7ef9b96e48663de.
+Original893 immutable rows and24 historical-receipt pin remain unchanged. The
+existing committed finite codemod records all complete caller successors; no
+new collector, inventory exemption or migration framework. No aggregate
+codemod package, local tier or exhaustive unrelated matrix rerun.
+
+The named admission survey is135 ->134, or135 excluding Docker whose removal
+remains unqualified. No fresh global census/downward baseline or remaining raw-
+site count is claimed at this cohort. #2542/#2151 and their existing watchlist
+mapping remain open; routine native ownership repair stays within the approved
+family. M01 and Docker remain qualification-open under #2353. No push or PR.

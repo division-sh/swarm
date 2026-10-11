@@ -30,6 +30,21 @@ func TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores(
 		{"selected-execution", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadSelectedExecutionStorageForTest(ctx, owner, id)
 		}, SelectedExecutionStorage{}},
+		{"selected-binding-count", func(ctx context.Context, owner any, _ string) (any, error) {
+			return CountSelectedContractBindingStorageForTest(ctx, owner)
+		}, 0},
+		{"selected-execution-count", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedRuntimeExecutionStorageForTest(ctx, owner, id)
+		}, 0},
+		{"selected-execution-state", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedRuntimeExecutionStateStorageForTest(ctx, owner, id)
+		}, ""},
+		{"run-construction-count", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountRunFlowInstanceStorageForTest(ctx, owner, id)
+		}, 0},
+		{"run-exact-event-count", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountRunExactEventStorageForTest(ctx, owner, id, id)
+		}, 0},
 		{"fork-counts", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadConversationForkStorageForTest(ctx, owner, id)
 		}, ConversationForkStorage{}},

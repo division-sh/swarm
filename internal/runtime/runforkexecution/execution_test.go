@@ -695,7 +695,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Mock,
 		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(historicalNode), Target: events.MustExistingEntityTarget(historicalTarget)}})
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	request := SelectedContractExecutionRequest{
@@ -1393,7 +1393,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002202, 0).UTC()
 	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	agent := &selectedContractForkTestAgent{}
@@ -1695,7 +1695,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002203, 0).UTC()
 			seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
-			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+			seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
@@ -3000,7 +3000,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002403, 0).UTC()
 	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
@@ -3789,7 +3789,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
 	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
@@ -3901,7 +3901,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
 	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), pg, sourceRunID, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
@@ -5509,29 +5509,13 @@ func selectedExecutionSourceArtifactIfKnown(t testing.TB, bundleHash string) *so
 	return nil
 }
 
-func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEventID, entityID string, at time.Time) {
+func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, ctx context.Context, selected any, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "source_dead_letter", "run-fork-test", "seed", nil), "run-fork-test", "seed")
-	failureRaw, err := json.Marshal(failure)
-	if err != nil {
-		t.Fatalf("marshal source dead-letter failure: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES ($1::uuid, 'platform', 'old-source-node', $2::uuid, 'flow-a/1', 'success', 'source_outcome_must_not_suppress_fork', '{}'::jsonb, $3)
-	`, sourceEventID, entityID, at); err != nil {
-		t.Fatalf("seed source receipt: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO dead_letters (
-			original_event_id, original_event, entity_id, flow_instance, failure, handler_node, created_at
-		)
-		VALUES ($1::uuid, 'item.received', $2::uuid, 'flow-a/1', $3::jsonb, 'old-source-node', $4)
-	`, sourceEventID, entityID, string(failureRaw), at); err != nil {
-		t.Fatalf("seed source dead letter: %v", err)
+	if err := storetest.SeedSelectedSourceOutcome(ctx, selected, storetest.SelectedSourceOutcomeFixture{
+		RunID: sourceRunID, EventID: sourceEventID, EntityID: entityID, CreatedAt: at, Failure: failure,
+	}); err != nil {
+		t.Fatalf("seed source receipt/dead letter pair: %v", err)
 	}
 }
 

@@ -32,6 +32,24 @@ type SelectedCausalDiagnosticStorage struct {
 	Projection []byte
 }
 
+func CountRunExactEventStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	for _, id := range []string{runID, eventID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return 0, err
+		}
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountRunExactEventStorageTx(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
 func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, eventID, agentID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return 0, err

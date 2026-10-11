@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 158 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "2ab80a41c3b56e720878522cfe42cb3ceca0b6af76d2dc1753ae731773881a2a" {
+	if err != nil || len(rows) != 160 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e54d4e6bcd80ea2a1c6a34a9d14ee113a40a66bc645ed449b7ef9b96e48663de" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,10 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "seedSourceOutcomeThatMustNotSuppressFork" || function == "seedSelectedRuntimeOutcomeSource" {
+		assertFamily145SourceOutcomeProofs(t, function, beforeSource, afterSource)
+		return
+	}
 	if function == "TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity" {
 		assertFamily145ReplayFaultAssertions(t, beforeSource, afterSource)
 		return
@@ -147,6 +151,8 @@ func family145SemanticOwner(function string) bool {
 		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
 		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations", "loadNotifyAllChildrenSingleEventID",
 		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory", "requireSourceRevisionLifecycleDiagnosticReceipts":
+		return true
+	case "seedSourceOutcomeThatMustNotSuppressFork", "seedSelectedRuntimeOutcomeSource":
 		return true
 	}
 	return false
