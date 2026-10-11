@@ -35,14 +35,20 @@ type servedNativeClientTrust struct {
 type servedNativeProcessConfig struct {
 	ConfigPath, SourceRoot, PlatformSpecPath, SwarmDir, StoreMode string
 	Trust                                                         servedNativeClientTrust
+	LogoutReservationCut                                          bool
 }
 
 const servedNativeProcessEnv = "TEST_SERVED_WHATSAPP_PROCESS"
 
 func startServedNativeSDKProcess(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer) *channelOnboardingCrashServeProcess {
+	return startServedNativeSDKProcessWithLogoutCut(t, opts, peer, false)
+}
+
+func startServedNativeSDKProcessWithLogoutCut(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, reservationCut bool) *channelOnboardingCrashServeProcess {
 	t.Helper()
 	config, err := json.Marshal(servedNativeProcessConfig{ConfigPath: opts.ConfigPath, SourceRoot: opts.SourceRoot,
-		PlatformSpecPath: opts.PlatformSpecPath, SwarmDir: opts.SwarmDir, StoreMode: opts.StoreMode, Trust: peer.clientTrust})
+		PlatformSpecPath: opts.PlatformSpecPath, SwarmDir: opts.SwarmDir, StoreMode: opts.StoreMode, Trust: peer.clientTrust,
+		LogoutReservationCut: reservationCut})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +88,9 @@ func TestServedWhatsAppSDKProcessHelper(t *testing.T) {
 	var config servedNativeProcessConfig
 	if err := json.Unmarshal([]byte(encoded), &config); err != nil {
 		t.Fatal(err)
+	}
+	if config.LogoutReservationCut {
+		installServedNativeLogoutReservationCut(t)
 	}
 	host, _, err := net.SplitHostPort(config.Trust.Address)
 	if err != nil || !net.ParseIP(host).IsLoopback() {

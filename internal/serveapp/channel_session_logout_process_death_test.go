@@ -7,15 +7,134 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 )
+
+type servedNativeLogoutReservationCut struct {
+	serveSessionBootstrapOwner
+}
+
+func (s servedNativeLogoutReservationCut) DispatchSessionLogout(ctx context.Context, op channelonboarding.TeardownOperation) error {
+	if op.Kind != channelonboarding.TeardownLogout || op.Phase != channelonboarding.TeardownAuthorityRetired ||
+		op.Logout == nil || op.Logout.Validate() != nil {
+		return channelonboarding.ErrConflict
+	}
+	fmt.Fprintln(os.Stdout, "NATIVE_LOGOUT_RESERVED "+op.TeardownID)
+	<-ctx.Done()
+	return context.Cause(ctx)
+}
+
+func installServedNativeLogoutReservationCut(t *testing.T) {
+	t.Helper()
+	previous := newServeSessionBootstrap
+	newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
+		credentials operatorchannel.CredentialCurrentness, directory string,
+	) (serveSessionBootstrapOwner, error) {
+		owner, err := previous(selectRuntime, store, credentials, directory)
+		if err != nil {
+			return nil, err
+		}
+		return servedNativeLogoutReservationCut{serveSessionBootstrapOwner: owner}, nil
+	}
+	t.Cleanup(func() { newServeSessionBootstrap = previous })
+}
+
+func TestServedWhatsAppLogoutReservationProcessDeathBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+			peer := newServeNativeProtocolPeer(t)
+			opts, _ := servedNativeProcessOptions(t, backend)
+			process := startServedNativeSDKProcessWithLogoutCut(t, opts, peer, true)
+			endpoint := process.endpoint(t) + "/v1/rpc"
+			ready := requireServedNativeProcessPairing(t, endpoint, peer)
+			peer.mu.Lock()
+			connections := peer.connections
+			peer.mu.Unlock()
+			params := map[string]any{"operation_id": ready.Operation.OperationID, "expected_revision": ready.Operation.Revision,
+				"idempotency_key": "reserved-logout-process-death"}
+			done := beginServedNativeInterruptedLogout(t, endpoint, params)
+			deadline := time.Now().Add(5 * time.Second)
+			for !strings.Contains(process.output.String(), "NATIVE_LOGOUT_RESERVED ") {
+				if time.Now().After(deadline) {
+					t.Fatal("public logout missed its committed reservation boundary", process.output.String())
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			var reserved channelonboarding.Result
+			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &reserved)
+			if reserved.Logout == nil || reserved.Logout.Teardown.Phase != channelonboarding.TeardownAuthorityRetired ||
+				reserved.Operation.Phase != channelonboarding.PhaseRetired || reserved.Logout.Teardown.Logout != nil {
+				t.Fatal("reservation lost private-target-free frozen responsibility", reserved)
+			}
+			select {
+			case frame := <-peer.logouts:
+				t.Fatal("reservation-only cut already sent unlink", frame)
+			default:
+			}
+			if err := process.kill(); err != nil {
+				t.Fatal("reserved logout process did not die and join", err)
+			}
+			requireServedNativeDisconnect(t, peer)
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("reservation-only death fabricated successful logout")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("dead reservation left the original caller unresolved")
+			}
+			enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
+			for range 2 {
+				process = startServedNativeSDKProcess(t, opts, peer)
+				endpoint = process.endpoint(t) + "/v1/rpc"
+				var historical channelonboarding.Result
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &historical)
+				if historical.Logout == nil || historical.Logout.Teardown.TeardownID != reserved.Logout.Teardown.TeardownID ||
+					historical.Logout.EffectOperationID != reserved.Logout.EffectOperationID ||
+					historical.Logout.Teardown.Revision != reserved.Logout.Teardown.Revision ||
+					historical.Logout.Teardown.Phase != channelonboarding.TeardownAuthorityRetired ||
+					historical.Operation.Phase != channelonboarding.PhaseRetired ||
+					(historical.Readiness != nil && historical.Readiness.Ready) {
+					t.Fatal("reservation-only recovery fabricated settlement or fresh execution", historical)
+				}
+				requireServedJSONRPCError(t, endpoint, "channel.logout", params)
+				var unchanged channelonboarding.Result
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &unchanged)
+				if unchanged.Logout == nil || unchanged.Logout.Teardown.Revision != reserved.Logout.Teardown.Revision ||
+					unchanged.Logout.Teardown.Phase != channelonboarding.TeardownAuthorityRetired {
+					t.Fatal("missing original SDK owner rewrote pending responsibility", unchanged)
+				}
+				if err := process.stop(); err != nil {
+					t.Fatal("reservation-only recovery process did not join", err, process.output.String())
+				}
+				peer.mu.Lock()
+				currentConnections := peer.connections
+				peer.mu.Unlock()
+				if currentConnections != connections {
+					t.Fatal("reservation-only recovery reconnected or adopted a successor", currentConnections, connections)
+				}
+				select {
+				case frame := <-peer.logouts:
+					t.Fatal("reservation-only recovery/replay sent unlink", frame)
+				default:
+				}
+			}
+		})
+	}
+}
 
 func TestServedWhatsAppLogoutLaunchedProcessDeathBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
