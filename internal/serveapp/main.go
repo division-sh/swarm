@@ -53,6 +53,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -1360,7 +1361,20 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	sessionBootstrap, channelProviderOwner, err := newServeChannelProviderOwners(runtimeContextManager, channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
+	nativeDirectory := swarmDir.Path
+	var nativeInvocation *sessionprovider.InvocationState
+	if opts.Dev {
+		nativeInvocation, err = sessionprovider.NewInvocationState(processWorkOwner)
+		if err == nil {
+			err = selectedLifecycle.SetNativeInvocationState(nativeInvocation)
+		}
+		if err != nil {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+		nativeDirectory = ""
+	}
+	sessionBootstrap, channelProviderOwner, err := newServeChannelProviderOwners(runtimeContextManager, channelOnboardingStore, providerCredentialOwner, nativeDirectory, nativeInvocation)
 	if err != nil {
 		presenter.fail(5, "channel_onboarding", err)
 		return 1
