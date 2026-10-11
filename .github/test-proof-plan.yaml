@@ -370,7 +370,7 @@ units:
       TestEdgeOwnedConnectionPoliciesSharingInputBothStores: [sqlite/forward, sqlite/reverse, postgres/forward, postgres/reverse]
       TestEdgeOwnedMixedConnectionProjectionsBothStores: [sqlite/generated.uuid/forward, sqlite/generated.uuid/reverse, sqlite/event.id/forward, sqlite/event.id/reverse, postgres/generated.uuid/forward, postgres/generated.uuid/reverse, postgres/event.id/forward, postgres/event.id/reverse]
       TestReceiverCompositionRestartBothStores: [sqlite, postgres]
-      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema]
+      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, default_sqlite/connected_restart/before_restart, default_sqlite/connected_restart/after_restart, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema, explicit_postgres/connected_restart/before_restart, explicit_postgres/connected_restart/after_restart]
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -832,7 +832,7 @@ units:
     run: '^TestR($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^r].*)))))))$'
     required_children:
       TestR7ServedObserverOrdersExecutionAndRestartBothStores: [default_sqlite/observer_first=false, default_sqlite/observer_first=true, explicit_postgres/observer_first=false, explicit_postgres/observer_first=true]
-      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema]
+      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, default_sqlite/connected_restart/before_restart, default_sqlite/connected_restart/after_restart, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema, explicit_postgres/connected_restart/before_restart, explicit_postgres/connected_restart/after_restart]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
