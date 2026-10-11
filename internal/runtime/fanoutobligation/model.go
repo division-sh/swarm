@@ -122,6 +122,7 @@ type Capsule struct {
 	ChainDepth       int                                  `json:"chain_depth"`
 	ProducerSource   events.RoutingSource                 `json:"producer_source"`
 	Receiver         *ExecutionReceiver                   `json:"receiver,omitempty"`
+	Context          events.DeliveryContext               `json:"delivery_context"`
 	Lineage          events.EventLineage                  `json:"lineage"`
 	Entity           map[string]any                       `json:"entity,omitempty"`
 	PlatformEntity   map[string]any                       `json:"platform_entity,omitempty"`
@@ -165,6 +166,12 @@ func MarshalCapsule(c Capsule) ([]byte, error) {
 }
 
 func (c Capsule) Validate() error {
+	if err := c.Context.Validate(); err != nil {
+		return fmt.Errorf("fan-out continuation context: %w", err)
+	}
+	if len(c.Context.Joins) != 0 {
+		return errors.New("fan-out continuation cannot copy consumed join admissions")
+	}
 	if strings.TrimSpace(c.NodeKey) == "" || strings.TrimSpace(c.HandlerEventKey) == "" || strings.TrimSpace(c.Lineage.RunID) == "" || strings.TrimSpace(c.Lineage.ParentEventID) == "" {
 		return errors.New("fan-out capsule requires exact node, handler, run, and parent event identity")
 	}

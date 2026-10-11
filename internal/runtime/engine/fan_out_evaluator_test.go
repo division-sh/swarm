@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -137,8 +138,25 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 }
 
 func TestDeferredFanOutRetainsCapturedReplyForEveryOrdinal(t *testing.T) {
-	incoming := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:original-request"}}
+	declaration, err := timeridentity.NewJoinRef(testRootExecutableNode(t, "worker"), "batch.ready", "pending", "consumed-input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:original-request"},
+		Joins: []events.JoinAdmissionReceipt{{Ref: declaration, Disposition: events.JoinAdmissionEarly}}}
 	exec, intent, trigger, _ := preparedFanOutFixtureWithContext(t, incoming)
+	if intent.Request.Capsule.Context.ReplyContextID() != incoming.ReplyContextID() || len(intent.Request.Capsule.Context.Joins) != 0 {
+		t.Fatalf("capture lost the reply or copied consumed input admissions: %+v", intent.Request.Capsule.Context)
+	}
+	raw, err := fanoutobligation.MarshalCapsule(intent.Request.Capsule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded fanoutobligation.Capsule
+	if err := json.Unmarshal(raw, &decoded); err != nil || !decoded.Equal(intent.Request.Capsule) {
+		t.Fatalf("durable capsule lost exact continuation: %+v error=%v", decoded.Context, err)
+	}
+	intent.Request.Capsule = decoded
 	prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
 	if err != nil {
 		t.Fatal(err)
@@ -151,6 +169,22 @@ func TestDeferredFanOutRetainsCapturedReplyForEveryOrdinal(t *testing.T) {
 			t.Fatalf("deferred ordinal %d lost its captured reply: context=%+v error=%v", ordinal, emit.Context, err)
 		}
 		emit.Context.Reply.ID = "reply-v1:mutated-output"
+	}
+	if intent.Request.Capsule.Context.ReplyContextID() != incoming.ReplyContextID() {
+		t.Fatal("output mutation changed the frozen request")
+	}
+}
+
+func TestDeferredFanOutWithoutReplyDoesNotBorrowPumpContext(t *testing.T) {
+	exec, intent, trigger, _ := preparedFanOutFixture(t)
+	prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := events.WithDeliveryContext(context.Background(), events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:unrelated-worker"}})
+	emit, err := prepared.EvaluateOrdinal(ctx, int64(0), 0)
+	if err != nil || !emit.Context.Empty() {
+		t.Fatalf("absence borrowed a worker's return authority: %+v error=%v", emit.Context, err)
 	}
 }
 

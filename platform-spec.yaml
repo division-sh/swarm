@@ -4766,6 +4766,13 @@ handler_specification:
           global-work accounting consume this same owner.
         fork: >-
           fan_out_obligations is a closed fixed-revision family. A child inherits frozen capsule data, source, cardinality,
+          and the originating handler's exact reply-only continuation context. Capture consumes the admitted delivery
+          route and claim; native persistence compares it with the actual handler input. Deferred ordinals consume
+          that frozen context, not a pump worker's ambient context. Fork projection maps its opaque reply reference
+          through the captured reply inventory to the child's own row, refusing missing or contradictory evidence.
+          Return joins remain on that reply row; consumed input join-admission receipts are not copied into the
+          capsule or inherited by new ordinal publications. Absence remains absent, and a retained reference grants
+          neither execution nor approval authority. The child inherits
           cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
           claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
           closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
