@@ -7,5 +7,5 @@ import (
 )
 
 func TestQ10NativeFieldlessNoStagePrivateHistoryBothStores(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyQ10NativeFieldlessNoStagePrivateHistoryForTest)
+	pipeline.VerifyQ10NativeFieldlessNoStagePrivateHistoryForTest(t, pipelineDeliveryNativeFixture)
 }
