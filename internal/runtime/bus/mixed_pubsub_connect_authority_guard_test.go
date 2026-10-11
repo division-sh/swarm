@@ -18,10 +18,9 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		}
 	}
 	for owner, retired := range map[reflect.Type][]string{
-		reflect.TypeOf(RouteTable{}):                     {"templateObservers"},
-		reflect.TypeOf(routeResolvedPattern{}):           {"SourceTemplatePath", "SourceLocalEvent", "RoutePath", "MatchPattern"},
-		reflect.TypeOf(routeSubscriberTemplate{}):        {"IDTemplate"},
-		reflect.TypeOf(routeExecutableNodeDeclaration{}): {"Entry"},
+		reflect.TypeOf(RouteTable{}):              {"templateObservers"},
+		reflect.TypeOf(routeResolvedPattern{}):    {"SourceTemplatePath", "SourceLocalEvent", "RoutePath", "MatchPattern"},
+		reflect.TypeOf(routeSubscriberTemplate{}): {"IDTemplate"},
 	} {
 		for _, name := range retired {
 			if _, present := owner.FieldByName(name); present {
@@ -66,6 +65,8 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		"materializeTemplateSourceObserversLocked": {},
 		"materializeTemplateSourceObserverLocked":  {},
 		"compiledRouteOwnerDependencies":           {},
+		"routeExecutableNodeDeclaration":           {},
+		"routeAgentDeclaration":                    {},
 		"pubsubObserverDeclarations":               {},
 		"SourceTemplatePath":                       {},
 		"SourceLocalEvent":                         {},
