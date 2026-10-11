@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 152 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d0f6aaed62623bc542fde5c8102a2d04b32493bbd205039fbed9cccf9707dd52" {
+	if err != nil || len(rows) != 154 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f635db7fde61d1d7b0d8c4495d560ca8ebc7cbefe176e7b9c92b4458806ab3f1" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -146,7 +146,7 @@ func family145SemanticOwner(function string) bool {
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
 		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
 		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations", "loadNotifyAllChildrenSingleEventID",
-		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory":
+		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory", "requireSourceRevisionLifecycleDiagnosticReceipts":
 		return true
 	}
 	return false
@@ -155,7 +155,7 @@ func family145SemanticOwner(function string) bool {
 func family145PhysicalBusinessWitness(function string) bool {
 	switch function {
 	case "gateLifecycleDiagnosticOverlap", "loadNotifyAllChildrenNumericRegistrations", "loadNotifyAllChildrenSingleEventID",
-		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory":
+		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory", "requireSourceRevisionLifecycleDiagnosticReceipts":
 		return true
 	}
 	return false
@@ -174,7 +174,7 @@ func family145DiagnosticBusinessAssertions(source string) ([]string, error) {
 		var kept []ast.Stmt
 		for _, stmt := range block.List {
 			conditional, ok := stmt.(*ast.IfStmt)
-			if ok && conditional.Init != nil && (strings.HasPrefix(family145NodeString(conditional.Init), "err := rows.Scan(") || family145NodeString(conditional.Init) == "err := rows.Err()") {
+			if ok && conditional.Init != nil && family145PhysicalTransportCheck(family145NodeString(conditional.Init)) {
 				continue
 			}
 			kept = append(kept, stmt)
@@ -183,6 +183,11 @@ func family145DiagnosticBusinessAssertions(source string) ([]string, error) {
 		return true
 	})
 	return runSetupAssertions(family145NodeString(file.Decls[0]))
+}
+
+func family145PhysicalTransportCheck(initialization string) bool {
+	return strings.HasPrefix(initialization, "err := rows.Scan(") || strings.HasPrefix(initialization, "err := logs.Scan(") ||
+		initialization == "err := rows.Err()" || initialization == "err := logs.Err()"
 }
 
 func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {

@@ -895,3 +895,50 @@ approved24-receipt pin remains unchanged. Named supplied-pool admissions now140,
 or141 excluding Docker's unqualified removal. M01 is not rerun or reclassified;
 both M01 and Docker remain separate qualification-open #2353 obligations. No
 global census/baseline, restart, push, PR or family/parent closure claim.
+
+## Source-Revision Runtime And Diagnostic Receipt Dependency
+
+The complete source-revision runtime fixture now opens natively at its original
+location. Its outer factory, five-generation convergence helper and diagnostic
+receipt helper carry no pool/getter/reconstruction. The complete lifecycle-
+diagnostic-overlap fixture file is SQL-free. Original sources, modes, exact agent
+sets, predecessor fencing, process topology, joined retirement and cleanup are
+unchanged. Rebuilding five runtime occurrences over one retained selected store
+is not a claim of independent-store reopen or process-restart qualification.
+
+Two original read cuts remain separate native transactions. Eventpersistence
+owns the exact outbox-to-operation-ID join, requested outbox run and original
+three source-revision operation kinds, without operation-run equality, success
+filtering, ordering or deduplication. Projected means exactly the original
+driver timestamp is non-NULL; no timestamp decoding, synthesized clock or
+receipt-byte inference. Projection bytes are physical/detached. Eventrecord
+independently returns every physical runtime-log payload in that run, retaining
+duplicates and native bytes without canonical decoding. The original pending/
+empty receipt, empty coverage, JSON decode and one-log-per-outbox refusals remain.
+Both ports refuse raw/invalid/closed/cancelled ownership without provisional data.
+
+source-revision-native-consumers.jsonl PASS41.123s under race/count1: all four
+original backend/mode cells, each traversing five runtime generations and the
+real persisted source/agent/log readback. source-revision-native-owners-repaired.
+jsonl PASS14.197s: both-store physical run/name scope, duplicate payloads, exact
+native storage-byte oracle, detachment/original read counters and two-port
+empty/raw/invalid/cancel/closed refusal. Its first build receipt is disclosed
+RED: the fixture's declared narrow interface omitted CommitRuntimeLogEvent;
+selecting the actual native diagnostic persistence role repaired only that test
+declaration. No production or assertion change was used to erase the RED.
+
+source-revision-finite-controls.jsonl PASS1.988s preserves six business refusals
+and exact source/current/historical recipes. Hostile structural controls reject
+constant true/false or projection-byte-derived projected markers, and pin pending
+receipt refusal; they are not mislabeled as executing a real pending-outbox cut.
+The original runtime proof establishes nonempty successfully projected receipts.
+Adjacent delivery/event/revision inventories PASS3.054s; six-package U1000 and
+complete codemod dry run Changes=[] are green. Unchanged overlap/consumer receipts
+carry; no full recipe/aggregate/matrix/tier rerun, timeout raise or retry loop.
+
+The corpus is1018 rows /154 transitions, digest
+f635db7fde61d1d7b0d8c4495d560ca8ebc7cbefe176e7b9c92b4458806ab3f1;
+original893 immutable records and approved24-receipt pin are unchanged. Named
+admissions remaining139, or140 excluding Docker's unqualified removal. M01 and
+Docker remain qualification-open under #2353. No fresh global census/baseline,
+new architecture/framework, restart or family/parent closure, push or PR claim.

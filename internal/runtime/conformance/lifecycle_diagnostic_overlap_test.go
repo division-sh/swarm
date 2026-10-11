@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -103,50 +102,31 @@ func (s *lifecycleDiagnosticOverlap) ListPendingAgentLifecycleDiagnostics(ctx co
 	}
 }
 
-func requireSourceRevisionLifecycleDiagnosticReceipts(t *testing.T, db *sql.DB, runID string) {
+func requireSourceRevisionLifecycleDiagnosticReceipts(t *testing.T, selected notifyAllChildrenStore, runID string) {
 	t.Helper()
-	rows, err := db.Query(`SELECT d.outbox_id, d.projected_at, d.projection
-		FROM agent_lifecycle_diagnostic_outbox d
-		JOIN agent_lifecycle_operations o ON o.operation_id = d.operation_id
-		WHERE d.run_id = $1 AND o.operation_kind IN ('source_set_rebind', 'source_set_retire', 'process_takeover')`, runID)
+	owner := notifyAllChildrenNativeObservationOwner(selected)
+	rows, err := storetest.ReadSourceRevisionDiagnosticStorage(context.Background(), owner, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := make(map[string]int)
-	for rows.Next() {
-		var id string
-		var at any
-		var receipt []byte
-		if err := rows.Scan(&id, &at, &receipt); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		if at == nil || len(receipt) == 0 {
-			rows.Close()
+	for _, row := range rows {
+		id, receipt := row.OutboxID, row.Projection
+		if !row.Projected || len(receipt) == 0 {
 			t.Fatalf("source revision diagnostic %s remained pending after real hydration", id)
 		}
 		ids[id] = 0
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatal(err)
-	}
-	rows.Close()
 	if len(ids) == 0 {
 		t.Fatal("source revision did not exercise takeover/rebind diagnostic production")
 	}
-	logs, err := db.Query("SELECT payload FROM events WHERE event_name = 'platform.runtime_log' AND run_id = $1", runID)
+	logs, err := storetest.ReadRunLifecycleProjectionLogPayloads(context.Background(), owner, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer logs.Close()
-	for logs.Next() {
-		var raw []byte
+	for _, raw := range logs {
 		var event struct {
 			Details map[string]any `json:"details"`
-		}
-		if err := logs.Scan(&raw); err != nil {
-			t.Fatal(err)
 		}
 		if err := json.Unmarshal(raw, &event); err != nil {
 			t.Fatal(err)
@@ -155,9 +135,6 @@ func requireSourceRevisionLifecycleDiagnosticReceipts(t *testing.T, db *sql.DB, 
 		if _, ok := ids[id]; ok {
 			ids[id]++
 		}
-	}
-	if err := logs.Err(); err != nil {
-		t.Fatal(err)
 	}
 	for id, count := range ids {
 		if count != 1 {

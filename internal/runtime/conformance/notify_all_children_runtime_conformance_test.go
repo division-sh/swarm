@@ -1169,21 +1169,18 @@ func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backe
 func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		setup func(*testing.T) notifyAllChildrenStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				base := storetest.StartSQLiteRuntimeStore(t)
-				return base, storetest.DatabaseForTest(base)
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
@@ -1195,11 +1192,10 @@ func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnB
 			{name: "emitted_creation", autoEmit: true},
 		} {
 			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
-				selected, db := tc.setup(t)
+				selected := tc.setup(t)
 				proveDynamicFlowSourceRevisionConvergence(
 					t,
 					selected,
-					db,
 					mode.autoEmit,
 				)
 			})
@@ -1210,7 +1206,6 @@ func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnB
 func proveDynamicFlowSourceRevisionConvergence(
 	t *testing.T,
 	selected notifyAllChildrenStore,
-	db *sql.DB,
 	autoEmit bool,
 ) {
 	t.Helper()
@@ -1420,7 +1415,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
 		}
 	}
-	requireSourceRevisionLifecycleDiagnosticReceipts(t, db, runID)
+	requireSourceRevisionLifecycleDiagnosticReceipts(t, selected, runID)
 }
 
 func countNotifyAllChildrenLifecycleTransitions(
