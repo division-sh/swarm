@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
 type servedNativeLogoutReservationCut struct {
@@ -39,9 +40,9 @@ func installServedNativeLogoutReservationCut(t *testing.T) {
 	t.Helper()
 	previous := newServeSessionBootstrap
 	newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
-		credentials operatorchannel.CredentialCurrentness, directory string,
+		credentials operatorchannel.CredentialCurrentness, directory string, invocationState *sessionprovider.InvocationState,
 	) (serveSessionBootstrapOwner, error) {
-		owner, err := previous(selectRuntime, store, credentials, directory)
+		owner, err := previous(selectRuntime, store, credentials, directory, invocationState)
 		if err != nil {
 			return nil, err
 		}
