@@ -301,54 +301,48 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		if !errors.Is(err, errSelectedHistoricalScanCut) {
 			t.Fatalf("historical scan did not reach its exact admitted component cut: %v", err)
 		}
-		requireSelectedConstructedSourceUnchanged(t, db, backend, runID, before)
-		return
-	}
-	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
-		t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
-	}
-	wantActors := 1
-	if nested {
-		wantActors = 8
-	}
-	if result.AgentRuntimeMaterialization == nil || len(result.AgentRuntimeMaterialization.ConfiguredAgentIdentities) != wantActors || len(agents) != wantActors {
-		t.Fatalf("selected runtime omitted known actors: proof=%+v agents=%d", result.AgentRuntimeMaterialization, len(agents))
-	}
-	var executions int
-	for identity, agent := range agents {
-		if identity.RunID != result.Materialization.ForkRunID {
-			t.Fatal("source/sibling actor adopted into selected runtime")
+	} else {
+		if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+			t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
 		}
-		if nested && (identity.Route.InstancePath == "templ/child" || identity.Route.InstancePath == "templ/audit") {
-			t.Fatal("authored-path phantom prepared")
+		wantActors := 1
+		if nested {
+			wantActors = 8
 		}
-		if seen := agent.SeenRunIDs(); len(seen) != 0 {
-			if len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {
-				t.Fatalf("actor escaped exact selected owner: %v", seen)
+		if result.AgentRuntimeMaterialization == nil || len(result.AgentRuntimeMaterialization.ConfiguredAgentIdentities) != wantActors || len(agents) != wantActors {
+			t.Fatalf("selected runtime omitted known actors: proof=%+v agents=%d", result.AgentRuntimeMaterialization, len(agents))
+		}
+		var executions int
+		for identity, agent := range agents {
+			if identity.RunID != result.Materialization.ForkRunID {
+				t.Fatal("source/sibling actor adopted into selected runtime")
 			}
-			executions++
+			if nested && (identity.Route.InstancePath == "templ/child" || identity.Route.InstancePath == "templ/audit") {
+				t.Fatal("authored-path phantom prepared")
+			}
+			if seen := agent.SeenRunIDs(); len(seen) != 0 {
+				if len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {
+					t.Fatalf("actor escaped exact selected owner: %v", seen)
+				}
+				executions++
+			}
+		}
+		if executions != 1 {
+			t.Fatalf("fixed frontier executed %d actors, want one", executions)
+		}
+		workflow := pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner))
+		for _, source := range instances[1:] {
+			childOwner := flowidentity.RunScopedFlowInstance{RunID: result.Materialization.ForkRunID, Route: source.Route()}
+			header, found, err := workflow.LoadWorkflowInstance(ctx, childOwner)
+			parent, parentErr := runfork.ProjectParentRoute(runID, childOwner.RunID, source.ParentRoute)
+			if err != nil || parentErr != nil || !found || header.ParentFlowID != parent.FlowID || header.ParentFlowInstance != parent.FlowInstance || header.ParentEntityID != parent.EntityID {
+				t.Fatalf("fork header lost exact constructor parent: found=%v header=%#v err=%v parentErr=%v", found, header, err, parentErr)
+			}
+			if fields && source.TemplateID != "templ" && header.Fields["value"] != "retained" {
+				t.Fatalf("fork companion lost retained business field: %+v", header.Fields)
+			}
 		}
 	}
-	if executions != 1 {
-		t.Fatalf("fixed frontier executed %d actors, want one", executions)
-	}
-	workflow := pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner))
-	for _, source := range instances[1:] {
-		childOwner := flowidentity.RunScopedFlowInstance{RunID: result.Materialization.ForkRunID, Route: source.Route()}
-		header, found, err := workflow.LoadWorkflowInstance(ctx, childOwner)
-		parent, parentErr := runfork.ProjectParentRoute(runID, childOwner.RunID, source.ParentRoute)
-		if err != nil || parentErr != nil || !found || header.ParentFlowID != parent.FlowID || header.ParentFlowInstance != parent.FlowInstance || header.ParentEntityID != parent.EntityID {
-			t.Fatalf("fork header lost exact constructor parent: found=%v header=%#v err=%v parentErr=%v", found, header, err, parentErr)
-		}
-		if fields && source.TemplateID != "templ" && header.Fields["value"] != "retained" {
-			t.Fatalf("fork companion lost retained business field: %+v", header.Fields)
-		}
-	}
-	requireSelectedConstructedSourceUnchanged(t, db, backend, runID, before)
-}
-
-func requireSelectedConstructedSourceUnchanged(t *testing.T, db *sql.DB, backend, runID string, before map[string][]string) {
-	t.Helper()
 	after := selectedPreparationDatabaseSnapshot(t, db, backend)
 	for table, rows := range before {
 		if table == "runs" {
