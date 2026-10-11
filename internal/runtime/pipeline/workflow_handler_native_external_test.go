@@ -74,11 +74,11 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 			if err != nil {
-				return err
+				return fmt.Errorf("prepare native handler construction: %w", err)
 			}
 			committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 			if err != nil {
-				return err
+				return fmt.Errorf("commit native handler construction: %w", err)
 			}
 			if !committed.Acknowledged || !committed.Created {
 				return fmt.Errorf("handler fixture did not acknowledge native construction")
