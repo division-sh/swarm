@@ -9,10 +9,11 @@ import (
 )
 
 func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testing.T) {
-	type cut struct{ before, after string }
+	type cut struct{ before, after, run, event, dependent string }
 	frontier := func(run string) cut {
-		return cut{"", "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, " + run + ", frontier.EventID)\n"}
+		return cut{after: "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, " + run + ", frontier.EventID)\n", run: run, event: "frontier.EventID", dependent: "\t\t\tbefore := "}
 	}
+	// Predecessors are the reviewed source at e685734f3, including prior Successors.
 	for _, target := range []struct {
 		name, predecessor string
 		cuts              []cut
@@ -21,17 +22,17 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 		{"TestServedCompiledTransitionStaticForkEvidenceOnBothStores", "7b1057096b2f50fe7102d95ad575b65ab9c6f6b74630ed22b2e03db8b3f6f8ca", []cut{frontier("seed.RunID")}},
 		{"TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores", "91f3ce70ac71dce662d9d3f32ddaf597332ac7dd10633df3ff58e567d85b9b7f", []cut{frontier("runID")}},
 		{"TestSelectedForkPendingInputBothStores", "22dc3b9992b8ba39a92bd13ca7d26ada2ffa800a5ef0e808a0d15f6187f20433", []cut{
-			{"", "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)\n"},
-			{"", "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, point.EventID)\n"},
+			{after: "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)\n", run: "seed.RunID", event: "seed.EventID", dependent: "\t\t\t\twaitServedRunDeliveryQuiescence("},
+			{after: "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, point.EventID)\n", run: "seed.RunID", event: "point.EventID", dependent: "\t\t\t\trequirePendingInputStateCount("},
 		}},
 		{"TestSelectedForkPendingInputEvidenceBothStores", "9f5c1e797d05ab230fa7c55756c000b955c19ec80ad3af9d241883f71e43aa02", []cut{
-			{"", "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)\n"},
-			{"", "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, point.EventID)\n"},
+			{after: "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)\n", run: "seed.RunID", event: "seed.EventID", dependent: "\t\t\t\twaitServedRunDeliveryQuiescence("},
+			{after: "\t\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, point.EventID)\n", run: "seed.RunID", event: "point.EventID", dependent: "\t\t\t\tplan, err := family.Plan("},
 		}},
 		{"TestServedCompiledTransitionNestedCarrierCollisionOnBothStores", "3c668b9cdb84a0bd50b72d799fddedae23a4cde0958d57e6e6c89aaaa901ce90", []cut{
-			{"\t\t\tconfigureOwnedMockLifecycleProbe(t, probe)\n", "\t\t\treadiness := &nestedSeedReadinessBarrier{observer: probe, release: make(chan struct{})}\n\t\t\treleaseReadiness := sync.OnceFunc(func() { close(readiness.release) })\n\t\t\tt.Cleanup(releaseReadiness)\n\t\t\tdefer releaseReadiness()\n\t\t\tconfigureOwnedMockLifecycleProbe(t, readiness)\n"},
-			{"", "\t\t\t// Activation precedes this exact milestone; hold delivery so the\n\t\t\t// complete initial-tree assertion cannot observe a later handler state.\n\t\t\tprobe.Expect(seed.EventID).PostCommitDispatchStarted().Within(servedEventPublishLifecycleProbeWaitTimeout)\n"},
-			{"", "\t\t\treleaseReadiness()\n"},
+			{before: "\t\t\tconfigureOwnedMockLifecycleProbe(t, probe)\n", after: "\t\t\treadiness := &nestedSeedReadinessBarrier{observer: probe, release: make(chan struct{})}\n\t\t\treleaseReadiness := sync.OnceFunc(func() { close(readiness.release) })\n\t\t\tt.Cleanup(releaseReadiness)\n\t\t\tdefer releaseReadiness()\n\t\t\tconfigureOwnedMockLifecycleProbe(t, readiness)\n"},
+			{after: "\t\t\t// Activation precedes this exact milestone; hold delivery so the\n\t\t\t// complete initial-tree assertion cannot observe a later handler state.\n\t\t\tprobe.Expect(seed.EventID).PostCommitDispatchStarted().Within(servedEventPublishLifecycleProbeWaitTimeout)\n", event: "seed.EventID", dependent: "\t\t\tgotStages := map[string]string{}\n"},
+			{after: "\t\t\treleaseReadiness()\n"},
 		}},
 	} {
 		t.Run(target.name, func(t *testing.T) {
@@ -52,17 +53,65 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 				t.Fatal("missing exact milestone successor")
 			}
 			restored := selected.Successor
-			for _, change := range target.cuts {
+			for index, change := range target.cuts {
 				if strings.Count(restored, change.after) != 1 {
 					t.Fatal("missing or repeated reviewed temporal cut")
 				}
 				restored = strings.Replace(restored, change.after, change.before, 1)
-				mutant := strings.Replace(selected.Successor, change.after, "\t\t\tunreviewedMilestone();\n", 1)
-				guard := *selected
-				guard.Before, guard.After, guard.Successor = guard.After, guard.Successor, ""
-				if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
-					t.Fatal("changed temporal cut accepted by the source-bound guard")
+				without := strings.Replace(selected.Successor, change.after, change.before, 1)
+				mutants := map[string]string{
+					"missing":   without,
+					"duplicate": strings.Replace(selected.Successor, change.after, change.after+change.after, 1),
+					"altered":   strings.Replace(selected.Successor, change.after, "\t\t\tunreviewedMilestone();\n", 1),
 				}
+				if change.run != "" {
+					mutants["wrong_run"] = strings.Replace(selected.Successor, change.after, strings.Replace(change.after, change.run, "foreign.RunID", 1), 1)
+				}
+				if change.event != "" {
+					mutants["wrong_event"] = strings.Replace(selected.Successor, change.after, strings.Replace(change.after, change.event, "foreign.EventID", 1), 1)
+				}
+				if change.dependent != "" {
+					start := strings.Index(selected.Successor, change.after)
+					observation := strings.Index(without[start:], change.dependent)
+					if observation < 0 {
+						t.Fatal("missing reviewed dependent observation")
+					}
+					end := start + observation
+					end += strings.IndexByte(without[end:], '\n') + 1
+					mutants["after_observation"] = without[:end] + change.after + without[end:]
+				}
+				for name, mutant := range mutants {
+					t.Run(fmt.Sprintf("cut_%d/%s", index, name), func(t *testing.T) {
+						guard := *selected
+						guard.Before, guard.After, guard.Successor = guard.Successor, guard.Successor, ""
+						if mutant == selected.Successor {
+							t.Fatal("hostile control did not change source")
+						}
+						if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+							t.Fatal("changed temporal cut accepted by the source-bound guard")
+						}
+					})
+				}
+			}
+			mutants := map[string]string{"unrelated_source": strings.Replace(selected.Successor, "{\n", "{\n\tunreviewedSetup()\n", 1)}
+			if strings.Contains(selected.Successor, "nestedSeedReadinessBarrier") {
+				const release = "\t\t\treleaseReadiness()\n"
+				const assertion = "\t\t\tif !reflect.DeepEqual(gotStages, wantStages) {\n"
+				without := strings.Replace(selected.Successor, release, "", 1)
+				mutants["release_before_tree_assertion"] = strings.Replace(without, assertion, release+assertion, 1)
+				mutants["changed_tree_assertion"] = strings.Replace(selected.Successor, assertion, strings.Replace(assertion, "!reflect", "reflect", 1), 1)
+			}
+			for name, mutant := range mutants {
+				t.Run(name, func(t *testing.T) {
+					guard := *selected
+					guard.Before, guard.After, guard.Successor = guard.Successor, guard.Successor, ""
+					if mutant == selected.Successor {
+						t.Fatal("hostile control did not change source")
+					}
+					if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+						t.Fatal("changed source or tree assertion accepted by the source-bound guard")
+					}
+				})
 			}
 			canonical, err := canonicalFunction(restored)
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) != target.predecessor {
