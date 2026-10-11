@@ -221,9 +221,14 @@ func servedNativeProcessOptions(t *testing.T, backend string) (cliapp.ServeOptio
 
 func requireServedNativeProcessPairing(t *testing.T, endpoint string, peer *serveNativeProtocolPeer) channelonboarding.Result {
 	t.Helper()
+	return requireServedNativeProcessPairingRequest(t, endpoint, peer, channelonboarding.VerbConnect, "native-process-pairing", "SERVED_CLAIM")
+}
+
+func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key, claimMessageID string) channelonboarding.Result {
+	t.Helper()
 	var result channelonboarding.Result
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
-		"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-process-pairing"}, &result)
+		"provider": "whatsapp", "verb": string(verb), "save_proof": false, "idempotency_key": key}, &result)
 	id := result.Operation.OperationID
 	deadline := time.Now().Add(5 * time.Second)
 	for result.Pairing == nil || result.Pairing.Code == "" {
@@ -239,7 +244,7 @@ func requireServedNativeProcessPairing(t *testing.T, endpoint string, peer *serv
 	if result.IdentityOperation == nil || result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 		t.Fatal("pairing was substituted for principal claim", result)
 	}
-	from := peer.claim(result.IdentityOperation.Challenge)
+	from := peer.claimMessage(result.IdentityOperation.Challenge, claimMessageID)
 	deadline = time.Now().Add(5 * time.Second)
 	for result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation {
 		if time.Now().After(deadline) {
