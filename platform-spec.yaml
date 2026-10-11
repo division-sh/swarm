@@ -1264,6 +1264,12 @@ contract_formats:
             recipient or delivery. Authored source/sink markers are absent, including in fixtures.
           absent_means: event.target is absent when event.target_set is present or when uncontrolled external ingress has not yet been receiver-bound.
           mutual_exclusion: event.target and event.target_set MUST NOT both be populated on the persisted event.
+          public_selector_projection: An existing-run public target selects the exact constructed flow/header, not the
+            entity of every consumer. Admission proves that selector against each admitted receiver's exact captured
+            construction before deriving the event target projection from durable delivery routes. An entityless agent
+            stays exactly entityless; node and entity-bearing actor ownership remain independent. Exact duplicate
+            publication with the original selector consumes stored construction dependencies and connect claims, never
+            current topology or replacement headers. Missing, crossed or contradictory evidence refuses before mutation.
         target_set:
           fields:
           - flow_instance
@@ -2094,7 +2100,12 @@ contract_formats:
             An entityless static actor retains entityless_receiver even when its selected receiving flow has an
             entity-bearing header. Existing or materializing actor entity ownership requires that actor's exact entity
             coordinate; selected flow/header construction cannot transfer state ownership to an agent. Explicit caller
-            target restrictions remain independent and cannot be scrubbed to admit a conflicting actor. Same-flow,
+            target restrictions remain independent and cannot be scrubbed to admit a conflicting actor. A public
+            existing-run flow/header selector is verified against the captured construction dependency before actor
+            projection, rather than equated with actor entity ownership. Selected-root-local and connected consumers,
+            pending and attached, use that same relation; direct actor targets keep their exact entity semantics.
+            Durable duplicate restoration validates the original selector against stored dependencies and claims,
+            without rerouting or reading replacement headers. Same-flow,
             connected, active and cold agent producers consume this same projection. Independently runtime-created
             targetless carriers retain their explicit absence of state ownership. Sharing only a flow instance, handler,
             recipient spelling, or publication is not ownership evidence. Node intents are classified
@@ -30105,7 +30116,7 @@ cli_specification:
           behavior: Optional existing-run receiver target flow instance. Must be used with --run-id and --target-entity-id.
         - name: --target-entity-id <entity-id>
           maps_to: target.entity_id
-          behavior: Optional existing-run receiver target entity id. Must be used with --run-id and --target-flow-instance.
+          behavior: Optional existing-run constructed receiving flow/header entity id, not a grant of that entity to every consumer. Must be used with --run-id and --target-flow-instance; each consumer retains its admitted actor target.
         - name: --emitter <source>
           maps_to: emitter
           behavior: Optional producer identifier. Omitted means the server default emitter applies.
@@ -30142,7 +30153,7 @@ cli_specification:
       - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional target object from --target-flow-instance plus --target-entity-id, optional canonical bundle_hash, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
       - event names are passed through exactly by the CLI; the server admits only exact selected-root input pins and rejects private leaf/qualified references with EVENT_NOT_DECLARED without mutation or idempotency completion
       - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
-      - explicit target route publish persists event.target and one delivery_target_route through the server-owned event.publish/EventBus path; nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
+      - explicit target publish selects the exact constructed flow/header through server-owned event.publish/EventBus admission, then persists event.target or target_set derived from all authorized delivery routes. Entityless agents retain empty actor entity, entity-bearing agents and nodes retain their own exact owners, and unselected siblings receive no delivery or activation. Nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
       - payload.entity_id never supplies target/entity routing authority; payload validation follows the admitted input schema, while construction consumes only the resolved typed key and eligible constructor fields
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, partial target route flags, target route flags without --run-id, malformed bundle_hash, retired identity flags, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, operator_reference_event_id when present, new_run_created, and typed persisted delivery rows; it never labels operator reference provenance as causal source_event_id
@@ -37226,7 +37237,11 @@ api_specification:
         Existing-run publication preflights selected recipients before event/idempotency persistence. Missing recipients,
         noncanonical route ownership, or target failure returns EVENT_NOT_DECLARED, not success with zero deliveries.
         Optional target is a singular flow_instance/entity_id address validated against the selected run and actual consuming
-        relation; it cannot make a private input public. run_id and payload.entity_id do not imply a receiver.
+        relation; it selects the constructed receiving flow/header and cannot make a private input public. It does not
+        assign that header's entity to an entityless agent or replace any consumer's admitted entity. Selection is proved
+        against exact captured construction before the event projection is derived from durable actor/node delivery routes.
+        Exact duplicate publication with the original selector consumes the stored dependency/claim and never reselects
+        from current topology or a replacement header. run_id and payload.entity_id do not imply a receiver.
         The canonical constructor owns construction before ordinary delivery; handlers cannot materialize a missing instance.
         Composition owns receiver keys and resolution; retired handler-side acquisition grants no authority.
 
@@ -37272,7 +37287,7 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
         - name: target
           required: false
-          description: Optional singular receiver coordinate for existing-run publication. Requires run_id and a selected-run flow_instance plus entity_id. The coordinate never authorizes a private input or a consuming relation; EventBus must prove selected-root-local or explicit compiled-connection delivery authority. payload.entity_id and run_id are not target authority. Fan-out target_set and selector-style target forms are not part of the v1 event.publish public surface.
+          description: Optional singular constructed receiving flow/header coordinate for existing-run publication. Requires run_id and a selected-run flow_instance plus header entity_id. The coordinate never authorizes a private input or a consuming relation; EventBus must prove selected-root-local or explicit compiled-connection authority and preserve each consumer's independently admitted actor entity, including exact absence. payload.entity_id and run_id are not target authority. Fan-out target_set and alternate selector forms are not part of the v1 event.publish public surface.
           schema:
             $ref: '#/components/schemas/EventPublishTargetRoute'
         - name: emitter

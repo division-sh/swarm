@@ -1231,7 +1231,7 @@ func reuseDurableSubscribedEventRouteFacts(admitted events.AdmittedEvent, durabl
 		replayed, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 		return replayed, replayed.Event(), err
 	}
-	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) && !routeIdentitiesCanBeExactlyCompleted(existingTargets, durableTargets) {
+	if !publicationTargetProjectionAcceptsSelector(evt, durable.DeliveryRoutes, durableTargets) {
 		return admitted, evt, errors.New("durable event route facts conflict with the admitted event target")
 	}
 	if len(durableTargets) == 0 || sameRouteIdentities(existingTargets, durableTargets) {
@@ -1273,16 +1273,52 @@ func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.E
 	if projection.kind == preparedEventTargetProjectionSingular {
 		targets = []events.RouteIdentity{projection.target}
 	}
-	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
-	if projection.kind != preparedEventTargetProjectionNone && len(existing) > 0 &&
-		!sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
-		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", existing, targets)
+	if projection.kind != preparedEventTargetProjectionNone && !publicationTargetProjectionAcceptsSelector(evt, routes, targets) {
+		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", eventDeliveryTargetRoutes(evt), targets)
 	}
 	resolved, changed, err := ResolvePreparedPublishEventTargetProjection(evt, routes)
 	if err != nil {
 		return evt, false, fmt.Errorf("resolve delivery route projection: %w", err)
 	}
 	return resolved, changed, nil
+}
+
+// A public selector constrains the constructed flow; its consumers retain their
+// own actor targets. Durable replay proves that relation from captured receipts.
+func publicationTargetProjectionAcceptsSelector(evt events.Event, routes []events.DeliveryRoute, targets []events.RouteIdentity) bool {
+	existing := eventDeliveryTargetRoutes(evt)
+	if len(existing) == 0 || sameRouteIdentities(existing, targets) || routeIdentitiesCanBeExactlyCompleted(existing, targets) {
+		return true
+	}
+	selector := explicitRootPublicationTarget(evt)
+	if selector.FlowInstance == "" || selector.EntityID == "" || len(routes) == 0 {
+		return false
+	}
+	for _, route := range routes {
+		if routeIdentitiesCanBeExactlyCompleted([]events.RouteIdentity{selector}, []events.RouteIdentity{route.Target.Route()}) {
+			continue
+		}
+		if !agentConstructionAcceptsPublicationSelector(evt, selector, route) {
+			return false
+		}
+	}
+	return true
+}
+
+func agentConstructionAcceptsPublicationSelector(evt events.Event, selector events.RouteIdentity, route events.DeliveryRoute) bool {
+	if !route.Recipient.IsAgent() || route.Initialization.Empty() ||
+		route.Initialization.ValidateEvent(evt) != nil || route.Initialization.ValidateRoute(route) != nil {
+		return false
+	}
+	if route.ConnectClaim.Empty() && route.AgentIdentity.Route.Presence != agentidentity.RouteRoot {
+		return false
+	}
+	return publicSelectorMatchesConstruction(selector, route.Initialization.ConstructionTarget().Route())
+}
+
+func publicSelectorMatchesConstruction(selector, construction events.RouteIdentity) bool {
+	return selector.FlowInstance != "" && selector.EntityID != "" &&
+		routeIdentitiesCanBeExactlyCompleted([]events.RouteIdentity{selector}, []events.RouteIdentity{construction})
 }
 
 func sameEventTargetProjection(left, right events.Event) bool {

@@ -952,7 +952,10 @@ func filterDeliveryRecipientCandidates(
 					}
 				}
 			}
-			target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets, root)
+			target, targetOK, err := projection.agentRecipientTarget(evt, descriptor, singularTarget, targets, root)
+			if err != nil {
+				return deliveryRecipientManifest{}, err
+			}
 			if len(targets) > 0 && !targetOK {
 				continue
 			}

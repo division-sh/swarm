@@ -74,6 +74,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestReceiverConfigActivationRaceAndRollbackBothStores",
 			"TestReceiverEntitylessPendingAttachmentExecutesBothStores",
 			"TestReceiverPublicationCommitUncertaintyBothStores",
+			"TestReceiverPublicationExplicitTargetsBothStores",
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
 			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
 		},
@@ -109,6 +110,10 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			},
 		},
 		"store-runtime-full-05": {
+			"TestReceiverPublicationExplicitTargetsBothStores": {
+				"sqlite/selected_review", "sqlite/selected_other", "sqlite/selected_root", "sqlite/selected_foreign_root_control", "sqlite/missing_header_entity", "sqlite/foreign_run", "sqlite/foreign_flow", "sqlite/foreign_instance", "sqlite/foreign_header_entity",
+				"postgres/selected_review", "postgres/selected_other", "postgres/selected_root", "postgres/selected_foreign_root_control", "postgres/missing_header_entity", "postgres/foreign_run", "postgres/foreign_flow", "postgres/foreign_instance", "postgres/foreign_header_entity",
+			},
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores": {
 				"sqlite/unchanged", "sqlite/run_stopped", "sqlite/source_replaced", "sqlite/stored_winner", "sqlite/terminal_winner",
 				"postgres/unchanged", "postgres/run_stopped", "postgres/source_replaced", "postgres/stored_winner", "postgres/terminal_winner",
@@ -134,6 +139,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		"serveapp-other-late": {"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}},
 		"local-catalog-smoke": {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
 		"catalog-runtime":     {"TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores": {"sqlite/collector", "sqlite/renamed-observer", "postgres/collector", "postgres/renamed-observer"}},
+		"api-llm-bus-full":    {"TestOperatorEventPublishAgentHeaderSelectorsBothStores": {"sqlite/review", "sqlite/other", "postgres/review", "postgres/other"}},
 		"serveapp-runtime":    {"TestReleaseReceiverInitializationBothStores": {"default_sqlite/connected_typed_creation", "default_sqlite/direct_provider_schema", "default_sqlite/connected_restart/before_restart", "default_sqlite/connected_restart/after_restart", "explicit_postgres/connected_typed_creation", "explicit_postgres/direct_provider_schema", "explicit_postgres/connected_restart/before_restart", "explicit_postgres/connected_restart/after_restart"}},
 	} {
 		unit := policy.Units[id]

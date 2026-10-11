@@ -82,6 +82,12 @@ func TestConnectPendingAgentConsumesExactStaticDeclaration(t *testing.T) {
 			}
 			intent := intents[0]
 			intent.TargetOwnership = events.MustExistingEntityTarget(route.Target)
+			if test.want == agentLifecycleAdmissionStaticDeclaration {
+				intent.Initialization, err = events.AdmitStoredFlowReceiverInitialization(intent.AgentIdentity.RunID, uuid.NewString(), intent.TargetOwnership, intent.AgentIdentity.Route)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			err = validateAgentLifecycleTargetOwnership(intent)
 			if (err != nil) != (test.want == agentLifecycleAdmissionMaterializingFlow) {
 				t.Fatalf("existing target admission = %v, lifecycle=%v", err, test.want)

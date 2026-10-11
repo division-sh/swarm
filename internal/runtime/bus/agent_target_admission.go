@@ -92,10 +92,15 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		return intent, err
 	}
 	route := intent.TargetBlueprint.Normalized()
-	if route.Empty() && selected.Empty() {
+	if selector := explicitRootPublicationTarget(event); !selector.Empty() && route == selector && identity.Name.Source == agentidentity.NameSourceDeclared && !dependency.Empty() {
+		if !publicSelectorMatchesConstruction(selector, selected) {
+			return intent, fmt.Errorf("public selector contradicts exact agent construction")
+		}
+		route = selected
+		route.EntityID = descriptor.EntityID
+	} else if route.Empty() && selected.Empty() {
 		return intent, nil
-	}
-	if route.Empty() {
+	} else if route.Empty() {
 		route = selected
 		// Selected construction is context, not a caller's actor-entity request.
 		route.EntityID = descriptor.EntityID
@@ -132,6 +137,32 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		}
 	}
 	return intent, nil
+}
+
+func (p selectedRunTargetOwnerProjection) agentRecipientTarget(event events.Event, descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool, error) {
+	selector := explicitRootPublicationTarget(event)
+	if selector.Empty() || descriptor.Identity.Name.Source != agentidentity.NameSourceDeclared {
+		target, found := deliveryTargetForDescriptor(descriptor, singular, targets, root)
+		return target, found, nil
+	}
+	path := descriptor.Identity.Route.InstancePath
+	if descriptor.Identity.Route.Presence == agentidentity.RouteRoot {
+		path = descriptor.Identity.RunID
+	}
+	if selector.FlowInstance != path {
+		return events.RouteIdentity{}, false, nil
+	}
+	dependency, selected, err := p.agentConstructionDependency(event, descriptor.Identity, events.RouteIdentity{})
+	if err != nil {
+		return events.RouteIdentity{}, false, err
+	}
+	if dependency.Empty() {
+		// Admitted historical actors retain direct target semantics; absent native
+		// evidence is rejected by the construction owner, not rescued here.
+		target, found := deliveryTargetForDescriptor(descriptor, singular, targets, root)
+		return target, found, nil
+	}
+	return selector, publicSelectorMatchesConstruction(selector, selected), nil
 }
 
 func (p selectedRunTargetOwnerProjection) validateAgentTargetCoordinates(identity agentidentity.Identity, route events.RouteIdentity) error {
