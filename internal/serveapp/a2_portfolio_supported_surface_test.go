@@ -487,10 +487,8 @@ func requireA2PortfolioJoin(t *testing.T, rt servedControlProofRuntime, period o
 	t.Helper()
 	// Retain persisted integer tokens for typed results, and separately bind
 	// that evidence to the authenticated public accumulated-state projection.
-	var raw []byte
-	if err := rt.DB.QueryRow(`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, period.Entity.RunID, period.Entity.EntityID, period.Entity.FlowInstance).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	record, _ := requireReceiverTargetState(t, rt.ReceiverStateReader, period.Entity.RunID, "portfolio/period", period.Entity.FlowInstance, period.Entity.EntityID)
+	raw := record.Lifecycle.State.Accumulator
 	var public, persisted map[string]any
 	if err := json.Unmarshal(raw, &public); err != nil {
 		t.Fatal(err)
