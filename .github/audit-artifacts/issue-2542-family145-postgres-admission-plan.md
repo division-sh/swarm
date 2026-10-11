@@ -2313,3 +2313,28 @@ daily-rebase-source-correspondence.jsonl PASS. Current finite codemod is inert
 The source-spelling queue remains126 =111 outside +15 private; no global census
 or baseline update and no additional qualified-removal claim. Eight previously
 qualified removals carry; semantic drains, M01 and Docker remain unwaived.
+
+### Daily integration partition repair
+
+Reviewer6112149767 found the full-01 complement excluding every RunF prefix,
+while fork owns only RunFork. Narrow only that complement to exact RunFork
+territory and add the existing barrier-observation root's sqlite/postgres
+required children. A prospective-name control covers partial RunF/RunFo/RunFor,
+RunFanOut, complete RunFork and ordinary Run/Runtime names, including explicit
+gap and overlap rejection. No root rename, skip, unit, budget, deadline or
+profile-membership change.
+
+Running the requested full native binding check then exposed the reviewed
+isolated-query-writer hostile control absent from the core static selection:
+the source census contains81 roots, not80. Include that one existing static
+root in the same core-only unit and reconcile the exact census count to81;
+lifecycle/full keep its existing full-01 owner. No control or allowance is
+removed. This is complete selection of an already-reviewed guard, not another
+workload or a new raw fixture permission.
+
+daily-rebase-runfork-partition-repair.jsonl PASS15.748s: prospective controls,
+all current-plan binding variants and all pipeline partition/conservation
+checks. The timing/catalog envelope and the selected classifier control are
+also recorded. Cheap native binding joins the per-batch sweep whenever proof
+roots or partition intersections change. Template9 changes remain separate,
+uncommitted and unqualified by this planner-only checkpoint.
