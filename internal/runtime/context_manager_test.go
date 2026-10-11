@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -474,6 +475,52 @@ func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 	}
 	if !entry.shutdownComplete {
 		t.Fatal("successful shutdown retry was not marked complete")
+	}
+}
+
+func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testing.T) {
+	for _, aggregate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("aggregate_%t", aggregate), func(t *testing.T) {
+			contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+			manager, err := newTestRuntimeContextManager(t, nil, contextDef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			standing, err := contextDef.WorkOwner.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "service", RunID: "standing-run", Generation: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := manager.contexts[runtimeContextTestHashA]
+			entry.standing = map[string]*worklifetime.StandingOccurrence{"service": standing}
+			lease, err := standing.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = lease.Done() })
+			done := make(chan RuntimeContextDeactivationResult, 1)
+			go func() {
+				if aggregate {
+					done <- manager.DeactivateAllWithOptions(RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})[0]
+				} else {
+					done <- manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+				}
+			}()
+			select {
+			case <-lease.Context().Done():
+			case <-time.After(time.Second):
+				t.Fatal("withdrawal did not retire its standing child")
+			}
+			if err := lease.Done(); err != nil {
+				t.Fatal(err)
+			}
+			result := <-done
+			if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "shutdown grace") || entry.shutdownComplete {
+				t.Fatalf("rejected drain lost its error or marked runtime cleanup complete: %+v", result)
+			}
+			if len(entry.standing) != 0 || contextDef.WorkOwner.ActiveCount() != 0 {
+				t.Fatal("rejected drain returned without acknowledging its retired standing child")
+			}
+		})
 	}
 }
 

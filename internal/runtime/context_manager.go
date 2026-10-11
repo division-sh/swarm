@@ -2885,7 +2885,9 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 	remaining, drainErr := runtimeToShutdown.drainIngressForContextWithdrawal(opts)
 	result.ShutdownErr = errors.Join(result.ShutdownErr, drainErr)
 	if remaining.Grace <= 0 {
-		return result
+		// Validation failed after withdrawal retired standing children. Their
+		// mandatory cleanup still joins admitted producers before dependencies.
+		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.drainAdmittedIngress(context.Background(), 0))
 	}
 	// A continuation may retain a standing authorization lease while its
 	// receiver executes under the independent runtime owner. Return those
@@ -2895,6 +2897,9 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.deliveryContinuations.Retire(context.Background()))
 	}
 	result.ShutdownErr = errors.Join(result.ShutdownErr, m.joinStandingContextRetirement(entry, standingToRetire))
+	if remaining.Grace <= 0 {
+		return result
+	}
 	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(remaining))
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true

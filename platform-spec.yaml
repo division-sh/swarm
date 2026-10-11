@@ -40024,7 +40024,10 @@ process_local_work_lifetime_authority:
       public native COMMIT results still returning to the publication owner. Grace expiry cancels the
       admitted caller contexts, retains the timeout diagnostic, and still joins those producers before
       retiring their handoff dependency. Standing and runtime retirement joins remain mandatory, and
-      failed cleanup retains its owning entry. These are the same ordering rules as direct Runtime stop;
+      failed cleanup retains its owning entry. A rejected drain configuration or admission does not
+      waive joins for already-retired standing children: their admitted producers and dependencies
+      still join, while the original rejection is returned and runtime cleanup remains incomplete.
+      These are the same ordering rules as direct Runtime stop;
       no native ACK is revoked and no public completion capacity or replay permission changes.
     context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Admission detaches caller cancellation before accepted work escapes; queued callbacks receive and execute on the lease context, so request completion cannot cancel accepted work while occurrence retirement always does. Work accepted before fencing continues under that exact lease and must not reacquire occurrence admission from inside its queued or spawned execution. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
     selected_process_context: Only the process root constructs selected-fork occurrences; a loaded runtime has no selected-fork child constructor. A process-owned selected fork retains the exact process identity through direct work, standing work, Manager composition and route descendants. Each owner projects its own process into accepted lease contexts; a missing or foreign ambient process never supplies this authority. Retirement or replacement of an unrelated loaded runtime cannot cancel this selected occurrence, and retiring the selected occurrence cannot fence a loaded successor. Process retirement cancels all accepted selected work and cannot issue its exact store-release join receipt until selected descendants and preparation disposition have joined.

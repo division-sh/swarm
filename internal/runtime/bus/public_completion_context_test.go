@@ -2,11 +2,17 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/google/uuid"
 )
 
 func TestPublicCompletionPreparationCancellation(t *testing.T) {
@@ -92,5 +98,29 @@ func TestPublicCompletionPreparationCancellation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPublicCompletionExactDuplicateDoesNotInventPublicationMilestone(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("queued_%t", queued), func(t *testing.T) {
+			observer := lifecycleprobe.New()
+			bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{TestLifecycleProbe: observer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("task.requested"), "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+			prepared := PreparedPublish{Event: event, exactDuplicate: true, dispatchQueued: queued, targetFailure: !queued, publicationClaim: &pipelinePublicationClaim{bus: bus, eventID: event.ID()}}
+			if err := bus.dispatchPublicPublication(testAuthorActivityContext(t.Context()), prepared); err != nil {
+				t.Fatal(err)
+			}
+			absent, cancel := context.WithCancel(t.Context())
+			cancel()
+			for _, kind := range []lifecycleprobe.Kind{lifecycleprobe.EventPersisted, lifecycleprobe.PostCommitDispatchStarted, lifecycleprobe.PostCommitDispatchCompleted} {
+				if _, err := observer.Wait(absent, lifecycleprobe.Signal{Kind: kind, EventID: event.ID()}); err == nil {
+					t.Fatalf("exact duplicate invented a %s milestone", kind)
+				}
+			}
+		})
 	}
 }
