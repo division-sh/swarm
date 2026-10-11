@@ -800,6 +800,8 @@ units:
   delivery-continuation-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime/deliverycontinuation
+    required_children:
+      TestCoordinatorDispatchUsesExactPreFenceLease: [accepted, unowned, foreign, settled, retired]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
