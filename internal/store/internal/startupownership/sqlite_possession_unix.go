@@ -44,6 +44,17 @@ func acquireSQLiteConstructionPossession(selectedPath string) (sqlitePossession,
 }
 
 func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(context.Background(), selectedPath, createDatabase, false)
+}
+
+func waitSQLiteConstructionPossession(ctx context.Context, selectedPath string) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(ctx, selectedPath, true, true)
+}
+
+func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, createDatabase, wait bool) (sqlitePossession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	databasePath, err := canonicalSQLiteSelectedPath(selectedPath)
 	if err != nil {
 		return nil, err
@@ -56,7 +67,7 @@ func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePo
 	}
 
 	coordinatePath := databasePath + sqlitePossessionSuffix
-	coordinate, coordinateInfo, err := acquireSQLitePossessionCoordinate(coordinatePath)
+	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, true, wait)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +84,7 @@ func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePo
 		coordinateInfo: coordinateInfo,
 		coordinatePath: coordinatePath,
 	}
-	if err := possession.ProveCurrent(context.Background()); err != nil {
+	if err := possession.ProveCurrent(ctx); err != nil {
 		return nil, errors.Join(err, possession.Release())
 	}
 	return possession, nil
@@ -132,6 +143,10 @@ func acquireSQLitePossessionCoordinate(path string) (*os.File, os.FileInfo, erro
 }
 
 func openSQLitePossessionCoordinate(path string, create bool) (*os.File, os.FileInfo, error) {
+	return lockSQLitePossessionCoordinate(context.Background(), path, create, false)
+}
+
+func lockSQLitePossessionCoordinate(ctx context.Context, path string, create, wait bool) (*os.File, os.FileInfo, error) {
 	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 	if create {
 		flags |= unix.O_CREAT
@@ -160,7 +175,13 @@ func openSQLitePossessionCoordinate(path string, create bool) (*os.File, os.File
 	if err := requireSupportedLocalFilesystem(path); err != nil {
 		return nil, nil, errors.Join(err, coordinate.Close())
 	}
-	if err := unix.Flock(int(coordinate.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	operation := unix.LOCK_EX | unix.LOCK_NB
+	if wait {
+		operation = unix.LOCK_EX
+	}
+	// The native wait stays on this caller's stack. Cancellation never closes a
+	// descriptor beneath an unjoined syscall; the serving process owns its exit.
+	if err := unix.Flock(int(coordinate.Fd()), operation); err != nil {
 		identityErr := proveSQLitePossessionIdentity(path, info, true, "SQLite possession coordinate changed during observation")
 		closeErr := coordinate.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
@@ -170,6 +191,9 @@ func openSQLitePossessionCoordinate(path string, create bool) (*os.File, os.File
 			}, identityErr, closeErr)
 		}
 		return nil, nil, errors.Join(fmt.Errorf("acquire SQLite selected-store possession: %w", err), identityErr, closeErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
 	}
 	current, err := os.Lstat(path)
 	if err != nil || !isSafeSQLitePossessionCoordinate(current) || !os.SameFile(info, current) {

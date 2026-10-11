@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,5 +156,12 @@ func (s *PostgresStore) Close() error {
 	if s == nil || !s.backend.Valid() {
 		return nil
 	}
-	return s.backend.Close()
+	return errors.Join(s.startupPostgresOwner.ReleaseConstructionPossession(), s.backend.Close())
+}
+
+func (s *PostgresStore) RetainConstructionPossession(ctx context.Context) error {
+	if s == nil || s.startupPostgresOwner == nil {
+		return errors.New("PostgreSQL process construction owner is required")
+	}
+	return s.startupPostgresOwner.RetainConstructionPossession(ctx)
 }
