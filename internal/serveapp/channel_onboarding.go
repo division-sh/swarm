@@ -621,10 +621,16 @@ type serveConnectedChannelReadiness struct {
 }
 
 func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
-	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil {
+	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil || ctx == nil {
 		return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("connected channel readiness dependencies are incomplete")
 	}
+	if ctx.Err() != nil {
+		return channelonboarding.ConnectedChannelReadiness{}, false, context.Cause(ctx)
+	}
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
+	if ctx.Err() != nil {
+		return channelonboarding.ConnectedChannelReadiness{}, false, errors.Join(context.Cause(ctx), err)
+	}
 	if err != nil {
 		if errors.Is(err, channelonboarding.ErrNotFound) {
 			return channelonboarding.ProjectReadiness(channelonboarding.ReadinessFacts{
@@ -633,6 +639,11 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 			}), true, nil
 		}
 		return channelonboarding.ConnectedChannelReadiness{}, false, err
+	}
+	if activation.OperationID != op.OperationID {
+		// A new ceremony has no activation of its own yet. Its predecessor's
+		// current activation is projected only through that original operation.
+		return channelonboarding.ConnectedChannelReadiness{}, false, nil
 	}
 	now := o.observedAt()
 	facts := channelonboarding.ReadinessFacts{
