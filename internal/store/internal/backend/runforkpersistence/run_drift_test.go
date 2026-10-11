@@ -41,7 +41,7 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"original"}',CAST($2 AS TEXT),'company')`, run, entity); err != nil {
+	if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"original"}',$3,'company')`, run, entity, entity); err != nil {
 		t.Fatal(err)
 	}
 	if constructed {
@@ -309,7 +309,7 @@ func TestVerifyRunCrossRunIsolationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"foreign-bypass"}',CAST($2 AS TEXT),'company')`, foreign, entity); err != nil {
+			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"foreign-bypass"}',$3,'company')`, foreign, entity, entity); err != nil {
 				t.Fatal(err)
 			}
 			insertRunDriftHeader(t, db, foreign, entity, entity, "company", "queued")
@@ -371,7 +371,7 @@ func TestVerifyRunSnapshotIsolationBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			added := uuid.NewString()
-			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,CAST($2 AS TEXT),NULL,'worker','done',1,'{}','{}','{}','terminated')`, run, added); err != nil {
+			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,NULL,'worker','done',1,'{}','{}','{}','terminated')`, run, added, added); err != nil {
 				t.Fatal(err)
 			}
 			for _, row := range []runForkRevisionEntityMutation{
@@ -418,7 +418,7 @@ func TestVerifyRunEntityMembershipBothStores(t *testing.T) {
 					switch cut {
 					case "state_only":
 						entity = uuid.NewString()
-						if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{}',CAST($2 AS TEXT),'company')`, run, entity); err != nil {
+					if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{}',$3,'company')`, run, entity, entity); err != nil {
 							t.Fatal(err)
 						}
 					case "history_only":
