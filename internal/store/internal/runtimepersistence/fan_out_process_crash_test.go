@@ -212,7 +212,7 @@ func TestFanOutProcessSIGKILLRecoveryBothStores(t *testing.T) {
 				env = append(env, "SWARM_FAN_OUT_CRASH_PREDECESSOR="+string(oldJSON))
 				_, evidence, exited = startFanOutCrashChild(t, "successor", env)
 				next := awaitFanOutCrashEvidence(t, evidence)
-				if !next.Recovered || next.Authority.PredecessorAuthorityID != old.Authority.AuthorityID {
+				if !next.Recovered || next.Authority.Validate() != nil || next.Authority.AuthorityID == old.Authority.AuthorityID || next.Authority.AuthorityGeneration != old.Authority.AuthorityGeneration+1 || next.Authority.Backend != old.Authority.Backend || next.Authority.OwnerID != "fan-out-crash-successor" {
 					t.Fatalf("missing exact crash recovery evidence: old=%+v next=%+v", old, next)
 				}
 				select {
@@ -358,7 +358,7 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 		if err := json.Unmarshal([]byte(os.Getenv("SWARM_FAN_OUT_CRASH_PREDECESSOR")), &old); err != nil {
 			t.Fatal(err)
 		}
-		if authority.AuthorityID == old.AuthorityID || authority.PredecessorAuthorityID != old.AuthorityID || authority.AuthorityGeneration != old.AuthorityGeneration+1 || authority.AcquisitionKind != startupownership.AcquisitionCrashTakeover {
+		if authority.Validate() != nil || authority.AuthorityID == old.AuthorityID || authority.AuthorityGeneration != old.AuthorityGeneration+1 || authority.Backend != old.Backend || authority.OwnerID != request.OwnerID || authority.BootID != request.BootID || authority.RuntimeInstanceID != request.RuntimeInstanceID {
 			t.Fatalf("not actual crash takeover: old=%+v next=%+v", old, authority)
 		}
 	}

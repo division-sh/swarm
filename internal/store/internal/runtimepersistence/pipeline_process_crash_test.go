@@ -309,7 +309,8 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	fixture, control := openPipelineCrashStore(t, backend, location)
 	ctx := testAuthorActivityContext()
 	selected := fixture.store.(pipelineObligationParityStore)
-	capability, err := fixture.store.(startupownership.Store).AcquireProcessCapability(ctx, testStartupAcquireRequest("pipeline-crash-"+mode))
+	request := testStartupAcquireRequest("pipeline-crash-" + mode)
+	capability, err := fixture.store.(startupownership.Store).AcquireProcessCapability(ctx, request)
 	if err != nil {
 		t.Fatalf("acquire exact process authority: %v", err)
 	}
@@ -359,7 +360,7 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if err := json.Unmarshal([]byte(os.Getenv("SWARM_PIPELINE_CRASH_PREDECESSOR")), &old); err != nil {
 		t.Fatal(err)
 	}
-	if authority.AuthorityID == old.AuthorityID || authority.PredecessorAuthorityID != old.AuthorityID || authority.AuthorityGeneration != old.AuthorityGeneration+1 || authority.AcquisitionKind != startupownership.AcquisitionCrashTakeover {
+	if authority.Validate() != nil || authority.AuthorityID == old.AuthorityID || authority.AuthorityGeneration != old.AuthorityGeneration+1 || authority.Backend != old.Backend || authority.OwnerID != request.OwnerID || authority.BootID != request.BootID || authority.RuntimeInstanceID != request.RuntimeInstanceID {
 		t.Fatalf("not exact crash takeover: old=%#v next=%#v", old, authority)
 	}
 	count, _, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
