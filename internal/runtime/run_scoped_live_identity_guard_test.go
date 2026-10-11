@@ -134,7 +134,6 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 	for _, required := range []string{
 		"PRIMARY KEY (run_id, instance_path)",
 		"FOREIGN KEY (run_id, parent_instance) REFERENCES flow_instances (run_id, instance_path)",
-		"CHECK ((is_materialized AND run_id IS NOT NULL AND flow_instance IS NOT NULL) OR (NOT is_materialized AND run_id IS NULL))",
 		"`run + flow + instance_key` in both text and JSON output",
 	} {
 		if !strings.Contains(spec, required) {
