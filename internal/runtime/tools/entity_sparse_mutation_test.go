@@ -298,7 +298,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 		}
 		parentCtx := effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 		initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(parentCtx, parentOwner, pipeline.WorkflowInstance{
-			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), StorageRef: parent.InstancePath,
+			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), StorageRef: parent.InstancePath, Mode: "static",
 			InstanceID: parent.InstanceID, EntityID: parent.EntityID, CurrentState: parentStage.ID(),
 			StageDefined: !parentStage.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
 		}, at)
@@ -333,7 +333,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
-		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, InstanceKey: key, EntityID: entityID,
+		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, Mode: "template", InstanceID: owner.Route.InstanceID, InstanceKey: key, EntityID: entityID,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
 		CurrentState: storedStage.ID(), StageDefined: !storedStage.IsStatelessPosture(), Fields: fields, CreatedAt: at, EnteredStageAt: at,
