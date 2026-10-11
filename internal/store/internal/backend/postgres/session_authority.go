@@ -25,6 +25,7 @@ type AdvisoryLockLease struct {
 	onTerminal               func()
 	unlocked                 bool
 	released                 bool
+	releaseAcknowledged      bool
 	testUnlock               func(context.Context, *SessionAuthority, string) (bool, error)
 	testProve                func(context.Context, *SessionAuthority, string) (bool, error)
 	testBeforeBeginOperation func()
@@ -472,11 +473,30 @@ func (l *AdvisoryLockLease) Release(ctx context.Context) error {
 	return l.releaseWithRetirement(ctx)
 }
 
+// ReleaseProcess checks logical cancellation at operation admission, then joins
+// every admitted native release step through the same disposition owner.
+func (l *AdvisoryLockLease) ReleaseProcess(ctx context.Context) error {
+	return l.releaseWithPublicationAdmissionPolicy(ctx, nil, true)
+}
+
+func (l *AdvisoryLockLease) ReleasedCleanly() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.released && l.releaseAcknowledged
+}
+
 func (l *AdvisoryLockLease) releaseWithRetirement(ctx context.Context) error {
 	return l.releaseWithPublicationAdmission(ctx, nil)
 }
 
 func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context, admission *PublicationAdmission) error {
+	return l.releaseWithPublicationAdmissionPolicy(ctx, admission, false)
+}
+
+func (l *AdvisoryLockLease) releaseWithPublicationAdmissionPolicy(ctx context.Context, admission *PublicationAdmission, process bool) error {
 	if l == nil {
 		return nil
 	}
@@ -494,7 +514,9 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = context.WithoutCancel(ctx)
+	if !process {
+		ctx = context.WithoutCancel(ctx)
+	}
 	session := l.session
 	if l.testBeforeBeginOperation != nil {
 		l.testBeforeBeginOperation()
@@ -516,6 +538,12 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context,
 			wrapAdvisoryDiscardError(discard.drain()),
 		)
 	}
+	if process && ctx.Err() != nil {
+		l.mu.Unlock()
+		endOperation()
+		return ctx.Err()
+	}
+	ctx = context.WithoutCancel(ctx)
 	terminalDiscard := func(releaseErr error) error {
 		discard := session.prepareDiscardExcept(l)
 		actions := l.retireLocked()
@@ -551,6 +579,7 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context,
 		}
 	}
 	session.detach(l)
+	l.releaseAcknowledged = true
 	actions := l.retireLocked()
 	l.mu.Unlock()
 	endOperation()

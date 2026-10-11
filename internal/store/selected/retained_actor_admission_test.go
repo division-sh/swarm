@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -104,8 +105,8 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var authorityBefore int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&authorityBefore); err != nil {
+			authorityBefore, err := generationauthority.ReadProcessGeneration(ctx, db, backend == backendselection.BackendSQLite)
+			if err != nil {
 				t.Fatal(err)
 			}
 			inspection, err := OpenAdmissionInspection(ctx, request)
@@ -141,9 +142,9 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("inspection reconciled or hydrated persisted actors: %v", err)
 			}
-			var authorityAfter int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&authorityAfter); err != nil || authorityAfter != authorityBefore {
-				t.Fatalf("inspection acquired process authority: %d -> %d %v", authorityBefore, authorityAfter, err)
+			authorityAfter, err := generationauthority.ReadProcessGeneration(ctx, db, backend == backendselection.BackendSQLite)
+			if err != nil || authorityAfter != authorityBefore {
+				t.Fatalf("inspection changed process generation: %+v -> %+v %v", authorityBefore, authorityAfter, err)
 			}
 			if possession, err := inspection.ProbePossession(ctx); err != nil || !possession.Available {
 				t.Fatalf("actor inspection retained possession: %+v %v", possession, err)

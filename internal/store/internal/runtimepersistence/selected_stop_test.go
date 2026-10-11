@@ -61,7 +61,7 @@ func TestSelectedForkStopAuthorityBothStores(t *testing.T) {
 				}},
 				{"created", func(r *runcontrol.SelectedStopRequest) { r.Binding.CreatedAt = r.Binding.CreatedAt.Add(time.Second) }},
 				{"process", func(r *runcontrol.SelectedStopRequest) { r.Process.AuthorityID = uuid.NewString() }},
-				{"version", func(r *runcontrol.SelectedStopRequest) { r.Process.StateVersion++ }},
+				{"boot", func(r *runcontrol.SelectedStopRequest) { r.Process.BootID = uuid.NewString() }},
 				{"generation", func(r *runcontrol.SelectedStopRequest) { r.Process.AuthorityGeneration++ }},
 			} {
 				t.Run(test.name, func(t *testing.T) {

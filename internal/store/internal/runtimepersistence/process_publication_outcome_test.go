@@ -69,7 +69,7 @@ func (c *processPublicationConn) BeginTx(ctx context.Context, opts driver.TxOpti
 func (c *processPublicationConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 	if err == nil && c.owner.armed.Load() && c.owner.phase == "cancel_after_row" &&
-		strings.Contains(query, "INSERT INTO runtime_startup_authority_facts") {
+		strings.Contains(query, "UPDATE runtime_process_generation") {
 		c.owner.cancel()
 	}
 	return result, err
@@ -244,9 +244,9 @@ func TestProcessCapabilityPublicationRequiresAcknowledgedNativeCommitBothStores(
 				if control.begins.Load() != wantBegins || control.commits.Load() != wantCommits {
 					t.Fatalf("native acquisition replayed: begins=%d commits=%d want=%d/%d", control.begins.Load(), control.commits.Load(), wantBegins, wantCommits)
 				}
-				var records int
-				if err := observer.QueryRow(`SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&records); err != nil || records != int(wantCommits) {
-					t.Fatalf("physical COMMIT observation: records=%d want=%d err=%v", records, wantCommits, err)
+				var generation int
+				if err := observer.QueryRow(`SELECT generation FROM runtime_process_generation WHERE singleton_id=1`).Scan(&generation); err != nil || generation != int(wantCommits) {
+					t.Fatalf("physical COMMIT observation: generation=%d want=%d err=%v", generation, wantCommits, err)
 				}
 				if capability != nil {
 					if err := capability.Release(context.Background()); err != nil {

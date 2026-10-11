@@ -278,6 +278,9 @@ func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminal
 	if s == nil || owner == nil {
 		return
 	}
+	if s.lease.ReleasedCleanly() {
+		return
+	}
 	s.mu.Lock()
 	if s.released {
 		s.mu.Unlock()
@@ -392,7 +395,7 @@ func (s *postgresSession) Release(ctx context.Context) error {
 		return nil
 	}
 	s.mu.Unlock()
-	if err := s.lease.Release(ctx); err != nil {
+	if err := s.lease.ReleaseProcess(ctx); err != nil {
 		return err
 	}
 	s.mu.Lock()

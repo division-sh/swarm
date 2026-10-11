@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -234,18 +235,33 @@ func waitServingMatrixReceipt(t *testing.T, p *servingMatrixProbe, deadline time
 }
 
 type servingMatrixFixture struct {
-	selected notifyAllChildrenStore
-	db       *sql.DB
-	topology *notifyAllChildrenProcessTopology
-	sources  []semanticview.Source
-	runtimes []notifyAllChildrenRuntime
-	probes   []*servingMatrixProbe
-	started  []bool
+	selected         notifyAllChildrenStore
+	db               *sql.DB
+	topology         *notifyAllChildrenProcessTopology
+	sources          []semanticview.Source
+	runtimes         []notifyAllChildrenRuntime
+	probes           []*servingMatrixProbe
+	started          []bool
+	contenderResults []<-chan error
 }
 
 func newServingMatrixFixture(t *testing.T, backend string, workers *int, probes ...*servingMatrixProbe) *servingMatrixFixture {
 	t.Helper()
 	f := &servingMatrixFixture{probes: probes, started: make([]bool, len(probes))}
+	// Register first so this joins standbys after accepted work and possession
+	// cleanup, never treating local cancellation as native completion.
+	t.Cleanup(func() {
+		for _, done := range f.contenderResults {
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("cancelled standby lost its logical deadline: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("standby did not join after incumbent possession cleanup")
+			}
+		}
+	})
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
