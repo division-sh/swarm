@@ -21263,7 +21263,12 @@ run_model:
         identity. Missing, duplicate, foreign, future or already-settled outcome evidence fails closed. Other
         observers do not become the barrier''s outcome owner. This fixed-cut evidence is non-executable and never
         replaces current selected authority or grants timer reconstruction. Published arrival and fan-out joins
-        consume one sealed continuation carrier and one fixed-cut publication census. A transferred fan-out barrier
+        consume one sealed continuation carrier and one fixed-cut publication census. Read-only selected barrier
+        recipient admission consumes the sealed original publication and the exact compiled selected counterpart
+        of its node, handler event, join ID and fan-out declaration. The original publication retains its original
+        artifact/digest; selection does not rewrite that event or apply its old digest to counterfactual code.
+        Child materialization still projects and validates the selected handle through canonical fan-out correspondence.
+        Ordinary live occurrence admission continues to require its own exact artifact/digest. A transferred fan-out barrier
         retains publication lineage and due in its existing barrier row, never a copied or rearmed timer. Pending
         publication intent is distinct from a committed event and from settled receiver work. Historical readback
         proves a present event against its exact payload, producer, mode and due, then its exact outcome delivery;

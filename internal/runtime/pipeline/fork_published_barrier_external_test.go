@@ -65,6 +65,14 @@ func (p *publishedBarrierClaimProbe) NotifyLifecycle(ctx context.Context, signal
 }
 
 func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testing.T) {
+	verifyPublishedFanOutBarrierContinuation(t, false)
+}
+
+func TestIssue642PublishedBarrierCompletionFailureRollsBackBothStores(t *testing.T) {
+	verifyPublishedFanOutBarrierContinuation(t, true)
+}
+
+func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		if crashBackend := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
 			continue
@@ -134,14 +142,32 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, filepath.Join(repo, "platform-spec.yaml"))
+			targetRoot := root
+			if failingCompletion {
+				targetRoot = canonicalrouting.CopyForkFanOutBarrierCompletionFailure(t)
+			}
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, targetRoot, filepath.Join(repo, "platform-spec.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
+			if failingCompletion {
+				joins := semanticview.Wrap(bundle).WorkflowJoins()
+				if len(joins) != 1 || len(joins[0].Spec.OnComplete.DataAccumulation.Writes) != 1 || !joins[0].Spec.OnComplete.DataAccumulation.Writes[0].Value.HasCELValue() {
+					t.Fatal("completion failure must compile a real evaluation, not a literal")
+				}
+				storetest.RequireBundleDataCatalog(t, phase, selected.SourceArtifactWriter(), bundle)
+			}
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
 			crashing := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND") != ""
-			if crashing {
+			if crashing || failingCompletion {
 				childProbe.resume = make(chan struct{})
+				t.Cleanup(func() {
+					select {
+					case <-childProbe.resume:
+					default:
+						close(childProbe.resume)
+					}
+				})
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: runID, At: original.id, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
@@ -150,6 +176,13 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 					AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: childProbe}},
 			}
+			if failingCompletion {
+				request.ExpectedBundleHash = bundle.SourceArtifact.BundleHash()
+				request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: request.ExpectedBundleHash}
+				if request.ExpectedBundleHash == rt.Options.SourceArtifactFact.BundleHash() {
+					t.Fatal("completion failure must select a genuinely different admitted artifact")
+				}
+			}
 			if crashing {
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "published-barrier-crash", IdempotencyKey: "pending-cut", TransportHash: "published-barrier-crash-transport",
@@ -157,6 +190,7 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 					AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
 				}
 			}
+			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 			result, err := family.Execute(phase, request)
 			defer func() {
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -180,6 +214,13 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 			}
 			if crashing {
 				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, before.Entity.Revision)
+			}
+			if failingCompletion {
+				verifyPublishedBarrierCompletionRollback(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before)
+				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
+					t.Fatalf("failed barrier completion retained owned process work: active=%d baseline=%d", active, baselineWork)
+				}
+				return
 			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: childClaim.id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				diagnostic, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)

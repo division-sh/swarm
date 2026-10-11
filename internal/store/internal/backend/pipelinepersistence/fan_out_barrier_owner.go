@@ -335,6 +335,7 @@ func loadFanOutBarriers(
 	runID string,
 	status fanoutbarrier.Status,
 	exact *fanoutobligation.IntentKey,
+	forUpdate bool,
 ) ([]fanoutbarrier.Barrier, error) {
 	if exact != nil {
 		if err := exact.Validate(); err != nil || exact.RunID != runID {
@@ -361,7 +362,7 @@ func loadFanOutBarriers(
 		args = append(args, string(status))
 	}
 	query += " ORDER BY triggering_delivery_id, flow_path, declaration_family, semantic_path"
-	if postgres {
+	if postgres && forUpdate {
 		query += " FOR UPDATE"
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -468,7 +469,7 @@ func decodePersistedFanOutBarrier(item persistedFanOutBarrier) (fanoutbarrier.Ba
 }
 
 func loadArmedFanOutBarriers(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]fanoutbarrier.Registration, error) {
-	barriers, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusArmed, nil)
+	barriers, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusArmed, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -650,7 +651,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 	runID string,
 	at time.Time,
 ) error {
-	barriers, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil)
+	barriers, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil, true)
 	if err != nil {
 		return err
 	}
@@ -747,7 +748,7 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	runID string,
 	selectedNow time.Time,
 ) error {
-	pendingRows, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil)
+	pendingRows, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil, true)
 	if err != nil {
 		return err
 	}
@@ -1234,7 +1235,7 @@ func commitFanOutBarrierCompletionTx(
 		return err
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := loadFanOutBarriers(ctx, tx, postgres, runID, "", &key)
+		rows, err := loadFanOutBarriers(ctx, tx, postgres, runID, "", &key, true)
 		if err != nil {
 			return err
 		}
