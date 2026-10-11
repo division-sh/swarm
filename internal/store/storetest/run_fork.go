@@ -13,6 +13,18 @@ func ReadRunStatusStorage(ctx context.Context, selected any, runID string) (stri
 	return private.ReadRunStatusStorageForTest(ctx, selected, runID)
 }
 
+func ReadSelectedSourceRefusalStorage(ctx context.Context, selected any, sourceRunID, sourceEventID string) (map[string]int, error) {
+	return private.ReadSelectedSourceRefusalStorageForTest(ctx, selected, sourceRunID, sourceEventID)
+}
+
+func ReadSelectedForkRefusalStorage(ctx context.Context, selected any, forkRunID string) (map[string]int, error) {
+	return private.ReadSelectedForkRefusalStorageForTest(ctx, selected, forkRunID)
+}
+
+func CountSelectedForkRunsForSource(ctx context.Context, selected any, sourceRunID string) (int, error) {
+	return private.CountSelectedForkRunsForSourceForTest(ctx, selected, sourceRunID)
+}
+
 func CountRunNamedEventStorage(ctx context.Context, selected any, runID, eventName string) (int, error) {
 	return private.CountRunNamedEventStorageForTest(ctx, selected, runID, eventName)
 }

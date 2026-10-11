@@ -715,14 +715,14 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if _, err := ExecuteSelectedContractRunFork(ctx, missingProcess); err == nil || !strings.Contains(err.Error(), "selected preparation requires its bound process capability") {
 		t.Fatalf("missing process refusal = %v", err)
 	}
-	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+	assertNoSelectedContractExecutionMutationForSource(t, ctx, pg, sourceRunID, sourceEventID)
 	if err := request.AgentRuntime.ProcessCapability.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ExecuteSelectedContractRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "prove selected owner's process capability") {
 		t.Fatalf("retired process refusal = %v", err)
 	}
-	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+	assertNoSelectedContractExecutionMutationForSource(t, ctx, pg, sourceRunID, sourceEventID)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
 	// A successor process gets a new owner; a retired owner's binding is immutable.
 	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
@@ -3927,7 +3927,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	if result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || result.Activated {
 		t.Fatalf("result = %#v, want no fork publish before marker block", result)
 	}
-	assertNoForkExecutionRowsForRun(t, db, materialized.ForkRunID)
+	assertNoForkExecutionRowsForRun(t, ctx, pg, materialized.ForkRunID)
 }
 
 func persistRunForkManagedTurn(t testing.TB, ctx context.Context, selected *store.PostgresStore, event events.Event, identity agentidentity.Identity, runID, sessionID, turnID, entityID string, at time.Time) {
@@ -4433,8 +4433,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyUnresolvedSelectedForkInput(t)
@@ -4472,8 +4471,8 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 		t.Fatalf("result mutated before unresolved frontier rejection: %#v", result)
 	}
 
-	var forkRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
+	forkRows, err := storetest.CountSelectedForkRunsForSource(ctx, pg, sourceRunID)
+	if err != nil {
 		t.Fatalf("count fork rows: %v", err)
 	}
 	if forkRows != 0 {
@@ -5569,56 +5568,35 @@ func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRu
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }
 
-func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string) {
+func assertNoForkExecutionRowsForRun(t *testing.T, ctx context.Context, selected any, forkRunID string) {
 	t.Helper()
-	ctx := context.Background()
-	for name, query := range map[string]string{
-		"events":                                  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
-		"event_deliveries":                        `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
-		"run_fork_selected_contract_executions":   `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`,
-		"run_fork_selected_contract_divergences":  `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE fork_run_id = $1::uuid`,
-		"run_fork_selected_contract_route_rows":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`,
-		"run_fork_delivery_event_replay_lineages": `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, forkRunID).Scan(&count); err != nil {
-			t.Fatalf("count %s rows: %v", name, err)
-		}
+	counts, err := storetest.ReadSelectedForkRefusalStorage(ctx, selected, forkRunID)
+	if err != nil {
+		t.Fatalf("count rejected fork rows: %v", err)
+	}
+	for name, count := range counts {
 		if count != 0 {
 			t.Fatalf("%s rows for blocked selected fork = %d, want 0", name, count)
 		}
 	}
 }
 
-func assertNoSelectedContractExecutionMutationForSource(t *testing.T, db *sql.DB, sourceRunID, sourceEventID string) {
+func assertNoSelectedContractExecutionMutationForSource(t *testing.T, ctx context.Context, selected any, sourceRunID, sourceEventID string) {
 	t.Helper()
-	ctx := context.Background()
-	for name, query := range map[string]string{
-		"fork_runs":                            `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`,
-		"selected_contract_bindings":           `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE source_run_id = $1::uuid`,
-		"selected_contract_executions":         `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id = $1::uuid`,
-		"selected_contract_branch_divergences": `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE source_run_id = $1::uuid`,
-		"selected_contract_route_recoveries":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE source_run_id = $1::uuid`,
-		"delivery_event_replays":               `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE source_run_id = $1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, sourceRunID).Scan(&count); err != nil {
-			t.Fatalf("count %s rows: %v", name, err)
+	counts, err := storetest.ReadSelectedSourceRefusalStorage(ctx, selected, sourceRunID, sourceEventID)
+	if err != nil {
+		t.Fatalf("count rejected source rows: %v", err)
+	}
+	for name, count := range counts {
+		if name == "fork_events" {
+			continue
 		}
 		if count != 0 {
 			t.Fatalf("%s rows for blocked selected fork source = %d, want 0", name, count)
 		}
 	}
 
-	var forkEvents int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE source_event_id = $1::uuid
-		  AND run_id <> $2::uuid
-	`, sourceEventID, sourceRunID).Scan(&forkEvents); err != nil {
-		t.Fatalf("count fork events: %v", err)
-	}
+	forkEvents := counts["fork_events"]
 	if forkEvents != 0 {
 		t.Fatalf("fork event rows for blocked selected fork source event = %d, want 0", forkEvents)
 	}

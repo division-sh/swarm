@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 160 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e54d4e6bcd80ea2a1c6a34a9d14ee113a40a66bc645ed449b7ef9b96e48663de" {
+	if err != nil || len(rows) != 162 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e4228f4f4b90cd6e518ca8d20f48e2949cdd376e7c8f143756a42c203571fe74" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,10 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "assertNoForkExecutionRowsForRun" || function == "assertNoSelectedContractExecutionMutationForSource" {
+		assertFamily145RefusalProofs(t, function, beforeSource, afterSource)
+		return
+	}
 	if function == "seedSourceOutcomeThatMustNotSuppressFork" || function == "seedSelectedRuntimeOutcomeSource" {
 		assertFamily145SourceOutcomeProofs(t, function, beforeSource, afterSource)
 		return
@@ -153,6 +157,8 @@ func family145SemanticOwner(function string) bool {
 		"loadNotifyAllChildrenSemanticRejections", "assertReporterFanOutSingleChunkHistory", "assertServingMatrixHistory", "requireSourceRevisionLifecycleDiagnosticReceipts":
 		return true
 	case "seedSourceOutcomeThatMustNotSuppressFork", "seedSelectedRuntimeOutcomeSource":
+		return true
+	case "assertNoForkExecutionRowsForRun", "assertNoSelectedContractExecutionMutationForSource":
 		return true
 	}
 	return false
@@ -323,7 +329,7 @@ func TestFamily145ForkCallerRewriteRejectsUnreviewedBindings(t *testing.T) {
 }
 
 func TestFamily145ForkCallerInventoryConsumesOriginalSelectedOwner(t *testing.T) {
-	var revisions, histories int
+	var revisions, histories, nativeSnapshots int
 	for _, source := range family145ForkCallerSources {
 		data, err := os.ReadFile(filepath.Join("../../..", "internal/runtime/runforkexecution", source.name))
 		if err != nil {
@@ -337,6 +343,12 @@ func TestFamily145ForkCallerInventoryConsumesOriginalSelectedOwner(t *testing.T)
 			fn, ok := declaration.(*ast.FuncDecl)
 			if !ok {
 				continue
+			}
+			if source.name == "runtime_outcome_test.go" && fn.Name.Name == "seedSelectedRuntimeOutcomeSource" {
+				if err := family145NativeOutcomeSnapshot(fn); err != nil {
+					t.Fatalf("named native snapshot replacement changed: %v", err)
+				}
+				nativeSnapshots++
 			}
 			if fn.Name.Name == "captureSelectedExecutionSourceRevision" {
 				want := `func captureSelectedExecutionSourceRevision(t testing.TB, selected any, runID string, families ...runforkrevision.Family) int64 {
@@ -375,7 +387,58 @@ func TestFamily145ForkCallerInventoryConsumesOriginalSelectedOwner(t *testing.T)
 			})
 		}
 	}
-	if revisions != 30 || histories != 21 {
-		t.Fatalf("finite caller inventory changed: revisions=%d history=%d", revisions, histories)
+	if revisions != 29 || nativeSnapshots != 1 || revisions+nativeSnapshots != 30 || histories != 21 {
+		t.Fatalf("finite caller inventory changed: revisions=%d nativeSnapshots=%d history=%d", revisions, nativeSnapshots, histories)
+	}
+}
+
+func family145NativeOutcomeSnapshot(fn *ast.FuncDecl) error {
+	var snapshots int
+	var problem error
+	ast.Inspect(fn, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := family145NodeString(call.Fun)
+		switch {
+		case name == "storetest.CaptureRunForkSnapshot":
+			snapshots++
+			if len(call.Args) != 4 || family145NodeString(call) != "storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)" {
+				problem = fmt.Errorf("snapshot must consume the original selected owner and coordinates")
+			}
+		case name == "captureSelectedExecutionSourceRevision" || strings.Contains(name, "BeginTx") ||
+			strings.Contains(name, "CaptureSQLite") || name == "storetest.DatabaseForTest" || strings.HasSuffix(name, ".Commit"):
+			problem = fmt.Errorf("native snapshot retained a duplicate raw transaction protocol: %s", name)
+		}
+		return true
+	})
+	if problem != nil {
+		return problem
+	}
+	if snapshots != 1 {
+		return fmt.Errorf("native snapshot multiplicity=%d, want exactly one", snapshots)
+	}
+	return nil
+}
+
+func TestFamily145NativeOutcomeSnapshotReplacementRejectsMissingDuplicateForeignAndRawProtocol(t *testing.T) {
+	want := "storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)"
+	for _, body := range []string{
+		"", want + ";" + want,
+		strings.Replace(want, "selected", "peer", 1),
+		strings.Replace(want, "ctx", "context.Background()", 1),
+		strings.Replace(want, "runID", "foreignRunID", 1),
+		want + "; db.BeginTx(ctx, nil)", want + "; storetest.DatabaseForTest(selected)",
+		want + "; tx.Commit()", want + "; captureSelectedExecutionSourceRevision(t, selected, runID)",
+	} {
+		fn := sourceOutcomeAST("func seedSelectedRuntimeOutcomeSource() {" + body + "}").Decls[0].(*ast.FuncDecl)
+		if err := family145NativeOutcomeSnapshot(fn); err == nil {
+			t.Fatalf("native replacement accepted missing/duplicate/foreign/raw snapshot: %s", body)
+		}
+	}
+	fn := sourceOutcomeAST("func seedSelectedRuntimeOutcomeSource() {" + want + "}").Decls[0].(*ast.FuncDecl)
+	if err := family145NativeOutcomeSnapshot(fn); err != nil {
+		t.Fatal(err)
 	}
 }

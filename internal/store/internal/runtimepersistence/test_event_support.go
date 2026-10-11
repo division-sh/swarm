@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
@@ -30,6 +31,52 @@ import (
 type SelectedCausalDiagnosticStorage struct {
 	Events     []eventrecord.LifecycleDiagnosticEventLineage
 	Projection []byte
+}
+
+func ReadSelectedSourceRefusalStorageForTest(ctx context.Context, selected any, sourceRunID, sourceEventID string) (map[string]int, error) {
+	for _, id := range []string{sourceRunID, sourceEventID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return nil, err
+		}
+	}
+	var out map[string]int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = runforkpersistence.ReadSelectedSourceRefusalStorageTx(ctx, tx, sourceRunID)
+		if err != nil {
+			return err
+		}
+		out["fork_events"], err = eventrecord.CountSourceEventForeignRunStorageTx(ctx, tx, sourceEventID, sourceRunID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadSelectedForkRefusalStorageForTest(ctx context.Context, selected any, forkRunID string) (map[string]int, error) {
+	if err := validateStandaloneStorageEvent(selected, forkRunID); err != nil {
+		return nil, err
+	}
+	var out map[string]int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = runforkpersistence.ReadSelectedForkRefusalStorageTx(ctx, tx, forkRunID)
+		if err != nil {
+			return err
+		}
+		out["events"], err = eventrecord.CountRunEventStorageTx(ctx, tx, forkRunID)
+		if err != nil {
+			return err
+		}
+		out["event_deliveries"], err = deliveryadapter.CountSelectedForkDeliveryStorageTx(ctx, tx, forkRunID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func CountRunExactEventStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {

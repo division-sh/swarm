@@ -8,6 +8,22 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
 
+func CountSelectedForkRunsForSourceForTest(ctx context.Context, selected any, sourceRunID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, sourceRunID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = runforkpersistence.CountSelectedForkRunsForSourceTx(ctx, tx, sourceRunID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
 func CountSelectedContractBindingStorageForTest(ctx context.Context, selected any) (int, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err

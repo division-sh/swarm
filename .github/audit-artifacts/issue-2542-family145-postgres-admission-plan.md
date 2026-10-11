@@ -1157,3 +1157,90 @@ remains unqualified. No fresh global census/downward baseline or remaining raw-
 site count is claimed at this cohort. #2542/#2151 and their existing watchlist
 mapping remain open; routine native ownership repair stays within the approved
 family. M01 and Docker remain qualification-open under #2353. No push or PR.
+
+### Complete Rejection Observers And Snapshot Inventory Repair
+
+Reviewer-b's6107642960 identifies a real guard-selection gap at65be9e9d3:
+TestFamily145ForkCallerInventoryConsumesOriginalSelectedOwner still demanded30
+revision-helper calls after the outcome matrix moved one call to the native
+snapshot owner. The earlier selected controls did not execute that inventory;
+the earlier checkpoint is not unconditionally guard-green or approved. This
+cohort repairs the inventory explicitly:29 original helper calls plus exactly
+one CaptureRunForkSnapshot(t,ctx,selected,runID) at the named
+runtime_outcome_test.go/seedSelectedRuntimeOutcomeSource consumer, preserving
+all21 history callers. Missing/duplicate snapshots, changed owner/context/run,
+getter, BeginTx, Commit and duplicate old-helper protocols are rejected. No
+file exemption, reduced total, historical rewrite or baseline allowance.
+
+Both complete rejection-observer helpers now consume their original selected
+owner and caller context, rather than a pool and new background context:
+assertNoSelectedContractExecutionMutationForSource has two callsites in the
+lineage journey; assertNoForkExecutionRowsForRun has one in post-T marker
+activation refusal. The former retains all six source-run metadata counts and
+its distinct generic source_event_id/run-inequality assertion. The latter
+retains all six fork-local counts. Each fixed detached witness is read through
+one original native transaction after the consumer's completed rejection; no
+eligibility, generation, lifecycle, status, ordering or inferred-source filter
+replaces the original predicates or zero-mutation assertions. These quiescent
+refusal witnesses are not merged with execution-state/status observations.
+
+Canonical row owners: runforkpersistence owns exact fork-run lineage, selected
+binding/execution/divergence/route recovery and independent delivery-replay
+metadata; eventrecord owns physical event-run and generic source-event/foreign-
+run counts; the existing closed delivery projection owner retains all-status
+run delivery cardinality. Event coordination stays in test_event_support,
+not another importing SQL owner. Detached storetest ports expose only the
+original coordinates, no SQL, table, predicate, callback, pool or authority.
+Invalid/raw/uninitialized/cancelled/closed ownership returns no partial map or
+scalar. The complete unresolved-frontier fixture now opens natively and uses
+its separate original forked_from_run_id scalar; every refusal/assertion remains.
+
+| Manifestation | Disposition | Exact execution proof |
+| --- | --- | --- |
+| Missing and retired process capability leave no fork mutation | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage, both original source-refusal cuts and successful successor execution |
+| Post-T replay marker blocks publication without fork-local residue | execution-proven through the same corrected path | TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker, unchanged typed blocker, empty execution/publication and six physical counts |
+| Unresolved frontier refuses before materialization | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization, original result/typed blocker and separate lineage count |
+| Fixed physical observer scope and original coordinator | execution-proven through the same corrected path | TestSelectedForkRefusalObservationsRetainExactPhysicalScopeBothStores, valid same-run replay history, exact foreign requested coordinates, absent IDs, all map keys and eight original-owner read commits/no writes |
+| Residue cannot be represented as unconditional zero | execution-proven through the same corrected path | TestSelectedForkRefusalObservationsDetectGenuineMaterializedDescendantsBothStores, actual compiled-source construction and native fork materialization, positive source count and child self-exclusion |
+| Raw/cancelled/closed readers return no evidence | execution-proven through the same corrected path | Expanded TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores, three added ports |
+| Historical outcome's inventory replacement was omitted | reproduced and fixed | Reviewer-b's exact RED at65be9e9d3; TestFamily145ForkCallerInventoryConsumesOriginalSelectedOwner and TestFamily145NativeOutcomeSnapshotReplacementRejectsMissingDuplicateForeignAndRawProtocol GREEN |
+
+Focused vemew race/count1: refusal-native-consumers.jsonl PASS11.948s, all three
+original execution roots. The new physical-scope proof initially panicked on
+an omitted flow path, then refused the attempted cross-run generic causal
+event on both stores. These are invalid new proof setup, not waived production
+defects. Corrected setup supplies the explicit root path, preserves genuinely
+admitted same-run history and separately asserts the native foreign-causal
+refusal; no raw write or admission bypass. refusal-native-scope-admitted-causal
+PASS15.459s, including the expanded invalid/cancelled/closed controls.
+refusal-native-positive-lineage PASS14.341s uses existing source-aware native
+construction and real MaterializeRunFork, not a fabricated child or lease.
+
+Actual eventrecord query counterexample changes only run_id<>$2 to run_id=$2:
+refusal-inequality-counterexample expected RED49.415s on both stores, each
+reporting fork_events1 rather than0, not a SQL/timeout failure. Exact predicate
+restored; refusal-inequality-restored-owner-guards GREEN74.506s for the physical
+root and all three selected-store event/delivery/revision ownership guards.
+Production event-construction guard separately GREEN2.862s. All original SQL
+predicates have exact domain-owner correspondence, and complete metadata loops
+must execute every count and retain native results rather than synthesize zero.
+Business-assertion/foreign-owner/context hostile controls reject changed witnesses.
+
+The complete TestFamily145 prefix (25 roots), all three historical-model roots
+and finite reviewed snapshots PASS23.081s. Four owner-retirement/successor/
+correspondence/syntax controls separately PASS0.028s. This includes the previously
+missed caller inventory, not a selected-root proxy for it. Finite corpus1022
+rows/162 exact transitions, digest
+e4228f4f4b90cd6e518ca8d20f48e2949cdd376e7c8f143756a42c203571fe74;
+original893 immutable rows and24 historical receipts preserved. Complete codemod
+dry run Changes=[] (after correcting an unsupported local -root invocation);
+six-package U1000 is GREEN. Exact-head complexity is evaluated after the signed
+checkpoint. No collector/guard classifier, baseline, budget, workflow or planner
+allowance. Authoritative spec records these bounded fixture observations.
+
+Named supplied-pool admissions134 ->133, or134 excluding Docker's unqualified
+removal. This is not a fresh global census/raw-site count or whole-family/parent
+closure. Other raw SQL in the larger lineage/post-T parent fixtures remains
+explicit migration tail. M01 and Docker remain qualification-open in #2353;
+the previous stdlib setup failure remains unclassified. No aggregate package,
+local tier, restart qualification, flake/performance repair, push or PR claimed.

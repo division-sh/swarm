@@ -45,6 +45,15 @@ func TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores(
 		{"run-exact-event-count", func(ctx context.Context, owner any, id string) (any, error) {
 			return CountRunExactEventStorageForTest(ctx, owner, id, id)
 		}, 0},
+		{"source-refusal", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedSourceRefusalStorageForTest(ctx, owner, id, id)
+		}, map[string]int(nil)},
+		{"fork-refusal", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedForkRefusalStorageForTest(ctx, owner, id)
+		}, map[string]int(nil)},
+		{"fork-lineage-count", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedForkRunsForSourceForTest(ctx, owner, id)
+		}, 0},
 		{"fork-counts", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadConversationForkStorageForTest(ctx, owner, id)
 		}, ConversationForkStorage{}},
