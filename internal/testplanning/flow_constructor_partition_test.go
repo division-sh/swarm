@@ -72,6 +72,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		"store-runtime-full-03": {"TestGenericConstructedGateForkUsesFixedSnapshotBothStores"},
 		"store-runtime-full-05": {
 			"TestReceiverConfigActivationRaceAndRollbackBothStores",
+			"TestReceiverEntitylessPendingAttachmentExecutesBothStores",
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
 			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
 		},
