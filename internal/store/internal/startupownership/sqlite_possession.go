@@ -162,7 +162,7 @@ func (s *StartupSQLiteOwner) acquirePossession(ctx context.Context) (sqlitePosse
 				return initial, nil
 			}
 		}
-		possession, err := acquireSQLiteFilePossession(s.path)
+		possession, err := waitSQLiteFilePossession(ctx, s.path)
 		if err != nil {
 			return nil, err
 		}

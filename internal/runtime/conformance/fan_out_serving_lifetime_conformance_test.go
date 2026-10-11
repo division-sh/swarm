@@ -114,7 +114,7 @@ func TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends(t *testing
 			}
 			before := readServingLifetimeState(t, f.db, runID)
 			assertServingLifetimeUnissued(t, before)
-			assertServingMatrixContenderRefused(t, f, ctx)
+			assertServingMatrixContenderWaits(t, f, ctx)
 			loseServingMatrixProcessPossession(t, backend, f.db)
 			if err := f.topology.capability.ProveCurrent(ctx); err == nil {
 				t.Fatal("actual lost selected-store possession still proved current")
@@ -305,25 +305,44 @@ func assertServingLifetimeClaimOwner(t *testing.T, db *sql.DB, runID, want strin
 	}
 }
 
-func assertServingMatrixContenderRefused(t *testing.T, f *servingMatrixFixture, ctx context.Context) {
+func assertServingMatrixContenderWaits(t *testing.T, f *servingMatrixFixture, ctx context.Context) {
 	t.Helper()
-	var before, after int
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	contender, err := f.selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "fan-out-m07-contender", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	inspection, ok := f.selected.(interface {
+		InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)
 	})
-	if contender != nil {
-		t.Cleanup(func() { _ = contender.Release(context.Background()) })
-		t.Fatal("second ordinary process obtained a separate serving capability while the first held work")
+	if !ok {
+		t.Fatal("serving matrix requires the native read-only generation port")
 	}
-	var acquisition *startupownership.AcquisitionError
-	if !errors.As(err, &acquisition) || acquisition.Failure != startupownership.AcquisitionTakeoverRequired {
-		t.Fatalf("second ordinary process refusal lacks typed possession evidence: %v", err)
+	before, err := inspection.InspectAuthority(ctx)
+	if err != nil || before.Authority == nil {
+		t.Fatalf("read incumbent generation: %+v, %v", before, err)
 	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&after); err != nil || after != before {
-		t.Fatalf("refused competing process mutated authority history: before=%d after=%d err=%v", before, after, err)
+	waitCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	f.contenderResults = append(f.contenderResults, done)
+	go func() {
+		contender, err := f.selected.AcquireProcessCapability(waitCtx, startupownership.AcquireRequest{
+			OwnerID: "fan-out-m07-contender", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+		})
+		if contender != nil {
+			err = errors.Join(errors.New("second process obtained serving authority before the incumbent joined"), contender.Release(context.Background()))
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		// Keep the same result for the teardown's mandatory native join.
+		done <- err
+		t.Fatalf("standby returned before native possession became available: %v", err)
+	case <-waitCtx.Done():
+	}
+	after, err := inspection.InspectAuthority(ctx)
+	if err != nil || after.Authority == nil || *after.Authority != *before.Authority {
+		t.Fatalf("waiting process changed canonical generation: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if err := f.topology.capability.ProveCurrent(ctx); err != nil {
+		t.Fatalf("standby disturbed the incumbent's native possession: %v", err)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -28,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -334,7 +336,7 @@ type agentFixtureAuthoritySnapshot struct {
 }
 
 type agentFixtureAuthorityRows struct {
-	AuthorityFacts      int
+	ProcessGeneration   processbinding.LeaseStamp
 	SourceSetHeads      int
 	SourceSetOperations int
 	GenerationGrants    int
@@ -394,20 +396,26 @@ func TestAgentFixtureSealedAuthorityRejectionParity(t *testing.T) {
 func captureAgentFixtureAuthorityRows(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) agentFixtureAuthorityRows {
 	t.Helper()
 	var db *sql.DB
+	sqlite := false
 	switch store := selected.(type) {
 	case *SQLiteRuntimeStore:
 		db = store.backend.ConstructionHandle()
+		sqlite = true
 	case *PostgresStore:
 		db = store.backend.ConstructionHandle()
 	default:
 		t.Fatalf("unsupported agent fixture authority store %T", selected)
 	}
 	counts := agentFixtureAuthorityRows{}
+	stamp, err := generationauthority.ReadProcessGeneration(ctx, db, sqlite)
+	if err != nil {
+		t.Fatalf("read process generation: %v", err)
+	}
+	counts.ProcessGeneration = stamp
 	for _, query := range []struct {
 		table string
 		out   *int
 	}{
-		{table: "runtime_startup_authority_facts", out: &counts.AuthorityFacts},
 		{table: "agent_topology_source_set_head", out: &counts.SourceSetHeads},
 		{table: "agent_topology_source_set_operations", out: &counts.SourceSetOperations},
 		{table: "runtime_generation_grants", out: &counts.GenerationGrants},
