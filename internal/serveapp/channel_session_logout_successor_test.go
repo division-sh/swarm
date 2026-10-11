@@ -3,12 +3,14 @@
 package serveapp
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing.T) {
@@ -17,10 +19,11 @@ func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			originalPeer := newServeNativeProtocolPeer(t)
-			opts, _ := servedNativeProcessOptions(t, backend)
+			opts, location := servedNativeProcessOptions(t, backend)
 			process := startServedNativeSDKProcess(t, opts, originalPeer)
 			endpoint := process.endpoint(t) + "/v1/rpc"
 			original := requireServedNativeProcessPairing(t, endpoint, originalPeer)
+			originalConnection := readServedNativeConnectionID(t, backend, location, original.Operation.OperationID)
 			params := map[string]any{"operation_id": original.Operation.OperationID,
 				"expected_revision": original.Operation.Revision, "idempotency_key": "logout-before-fresh-pairing"}
 			completed := requireServedNativeOriginalLogout(t, endpoint, originalPeer, params)
@@ -39,11 +42,12 @@ func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing
 			successor := requireServedNativeProcessPairingRequest(t, endpoint, successorPeer,
 				channelonboarding.VerbReconnect, "explicit-successor-pairing", "SERVED_SUCCESSOR_CLAIM")
 			if successor.Operation.OperationID == original.Operation.OperationID ||
+				readServedNativeConnectionID(t, backend, location, successor.Operation.OperationID) == originalConnection ||
 				successor.Operation.BindingRevision <= original.Operation.BindingRevision {
 				t.Fatal("fresh ceremony adopted original operator responsibility", successor.Operation)
 			}
 			requireServedNativeHistoricalLogoutIsolation(t, endpoint, params, completed, successor)
-			successorPeer.text("Inbox", "SERVED_SUCCESSOR_INBOX")
+			successorPeer.text("/inbox", "SERVED_SUCCESSOR_INBOX")
 			message := awaitServedNativeProcessSend(t, successorPeer, "Inbox\n")
 			successorPeer.mu.Lock()
 			from, lid := successorPeer.from.ToNonAD(), successorPeer.fromLID.ToNonAD()
@@ -64,6 +68,26 @@ func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing
 			}
 		})
 	}
+}
+
+func readServedNativeConnectionID(t *testing.T, backend, location, operationID string) string {
+	t.Helper()
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, err := storetest.ReadServedChannelConnection(ctx, reader, operationID)
+	if err != nil {
+		t.Fatal("read-only successor oracle could not observe original connection", err)
+	}
+	return connection
 }
 
 func requireServedNativeOriginalLogout(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, params map[string]any) channelonboarding.SessionLogoutReadback {
