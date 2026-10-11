@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 )
 
@@ -30,6 +31,21 @@ func NewTransferredJoinOccurrence(join joinruntime.Activation, record joinruntim
 		return TransferredJoinOccurrence{}, err
 	}
 	return occurrence, nil
+}
+
+func NewTransferredFanOutBarrierOccurrence(barrier fanoutbarrier.Barrier) (TransferredJoinOccurrence, error) {
+	if err := barrier.Validate(); err != nil {
+		return TransferredJoinOccurrence{}, err
+	}
+	if barrier.TransferredOccurrence == nil || barrier.Summary == nil {
+		return TransferredJoinOccurrence{}, fmt.Errorf("transferred barrier requires its retained publication and summary")
+	}
+	command, err := FanOutBarrierAdmission(barrier.Registration, *barrier.Summary, barrier.TransferredOccurrence.DueAt)
+	if err != nil {
+		return TransferredJoinOccurrence{}, err
+	}
+	occurrence := TransferredJoinOccurrence{Command: command, Publication: barrier.TransferredOccurrence.Publication}
+	return occurrence, occurrence.Validate()
 }
 
 func (o TransferredJoinOccurrence) Validate() error {

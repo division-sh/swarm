@@ -12,10 +12,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -214,7 +216,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
-		return admission.prepareNonActivitySourceEvent(sourceEvent, event, state, actual)
+		return admission.prepareNonActivitySourceEvent(ctx, tx, sourceEvent, event, state, actual)
 	}
 	var sourceRequest runForkActivityRequestPayload
 	if err := json.Unmarshal(sourceEvent.Payload, &sourceRequest); err != nil {
@@ -336,8 +338,23 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	return event, nil
 }
 
-func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
+func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
 	if projected.EventName == "platform.join_complete" || projected.EventName == "platform.join_timeout" {
+		payload, err := canonicaljson.Decode(source.Payload)
+		if err != nil {
+			return projected, err
+		}
+		object, valid := payload.Interface().(map[string]any)
+		if !valid {
+			return projected, fmt.Errorf("published join requires its typed payload")
+		}
+		_, ref, valid := timeridentity.ParseJoinHandle(object)
+		if !valid {
+			return projected, fmt.Errorf("published join requires its exact typed handle")
+		}
+		if ref.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+			return a.publishedBarrier(ctx, tx, projected, state, actual, ref)
+		}
 		return a.publishedArrival(projected, state)
 	}
 	role, found, err := a.eventRole(source.SourceEventID)

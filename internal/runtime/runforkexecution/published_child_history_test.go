@@ -72,7 +72,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				if err != nil || len(start.JoinSchedules) != 0 || len(start.TransferredJoins) != 1 {
 					t.Fatalf("acknowledged/prepublication cut: joins=%d transfers=%d err=%v", len(start.JoinSchedules), len(start.TransferredJoins), err)
 				}
-				if _, found := start.HistoricalArrivalPublication(id); found {
+				if _, found := start.HistoricalJoinPublication(id); found {
 					t.Fatal("prepublication history invented a committed event")
 				}
 				var published runfork.RunForkPlan
@@ -81,7 +81,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					if err != nil || len(published.JoinSchedules) != 0 || len(published.TransferredJoins) != 1 {
 						t.Fatalf("committed publication cut: %+v err=%v", published, err)
 					}
-					if _, found := published.HistoricalArrivalPublication(id); !found {
+					if _, found := published.HistoricalJoinPublication(id); !found {
 						t.Fatal("publication cut omitted exact transferred event evidence")
 					}
 				}
@@ -109,7 +109,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				}
 				again, err = lifecycle.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: checkpoint.ForkRun, At: id})
 				if err != nil || !reflect.DeepEqual(published.Entities, again.Entities) || !reflect.DeepEqual(published.PendingWork, again.PendingWork) ||
-					!reflect.DeepEqual(published.HistoricalArrivalCoordinates(), again.HistoricalArrivalCoordinates()) {
+					!reflect.DeepEqual(published.HistoricalJoinCoordinates(), again.HistoricalJoinCoordinates()) {
 					t.Fatalf("restart/settlement changed the old publication cut: %v", err)
 				}
 				before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, checkpoint.ForkRun)

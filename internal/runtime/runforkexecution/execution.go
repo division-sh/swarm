@@ -354,15 +354,15 @@ type publishSelectedContractForkEventsRequest struct {
 
 func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent runfork.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {
 	var event events.Event
-	if sourceEvent.PublishedArrival.Present() {
-		original := sourceEvent.PublishedArrival.SourceEvent()
-		child := sourceEvent.PublishedArrival.ChildCommand()
+	if sourceEvent.PublishedJoin.Present() {
+		original := sourceEvent.PublishedJoin.SourceEvent()
+		child := sourceEvent.PublishedJoin.ChildCommand()
 		if original.RunID() != sourceRunID || original.ID() != sourceEvent.SourceEventID || child.RunID != forkRunID ||
 			string(original.Type()) != sourceEvent.EventName || original.ExecutionMode() != sourceEvent.ExecutionMode ||
 			child.RoutingSource != sourceEvent.RoutingSource {
 			return event, fmt.Errorf("selected arrival contradicts its sealed source/child projection")
 		}
-		projected, err := sourceEvent.PublishedArrival.Event(forkEventID, producerID)
+		projected, err := sourceEvent.PublishedJoin.Event(forkEventID, producerID)
 		if err != nil {
 			return event, err
 		}

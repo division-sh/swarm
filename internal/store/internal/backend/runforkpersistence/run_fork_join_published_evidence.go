@@ -39,8 +39,8 @@ func runForkPublishedJoinEvidence(snapshot *runForkRevisionSnapshot, activation 
 	return event, nil
 }
 
-func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals []genericschedule.Activation) ([]runfork.PublishedArrival, error) {
-	var publications []runfork.PublishedArrival
+func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals []genericschedule.Activation) ([]runfork.PublishedJoinOccurrence, error) {
+	var publications []runfork.PublishedJoinOccurrence
 	for _, activation := range arrivals {
 		if activation.Status != genericschedule.StatusFired {
 			continue
@@ -49,7 +49,7 @@ func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals [
 		if err != nil {
 			return nil, err
 		}
-		publication, err := runfork.NewPublishedArrival(activation, admitted.Event())
+		publication, err := runfork.NewPublishedJoinOccurrence(activation, admitted.Event())
 		if err != nil {
 			return nil, err
 		}

@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -12,29 +14,44 @@ import (
 
 // A published occurrence's typed handle selects its original arm. Name-based
 // pubsub cannot turn it into a new output or bind it to a later stage entry.
-func admitPublishedArrivalFrontier(source semanticview.Source, plan runfork.RunForkPlan, publication runfork.PublishedArrival) (forkrecipient.Evidence, error) {
+func admitPublishedJoinFrontier(source semanticview.Source, plan runfork.RunForkPlan, publication runfork.PublishedJoinOccurrence) (forkrecipient.Evidence, error) {
 	event := publication.Event()
 	recipient, target, handler, found, err := pipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(source, event)
 	if err != nil || !found {
-		return forkrecipient.Evidence{}, fmt.Errorf("resolve retained arrival declaration: found=%v: %w", found, err)
+		return forkrecipient.Evidence{}, fmt.Errorf("resolve retained join declaration: found=%v: %w", found, err)
 	}
 	bound := false
+	payload, err := canonicaljson.Decode(event.Payload())
+	if err != nil {
+		return forkrecipient.Evidence{}, err
+	}
+	object, valid := payload.Interface().(map[string]any)
+	if !valid {
+		return forkrecipient.Evidence{}, fmt.Errorf("retained join requires its exact handle payload")
+	}
+	_, ref, valid := timeridentity.ParseJoinHandle(object)
+	if !valid {
+		return forkrecipient.Evidence{}, fmt.Errorf("retained join requires its exact declaration")
+	}
 	for _, pending := range plan.PendingWork {
 		if pending.EventID != event.ID() || pending.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+			continue
+		}
+		if ref.Mode() == timeridentity.JoinRefModeFanOutDelivery && (pending.DeliveryRoute.Recipient != recipient || !events.SameRouteIdentity(pending.DeliveryRoute.Target.Route(), target)) {
 			continue
 		}
 		if pending.DeliveryID == "" || pending.DeliveryRoute.Recipient != recipient ||
 			!pending.DeliveryRoute.Target.ExistingEntity() || !events.SameRouteIdentity(pending.DeliveryRoute.Target.Route(), target) ||
 			!pending.DeliveryRoute.ConnectClaim.Empty() || !pending.DeliveryRoute.AgentIdentity.IsZero() {
-			return forkrecipient.Evidence{}, fmt.Errorf("retained arrival frontier contradicts its original durable binding")
+			return forkrecipient.Evidence{}, fmt.Errorf("retained join frontier contradicts its original durable binding")
 		}
 		if bound {
-			return forkrecipient.Evidence{}, fmt.Errorf("retained arrival frontier repeats its original binding")
+			return forkrecipient.Evidence{}, fmt.Errorf("retained join frontier repeats its original binding")
 		}
 		bound = true
 	}
 	if !bound {
-		return forkrecipient.Evidence{}, fmt.Errorf("retained arrival frontier lacks unfinished durable work")
+		return forkrecipient.Evidence{}, fmt.Errorf("retained join frontier lacks unfinished durable work")
 	}
 	path := target.FlowInstance
 	if handler.Node().FlowPath() == semanticview.RootExecutionFlowID(source) && path == plan.SourceRunID {
@@ -42,8 +59,8 @@ func admitPublishedArrivalFrontier(source semanticview.Source, plan runfork.RunF
 	}
 	handlerEvent, exact := handler.EventOverride()
 	if !exact {
-		return forkrecipient.Evidence{}, fmt.Errorf("retained arrival requires its exact original handler event")
+		return forkrecipient.Evidence{}, fmt.Errorf("retained join requires its exact original handler event")
 	}
 	return forkrecipient.NewLocal(forkrecipient.Input{Recipient: recipient, Path: path,
-		HandlerNode: handler.Node(), HandlerEvent: handlerEvent, RouteSource: "retained_arrival"})
+		HandlerNode: handler.Node(), HandlerEvent: handlerEvent, RouteSource: "retained_join"})
 }

@@ -179,7 +179,7 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Frontier      RunForkContractFrontierAdmission
 		Recipients    RunForkSelectedContractRecipientPlanning
 		Declarations  string
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalArrivalCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision})
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision})
 	if err != nil {
 		return "", err
 	}

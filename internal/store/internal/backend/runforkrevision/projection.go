@@ -457,7 +457,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			"created_at", "ordinal", "outcome_kind", "event_id", "outcome_source_event_id", "inherited_disposition", "failure",
 			"barrier_target_flow_path", "barrier_target_node_id", "barrier_handler_event", "barrier_join_id",
 			"barrier_route_scope_key", "barrier_route_instance_id", "barrier_route_instance_path", "barrier_entity_id",
-			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_schedule_activation_id", "barrier_updated_at",
+			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_schedule_activation_id", "barrier_updated_at", "barrier_transferred_occurrence",
 		}
 		parts := []projectionPart{
 			{kind: "intent", alias: "i", query: `
@@ -467,7 +467,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					i.source_resource_flow_path, i.source_resource_event_name, i.source_resource_version_id,
 					i.cardinality, i.cursor, i.status, CAST(i.capsule AS TEXT), i.blocked_reason,
 					CAST(i.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
-					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 				FROM fan_out_intents i WHERE i.run_id=$1`},
 			{kind: "outcome", alias: "o", query: `
 				SELECT
@@ -475,7 +475,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
 					CAST(o.created_at AS TEXT), o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.inherited_disposition, CAST(o.failure AS TEXT),
-					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 				FROM fan_out_outcomes o LEFT JOIN fan_out_intents i ON i.run_id=o.run_id AND
 					((i.origin_kind='deployment' AND i.deployment_feed_id=o.deployment_feed_id) OR
 					(i.origin_kind='handler' AND i.triggering_delivery_id=o.triggering_delivery_id AND
@@ -489,7 +489,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					CAST(b.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
 					b.target_flow_path, b.target_node_id, b.handler_event, b.join_id,
 					b.route_scope_key, CAST(b.route_instance_id AS TEXT), b.route_instance_path, CAST(b.entity_id AS TEXT),
-					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.schedule_activation_id AS TEXT), CAST(b.updated_at AS TEXT)
+					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.schedule_activation_id AS TEXT), CAST(b.updated_at AS TEXT), CAST(b.transferred_occurrence AS TEXT)
 				FROM fan_out_obligation_barriers b WHERE b.run_id=$1`},
 		}
 		spec = projectionSpec{
@@ -497,7 +497,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			parts: parts,
 			columns: typedColumns(map[string]valueKind{
 				"capsule": valueJSON, "failure": valueJSON, "created_at": valueTime,
-				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime,
+				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime, "barrier_transferred_occurrence": valueJSON,
 			}, names...),
 		}
 	case FamilyTimers:

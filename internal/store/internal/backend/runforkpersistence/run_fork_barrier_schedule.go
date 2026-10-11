@@ -1,8 +1,6 @@
 package runforkpersistence
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -15,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func loadRunForkPendingBarrierSchedules(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan) (map[string]genericschedule.Activation, error) {
+func loadRunForkPendingBarrierSchedules(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan) (map[string]genericschedule.Activation, error) {
 	pending := make(map[string]struct{})
 	for _, obligation := range plan.FanOutObligations {
 		barrier := obligation.Barrier
@@ -25,14 +23,16 @@ func loadRunForkPendingBarrierSchedules(ctx context.Context, tx *sql.Tx, plan ru
 		if barrier.Registration.IntentKey.RunID != plan.SourceRunID {
 			return nil, fmt.Errorf("pending fork barrier belongs to another source run")
 		}
+		if barrier.TransferredOccurrence != nil {
+			continue
+		}
 		pending[barrier.ScheduleActivationID] = struct{}{}
 	}
 	if len(pending) == 0 {
 		return nil, nil
 	}
-	snapshot, err := loadRunForkPointSnapshot(ctx, tx, plan.SourceRunID, plan.ForkPoint)
-	if err != nil {
-		return nil, err
+	if snapshot == nil || snapshot.RunID != plan.SourceRunID || snapshot.Revision != plan.ForkPoint.Revision {
+		return nil, fmt.Errorf("fork barrier requires its exact captured cut")
 	}
 	if _, err := validateRunForkBarrierSchedules(snapshot, plan.FanOutObligations); err != nil {
 		return nil, err
@@ -46,8 +46,8 @@ func loadRunForkPendingBarrierSchedules(ctx context.Context, tx *sql.Tx, plan ru
 		if err != nil {
 			return nil, err
 		}
-		if activation.Status != genericschedule.StatusActive {
-			return nil, fmt.Errorf("published fork barrier occurrence requires historical event continuation, not rearming")
+		if activation.Status != genericschedule.StatusActive && activation.Status != genericschedule.StatusFired {
+			return nil, fmt.Errorf("pending fork barrier has no active or published occurrence")
 		}
 		schedules[timer.TimerID] = activation
 	}
@@ -79,6 +79,12 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 		if barrier.Summary != nil && barrier.Summary.Total != obligation.Intent.Request.Cardinality {
 			return nil, fmt.Errorf("fixed-revision barrier summary contradicts its fan-out cardinality")
 		}
+		if barrier.TransferredOccurrence != nil {
+			if err := requireRunForkTransferredBarrierHistory(snapshot, *barrier, timers); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if barrier.ScheduleActivationID == "" {
 			continue
 		}
@@ -104,6 +110,37 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 		owned[id] = struct{}{}
 	}
 	return owned, nil
+}
+
+func requireRunForkTransferredBarrierHistory(snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, timers map[string]runForkRevisionTimer) error {
+	occurrence, err := genericschedule.NewTransferredFanOutBarrierOccurrence(barrier)
+	if err != nil {
+		return err
+	}
+	if snapshot == nil || snapshot.RunID != occurrence.Command.RunID || snapshot.Revision <= 0 {
+		return fmt.Errorf("transferred barrier requires its exact historical owner and cut")
+	}
+	scope, err := occurrence.Command.ScopeKey()
+	if err != nil {
+		return err
+	}
+	for _, timer := range timers {
+		if timer.ScheduleScope == scope && timer.ScheduleKey == occurrence.Command.ScheduleKey {
+			return fmt.Errorf("transferred barrier cannot also own an executable schedule")
+		}
+	}
+	event, found, err := runForkTransferredJoinEvent(snapshot, occurrence)
+	if err != nil {
+		return err
+	}
+	if !found {
+		if barrier.Status == fanoutbarrier.StatusFired || barrier.Status == fanoutbarrier.StatusOutcomeDeadLettered {
+			return fmt.Errorf("settled transferred barrier lacks its retained publication")
+		}
+		return nil
+	}
+	_, err = requireRunForkPublishedBarrierDelivery(snapshot, barrier, event, barrier.Status == fanoutbarrier.StatusClosedPending)
+	return err
 }
 
 // Transport projection only: the existing activation and barrier owners validate

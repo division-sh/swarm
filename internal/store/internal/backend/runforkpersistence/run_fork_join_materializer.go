@@ -34,7 +34,7 @@ func prepareRunForkArrivalJoinRequests(plan runfork.RunForkPlan, childRunID stri
 	requests := make([]storegenericschedule.ForkJoinRequest, 0, len(projected))
 	for _, row := range projected {
 		if row.source.Status == genericschedule.StatusFired {
-			publication, found := plan.HistoricalArrivalPublication(row.source.CurrentEventID)
+			publication, found := plan.HistoricalJoinPublication(row.source.CurrentEventID)
 			if !found {
 				return nil, fmt.Errorf("published arrival requires its fixed-cut historical publication")
 			}

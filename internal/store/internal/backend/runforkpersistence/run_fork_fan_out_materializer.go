@@ -25,7 +25,7 @@ import (
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, *genericschedule.PublishedJoinContinuation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
 }
 
@@ -332,7 +332,19 @@ func materializeRunForkFanOutObligations(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return 0, err
 	}
-	barrierSchedules, err := loadRunForkPendingBarrierSchedules(ctx, tx, plan)
+	var snapshot *runForkRevisionSnapshot
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Barrier == nil || obligation.Barrier.Status != fanoutbarrier.StatusClosedPending {
+			continue
+		}
+		var err error
+		snapshot, err = loadRunForkPointSnapshot(ctx, tx, plan.SourceRunID, plan.ForkPoint)
+		if err != nil {
+			return 0, err
+		}
+		break
+	}
+	barrierSchedules, err := loadRunForkPendingBarrierSchedules(snapshot, plan)
 	if err != nil {
 		return 0, err
 	}
@@ -443,7 +455,15 @@ func materializeRunForkFanOutObligations(
 			if captured, found := barrierSchedules[obligation.Barrier.ScheduleActivationID]; found {
 				schedule = &captured
 			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, schedule, planRef, generation, now); err != nil {
+			var published *genericschedule.PublishedJoinContinuation
+			if obligation.Barrier.Status == fanoutbarrier.StatusClosedPending && (obligation.Barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
+				continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, *obligation.Barrier, forkRunID, planRef, generation, now)
+				if err != nil {
+					return 0, err
+				}
+				published = &continuation
+			}
+			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, schedule, published, planRef, generation, now); err != nil {
 				return 0, err
 			}
 		}

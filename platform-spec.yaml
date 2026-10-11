@@ -19794,8 +19794,11 @@ platform_tables:
         Canonical per-intent terminal-disposition barrier. The row binds one exact compiled delivery-barrier declaration
         to one exact fan-out intent and selected execution target. Raw delivery and route facts remain in their owners;
         this row stores only the closed ordinal summary and barrier lifecycle. A closed_pending row also owns the exact
-        server-minted generic-schedule activation that must either fire or be transactionally cancelled before the
-        barrier becomes terminal. Armed and closed_pending rows block run completion. There is no polling, count
+        server-minted generic-schedule activation, or an exact transferred already-published occurrence without
+        schedule authority. Transferred occurrence metadata retains immediate source event/run, deterministic child
+        event, publication stamp, execution mode and original due. The fixed-cut event and unfinished outcome delivery
+        must be independently admitted; metadata alone cannot authorize publication or execution. The occurrence must
+        settle or be transactionally cancelled before the barrier becomes terminal. Armed and closed_pending rows block run completion. There is no polling, count
         inference, fake stage, or compatibility representation.
       ddl: |
         CREATE TABLE fan_out_obligation_barriers (
@@ -19821,12 +19824,14 @@ platform_tables:
             summary                   JSONB,
             schedule_key              TEXT,
             schedule_activation_id    UUID,
+            transferred_occurrence    JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
             updated_at                TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             FOREIGN KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path) REFERENCES fan_out_intents(run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             CHECK ((schedule_activation_id IS NULL) OR (schedule_key IS NOT NULL)),
-            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (status = 'outcome_suppressed_generation_superseded' AND ((summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL))) OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status = 'closed_pending' AND summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL) OR (status IN ('fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
+            CHECK ((transferred_occurrence IS NULL) OR (schedule_activation_id IS NULL AND summary IS NOT NULL AND schedule_key IS NOT NULL AND status <> 'armed')),
+            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL AND transferred_occurrence IS NULL) OR (status = 'outcome_suppressed_generation_superseded' AND ((summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL AND transferred_occurrence IS NULL) OR (summary IS NOT NULL AND schedule_key IS NOT NULL AND (schedule_activation_id IS NOT NULL OR transferred_occurrence IS NOT NULL)))) OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status = 'closed_pending' AND summary IS NOT NULL AND schedule_key IS NOT NULL AND (schedule_activation_id IS NOT NULL OR transferred_occurrence IS NOT NULL)) OR (status IN ('fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
             INDEX idx_fan_out_obligation_barriers_run (run_id, status),
             INDEX idx_fan_out_obligation_barriers_schedule (schedule_key) WHERE schedule_key IS NOT NULL,
             UNIQUE INDEX idx_fan_out_obligation_barriers_activation (schedule_activation_id) WHERE schedule_activation_id IS NOT NULL
@@ -21257,7 +21262,14 @@ run_model:
         must agree with the barrier''s exact node, existing entity, flow instance and deterministic obligation
         identity. Missing, duplicate, foreign, future or already-settled outcome evidence fails closed. Other
         observers do not become the barrier''s outcome owner. This fixed-cut evidence is non-executable and never
-        replaces current selected authority or grants timer reconstruction. Dynamic-flow and other unproved
+        replaces current selected authority or grants timer reconstruction. Published arrival and fan-out joins
+        consume one sealed continuation carrier and one fixed-cut publication census. A transferred fan-out barrier
+        retains publication lineage and due in its existing barrier row, never a copied or rearmed timer. Pending
+        publication intent is distinct from a committed event and from settled receiver work. Historical readback
+        proves a present event against its exact payload, producer, mode and due, then its exact outcome delivery;
+        fired or dead-lettered barriers cannot omit that evidence. Completion consumes the canonical barrier row
+        and exact inbound delivery in the ordinary atomic business/settlement commit. A transferred row or successful
+        materialization alone cannot authorize that commit. Dynamic-flow and other unproved
         continuation capabilities remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical

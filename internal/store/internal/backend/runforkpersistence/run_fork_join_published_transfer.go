@@ -229,15 +229,15 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	if err != nil {
 		return event, err
 	}
-	route, err = projectRunForkPublishedArrivalRoute(plan, continuation.ChildCommand(), route)
+	route, err = projectRunForkPublishedJoinRoute(plan, continuation.ChildCommand(), route)
 	if err != nil {
 		return event, err
 	}
-	event.PublishedArrival, event.PublishedArrivalRoute, event.Payload = continuation, route, projected.Payload()
+	event.PublishedJoin, event.PublishedJoinRoute, event.Payload = continuation, route, projected.Payload()
 	return event, nil
 }
 
-func projectRunForkPublishedArrivalRoute(plan runfork.RunForkPlan, command genericschedule.AdmissionCommand, route events.DeliveryRoute) (events.DeliveryRoute, error) {
+func projectRunForkPublishedJoinRoute(plan runfork.RunForkPlan, command genericschedule.AdmissionCommand, route events.DeliveryRoute) (events.DeliveryRoute, error) {
 	var err error
 	route.Context, err = projectRunForkConstructionContext(plan, command.RunID, route.Context)
 	if err != nil {

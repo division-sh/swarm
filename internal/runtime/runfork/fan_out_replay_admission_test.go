@@ -320,7 +320,7 @@ func TestRunForkSelectedFanOutReplayAdmissionPreservesSources(t *testing.T) {
 	plan.ReplayResumeAdmission = admission
 	plan.Entities = []RunForkEntityState{{Fields: map[string]any{"kept": "source"}}}
 	plan.historicalInputs = map[string]InputPublication{"kept": {}}
-	plan.historicalArrivals = map[string]PublishedArrival{"kept": {}}
+	plan.historicalJoins = map[string]PublishedJoinOccurrence{"kept": {}}
 	plan.historicalEventIDs = []string{"kept"}
 	beforePlan, beforeAdmission := fanOutReplayAdmissionSnapshot(t, plan), fanOutReplayAdmissionSnapshot(t, admission)
 	got, err := RunForkSelectedFanOutReplayAdmission(plan, admission)
@@ -335,7 +335,7 @@ func TestRunForkSelectedFanOutReplayAdmissionPreservesSources(t *testing.T) {
 	if beforePlan != fanOutReplayAdmissionSnapshot(t, plan) || beforeAdmission != fanOutReplayAdmissionSnapshot(t, admission) {
 		t.Fatal("selected admission shares mutable slices with the source")
 	}
-	if len(plan.historicalInputs) != 1 || len(plan.historicalArrivals) != 1 || !reflect.DeepEqual(plan.historicalEventIDs, []string{"kept"}) {
+	if len(plan.historicalInputs) != 1 || len(plan.historicalJoins) != 1 || !reflect.DeepEqual(plan.historicalEventIDs, []string{"kept"}) {
 		t.Fatal("selected admission changed private source evidence")
 	}
 }

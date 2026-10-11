@@ -257,11 +257,11 @@ func planRunForkSnapshot(
 	evidence.TimerHistory.Point = plan.ForkPoint
 	plan.JoinSchedules = evidence.JoinSchedules
 	plan.TransferredJoins = evidence.TransferredJoins
-	publications, err := runForkAllArrivalPublications(snapshot, plan)
+	publications, err := runForkAllJoinPublications(snapshot, plan)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
-	plan, err = plan.WithHistoricalArrivalPublications(snapshot.Revision, publications)
+	plan, err = plan.WithHistoricalJoinPublications(snapshot.Revision, publications)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

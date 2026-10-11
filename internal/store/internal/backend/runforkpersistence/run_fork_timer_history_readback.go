@@ -63,7 +63,7 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if err != nil {
 		return admission, err
 	}
-	published := plan.HistoricalArrivalCoordinates()
+	published := plan.HistoricalJoinCoordinates()
 	transferred, err := readRunForkTransferredJoinInventory(ctx, attempt, plan, childRunID)
 	if err != nil {
 		return admission, err

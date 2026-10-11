@@ -239,8 +239,8 @@ func validateSelectedForkPublishedInputFrame(binding runfork.RunForkSelectedCont
 	if !lineage.CreatedAt.Equal(event.CreatedAt()) {
 		return fmt.Errorf("selected input lineage changed its retained publication time")
 	}
-	if sourceEvent.PublishedArrival.Present() {
-		return sourceEvent.PublishedArrival.ValidateEvent(event, lineage.SelectionAuthority)
+	if sourceEvent.PublishedJoin.Present() {
+		return sourceEvent.PublishedJoin.ValidateEvent(event, lineage.SelectionAuthority)
 	}
 	if event.Producer().Type() != events.EventProducerPlatform || event.Producer().ID() != lineage.SelectionAuthority || event.TaskID() != "" || event.ParentEventID() != "" || event.ChainDepth() != 0 {
 		return fmt.Errorf("selected input publication changed its original publication frame")

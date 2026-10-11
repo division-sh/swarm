@@ -360,6 +360,11 @@ func projectRunForkFanOutBarrier(runID string, fact *runForkRevisionFanOutFact, 
 		}
 		barrier.Summary = &summary
 	}
+	transferred, err := fanoutbarrier.DecodeTransferredOccurrence(fact.BarrierTransferredOccurrence)
+	if err != nil {
+		return nil, fmt.Errorf("decode transferred barrier occurrence: %w", err)
+	}
+	barrier.TransferredOccurrence = transferred
 	if err := barrier.Validate(); err != nil {
 		return nil, err
 	}

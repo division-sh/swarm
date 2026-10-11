@@ -72,8 +72,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
-		if publication, found := req.Plan.HistoricalArrivalPublication(frontier[i].SourceEventID); found {
-			recipient, err := admitPublishedArrivalFrontier(req.Source, req.Plan, publication)
+		if publication, found := req.Plan.HistoricalJoinPublication(frontier[i].SourceEventID); found {
+			recipient, err := admitPublishedJoinFrontier(req.Source, req.Plan, publication)
 			if err != nil {
 				return runfork.RunForkContractFrontierAdmission{}, err
 			}

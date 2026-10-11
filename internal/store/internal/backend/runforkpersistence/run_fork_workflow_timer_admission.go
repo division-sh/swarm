@@ -187,7 +187,7 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 	}
 	for _, schedule := range plan.JoinSchedules {
 		if schedule.Status == genericschedule.StatusFired {
-			publication, found := plan.HistoricalArrivalPublication(schedule.CurrentEventID)
+			publication, found := plan.HistoricalJoinPublication(schedule.CurrentEventID)
 			if !found {
 				return false, nil
 			}
@@ -201,7 +201,7 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 		}
 	}
 	for _, source := range plan.TransferredJoins {
-		publication, found := plan.HistoricalArrivalPublication(source.Publication.EventID)
+		publication, found := plan.HistoricalJoinPublication(source.Publication.EventID)
 		if !found {
 			// Retained intention is readable, but not committed source publication.
 			return false, nil

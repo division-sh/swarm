@@ -302,7 +302,7 @@ type selectedContractRecipientPlanPublishGuard struct {
 	plansBySourceEvent map[string]runfork.RunForkSelectedContractRecipientPlanEvent
 	sourceByForkEvent  map[string]string
 	sourceAgents       map[string]struct{}
-	publishedArrivals  map[string]events.DeliveryRoute
+	publishedJoins     map[string]events.DeliveryRoute
 	semanticSource     semanticview.Source
 	workflowProjection selectedContractWorkflowProjection
 }
@@ -348,21 +348,21 @@ func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelect
 		plansBySourceEvent: plans,
 		sourceByForkEvent:  map[string]string{},
 		sourceAgents:       allowedAgents,
-		publishedArrivals:  map[string]events.DeliveryRoute{},
+		publishedJoins:     map[string]events.DeliveryRoute{},
 		semanticSource:     source,
 		workflowProjection: projection,
 	}, nil
 }
 
-func (g *selectedContractRecipientPlanPublishGuard) ExpectPublishedArrivalDelivery(event events.Event, route events.DeliveryRoute) error {
+func (g *selectedContractRecipientPlanPublishGuard) ExpectPublishedJoinDelivery(event events.Event, route events.DeliveryRoute) error {
 	_, expected, err := g.expectedRecipientPlanEvent(event)
 	if err != nil {
 		return err
 	}
-	if _, found, err := selectedPublishedArrivalDeliveryRoute(g.semanticSource, event, expected.Recipients, route); err != nil || !found {
+	if _, found, err := selectedPublishedJoinDeliveryRoute(g.semanticSource, event, expected.Recipients, route); err != nil || !found {
 		return fmt.Errorf("retain published arrival delivery: found=%v: %w", found, err)
 	}
-	g.publishedArrivals[event.ID()] = route.Normalized()
+	g.publishedJoins[event.ID()] = route.Normalized()
 	return nil
 }
 
@@ -493,7 +493,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err != nil {
 		return nil, err
 	}
-	if route, found, err := selectedPublishedArrivalDeliveryRoute(g.semanticSource, evt, expected.Recipients, g.publishedArrivals[evt.ID()]); found || err != nil {
+	if route, found, err := selectedPublishedJoinDeliveryRoute(g.semanticSource, evt, expected.Recipients, g.publishedJoins[evt.ID()]); found || err != nil {
 		if err != nil {
 			return nil, err
 		}
@@ -502,7 +502,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	return selectedContractNodeDeliveryRoutes(g.semanticSource, expected.EventName, expected.Recipients)
 }
 
-func selectedPublishedArrivalDeliveryRoute(source semanticview.Source, event events.Event, selected []forkrecipient.Evidence, original events.DeliveryRoute) (runtimebus.DeliveryRouteBlueprint, bool, error) {
+func selectedPublishedJoinDeliveryRoute(source semanticview.Source, event events.Event, selected []forkrecipient.Evidence, original events.DeliveryRoute) (runtimebus.DeliveryRouteBlueprint, bool, error) {
 	recipient, target, handler, found, err := runtimepipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(source, event)
 	if err != nil || !found {
 		return runtimebus.DeliveryRouteBlueprint{}, found, err

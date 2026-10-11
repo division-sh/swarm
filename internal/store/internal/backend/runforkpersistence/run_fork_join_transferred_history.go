@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -66,8 +67,8 @@ func runForkTransferredJoins(entities []runfork.RunForkEntityState) []genericsch
 	return sources
 }
 
-func transferredArrivalPublications(snapshot *runForkRevisionSnapshot, sources []genericschedule.TransferredJoinOccurrence) ([]runfork.PublishedArrival, error) {
-	var publications []runfork.PublishedArrival
+func transferredArrivalPublications(snapshot *runForkRevisionSnapshot, sources []genericschedule.TransferredJoinOccurrence) ([]runfork.PublishedJoinOccurrence, error) {
+	var publications []runfork.PublishedJoinOccurrence
 	for _, source := range sources {
 		event, found, err := runForkTransferredJoinEvent(snapshot, source)
 		if err != nil {
@@ -76,7 +77,7 @@ func transferredArrivalPublications(snapshot *runForkRevisionSnapshot, sources [
 		if !found {
 			continue
 		}
-		publication, err := runfork.NewTransferredPublishedArrival(source, event)
+		publication, err := runfork.NewTransferredPublishedJoinOccurrence(source, event)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +86,7 @@ func transferredArrivalPublications(snapshot *runForkRevisionSnapshot, sources [
 	return publications, nil
 }
 
-func runForkAllArrivalPublications(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan) ([]runfork.PublishedArrival, error) {
+func runForkAllJoinPublications(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan) ([]runfork.PublishedJoinOccurrence, error) {
 	publications, err := historicalArrivalPublications(snapshot, plan.JoinSchedules)
 	if err != nil {
 		return nil, err
@@ -94,5 +95,59 @@ func runForkAllArrivalPublications(snapshot *runForkRevisionSnapshot, plan runfo
 	if err != nil {
 		return nil, err
 	}
-	return append(publications, transferred...), nil
+	publications = append(publications, transferred...)
+	barriers, err := runForkBarrierPublications(snapshot, plan)
+	if err != nil {
+		return nil, err
+	}
+	return append(publications, barriers...), nil
+}
+
+func runForkBarrierPublications(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan) ([]runfork.PublishedJoinOccurrence, error) {
+	var publications []runfork.PublishedJoinOccurrence
+	for _, obligation := range plan.FanOutObligations {
+		barrier := obligation.Barrier
+		if barrier == nil || barrier.Status != fanoutbarrier.StatusClosedPending {
+			continue
+		}
+		if barrier.TransferredOccurrence != nil {
+			occurrence, err := genericschedule.NewTransferredFanOutBarrierOccurrence(*barrier)
+			if err != nil {
+				return nil, err
+			}
+			event, found, err := runForkTransferredJoinEvent(snapshot, occurrence)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
+			if _, err := requireRunForkPublishedBarrierDelivery(snapshot, *barrier, event, true); err != nil {
+				return nil, err
+			}
+			publication, err := runfork.NewTransferredPublishedJoinOccurrence(occurrence, event)
+			if err != nil {
+				return nil, err
+			}
+			publications = append(publications, publication)
+			continue
+		}
+		activation, err := runForkBarrierCapturedActivation(snapshot, barrier.ScheduleActivationID)
+		if err != nil {
+			return nil, err
+		}
+		if activation.Status != genericschedule.StatusFired {
+			continue
+		}
+		event, _, err := runForkPublishedFanOutBarrierEvidence(snapshot, *barrier, activation)
+		if err != nil {
+			return nil, err
+		}
+		publication, err := runfork.NewPublishedJoinOccurrence(activation, event.Event())
+		if err != nil {
+			return nil, err
+		}
+		publications = append(publications, publication)
+	}
+	return publications, nil
 }

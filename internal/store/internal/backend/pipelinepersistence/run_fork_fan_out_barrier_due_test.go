@@ -182,7 +182,7 @@ func runForkBarrierDueMutation(t *testing.T, postgres bool, source fanoutbarrier
 	result := mutationprotocol.RunPostgres(context.Background(), backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
 		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, postgres, schedules, uuid.NewString(), source, activation, source.Registration.PlanRef, nil, birth)
+				return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, postgres, schedules, uuid.NewString(), source, activation, nil, source.Registration.PlanRef, nil, birth)
 			})
 			if err != nil {
 				return struct{}{}, err
