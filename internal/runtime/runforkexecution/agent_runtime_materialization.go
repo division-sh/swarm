@@ -356,7 +356,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		MaterializationSupported: len(actors) == 0,
 		EphemeralForkLocal:       true,
 	}
-	if len(actors) == 0 && len(agentPlans) == 0 {
+	if len(actors) == 0 && len(agentPlans) == 0 && !semanticview.SourceDeclaresAgents(loaded.Source) {
 		return selectedContractAgentRuntimePlan{Declarations: declarations, Proof: proof, Options: options}, nil
 	}
 	options, workspaceProjection, err := bindSelectedContractWorkspaceProjection(loaded, options)
@@ -545,7 +545,7 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 		}
 		return nil
 	}
-	if len(req.AgentRuntime.Records) == 0 {
+	if len(req.AgentRuntime.Records) == 0 && !semanticview.SourceDeclaresAgents(req.LoadedSource.Source) {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
 			LifecycleDiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
 				Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
@@ -812,14 +812,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}
 	exec.SetModelRuntimes(runtimes)
 	managerOptions.WorkspaceGatewayAdmission = func(ctx context.Context, actor runtimeactors.AgentConfig) error {
-		token, ok := runtimeeffects.LifecycleTokenFromContext(ctx)
-		if !ok || managerRef == nil || token.Identity != actor.Identity {
-			return errors.New("selected activation requires its exact lifecycle token")
-		}
-		if err := managerRef.ProveUnpublishedActivation(token); err != nil {
-			return err
-		}
-		return req.Prepared.catalog.ObserveActivationGateway(ctx, options.Config, binding, mcpTurns, options.Workspace, actor, req.Prepared.preparationID, req.Prepared.coordinates, options.ProcessCapability)
+		return observeSelectedActivationActor(ctx, req, managerRef, runtimes, exec, binding, mcpTurns, actor)
 	}
 	factory := runtimeagents.NewLLMAgentFactory(runtimes, exec, runtimeagents.LLMAgentOptions{})
 	return selectedContractAgentRuntimeFactory{
