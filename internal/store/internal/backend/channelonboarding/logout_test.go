@@ -110,6 +110,45 @@ func TestSessionLogoutReservationFreezesAndFencesBothStores(t *testing.T) {
 	}
 }
 
+func TestSessionLogoutReservationIsolatesSameAccountSiblingBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCallbackLockFixture(t, backend)
+			original := pairedLogoutOperation(t, f)
+			request := sessionReservation(t, f.principal, time.Now().UTC())
+			request.TargetSelector = "ingress:other:whatsapp"
+			sibling := pairedLogoutRequestOperation(t, f, request)
+			if original.SessionAccount.AccountRef != sibling.SessionAccount.AccountRef ||
+				original.SessionConnectionID == sibling.SessionConnectionID {
+				t.Fatal("isolation fixture did not reserve distinct connections for the same account")
+			}
+			ctx := context.Background()
+			logout, err := f.selected.ReserveChannelTeardown(ctx, logoutReservation(original))
+			if err != nil || logout.RetiredOperations != 1 {
+				t.Fatal("logout did not scope its exact connection", logout, err)
+			}
+			retained, err := f.selected.GetChannelOnboarding(ctx, sibling.OperationID)
+			if err != nil || !reflect.DeepEqual(retained, sibling) {
+				t.Fatal("logout adopted a same-account sibling's responsibility", retained, err)
+			}
+			pending, err := domain.RetainedSessionLogoutPending(ctx, f.selected, sibling)
+			if err != nil || pending {
+				t.Fatal("sibling adopted original logout cleanup possession", pending, err)
+			}
+			foreign := logoutReservation(sibling)
+			foreign.Logout.OccurrenceID = logout.Logout.OccurrenceID
+			foreign.Logout.Account = original.SessionAccount
+			if _, err := f.selected.ReserveChannelTeardown(ctx, foreign); err == nil {
+				t.Fatal("same-account sibling inherited the original connection's destruction target")
+			}
+			rows, err := f.selected.ListChannelTeardowns(ctx)
+			if err != nil || len(rows) != 1 {
+				t.Fatal("rejected cross-connection target persisted extra responsibility", len(rows), err)
+			}
+		})
+	}
+}
+
 func TestSessionLogoutReservationRejectsContradictionsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
