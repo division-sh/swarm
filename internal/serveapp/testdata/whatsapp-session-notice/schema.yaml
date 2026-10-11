@@ -1,0 +1,20 @@
+name: whatsapp-session-notice
+imports:
+  provider_trigger_events:
+    - provider: whatsapp
+      event: inbound.whatsapp.message
+stages:
+  active: {}
+pins:
+  inputs:
+    - inbound.whatsapp
+    - notice.requested
+  outputs:
+    - inbound.whatsapp.message
+    - notice.requested
+ingress:
+  alias: reception
+  providers:
+    - provider: whatsapp
+connect:
+  - {event: notice.requested, from: ., to: notices}
