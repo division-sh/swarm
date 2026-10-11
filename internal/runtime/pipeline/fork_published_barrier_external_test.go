@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -65,6 +66,9 @@ func (p *publishedBarrierClaimProbe) NotifyLifecycle(ctx context.Context, signal
 
 func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		if crashBackend := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
+			continue
+		}
 		t.Run(backend, func(t *testing.T) {
 			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "producer")
 			if err != nil {
@@ -76,7 +80,7 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 			}
 			sourceProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
-			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, sourceProbe)
+			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, sourceProbe, os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_ADDRESS"))
 			var sourceRelease sync.Once
 			t.Cleanup(func() { sourceRelease.Do(func() { close(sourceProbe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -135,13 +139,25 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 				t.Fatal(err)
 			}
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
-			result, err := family.Execute(phase, runforkexecution.SelectedContractExecutionRequest{
+			crashing := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND") != ""
+			if crashing {
+				childProbe.resume = make(chan struct{})
+			}
+			request := runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: runID, At: original.id, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 					AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: childProbe}},
-			})
+			}
+			if crashing {
+				request.ForkOperation = &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "published-barrier-crash", IdempotencyKey: "pending-cut", TransportHash: "published-barrier-crash-transport",
+					SourceRunID: runID, ForkEventID: original.id, TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
+					AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
+				}
+			}
+			result, err := family.Execute(phase, request)
 			defer func() {
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 				defer stop()
@@ -161,6 +177,9 @@ func TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t *testi
 			claim, valid := deliverylifecycle.ClaimFromContext(childClaim.ctx)
 			if !valid || claim.RunID() != result.Materialization.ForkRunID || childClaim.id == original.id {
 				t.Fatal("child reused original outcome claim")
+			}
+			if crashing {
+				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, before.Entity.Revision)
 			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: childClaim.id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				diagnostic, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)

@@ -47,6 +47,7 @@ type mixedFanOutCrashCheckpoint struct {
 	BundleHash, Token             string
 	SourceEntityID, ChildEntityID string
 	SourceRevision, ChildRevision int
+	Authority                     *publishedBarrierCrashAuthority
 }
 
 func (f *mixedFanOutCrashFixture) publishCheckpoint(t *testing.T, checkpoint mixedFanOutCrashCheckpoint) {
@@ -249,6 +250,14 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 
 func killMixedFanOutAtClaim(t *testing.T, backend, address string, retained fanoutobligation.InheritedTerminalDisposition) mixedFanOutCrashCheckpoint {
 	t.Helper()
+	return killSelectedReceiverAtClaim(t, "TestIssue642MixedFanOutCrashProcessHelper", []string{
+		"SWARM_MIXED_FANOUT_CRASH_BACKEND=" + backend, "SWARM_MIXED_FANOUT_CRASH_ADDRESS=" + address,
+		"SWARM_MIXED_FANOUT_CRASH_RETAINED=" + string(retained),
+	})
+}
+
+func killSelectedReceiverAtClaim(t *testing.T, helper string, environment []string) mixedFanOutCrashCheckpoint {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	reader, writer, err := os.Pipe()
@@ -271,9 +280,8 @@ func killMixedFanOutAtClaim(t *testing.T, backend, address string, retained fano
 			t.Errorf("unseal only the owned crash fixture for cleanup: %v", err)
 		}
 	})
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestIssue642MixedFanOutCrashProcessHelper$")
-	cmd.Env = append(os.Environ(), "TMPDIR="+root, "SWARM_MIXED_FANOUT_CRASH_BACKEND="+backend,
-		"SWARM_MIXED_FANOUT_CRASH_ADDRESS="+address, "SWARM_MIXED_FANOUT_CRASH_RETAINED="+string(retained))
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^"+helper+"$")
+	cmd.Env = append(append(os.Environ(), "TMPDIR="+root), environment...)
 	cmd.ExtraFiles = []*os.File{writer}
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
