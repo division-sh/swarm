@@ -25,8 +25,13 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 		return nil, fmt.Errorf("WhatsApp incoming Capture requires its private database and stable connection")
 	}
 	db.SetMaxOpenConns(1)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	region := trace.StartRegion(ctx, "whatsapp.private.capture-schema")
-	_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_incoming_capture (
+	_, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_incoming_capture (
 		sequence INTEGER PRIMARY KEY,
 		connection_id TEXT NOT NULL,
 		account_ref TEXT NOT NULL,
@@ -50,7 +55,7 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 	if err != nil {
 		return nil, err
 	}
-	columns, err := db.QueryContext(ctx, `SELECT setup_disposition,setup_disposition_digest FROM whatsapp_incoming_capture LIMIT 0`)
+	columns, err := tx.QueryContext(ctx, `SELECT setup_disposition,setup_disposition_digest FROM whatsapp_incoming_capture LIMIT 0`)
 	if err != nil {
 		return nil, fmt.Errorf("WhatsApp private capture schema is unsupported: %w", err)
 	}
@@ -58,12 +63,25 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 		return nil, err
 	}
 	region = trace.StartRegion(ctx, "whatsapp.private.failure-schema")
-	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_callback_failures (
+	_, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_callback_failures (
 		connection_id TEXT NOT NULL,
 		occurrence_id TEXT NOT NULL,
 		reason TEXT NOT NULL CHECK(reason IN ('crash','capture_failed')),
 		PRIMARY KEY(connection_id,occurrence_id,reason)
 	)`)
+	region.End()
+	if err != nil {
+		return nil, err
+	}
+	columns, err = tx.QueryContext(ctx, `SELECT connection_id,occurrence_id,reason FROM whatsapp_callback_failures LIMIT 0`)
+	if err != nil {
+		return nil, fmt.Errorf("WhatsApp private failure schema is unsupported: %w", err)
+	}
+	if err := columns.Close(); err != nil {
+		return nil, err
+	}
+	region = trace.StartRegion(ctx, "whatsapp.private.capture-schema-commit")
+	err = tx.Commit()
 	region.End()
 	if err != nil {
 		return nil, err
