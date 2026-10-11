@@ -15,7 +15,7 @@ func TestQ10AgentReadbackAndQueryOwnershipBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator",
 				Tools: []string{"get_entity", "search_entities", "query_entities", "query_metrics"}}
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n")
+			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n", "queued", true)
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
@@ -125,6 +125,22 @@ func TestQ10AgentReadbackAndQueryOwnershipBothStores(t *testing.T) {
 			foreign := read("query_entities", map[string]any{"flow_instance": "foreign/one"})
 			if rows := foreign["results"].([]map[string]any); len(rows) != 0 {
 				t.Fatalf("undeclared path escaped the admitted flow scope: %v", rows)
+			}
+
+			advanceReviewedEntityToolFixture(t, ctx, "review/constructed", constructed)
+			if row := read("get_entity", map[string]any{"entity_id": constructed}); row["current_state"] != "marginal_review" {
+				t.Fatalf("get_entity returned declared initial instead of stored current stage: %v", row)
+			}
+			advanced := read("search_entities", map[string]any{"current_state": "marginal_review"})
+			if rows := advanced["results"].([]map[string]any); len(rows) != 1 || rows[0]["entity_id"] != constructed || rows[0]["current_state"] != "marginal_review" {
+				t.Fatalf("search_entities lost the stored-stage discriminator: %v", advanced)
+			}
+			advanced = read("query_entities", map[string]any{"filter": `current_state == "marginal_review"`, "select": []string{"entity_id", "current_state"}})
+			if rows := advanced["results"].([]map[string]any); len(rows) != 1 || rows[0]["entity_id"] != constructed || rows[0]["current_state"] != "marginal_review" {
+				t.Fatalf("query_entities lost stored-stage membership/value: %v", advanced)
+			}
+			if rows := read("search_entities", map[string]any{"current_state": "queued"})["results"].([]map[string]any); len(rows) != 0 {
+				t.Fatalf("declaration initial resurrected after native transition: %v", rows)
 			}
 		})
 	}
