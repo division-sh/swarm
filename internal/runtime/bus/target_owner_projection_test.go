@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -413,6 +414,58 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 	routes := resolved.DeliveryRoutes()
 	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() {
 		t.Fatalf("runtime-created carrier routes = %#v, want exact identity with explicit target absence", routes)
+	}
+}
+
+func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	runID := eventtest.UUID("independent-runtime-native-observation")
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("independent-runtime-publication"), "work.ready", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	for _, root := range []bool{true, false} {
+		for _, prospective := range []bool{false, true} {
+			t.Run(fmt.Sprintf("root=%t/prospective=%t", root, prospective), func(t *testing.T) {
+				identity := agentidentitytest.RootRuntimeForRun(t, runID, "workflow-runtime", "independent-runtime")
+				flow := semanticview.RootExecutionFlowID(source)
+				if !root {
+					flow = "consumer"
+					identity = agentidentitytest.RuntimeForRun(t, runID, "workflow-runtime", "independent-runtime", flow, flow, flow)
+				}
+				projection := selectedRunTargetOwnerProjection{required: true, source: source, agentsAvailable: true,
+					agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}},
+				}
+				if prospective {
+					instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+					owner := newTestFlowInstanceActivationOwner(nil)
+					activation, err := owner.PrepareFlowInstanceActivation(constructionIndexContext(t, source), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, TriggerEvent: event, OccurredAt: event.CreatedAt()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					projection, err = projection.withActivationPlans([]runtimepipeline.FlowInstanceActivationPlan{activation})
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					projection.context = admittedAgentConstructionContext(t, source, runID)
+				}
+				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Producer: routeIntentProducerAgentPolicy, Persist: true}
+				resolved, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() {
+					t.Fatalf("independent targetless actor acquired flow ownership: %+v", routes)
+				}
+				instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+				intent.TargetBlueprint = events.RouteIdentity{FlowID: flow, FlowInstance: instance.InstancePath}
+				if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err != nil {
+					t.Fatalf("explicit matching runtime target refused: %v", err)
+				}
+				intent.TargetBlueprint.EntityID = instance.EntityID
+				if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err == nil {
+					t.Fatal("explicit foreign actor entity was erased")
+				}
+			})
+		}
 	}
 }
 

@@ -25,10 +25,11 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 					t.Errorf("cold-provider shutdown=%d\n%s", code, process.outputString())
 				}
 			})
-			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
+			params := map[string]any{
 				"event_name": "task.assigned", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-provider-source",
-			}, 30*time.Second)
+			}
+			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", params, 30*time.Second)
 			if response.Error != nil {
 				t.Fatalf("cold-provider source admission: %+v\n%s", response.Error, process.outputString())
 			}
@@ -93,6 +94,24 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 					}
 					seen[declaration] = true
 				}
+			}
+			// Replaying the accepted command after receiver retirement consumes
+			// durable authority; it cannot re-plan against the live actor catalog.
+			before, err := json.Marshal(rt.events(t, seed.RunID, "task.assigned"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			duplicate := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", params, 30*time.Second)
+			if duplicate.Error != nil {
+				t.Fatalf("accepted source replay after completion: %+v", duplicate.Error)
+			}
+			var reused servedEventPublishRPCResult
+			if err := json.Unmarshal(duplicate.Result, &reused); err != nil || reused.EventID != seed.EventID || reused.RunID != seed.RunID {
+				t.Fatalf("duplicate changed exact publication: seed=%+v reuse=%+v err=%v", seed, reused, err)
+			}
+			after, err := json.Marshal(rt.events(t, seed.RunID, "task.assigned"))
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("duplicate changed exact source/settlement readback: %v", err)
 			}
 		})
 	}

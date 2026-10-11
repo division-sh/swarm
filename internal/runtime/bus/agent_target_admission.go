@@ -84,6 +84,9 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		return intent, fmt.Errorf("agent configuration identity disagrees with recipient")
 	}
 	descriptor = descriptor.Normalized()
+	if identity.Name.Source == agentidentity.NameSourceRuntimeCreated && intent.TargetBlueprint.Empty() && intent.ReceiverBlueprint.Empty() && intent.ConnectPlan.Empty() && intent.ConnectClaim.Empty() {
+		return intent, nil
+	}
 	dependency, selected, err := p.agentConstructionDependency(event, identity, intent.ReceiverBlueprint)
 	if err != nil {
 		return intent, err
