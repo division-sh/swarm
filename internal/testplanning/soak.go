@@ -48,10 +48,21 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if timeout != "" || strings.Contains(run, "/") {
 		return fmt.Errorf("only the exact soak, served reporter or persistence census may set its approved timeout; only the soak may filter a backend")
 	}
+	if isPipelineRestSelection(packages, run, skip, count, budget) {
+		return nil
+	}
 	if skip != "" && (skip != SoakRun || len(packages) != 1 || packages[0] != SoakPackage) {
-		return fmt.Errorf("only the exact separately executed soak may be excluded")
+		return fmt.Errorf("only the exact separately executed soak or pipeline families may be excluded")
 	}
 	return nil
+}
+
+// The complementary pipeline owner excludes only its two separately executed
+// whole-root families, never a backend or descendant case.
+func isPipelineRestSelection(packages []string, run, skip, count, budget string) bool {
+	return len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/runtime/pipeline" &&
+		run == `^(Test|Fuzz|Example)` && skip == `^Test(A2|CompiledTransition|Guard|PipelineCompiled|WorkflowCurrentTransition|JoinCapturedLoop|WorkflowTimer|WorkflowJoin|AcceptedWorkflowTimer|MutationFreeAcceptedEventTimer|Issue2564M09).*$` &&
+		count == "count-1" && budget == "broad"
 }
 
 // ValidateConformanceProofPartition expands exactly the two approved backend

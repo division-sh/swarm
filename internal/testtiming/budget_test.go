@@ -206,7 +206,7 @@ func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplann
 	packages := []string{
 		"github.com/division-sh/swarm/internal/apispec",
 		"github.com/division-sh/swarm/internal/dashboard/server",
-		"github.com/division-sh/swarm/internal/runtime/pipeline",
+		"github.com/division-sh/swarm/internal/runtime/manager",
 	}
 	weights := make(map[string]float64, len(packages))
 	for _, pkg := range packages {
