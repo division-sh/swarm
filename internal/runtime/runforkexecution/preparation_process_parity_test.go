@@ -59,7 +59,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				cap  startupownership.ProcessCapability
 			}{
 				{"missing", nil},
-				{"foreign_acquisition", crossedSelectedProcessCapability{ProcessCapability: capability, cross: func(a *startupownership.Authority) { a.AcquisitionID = uuid.NewString() }}},
+				{"foreign_lease", crossedSelectedProcessCapability{ProcessCapability: capability, cross: func(a *startupownership.Authority) { a.AuthorityID = uuid.NewString() }}},
 				{"foreign_generation", crossedSelectedProcessCapability{ProcessCapability: capability, cross: func(a *startupownership.Authority) { a.AuthorityGeneration++ }}},
 			} {
 				t.Run(test.name, func(t *testing.T) {
