@@ -155,7 +155,7 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 				return projected
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			rt := startWorkspaceGatewayProofRuntime(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t), "", nil, "127.0.0.1:0")
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
 			defer unblock()
@@ -163,10 +163,6 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 			entered := make(chan string, 1)
 			rt.Runtime.Bus.SetLoggerHook(&exactOriginDiagnosticHold{logger: rt.Runtime.Logger, entered: entered, release: release})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "exact-origin"}, "idempotency_key": "exact-origin-seed"})
-			var selected any = rt.SQLite
-			if rt.Backend == "postgres" {
-				selected = rt.Postgres
-			}
 			cut, cancelCut := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
 			defer cancelCut()
 			select {
@@ -177,7 +173,7 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 			case <-cut.Done():
 				t.Fatal("exact publication did not reach native handoff")
 			}
-			beforeHandoff := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), selected, seed.RunID, seed.EventID)
+			beforeHandoff := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.Events, seed.RunID, seed.EventID)
 			if !beforeHandoff.RecordFound || beforeHandoff.PipelineReceiptCount != 0 {
 				t.Fatalf("handoff hold missed its native predecessor: %+v", beforeHandoff)
 			}
@@ -199,12 +195,15 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 			case <-cut.Done():
 				t.Fatal("exact publication did not reach diagnostic tail")
 			}
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), selected, seed.RunID, seed.EventID)
+			waitWorkspaceProofPipelineHandoff(t, rt, seed.RunID)
+			evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.Events, seed.RunID, seed.EventID)
 			if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != "success" {
 				t.Fatalf("held diagnostic lacks native pipeline settlement: %+v", evidence)
 			}
-			early := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			early, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.Events, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			probe.NotifyLifecycle(t.Context(), lifecycleprobe.Signal{Kind: lifecycleprobe.PostCommitDispatchCompleted, EventID: "unrelated"})
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
@@ -221,11 +220,14 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
-			settled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			settled, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.Events, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if reflect.DeepEqual(early["events"], settled["events"]) {
 				t.Fatal("held diagnostic did not expose the delivery-only snapshot counterexample")
 			}
-			t.Logf("HELD PUBLICATION: pipeline receipts=%d->%d events=%d->%d; completion, not handoff, joins the diagnostic writer", beforeHandoff.PipelineReceiptCount, evidence.PipelineReceiptCount, len(early["events"]), len(settled["events"]))
+			t.Logf("HELD PUBLICATION: pipeline receipts=%d->%d events=%d->%d; completion, not handoff, joins the diagnostic writer", beforeHandoff.PipelineReceiptCount, evidence.PipelineReceiptCount, len(early["events"].Rows), len(settled["events"].Rows))
 		})
 	}
 }
