@@ -266,10 +266,10 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			receiverEntityID := uuid.NewString()
 			seedStandingRepairEntityState(t, ctx, db, backend, fresh.RunID, receiverEntityID)
-			query := `UPDATE entity_state SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
+			query := `UPDATE flow_instances SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
 			args := []any{fresh.RunID, receiverEntityID}
 			if backend == "postgres" {
-				query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+				query = `UPDATE flow_instances SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
 			if _, err := db.ExecContext(ctx, query, args...); err != nil {
 				t.Fatalf("make standing entity terminal: %v", err)
@@ -337,10 +337,10 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			suspendedReceiverEntityID := uuid.NewString()
 			seedStandingRepairEntityState(t, ctx, db, backend, suspendedFresh.RunID, suspendedReceiverEntityID)
-			query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
+			query = `UPDATE flow_instances SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
 			args = []any{suspendedFresh.RunID, suspendedReceiverEntityID}
 			if backend == "postgres" {
-				query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+				query = `UPDATE flow_instances SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
 			if _, err := db.ExecContext(ctx, query, args...); err != nil {
 				t.Fatalf("make suspended standing entity terminal: %v", err)
@@ -389,42 +389,28 @@ func seedStandingRepairEntityState(t *testing.T, ctx context.Context, db *sql.DB
 	at := time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC)
 	query := `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, 'standing/root', 'standing_service', 'serving',
-			'{"ready":true}', '{"name":"standing"}', '{"generation":2}', '{"metrics":{"requests":3}}', 4,
-			?, ?, ?)
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+		) VALUES (?, ?, 'standing/root', 'standing_service', '{"name":"standing"}', ?, ?)
 		ON CONFLICT(run_id, entity_id) DO UPDATE SET
-			current_state = excluded.current_state,
-			gates = excluded.gates,
 			fields = excluded.fields,
-			bookkeeping = excluded.bookkeeping,
-			accumulator = excluded.accumulator,
-			revision = excluded.revision,
 			updated_at = excluded.updated_at`
-	args := []any{runID, entityID, at, at, at}
+	args := []any{runID, entityID, at, at}
 	if backend == "postgres" {
 		query = `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, current_state,
-				gates, fields, bookkeeping, accumulator, revision,
-				entered_state_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, 'standing/root', 'standing_service', 'serving',
-				'{"ready":true}'::jsonb, '{"name":"standing"}'::jsonb, '{"generation":2}'::jsonb, '{"metrics":{"requests":3}}'::jsonb, 4,
-				$3, $3, $3)
+				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, 'standing/root', 'standing_service', '{"name":"standing"}'::jsonb, $3, $3)
 			ON CONFLICT(run_id, entity_id) DO UPDATE SET
-				current_state = EXCLUDED.current_state,
-				gates = EXCLUDED.gates,
 				fields = EXCLUDED.fields,
-				bookkeeping = EXCLUDED.bookkeeping,
-				accumulator = EXCLUDED.accumulator,
-				revision = EXCLUDED.revision,
 				updated_at = EXCLUDED.updated_at`
 		args = []any{runID, entityID, at}
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("seed standing repair entity state: %v", err)
+	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "standing/root", "standing/root", "standing_service", "serving", `{"metrics":{"requests":3}}`, at)
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET gates='{"ready":true}', bookkeeping='{"generation":2}', revision=4 WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
+		t.Fatalf("seed standing repair lifecycle: %v", err)
 	}
 }
 
