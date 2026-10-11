@@ -69,8 +69,12 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
 			"TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores",
 		},
-		"store-runtime-full-03":  {"TestGenericConstructedGateForkUsesFixedSnapshotBothStores"},
-		"store-runtime-full-05":  {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
+		"store-runtime-full-03": {"TestGenericConstructedGateForkUsesFixedSnapshotBothStores"},
+		"store-runtime-full-05": {
+			"TestReceiverConfigActivationRaceAndRollbackBothStores",
+			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
+			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
+		},
 		"store-runtime-selected": {"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores"},
 		"store-runtime-s-z-rest": {
 			"TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
@@ -94,6 +98,12 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		}
 	}
 	for id, proofs := range map[string]map[string][]string{
+		"store-runtime-full-05": {
+			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores": {
+				"sqlite/unchanged", "sqlite/run_stopped", "sqlite/source_replaced", "sqlite/stored_winner", "sqlite/terminal_winner",
+				"postgres/unchanged", "postgres/run_stopped", "postgres/source_replaced", "postgres/stored_winner", "postgres/terminal_winner",
+			},
+		},
 		"store-runtime-full-02": {
 			"TestDeploymentConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 		},
