@@ -21265,6 +21265,10 @@ run_model:
       and current-only members remain explicit drift. Missing required fields, fabricated fieldless fields and conflicting
       entity/route/type pairing fail closed with coordinates. Read-only projection access shares mutation admission
       without acquiring mutation locks or promoting state-only evidence to construction authority.
+      Projection preserves the actual producer/store entity identifier: PostgreSQL mutation selection uses native
+      UUID equality, while SQLite retains exact stored TEXT spelling. Valid nonzero entity UUID spellings must not
+      acquire a reader-only canonical-text restriction borrowed from run-ID admission; header/data pairing still
+      requires exact stored identity. No reader rewrites identifiers or grants construction through normalization.
       Mutation ordering shares the run-fork committed-revision owner: first
       revision, then mutation ID within a revision. This UUID tie-break is deterministic, not an intra-transaction
       chronology. Revision facts supply validated ordering coordinates, never replacement mutation values.
