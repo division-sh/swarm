@@ -17,7 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -38,7 +40,7 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 	var configText string
 	if backend == "sqlite" {
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		selected, _, err := construction.OpenSQLiteRuntimeForServing(context.Background(), path)
+		selected, err := selectedtest.OpenProcessLeaseFixture(context.Background(), backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: path}, "")
 		if err != nil {
 			t.Fatal(err)
 		}

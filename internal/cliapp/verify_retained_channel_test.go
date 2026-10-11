@@ -3,7 +3,6 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -15,10 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
-func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Context, root, configPath string, owner any, db *sql.DB) {
+func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Context, root, configPath string, owner any) {
 	t.Helper()
 	selected := owner.(interface {
 		channelonboarding.Store
@@ -131,7 +131,8 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	if err != nil || !reflect.DeepEqual(teardown, actualTeardown) {
 		t.Fatalf("verify settled teardown: %+v %v", actualTeardown, err)
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE connected_channel_activations SET runtime_instance_id=$1 WHERE activation_id=$2", uuid.NewString(), activation.ActivationID); err != nil {
+	hostileRuntime := uuid.NewString()
+	if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, activation.Coordinate.RuntimeInstanceID, hostileRuntime); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := channelonboarding.InspectRetainedActivations(ctx, selected); err == nil || !strings.Contains(err.Error(), "exact owning onboarding operation") {
@@ -141,7 +142,7 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	if code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic); code != cliExitConflict || !strings.Contains(out.String(), "exact owning onboarding operation") {
 		t.Fatalf("public verify hid boot's crossed evidence refusal: %d %s %s", code, &out, &diagnostic)
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE connected_channel_activations SET runtime_instance_id=$1 WHERE activation_id=$2", activation.Coordinate.RuntimeInstanceID, activation.ActivationID); err != nil {
+	if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, hostileRuntime, activation.Coordinate.RuntimeInstanceID); err != nil {
 		t.Fatal(err)
 	}
 }

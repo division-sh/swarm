@@ -3,11 +3,11 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,10 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/construction"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -45,53 +43,34 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			configText := "llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"
-			var owner interface {
-				store.SchemaBootstrapper
-				startupownership.Store
-				Close() error
-			}
-			var db *sql.DB
-			var openBootStore func(context.Context) (startupownership.Store, func() error, error)
+			scope := backendselection.Selection{Backend: backend}
+			var dsn string
 			if backend == backendselection.BackendSQLite {
 				path := filepath.Join(t.TempDir(), "runtime.db")
-				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				owner, db = selected, handle
-				openBootStore = func(ctx context.Context) (startupownership.Store, func() error, error) {
-					selected, _, err := construction.OpenSQLiteRuntimeForServing(ctx, path)
-					if err != nil {
-						return nil, nil, err
-					}
-					return selected, selected.Close, nil
-				}
+				scope.SQLitePath = path
 				configText += fmt.Sprintf("store: {backend: sqlite, sqlite: {path: %q}}\n", path)
 			} else {
-				dsn, _, _ := testutil.StartEmptyPostgres(t)
-				selected, handle, err := construction.OpenPostgresRuntime(ctx, dsn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				owner, db = selected, handle
-				openBootStore = func(ctx context.Context) (startupownership.Store, func() error, error) {
-					selected, _, err := construction.OpenPostgresRuntime(ctx, dsn)
-					if err != nil {
-						return nil, nil, err
-					}
-					if err := selected.BootstrapSchema(ctx, schema); err != nil {
-						return nil, nil, errors.Join(err, selected.Close())
-					}
-					return selected, selected.Close, nil
-				}
-				connection, err := testpostgres.ParseConnection(dsn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				parameters := connection.Parameters()
+				location, parameters, _ := testutil.StartEmptyPostgresProcessLeaseProof(t)
+				dsn = location
 				t.Setenv("SWARM_VERIFY_POSSESSION_PASSWORD", parameters.Password)
 				configText += fmt.Sprintf("store: {backend: postgres}\ndatabase: {host: %q, port: %d, name: %q, user: %q, password_env: SWARM_VERIFY_POSSESSION_PASSWORD, sslmode: %q}\n",
 					parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
+			}
+			owner, err := selectedtest.OpenProcessLeaseFixture(ctx, scope, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			openBootStore := func(ctx context.Context) (startupownership.Store, func() error, error) {
+				selected, err := selectedtest.OpenProcessLeaseFixture(ctx, scope, dsn)
+				if err != nil {
+					return nil, nil, err
+				}
+				if backend == backendselection.BackendPostgres {
+					if err := selected.BootstrapSchema(ctx, schema); err != nil {
+						return nil, nil, errors.Join(err, selected.Close())
+					}
+				}
+				return selected, selected.Close, nil
 			}
 			t.Cleanup(func() {
 				if err := owner.Close(); err != nil {
@@ -115,8 +94,8 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					}
 				}
 			})
-			var before int
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
+			before, err := selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil || before.Status != startupownership.AuthorityInspectionValid {
 				t.Fatal(err)
 			}
 			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
@@ -164,9 +143,9 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Fatalf("portable mode probed occupied deployment state: %+v", observation)
 				}
 			}
-			var after int
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
-				t.Fatalf("public observation changed/released the owner: %d -> %d %v", before, after, err)
+			after, err := selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("public observation changed/released the owner: %+v -> %+v %v", before, after, err)
 			}
 			if _, err := capability.Evidence(); err != nil {
 				t.Fatalf("verification released the actual owner's capability: %v", err)
@@ -175,7 +154,8 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			released = true
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
+			before, err = selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil {
 				t.Fatal(err)
 			}
 			for _, mode := range []string{"json", "text", "quiet"} {
@@ -211,11 +191,12 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Fatal("complete admission omitted retained connected-channel reads")
 				}
 			}
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
-				t.Fatalf("successful public observation acquired authority: %d -> %d %v", before, after, err)
+			after, err = selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("successful public observation acquired authority: %+v -> %+v %v", before, after, err)
 			}
 			t.Run("retained_channel", func(t *testing.T) {
-				assertVerifyRetainedChannelPublicAdmission(t, ctx, root, configPath, owner, db)
+				assertVerifyRetainedChannelPublicAdmission(t, ctx, root, configPath, owner.ChannelStore)
 			})
 			contender, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 				OwnerID: "contender-after-public-verification", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
@@ -228,7 +209,8 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
+			before, err = selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil {
 				t.Fatal(err)
 			}
 			waitCtx, cancelWait := context.WithCancel(ctx)
@@ -268,8 +250,9 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				t.Fatalf("actual boot did not wait for current possession: %v", err)
 			case <-time.After(30 * time.Millisecond):
 			}
-			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || before != after {
-				t.Fatalf("refused boot wrote authority after verification: %d -> %d %v", before, after, err)
+			after, err = selectedtest.InspectProcessLeaseSnapshot(ctx, owner.Store)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused boot wrote authority after verification: %+v -> %+v %v", before, after, err)
 			}
 			cancelWait()
 			if err := contender.Release(ctx); err != nil {
