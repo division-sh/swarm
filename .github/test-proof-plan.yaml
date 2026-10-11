@@ -831,6 +831,7 @@ units:
     # RE2 complement of TestReceiver; the adjacent unit owns that family.
     run: '^TestR($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^r].*)))))))$'
     required_children:
+      TestR7ServedObserverOrdersExecutionAndRestartBothStores: [default_sqlite/observer_first=false, default_sqlite/observer_first=true, explicit_postgres/observer_first=false, explicit_postgres/observer_first=true]
       TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -1098,7 +1099,7 @@ units:
       TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores: [sqlite, postgres]
       TestFlowAttachmentTimerAcquisitionCutsBothStores: [sqlite, postgres]
       TestFlowAttachmentAgentAcquisitionCutsBothStores: [postgres/after_publish/caller_cancel, postgres/after_publish/error, postgres/after_publish/panic, postgres/before_publish/caller_cancel, postgres/before_publish/error, postgres/before_publish/panic, sqlite/after_publish/caller_cancel, sqlite/after_publish/error, sqlite/after_publish/panic, sqlite/before_publish/caller_cancel, sqlite/before_publish/error, sqlite/before_publish/panic]
-      TestFlowAttachmentRouteAcquisitionCutsBothStores: [postgres/after_publish/caller_cancel, postgres/after_publish/error, postgres/after_publish/panic, postgres/before_publish/caller_cancel, postgres/before_publish/error, postgres/before_publish/panic, sqlite/after_publish/caller_cancel, sqlite/after_publish/error, sqlite/after_publish/panic, sqlite/before_publish/caller_cancel, sqlite/before_publish/error, sqlite/before_publish/panic]
+      TestFlowAttachmentActivationVerificationCutsBothStores: [postgres/after_publish/caller_cancel, postgres/after_publish/error, postgres/after_publish/panic, postgres/before_publish/caller_cancel, postgres/before_publish/error, postgres/before_publish/panic, sqlite/after_publish/caller_cancel, sqlite/after_publish/error, sqlite/after_publish/panic, sqlite/before_publish/caller_cancel, sqlite/before_publish/error, sqlite/before_publish/panic]
       TestFlowAttachmentNativeCommitAcknowledgmentBothStores: [postgres/aborted/commit_before_lost_ack, postgres/aborted/rollback_before_ack, postgres/first/commit_before_lost_ack, postgres/first/rollback_before_ack, postgres/retired/commit_before_lost_ack, postgres/retired/rollback_before_ack, sqlite/aborted/commit_before_lost_ack, sqlite/aborted/rollback_before_ack, sqlite/first/commit_before_lost_ack, sqlite/first/rollback_before_ack, sqlite/retired/commit_before_lost_ack, sqlite/retired/rollback_before_ack]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty

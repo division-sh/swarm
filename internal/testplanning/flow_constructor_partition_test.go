@@ -62,7 +62,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
 			"TestFlowAttachmentTimerAcquisitionCutsBothStores",
 			"TestFlowAttachmentAgentAcquisitionCutsBothStores",
-			"TestFlowAttachmentRouteAcquisitionCutsBothStores",
+			"TestFlowAttachmentActivationVerificationCutsBothStores",
 			"TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
 		},
 		"store-runtime-full-03-i-l": {

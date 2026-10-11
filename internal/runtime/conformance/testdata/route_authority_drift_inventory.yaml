@@ -178,7 +178,7 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/pipeline/workflow_instance_activation.go
-      - internal/store/internal/runtimepersistence/sqlite_runtime.go
+      - internal/store/internal/backend/pipelinepersistence/flow_instance_index.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
     canonical_layer: event_context
   - id: event_name_type
@@ -909,9 +909,6 @@ seam_families:
       - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go
-      - internal/store/internal/runtimepersistence/flow_instance_descriptors_sqlite_test.go
-      - internal/store/internal/runtimepersistence/flow_instance_routes_test.go
-      - internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go
     search_dimensions: [descriptor_evidence, connect_route_plan]
     invalid_authority:
       - active-agent descriptor lookup
@@ -924,7 +921,9 @@ seam_families:
       top-level receiver entity fields as supported descriptor evidence;
       nested, arbitrary, undeclared, unindexed, config, and instance
       business-field descriptor/index authority remains split to #1466 or
-      later gated children.
+      later gated children. #2594 deletes the native descriptor directory and
+      persisted route mirror; current target projections consume scoped native
+      observations and never establish construction or delivery authority.
   - id: event_delivery_plan_compatibility_adapter
     layer: invalid_old_authority
     classification: invalid_old_authority_path
@@ -1033,6 +1032,18 @@ seam_families:
       the #1495 typed route-intent producer model. #1494 guards their use and
       #1495 removes broad raw string producer helper entry points for EventBus
       RoutePlan production.
+  - id: direct_index_failure_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/indexed_connect_receivers_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      TestDirectPlanningPropagatesScopedIndexFailures invokes the existing
+      PlanDirect consumer with an empty compiled scope. It requires the same
+      source/run-bounded native observation owner and preserves cancellation,
+      independent store failures and joined failures. This test adds no direct
+      route producer, target permission, mutable membership or compatibility.
   - id: materialized_target_index_scope_proof
     layer: route_plan_consumers
     classification: valid_consumer
