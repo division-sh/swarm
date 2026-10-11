@@ -9,8 +9,8 @@ import (
 )
 
 func commandPlanProblems(plan testplanning.RunPlan) []string {
-	if plan.BuildContext.GOOS == "" || plan.BuildContext.GOARCH == "" || plan.BuildContext.CGOEnabled == "" {
-		return []string{"command evidence requires a bound plan with a complete current Go build context"}
+	if err := plan.BuildContext.Validate(); err != nil {
+		return []string{"command evidence requires a bound plan: " + err.Error()}
 	}
 	if err := plan.Validate(); err != nil {
 		return []string{fmt.Sprintf("invalid executable command plan: %v", err)}

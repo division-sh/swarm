@@ -222,6 +222,12 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 // Failed or incomplete execution may be observed, but never earns proof credit.
 func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	problems := commandPlanProblems(plan)
+	if err := evidence.BuildContext.Validate(); err != nil {
+		problems = append(problems, "recorded "+err.Error())
+	}
+	if evidence.BuildContext != plan.BuildContext {
+		problems = append(problems, "effective Go build context does not match the planned context")
+	}
 	if evidence.WorkflowRunID <= 0 || evidence.WorkflowAttempt <= 0 {
 		problems = append(problems, "workflow run ID and attempt must be positive")
 	}
@@ -246,9 +252,6 @@ func ValidateCommandIdentity(evidence CommandEvidence, plan testplanning.RunPlan
 		}
 		if evidence.EnvironmentID != unit.EnvironmentID {
 			problems = append(problems, fmt.Sprintf("environment_id %q does not match unit %q", evidence.EnvironmentID, unit.EnvironmentID))
-		}
-		if evidence.BuildContext != plan.BuildContext {
-			problems = append(problems, "effective Go build context does not match the planned context")
 		}
 		if evidence.WorkloadProfile != unit.WorkloadProfile || evidence.ExecutionTier != unit.ExecutionTier {
 			problems = append(problems, "workload profile or execution tier does not match the planned unit")

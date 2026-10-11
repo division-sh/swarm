@@ -29,6 +29,14 @@ type BuildContext struct {
 	GOARCH     string `json:"goarch"`
 	CGOEnabled string `json:"cgo_enabled"`
 	GOWORK     string `json:"gowork"`
+	GOVERSION  string `json:"goversion"`
+}
+
+func (b BuildContext) Validate() error {
+	if b.GOOS == "" || b.GOARCH == "" || b.CGOEnabled == "" || strings.TrimSpace(b.GOVERSION) == "" || strings.TrimSpace(b.GOVERSION) != b.GOVERSION {
+		return fmt.Errorf("incomplete effective Go build context: %+v", b)
+	}
+	return nil
 }
 
 type TestRoot struct {
@@ -69,7 +77,7 @@ type goListPackage struct {
 }
 
 func EffectiveBuildContext(ctx context.Context, dir string) (BuildContext, error) {
-	command := exec.CommandContext(ctx, "go", "env", "-json", "GOFLAGS", "GOOS", "GOARCH", "CGO_ENABLED", "GOWORK")
+	command := exec.CommandContext(ctx, "go", "env", "-json", "GOFLAGS", "GOOS", "GOARCH", "CGO_ENABLED", "GOWORK", "GOVERSION")
 	command.Dir = dir
 	raw, err := command.Output()
 	if err != nil {
@@ -85,8 +93,8 @@ func EffectiveBuildContext(ctx context.Context, dir string) (BuildContext, error
 	if strings.TrimSpace(env.GOFLAGS) != "" {
 		return BuildContext{}, fmt.Errorf("completion proof rejects effective GOFLAGS=%q; unset shell and go env -w flags", env.GOFLAGS)
 	}
-	if env.GOOS == "" || env.GOARCH == "" || env.CGOEnabled == "" {
-		return BuildContext{}, fmt.Errorf("incomplete effective Go build context: %+v", env.BuildContext)
+	if err := env.BuildContext.Validate(); err != nil {
+		return BuildContext{}, err
 	}
 	return env.BuildContext, nil
 }
@@ -237,8 +245,11 @@ func LoadParityProofs(path string) ([]ParityProof, error) {
 // BindExecution turns the selected source roots and existing parity references
 // into the exact, digest-bound pre-run completion obligations.
 func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof, policy Policy) error {
-	if plan == nil || len(inventory.Packages) == 0 || inventory.BuildContext.GOOS == "" {
+	if plan == nil || len(inventory.Packages) == 0 {
 		return fmt.Errorf("cannot bind execution without a plan and active build inventory")
+	}
+	if err := inventory.BuildContext.Validate(); err != nil {
+		return err
 	}
 	var full *RunPlan
 	if plan.Profile != ProfileFull {

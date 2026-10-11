@@ -827,7 +827,7 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 
 func bindTimingFixtureBuild(t *testing.T, plan *testplanning.RunPlan) {
 	t.Helper()
-	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1"}
+	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}
 	for i := range plan.Units {
 		unit := &plan.Units[i]
 		unit.SelectedRoots, unit.RequiredTests = nil, nil
@@ -896,6 +896,9 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		Version:         CommandEvidenceVersion,
 		PlanDigest:      plan.Digest,
 		Profile:         plan.Profile,
+		WorkloadProfile: unit.WorkloadProfile,
+		ExecutionTier:   unit.ExecutionTier,
+		BuildContext:    plan.BuildContext,
 		HeadSHA:         plan.HeadSHA,
 		BuildContext:    plan.BuildContext,
 		WorkloadProfile: unit.WorkloadProfile,

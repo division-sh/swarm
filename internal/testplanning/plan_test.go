@@ -111,6 +111,11 @@ func TestRunPlanRejectsWrongExecutionSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	plan.BuildContext = BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}
+	plan.Digest, err = planDigest(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := plan.ValidateExecutionSHA("executed-sha"); err != nil {
 		t.Fatalf("matching execution SHA: %v", err)
 	}
