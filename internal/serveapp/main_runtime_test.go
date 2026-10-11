@@ -3110,18 +3110,53 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &score); err != nil {
 		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
 	}
-	if err := db.QueryRowContext(context.Background(), `SELECT current_state FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, entityID, flow).Scan(&state); err != nil {
-		t.Fatalf("%s load setup lifecycle %s: %v", backend, entityID, err)
-	}
+	_, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, ".", flow, entityID)
+	state = instance.CurrentState
 	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
-	dataDiagnostic := servedEventPublishDebugQuery(t, db, backend, "entity_state", runID)
-	headerDiagnostic := servedEventPublishDebugQuery(t, db, backend, "flow_instances", runID)
-	if !strings.HasPrefix(dataDiagnostic, "entity_state: [") || !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "widget") || !strings.Contains(dataDiagnostic, "score") {
+	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
+	if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		snapshot, err = storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, rt.ReceiverStateReader)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := map[string]string{}
+	for _, observation := range []struct {
+		table   string
+		columns []string
+	}{
+		{"entity_state", []string{"entity_id", "entity_type", "fields"}},
+		{"flow_instances", []string{"entity_id", "current_state"}},
+	} {
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot[observation.table])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			owner, err := workspaceProofPhysicalText(row, "run_id")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if owner != runID {
+				continue
+			}
+			for _, column := range observation.columns {
+				value, err := workspaceProofPhysicalText(row, column)
+				if err != nil {
+					t.Fatal(err)
+				}
+				diagnostics[observation.table] += value + "\n"
+			}
+		}
+	}
+	dataDiagnostic, headerDiagnostic := diagnostics["entity_state"], diagnostics["flow_instances"]
+	if !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "widget") || !strings.Contains(dataDiagnostic, "score") {
 		t.Fatalf("%s data diagnostic lost the independent field row: %s", backend, dataDiagnostic)
 	}
-	if !strings.HasPrefix(headerDiagnostic, "flow_instances: [") || !strings.Contains(headerDiagnostic, runID) || !strings.Contains(headerDiagnostic, "waiting") {
+	if !strings.Contains(headerDiagnostic, entityID) || !strings.Contains(headerDiagnostic, "waiting") {
 		t.Fatalf("%s lifecycle diagnostic lost the constructed header: %s", backend, headerDiagnostic)
 	}
 
