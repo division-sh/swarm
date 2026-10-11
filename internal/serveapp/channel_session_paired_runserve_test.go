@@ -25,19 +25,19 @@ import (
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false, nil, false, false)
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{})
 }
 
 func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, true, nil, false, false)
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{quotedRetirement: true})
 }
 
 func TestRunServeWhatsAppAuthoredCustomerReplyBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false, nil, true, false)
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{authoredReply: true})
 }
 
 func TestRunServeWhatsAppAuthoredUncertainReplyRestartBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false, nil, true, true)
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{authoredReply: true, uncertainReply: true})
 }
 
 func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
@@ -46,12 +46,24 @@ func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 		if clearSource {
 			name = "cleared_source"
 		}
-		t.Run(name, func(t *testing.T) { testRunServeWhatsAppSignedPairing(t, false, &clearSource, false, false) })
+		t.Run(name, func(t *testing.T) {
+			testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{resetSources: &clearSource})
+		})
 	}
 }
 
-func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, resetSources *bool, authoredReply, uncertainReply bool) {
+type servedNativeJourneyProof struct {
+	quotedRetirement bool
+	explicitLogout   bool
+	resetSources     *bool
+	authoredReply    bool
+	uncertainReply   bool
+}
+
+func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyProof) {
 	t.Helper()
+	quotedRetirement, resetSources := proof.quotedRetirement, proof.resetSources
+	authoredReply, uncertainReply := proof.authoredReply, proof.uncertainReply
 	if resetSources != nil {
 		prior := buildSelectedAPICapabilities
 		buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
@@ -251,6 +263,35 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, rese
 			waitTextReplyIntent(t, reader, observation, "entry")
 			requireNativeIntentObservationScope(t, reader, observation)
 			cards := requireServedNativeInboxReply(t, endpoint, peer, reader)
+			if proof.explicitLogout {
+				requireServedNativeExplicitLogout(t, endpoint, peer, result.Operation)
+				if code := process.stop(); code != 0 {
+					t.Fatal("explicit logout RunServe failed to join", code, process.outputString())
+				}
+				requireServedNativeDisconnect(t, peer)
+				peer.mu.Lock()
+				connections := peer.connections
+				peer.mu.Unlock()
+				process = startServeRuntimeTestProcess(t, opts)
+				process.waitForReadyLine()
+				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+				var historical channelonboarding.Result
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &historical)
+				if historical.Operation.Phase != channelonboarding.PhaseRetired || historical.Logout == nil ||
+					historical.Logout.Teardown.Phase != channelonboarding.TeardownSucceeded || historical.Readiness != nil && historical.Readiness.Ready {
+					t.Fatal("logout restart restored executable authority or lost history", historical)
+				}
+				if code := process.stop(); code != 0 {
+					t.Fatal("historical logout RunServe failed to join", code, process.outputString())
+				}
+				peer.mu.Lock()
+				resumed := peer.connections
+				peer.mu.Unlock()
+				if resumed != connections {
+					t.Fatal("logout restart implicitly reconnected the retired account", connections, resumed)
+				}
+				return
+			}
 			if quotedRetirement {
 				requireServedNativeQuotedRetirement(t, endpoint, peer, reader, observation, cards)
 				if code := process.stop(); code != 0 {
