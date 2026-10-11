@@ -539,14 +539,9 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 		projection.active[identity.Key()] = identity
 	}
 	for _, binding := range bindings {
-		binding.Interface = binding.Interface.Normalized()
-		if binding.PrincipalID != principal.ID {
-			return retainedLifecycleProjection{}, fmt.Errorf("%w: retained operator channel binding belongs to another principal", ErrConflict)
-		}
-		if binding.Status == BindingCurrent {
-			if err := validateRetainedCurrentBinding(binding); err != nil {
-				return retainedLifecycleProjection{}, err
-			}
+		binding, err = normalizeRetainedBinding(principal.ID, binding)
+		if err != nil {
+			return retainedLifecycleProjection{}, err
 		}
 		if err := addIdentity(binding.Interface); err != nil {
 			return retainedLifecycleProjection{}, err
