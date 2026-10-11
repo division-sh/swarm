@@ -56,6 +56,13 @@ func CopyPublicCompletionFeedOnly(t testing.TB) string {
 	return root
 }
 
+func CopyPublicCompletionFeedOnlyActivation(t testing.TB) string {
+	t.Helper()
+	root := CopyPublicCompletionInitiation(t)
+	writeClosedVariantFile(t, root, "entities.yaml", "Deployment:\n  topic: {type: 'text?', _unused_reason: public completion attachment proof}\n")
+	return root
+}
+
 func CopyPublicCompletionReplacement(t testing.TB) string {
 	t.Helper()
 	root := CopyPublicCompletionFeedOnly(t)
