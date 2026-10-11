@@ -82,17 +82,9 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 		fixture         string
 		eventName       string
 		seedSourceTimer bool
-		fanOutBarrier   bool
 		wantCode        string
 		wantCapability  string
 	}{
-		{
-			name:           "selected fan-out barrier has no deferred execution owner",
-			fanOutBarrier:  true,
-			eventName:      "items.ready",
-			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkFanOutBarrier,
-		},
 		{
 			name:            "source timer lacks fixed-revision owner metadata",
 			fixture:         "tests/tier5-flow-lifecycle/test-timer-fire",
@@ -127,9 +119,6 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
-			if test.fanOutBarrier {
-				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
-			}
 			loader := admittedFixtureSelectedContractSourceLoader{
 				RepoRoot:         repoRoot,
 				SourceRoot:       contractsRoot,
@@ -185,9 +174,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 
 			owner := selectedContractExecutionOwnerForTest(t, pg)
 			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork, t: t, resolve: pg.ResolveAuthorActivityEventDescriptor}
-			if test.fanOutBarrier {
-				catalog.want = []string{"platform.join_complete"}
-			} else if test.fixture == "examples/routing/fan-in/barrier" {
+			if test.fixture == "examples/routing/fan-in/barrier" {
 				catalog.want = []string{"platform.join_complete", "platform.join_timeout"}
 			}
 			owner.ports.fork = catalog
@@ -435,11 +422,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		inputFlow      string
 		inputPayload   string
 		stateOnly      bool
-		fanOutBarrier  bool
 		wantCapability string
 	}{
-		{name: "delivery replay fan-out barrier", fanOutBarrier: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
-		{name: "state only fan-out barrier", fanOutBarrier: true, stateOnly: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
 		{
 			name:           "delivery replay timed join composition requires dynamic owner",
 			fixture:        "examples/routing/fan-in/barrier",
@@ -485,9 +469,6 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
-			if test.fanOutBarrier {
-				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
-			}
 			loader := admittedFixtureSelectedContractSourceLoader{
 				RepoRoot:         repoRoot,
 				SourceRoot:       contractsRoot,
@@ -510,9 +491,6 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
 				input := selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)}
-				if test.fanOutBarrier {
-					input.payload = []byte(`{"items":["first","second"]}`)
-				}
 				seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route}, input)
 			}
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)

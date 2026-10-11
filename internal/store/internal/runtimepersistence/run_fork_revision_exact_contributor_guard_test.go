@@ -479,7 +479,9 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 			"runforkrevision.FanOutIntentFact(intent.Request.Key)", "attempt.AddFacts(forkRunID, intentRef)",
 			"runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)", "attempt.AddFacts(forkRunID, outcomeRef)",
 		}},
-		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)", "attempt.AddFacts(forkRunID, ref)"}},
+		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, forkEventID, now)"}},
+		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkContinuedOutcomeTx", []string{"runforkrevision.FanOutOutcomeFact(childKey, outcome.Ordinal)", "attempt.AddFacts(childKey.RunID, ref)"}},
+		{"runforkpersistence/run_fork_selected_fan_out_evidence.go", "bindSelectedForkFanOutEvidenceTx", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, publication.Event().ID(), publication.Event().CreatedAt())"}},
 	}
 }
 
@@ -728,6 +730,30 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		}
 		if err := validateRevisionExactWriter(strings.Replace(source, "return effects.AddFacts(runID, ref)", "return nil", 1), contract); err == nil {
 			t.Fatal("unchecked typed ref without contribution passed")
+		}
+	})
+	t.Run("continued_outcome_named_writer", func(t *testing.T) {
+		root := repoRootForRuntimeWriterGuard(t)
+		for _, contract := range revisionExactWriterContracts() {
+			if contract.symbol != "bindRunForkFanOutPendingReplays" && contract.symbol != "bindRunForkContinuedOutcomeTx" && contract.symbol != "bindSelectedForkFanOutEvidenceTx" {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(body)
+			if err := validateRevisionExactWriter(source, contract); err != nil {
+				t.Fatal(err)
+			}
+			for _, required := range contract.calls {
+				if strings.Count(source, required) != 1 {
+					t.Fatalf("exact continuation contract occurrence changed: %s", required)
+				}
+				if err := validateRevisionExactWriter(strings.Replace(source, required, "missingContribution()", 1), contract); err == nil {
+					t.Fatalf("missing exact caller/contribution passed: %s", required)
+				}
+			}
 		}
 	})
 	t.Run("whole_cold_writer_is_not_blanket_forbidden", func(t *testing.T) {

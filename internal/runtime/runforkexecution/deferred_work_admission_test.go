@@ -66,11 +66,9 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			}}),
 		},
 		{
-			name:       "fan-out barrier declaration requires deferred execution owner",
-			plan:       basePlan,
-			source:     selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkFanOutBarrier,
+			name:   "fan-out barrier declaration has retained execution ownership",
+			plan:   basePlan,
+			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
 		},
 		{
 			name:       "connected declarative dynamic flow creation",
@@ -252,12 +250,12 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifted := selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
-		Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery,
-	}})
+	drifted := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v2"},
+	})
 	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||
-		!strings.Contains(err.Error(), selectedContractDeferredWorkFanOutBarrier) {
-		t.Fatalf("source drift error = %v, want unsupported barrier capability rejection", err)
+		!strings.Contains(err.Error(), "workflow identity does not match") {
+		t.Fatalf("source drift error = %v, want exact workflow identity rejection", err)
 	}
 }
 
