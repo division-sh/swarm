@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -201,6 +202,8 @@ type serveSessionReadFaultStore struct {
 }
 
 func (s *serveSessionReadFaultStore) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
+	region := trace.StartRegion(ctx, "whatsapp.test.onboarding-read")
+	defer region.End()
 	if s.onRead != nil {
 		s.onRead()
 	}
@@ -295,10 +298,24 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
+			f.adapter.store = &serveSessionReadFaultStore{Store: f.adapter.store}
+			selectRuntime := f.adapter.selectRuntime
+			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				region := trace.StartRegion(ctx, "whatsapp.test.resume-selection")
+				defer region.End()
+				return selectRuntime(ctx, candidate)
+			}
 			done := make(chan error, 1)
-			go func() { done <- f.adapter.ResumeSession(caller, f.op, f.candidate) }()
+			go func() {
+				region := trace.StartRegion(caller, "whatsapp.test.resume-call")
+				defer region.End()
+				done <- f.adapter.ResumeSession(caller, f.op, f.candidate)
+			}()
 			select {
 			case <-entered:
+			case err := <-done:
+				t.Fatal("resume returned before controlled-handshake cancellation", "result", err,
+					"selections", f.selections.Load(), "constructed", f.adapter.connection(f.op.OperationID) != nil)
 			case <-time.After(5 * time.Second):
 				var stacks bytes.Buffer
 				if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
