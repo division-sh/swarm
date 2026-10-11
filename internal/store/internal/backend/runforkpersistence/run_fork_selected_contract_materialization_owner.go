@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -100,7 +101,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	if port.requireCurrent == nil || port.runMutation == nil || port.lockSourceStatus == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
-		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.now == nil {
+		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil || port.now == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("selected-contract fork materialization operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
@@ -178,7 +179,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if routeResolved {
 			replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 		}
-		blockers, err := runForkSelectedMaterializationBlockers(plan, replayAdmission)
+		blockers, err := runForkSelectedMaterializationBlockers(plan, forkRunID, replayAdmission)
 		if err != nil {
 			return err
 		}
@@ -287,6 +288,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err != nil {
 				return err
 			}
+			replayAdmission, err = requireMaterializedRunForkReplyContexts(txctx, tx, port.replies, plan, forkRunID, port.postgres, replayAdmission)
+			if err != nil {
+				return err
+			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
 			if routeResolved {
@@ -378,6 +383,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
+		replayAdmission, err = materializeRunForkReplyContexts(forkCtx, tx, attempt, port.replies, plan, forkRunID, port.postgres, replayAdmission)
+		if err != nil {
+			return err
+		}
 		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, attempt, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins, now)
 		if err != nil {
 			return err
@@ -437,20 +446,27 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 
 // A complete source inventory permits only materialization. Native child
 // readback, not this prospective filter, removes its execution blocker.
-func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
+func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID string, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
 	eligible, err := runForkTimerHistoryMaterializable(plan)
 	if err != nil {
 		return nil, err
 	}
+	replies, err := projectRunForkReplyContexts(plan, childRunID)
+	if err != nil {
+		return nil, err
+	}
 	blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, admission, nil)
-	if !eligible {
-		return blockers, nil
+	openReply := false
+	for _, record := range replies {
+		openReply = openReply || record.State == replycontext.StateOpen
 	}
 	filtered := make([]runfork.RunForkUnsupportedBlocker, 0, len(blockers))
 	for _, blocker := range blockers {
-		if blocker.Code != runfork.RunForkBlockerTimerHistoryUnproven {
-			filtered = append(filtered, blocker)
+		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven && eligible ||
+			blocker.Code == runfork.RunForkBlockerOpenReplyContextUnsupported && openReply {
+			continue
 		}
+		filtered = append(filtered, blocker)
 	}
 	return filtered, nil
 }

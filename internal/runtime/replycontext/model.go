@@ -137,6 +137,43 @@ func (r Record) SameIdentity(other Record) bool {
 		r.CorrelationKey == other.CorrelationKey
 }
 
+// Continuation may settle an open obligation once; it cannot replace its
+// immutable binding, rewrite a previous settlement or manufacture earlier work.
+func (r Record) ValidateContinuationFrom(previous Record, admittedAt time.Time) error {
+	r, previous = r.Normalized(), previous.Normalized()
+	if err := previous.Validate(); err != nil {
+		return err
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if !r.SameIdentity(previous) || !r.CreatedAt.Equal(previous.CreatedAt) ||
+		admittedAt.IsZero() || r.CreatedAt.IsZero() || previous.UpdatedAt.IsZero() || previous.UpdatedAt.Before(previous.CreatedAt) || r.UpdatedAt.Before(previous.UpdatedAt) {
+		return fmt.Errorf("reply continuation changed immutable or admitted lifecycle evidence")
+	}
+	if previous.State == StateTerminal && (previous.TerminalAt.Before(previous.CreatedAt) || !previous.TerminalAt.Equal(previous.UpdatedAt)) {
+		return fmt.Errorf("retained reply settlement contradicts its lifecycle evidence")
+	}
+	if previous.State == StateTerminal || r.State == StateOpen {
+		if r.State != previous.State || r.AcceptedReplyEventID != previous.AcceptedReplyEventID ||
+			!r.UpdatedAt.Equal(previous.UpdatedAt) || !sameReplyTerminalTime(r.TerminalAt, previous.TerminalAt) {
+			return fmt.Errorf("reply continuation rewrote retained lifecycle evidence")
+		}
+		return nil
+	}
+	if r.TerminalAt.Before(previous.UpdatedAt) || r.TerminalAt.Before(admittedAt) || !r.TerminalAt.Equal(r.UpdatedAt) {
+		return fmt.Errorf("reply settlement precedes its admitted obligation")
+	}
+	return nil
+}
+
+func sameReplyTerminalTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
 // BindEnclosing retains the inbound obligation of this request's publishing
 // turn. The provider is serving that enclosing request, not a global last caller.
 func (r *Record) BindEnclosing(enclosing Record) error {

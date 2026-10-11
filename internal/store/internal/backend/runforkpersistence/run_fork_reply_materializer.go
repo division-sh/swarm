@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -165,6 +166,14 @@ func materializeRunForkReplyContexts(ctx context.Context, tx *sql.Tx, attempt *m
 }
 
 func requireMaterializedRunForkReplyContexts(ctx context.Context, tx *sql.Tx, owner runForkReplyContextOwner, plan runfork.RunForkPlan, childRunID string, postgres bool, admission runfork.RunForkReplayResumeAdmission) (runfork.RunForkReplayResumeAdmission, error) {
+	return requireRunForkReplyContexts(ctx, tx, owner, plan, childRunID, admission, false, time.Time{})
+}
+
+func requireContinuingRunForkReplyContexts(ctx context.Context, tx *sql.Tx, owner runForkReplyContextOwner, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, admission runfork.RunForkReplayResumeAdmission) (runfork.RunForkReplayResumeAdmission, error) {
+	return requireRunForkReplyContexts(ctx, tx, owner, plan, childRunID, admission, true, bornAt)
+}
+
+func requireRunForkReplyContexts(ctx context.Context, tx *sql.Tx, owner runForkReplyContextOwner, plan runfork.RunForkPlan, childRunID string, admission runfork.RunForkReplayResumeAdmission, continuing bool, bornAt time.Time) (runfork.RunForkReplayResumeAdmission, error) {
 	if err := ctx.Err(); err != nil {
 		return admission, err
 	}
@@ -175,12 +184,14 @@ func requireMaterializedRunForkReplyContexts(ctx context.Context, tx *sql.Tx, ow
 	if err != nil {
 		return admission, err
 	}
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM reply_contexts WHERE run_id=$1`, childRunID).Scan(&count); err != nil {
-		return admission, err
-	}
-	if count != len(records) {
-		return admission, fmt.Errorf("fork reply inventory differs from exact captured reply authority")
+	if !continuing {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM reply_contexts WHERE run_id=$1`, childRunID).Scan(&count); err != nil {
+			return admission, err
+		}
+		if count != len(records) {
+			return admission, fmt.Errorf("fork reply inventory differs from exact captured reply authority")
+		}
 	}
 	for _, expected := range records {
 		actual, err := owner.LoadWithinTransaction(ctx, tx, expected.ID)
@@ -190,10 +201,17 @@ func requireMaterializedRunForkReplyContexts(ctx context.Context, tx *sql.Tx, ow
 		if err := validateRunForkReplyCanonicalRecord(actual); err != nil {
 			return admission, err
 		}
-		if !sameRunForkReplyRecord(actual, expected) {
+		if continuing {
+			if err := actual.ValidateContinuationFrom(expected, bornAt); err != nil {
+				return admission, err
+			}
+		} else if !sameRunForkReplyRecord(actual, expected) {
 			return admission, fmt.Errorf("materialized reply context changed immutable or fixed-cut lifecycle facts")
 		}
 	}
+	// The source-open fact is discharged by exact continuation evidence even
+	// when the child has since settled it. New child requests are not inherited
+	// evidence and never authorize or replace these captured obligations.
 	return dischargeMaterializedRunForkReplyAdmission(admission, records)
 }
 
@@ -210,7 +228,7 @@ func validateRunForkReplyCanonicalRecord(record replycontext.Record) error {
 		(record.TerminalAt != nil && record.TerminalAt.IsZero()) {
 		return fmt.Errorf("fork reply projection/readback requires canonical captured lifecycle facts")
 	}
-	for _, value := range []string{record.SourceRequestEventID, record.SourceRunID} {
+	for _, value := range []string{record.RunID, record.RequestEventID, record.AcceptedReplyEventID, record.SourceRequestEventID, record.SourceRunID} {
 		if value == "" {
 			continue
 		}

@@ -385,6 +385,8 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			mock.ExpectBegin()
 			expectSelectedAttachmentBinding(mock, f.evidence.binding)
 			if test.arrivalErr == nil {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(f.evidence.lineage.ForkRunID).
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 				mock.ExpectQuery(`SELECT DISTINCT family`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"family"}))
 				mock.ExpectQuery(`SELECT clock_timestamp\(\)`).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Unix(200, 0).UTC()))
 				mock.ExpectQuery(`FROM event_deliveries d`).WithArgs(f.evidence.lineage.SourceRunID).WillReturnRows(sqlmock.NewRows([]string{"delivery_id"}))
@@ -429,6 +431,7 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 				},
 				workflowTimers:   &workflowTimerMaterializerOwner{},
 				arrivalSchedules: arrivals,
+				replies:          &runForkReplyOwnerProbe{},
 				deliveries:       postgresDeliveryAdapter,
 				attachment: func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error {
 					steps = append(steps, "attachment")

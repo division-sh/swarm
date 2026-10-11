@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -95,7 +96,11 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 				source = event.RoutingSource()
 			}
 		}
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source)
+		reply, err := capturedFrontierReplySettlement(req.Plan, frontier[i].SourceEventID)
+		if err != nil {
+			return runfork.RunForkContractFrontierAdmission{}, err
+		}
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source, reply)
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
@@ -461,7 +466,7 @@ type contractFrontierEvaluatedRoute struct {
 	nodeIDs                   []string
 }
 
-func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource) (contractFrontierEvaluatedRoute, error) {
+func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource, reply *replycontext.Record) (contractFrontierEvaluatedRoute, error) {
 	runID = strings.TrimSpace(runID)
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if routeTable == nil || runID == "" || eventName == "" {
@@ -479,9 +484,16 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out := contractFrontierEvaluatedRoute{}
 	seenNodes := map[string]struct{}{}
 	for _, plan := range graph.MatchingSourceEvent(sourceEvent) {
+		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && reply != nil && !plan.MatchesReplyRecord(*reply) {
+			continue
+		}
 		out.connectMatched = true
 		var targets []events.RouteIdentity
-		if plan.ReceiverEndpoint().IsRoot() {
+		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
+			if reply != nil {
+				targets = []events.RouteIdentity{reply.Origin}
+			}
+		} else if plan.ReceiverEndpoint().IsRoot() {
 			coordinate, err := semanticview.AdmitRootExecutionCoordinate(selectedSource, runID)
 			if err != nil {
 				return contractFrontierEvaluatedRoute{}, err

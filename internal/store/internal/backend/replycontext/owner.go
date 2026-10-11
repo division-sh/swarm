@@ -37,6 +37,33 @@ type FirstReplyContextStorage struct {
 	ContextID, RequestEventID, AcceptedReplyEventID string
 }
 
+func ReadReplyContextRecords(ctx context.Context, tx *sql.Tx, run string, postgres bool) ([]runtimereplycontext.Record, error) {
+	query := sqliteReplyContextSelect
+	if postgres {
+		query = postgresReplyContextSelect
+	}
+	rows, err := tx.QueryContext(ctx, query+` WHERE run_id=$1 ORDER BY reply_context_id`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []runtimereplycontext.Record
+	for rows.Next() {
+		record, err := scanReplyContext(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func ReadReplyContextRequestIDs(ctx context.Context, tx *sql.Tx, run string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(request_event_id AS TEXT) FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id`, run)
 	if err != nil {

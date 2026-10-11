@@ -18,12 +18,13 @@ type runForkWorkflowTimerReadbackPort struct {
 	plan             func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	timers           runForkWorkflowTimerMaterializationOwner
 	arrivalSchedules runForkArrivalJoinMaterializationOwner
+	replies          runForkReplyContextOwner
 }
 
 // Successor issuance consumes the permanent activation fact, never "paused"
 // as proof that the predecessor did not execute. Readback creates no work.
 func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutationprotocol.Attempt, req runfork.SelectedContractRuntimeExecutionIssueRequest, port runForkWorkflowTimerReadbackPort) error {
-	if port.snapshot == nil || port.plan == nil || port.timers == nil || port.arrivalSchedules == nil {
+	if port.snapshot == nil || port.plan == nil || port.timers == nil || port.arrivalSchedules == nil || port.replies == nil {
 		return fmt.Errorf("selected timer continuation requires its canonical readback owners")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -60,11 +61,17 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		bornAt := runlifecycle.CanonicalTimestamp(snapshot.StartedAt)
 		switch {
 		case operation.Status == runfork.ForkOperationMaterialized && snapshot.State == runlifecycle.StatePaused:
-			_, err = requireMaterializedRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
+			admission, err = requireMaterializedRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
 				req.InheritedSchedules, port.timers, port.arrivalSchedules, bornAt, admission)
+			if err == nil {
+				_, err = requireMaterializedRunForkReplyContexts(ctx, tx, port.replies, plan, snapshot.RunID, port.postgres, admission)
+			}
 		case operation.Status == runfork.ForkOperationActivated && snapshot.State == runlifecycle.StateRunning:
-			_, err = requireContinuingRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
+			admission, err = requireContinuingRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
 				req.InheritedSchedules, port.timers, port.arrivalSchedules, bornAt, admission)
+			if err == nil {
+				_, err = requireContinuingRunForkReplyContexts(ctx, tx, port.replies, plan, snapshot.RunID, bornAt, admission)
+			}
 		default:
 			err = fmt.Errorf("selected timer continuation has no executable permanent operation/state pair")
 		}
@@ -81,7 +88,7 @@ func postgresRunForkWorkflowTimerReadbackPort(s *RunForkPostgresOwner) runForkWo
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
 		},
-		timers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner,
+		timers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner, replies: s.replies,
 	}
 }
 
@@ -93,6 +100,6 @@ func sqliteRunForkWorkflowTimerReadbackPort(s *RunForkSQLiteOwner) runForkWorkfl
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
 		},
-		timers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner,
+		timers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner, replies: s.replies,
 	}
 }
