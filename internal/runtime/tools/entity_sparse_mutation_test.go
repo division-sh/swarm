@@ -281,6 +281,10 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	if err != nil || constructed.InstancePath != flowInstance {
 		t.Fatalf("entity fixture constructor path: constructed=%+v err=%v", constructed, err)
 	}
+	key, err := pipeline.AdmitFlowInstanceKey(source, flowID, constructed.InstanceID)
+	if err != nil {
+		t.Fatalf("admit the component fixture's explicit construction key: %v", err)
+	}
 	graph, found := semanticview.WorkflowStageTopology(source, flowID)
 	if !found {
 		t.Fatal("entity fixture requires its compiled stage catalog")
@@ -291,7 +295,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
-		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
+		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, InstanceKey: key, EntityID: entityID,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
 		CurrentState: storedStage.ID(), StageDefined: !storedStage.IsStatelessPosture(), Fields: fields, CreatedAt: at, EnteredStageAt: at,
