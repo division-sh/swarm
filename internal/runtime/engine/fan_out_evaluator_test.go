@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -35,6 +36,11 @@ func (s *fanOutCensusCountingSource) ExecutableNodeRecords() []rc.ScopedNodeReco
 }
 
 func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
+	t.Helper()
+	return preparedFanOutFixtureWithContext(t, events.DeliveryContext{}, r2Mixed...)
+}
+
+func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryContext, r2Mixed ...bool) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
 	t.Helper()
 	node := testRootExecutableNode(t, "worker")
 	handler, err := rc.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", rc.SystemNodeEventHandler{FanOut: &rc.FanOutSpec{
@@ -103,13 +109,49 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 		t.Fatal(err)
 	}
 	trigger := eventtest.RunCreatingRootIngress(eventtest.UUID("prepared-fan-out"), "batch.ready", "", "", raw, 0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
+	ctx := context.Background()
+	if !incoming.Empty() {
+		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Context: incoming,
+			Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: trigger.RunID(), EntityID: "entity-1"})}
+		routeID, err := route.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		deliveryID, err := deliverylifecycle.DeliveryID(trigger.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim, err := deliverylifecycle.AdmitPersistedClaim(deliveryID, trigger.RunID(), events.EncodeDeliveryRouteIdentity(routeID), eventtest.UUID("prepared-fan-out-claim"), 1, deliverylifecycle.SubscriberNode, node.Key())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = events.WithDeliveryContext(deliverylifecycle.WithRoute(deliverylifecycle.WithClaim(ctx, claim), route), incoming)
+	}
+	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("capture: %v %#v", err, result.FanOutIntent)
 	}
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{Request: *result.FanOutIntent, Source: result.FanOutIntent.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 	return exec, intent, trigger, source
+}
+
+func TestDeferredFanOutRetainsCapturedReplyForEveryOrdinal(t *testing.T) {
+	incoming := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:original-request"}}
+	exec, intent, trigger, _ := preparedFanOutFixtureWithContext(t, incoming)
+	prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ordinal := range 2 {
+		// A later pump context cannot supply or replace the original input.
+		ctx := events.WithDeliveryContext(context.Background(), events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:unrelated-worker"}})
+		emit, err := prepared.EvaluateOrdinal(ctx, int64(ordinal), ordinal)
+		if err != nil || emit.Context.ReplyContextID() != incoming.ReplyContextID() {
+			t.Fatalf("deferred ordinal %d lost its captured reply: context=%+v error=%v", ordinal, emit.Context, err)
+		}
+		emit.Context.Reply.ID = "reply-v1:mutated-output"
+	}
 }
 
 func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
