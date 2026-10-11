@@ -206,15 +206,10 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			}
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-resume"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			var childState, siblingState string
-			if err := rt.DB.QueryRow(`SELECT current_state FROM flow_instances WHERE run_id=$1 AND instance_path='child' AND entity_id=$2`, seed.RunID, childEntity).Scan(&childState); err != nil {
-				t.Fatal(err)
-			}
-			if err := rt.DB.QueryRow(`SELECT current_state FROM flow_instances WHERE run_id=$1 AND instance_path='sibling' AND entity_id=$2`, seed.RunID, siblingEntity).Scan(&siblingState); err != nil {
-				t.Fatal(err)
-			}
-			if childState != "done" || siblingState != "ready" {
-				t.Fatalf("unselected sibling executed: child=%s sibling=%s", childState, siblingState)
+			_, child := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "child", "child", childEntity)
+			_, sibling := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "sibling", "sibling", siblingEntity)
+			if child.CurrentState != "done" || sibling.CurrentState != "ready" {
+				t.Fatalf("unselected sibling executed: child=%s sibling=%s", child.CurrentState, sibling.CurrentState)
 			}
 			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
 			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
