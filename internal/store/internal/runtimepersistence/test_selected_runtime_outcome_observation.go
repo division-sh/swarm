@@ -5,7 +5,6 @@ import (
 	"database/sql"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
@@ -21,25 +20,6 @@ func CountSelectedForkSourceEventLineageStorageForTest(ctx context.Context, sele
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		out, err = runforkpersistence.CountSelectedForkSourceEventLineageStorageTx(ctx, tx, forkRunID, sourceEventID)
-		return err
-	})
-	if err != nil {
-		return 0, err
-	}
-	return out, nil
-}
-
-func CountRunEventOrSourceEventStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
-	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
-		return 0, err
-	}
-	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
-		return 0, err
-	}
-	var out int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.CountRunEventOrSourceEventStorageTx(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {

@@ -216,6 +216,25 @@ func ReadSelectedForkRefusalStorageForTest(ctx context.Context, selected any, fo
 	return out, nil
 }
 
+func CountRunEventOrSourceEventStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return 0, err
+	}
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountRunEventOrSourceEventStorageTx(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
 func CountRunExactEventStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
 	for _, id := range []string{runID, eventID} {
 		if err := validateStandaloneStorageEvent(selected, id); err != nil {

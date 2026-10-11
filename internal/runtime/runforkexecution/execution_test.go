@@ -2507,22 +2507,36 @@ func TestSelectedForkPreparedPreflightUsesExactProviderPromptAndExecutesEligible
 		t.Run(backend, func(t *testing.T) {
 			if backend == "sqlite" {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				proveSelectedForkPreparedPreflight(t, storetest.Database(selected), selected)
+				proveSelectedForkPreparedPreflight(t, selected)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				proveSelectedForkPreparedPreflight(t, db, storetest.AdmitPostgresRuntimeStore(t, db))
+				proveSelectedForkPreparedPreflight(t, storetest.StartPostgresRuntimeStore(t))
 			}
 		})
 	}
 }
 
-func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected interface {
+func proveSelectedForkPreparedPreflight(t *testing.T, selected interface {
 	runtimestartupownership.Store
 	runtimeeffects.Store
 	managedcapabilities.Persistence
 }) {
 	t.Helper()
 	ctx := runForkTestContext(t)
+	repoRoot := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"),
+		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if err != nil {
+		t.Fatalf("load prospective fixture source: %v", err)
+	}
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	sourceFingerprint, err := runfork.SelectedPreparationSourceFingerprint(loaded.EffectiveSourceIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
 	process := selectedContractTestProcessCapability(t, ctx, selected)
 	processEvidence, err := process.Evidence()
 	if err != nil {
@@ -2576,11 +2590,18 @@ func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected inter
 	if err != nil {
 		t.Fatal(err)
 	}
+	configurationFingerprint, err := selectedPreparationFingerprint(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Component-only opaque identity, not an admitted fixed-history certificate.
+	prospectiveCatalogFingerprint := catalog.Fingerprint()
 	preparationID := uuid.NewString()
 	probe := swaruntime.PreparedSelectedForkProviderProbe{Agent: blueprint, Authority: managedcapabilities.PreparedSelectedForkProbeAuthority{
 		SelectedForkPreparationCoordinates: managedcapabilities.SelectedForkPreparationCoordinates{
 			ProcessAuthorityID: processEvidence.AuthorityID, ProcessOwnerID: processEvidence.OwnerID, ProcessBootID: processEvidence.BootID,
-			BundleHash: runForkTestBundleHash, SourceFingerprint: strings.Repeat("1", 64), AdmittedPlanFingerprint: strings.Repeat("2", 64), ConfigurationFingerprint: strings.Repeat("3", 64), CatalogFingerprint: catalog.Fingerprint(),
+			BundleHash: loaded.SourceArtifactFact.BundleHash(), SourceFingerprint: sourceFingerprint,
+			AdmittedPlanFingerprint: prospectiveCatalogFingerprint, ConfigurationFingerprint: configurationFingerprint, CatalogFingerprint: catalog.Fingerprint(),
 		}, ActorPlanFingerprint: planFingerprint,
 	}}
 	surfaceIDs, err := swaruntime.ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, binding, catalog, turns, preparationID, process, []swaruntime.PreparedSelectedForkProviderProbe{probe}, liveTestEffectController(selected), selected)
@@ -2604,17 +2625,8 @@ func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected inter
 	if len(surfaceIDs) != 1 {
 		t.Fatalf("selected-fork startup surfaces = %#v, want one", surfaceIDs)
 	}
-	var raw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT surface
-		FROM managed_agent_capability_surfaces
-		WHERE surface_id = $1
-		  AND authority_kind = 'startup_probe'
-		  AND execution_kind = 'selected_fork_preparation'
-		  AND execution_authority_id = $2
-		  AND run_id IS NULL
-		  AND actor_id = 'selected-health-agent'
-	`, surfaceIDs[0], preparationID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadRunlessSelectedPreparationSurfaceStorage(ctx, selected, surfaceIDs[0], preparationID, "selected-health-agent")
+	if err != nil {
 		t.Fatalf("read selected-fork eligible-call capability surface: %v", err)
 	}
 	var surface managedcapabilities.Surface
@@ -2635,10 +2647,21 @@ func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected inter
 	if !confirmed || !surface.ActorIdentity.IsZero() || surface.ActorPlan != plan || surface.Authority.RunID != "" || surface.Authority.ExecutionAuthorityID != preparationID {
 		t.Fatalf("selected-fork eligible-call surface lost exact prospective evidence: %+v", surface)
 	}
-	for _, table := range []string{"runs", "agents", "run_fork_selected_contract_runtime_executions", "runtime_generation_grants"} {
-		var count int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("probe created %s state: %d %v", table, count, err)
+	if surface.Authority.Preparation == nil || *surface.Authority.Preparation != probe.Authority {
+		t.Fatalf("persisted preparation coordinates differ from exact supplied component evidence: %+v", surface.Authority.Preparation)
+	}
+	for _, witness := range []struct {
+		table string
+		read  func(context.Context, any) (int, error)
+	}{
+		{"runs", storetest.CountGlobalRunStorage},
+		{"agents", storetest.CountGlobalAgentStorage},
+		{"run_fork_selected_contract_runtime_executions", storetest.CountGlobalSelectedRuntimeExecutionStorage},
+		{"runtime_generation_grants", storetest.CountGlobalGenerationGrantStorage},
+	} {
+		count, err := witness.read(ctx, selected)
+		if err != nil || count != 0 {
+			t.Fatalf("probe created %s state: %d %v", witness.table, count, err)
 		}
 	}
 }

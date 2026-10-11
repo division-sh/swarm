@@ -1956,3 +1956,96 @@ Original893 tuples/24 historical receipts remain immutable. Named ordinary admis
 The architecture/watchlist decision remains existing owners and explicit remaining
 family145/#2542/#2151 debt; no new issue/framework or closure credit. M01/Docker stay
 qualification-open in #2353. No push, PR, tier, server2 or process-restart claim.
+
+## Prospective preflight component and closed event placement checkpoint
+
+Binding component ruling6109811473 is applied test-locally. The original prepared
+provider/MCP root opens SQLite and PostgreSQL natively, without a raw getter/pool
+or executable source run. Its actual admitted fixture source supplies the existing
+SelectedPreparationSourceFingerprint, and its actual configuration supplies the
+existing selectedPreparationFingerprint. The frozen catalog's own Fingerprint is
+explicit opaque prospective component identity in the existing plan-coordinate slot,
+not an admitted fixed-history certificate. Actor plan fingerprint remains canonical.
+No production validator, preparation/materialization owner or fixed-history fallback
+changes. The new explicit control still refuses a public plan without its private
+admitted history certificate before producing any fingerprint.
+
+The original process capability, blueprint, exact provider prompt, authenticated
+eligible MCP call and confirmed tool evidence remain. Exact persisted preparation
+coordinates now additionally equal the supplied component evidence. Managed capability
+owns the detached raw surface read with every original predicate: exact surface,
+startup_probe authority, selected_fork_preparation kind, preparation identity, NULL
+run and exact actor. Decoding and ValidateEffective remain in the consumer, not a
+narrowing storage decoder. Four unconditional whole-store counts remain ordered and
+separate, each with its own original native read and immediate global-zero assertion:
+runlifecycle/runs, agentpersistence/agents, runforkpersistence/selected executions,
+generationauthority/grants. No status, eligibility, new-row subtraction or grouping
+changes the original proof. Public bridges expose bytes/scalars, not selectors,
+SQL, callbacks, pools or executable authority.
+
+Systematic consumption: both original backend openings and the complete shared
+preflight helper consume these owners. Executable selected preparation continues
+to consume genuine fixed-history identity and is not this component's consumer.
+The older five-table global fork map has different tables and one snapshot cut;
+it cannot replace these four independent reads. Full selected preparation binding,
+crossed receipt and frozen catalog controls are unchanged and their independent
+ruling receipts carry. Remaining provider/module/fork observations and constructors
+remain family145/#2542/#2151 debt.
+
+Reviewer F1 at674aa134e is repaired exactly as authorized: the complete event/source
+union bridge moves unchanged into existing test_event_support.go. Its API, validation,
+query, transaction and callers are unchanged; the unauthorized eventrecord import
+is removed, with no import allowance or file exemption added. The explicit event
+boundary and native both-store diagnostic controls now pass. A separately exposed
+old scenario receipt fault is repaired by an inline named SQL callback calling the
+same apiidempotency operation in the same original unrevisioned mutation attempt.
+Whole-table deletion, cancellation, independent history and finalization remain.
+
+| Manifestation | Current disposition | Exact proof |
+| --- | --- | --- |
+| Prospective component supplied pool/getter and repeated fake coordinate hashes | reproduced and fixed | Complete original provider/MCP root under race on both stores; every original prompt, call, surface and global-zero assertion retained |
+| Surface/global scopes and original read/failure ownership | execution-proven through the same corrected path | Native both-store four separate read commits/zero writes, absence/raw/foreign/invalid/cancelled/closed controls; physical predicate/state matrices and finite caller hostile controls |
+| Prospective identity incorrectly treated as admitted history | reproduced and fixed | Explicit SelectedPreparationPlanFingerprint refusal control; production source unchanged; exact persisted coordinates asserted |
+| Runless surface predicate accidentally removed | reproduced and fixed | Actual managed-capability SQL mutation drops run_id IS NULL, RED accepting with-run row; restore GREEN |
+| Diagnostic bridge outside closed import owner | reproduced and fixed | Independent reviewer RED at674aa134e; unchanged bridge move, exact event boundary + both-store observations GREEN20.487s and original runtime root GREEN8.401s |
+| Non-inline SQL loan in earlier scenario receipt fault | reproduced and fixed | Expanded guard sweep RED; inline-only repair; TestScopedSQLLoansCannotCommitOrEscape plus original both-store whole-table/cancellation/history proof GREEN |
+| Adjacent historical-writer and finite text/query-fixture inventories | escalated, not qualified | Complete non-fail-fast80-root structural unit and extra persistence static sweep, unresolved exact inventory failures recorded below and in ruling request6110064834 |
+
+Vemew: original component race root GREEN10.364s; explicit no-history control
+GREEN1.027s; both-store native observation controls GREEN12.370s; physical surface/
+global state matrices GREEN1.279s. Actual SQL mutation RED0.085s and restore
+GREEN1.091s. Complete cheap family145/historical/finite/successor/native-run-setup
+set after placement repair GREEN15.122s; original five guards GREEN1.239s/8.956s.
+Affected U1000 and dry-run Changes=[] are clean; no retries, skips, timeout increase,
+weakened original assertion, tier or server2. Committed-head complexity is separate.
+
+The expanded source-pinned80-root unit is RED on two finite retired-constructor
+reference inventories and TestEventFixtureWritersUseSemanticOwners. The additional
+persistence static sweep is RED on the latter, the historical-writer census and
+the repaired SQL-loan case. These are real accumulated-branch guard obligations,
+not pressure or demonstrated master inheritance. They were missed by prior narrow
+guard selection; earlier green receipts did not qualify these controls. Remaining
+disposition requested on #2542 at6110064834: one exact isolated event-query INSERT,
+four already-approved historical writer rows, and finite current/historical snapshot
+references (recipes12 vs8; family1456). No classifier relaxation, handwritten file
+exemption, import allowance, observation-marker mislabeling or baseline increase is
+made pending that ruling. This checkpoint is not approved stacking/landing evidence.
+
+Receipts ~/.cache/swarm-2542-family145/prospective-preflight-*:
+root da755607c90eb74dc80e227113405aa439e9eaf1c22336348626a8dc0373dc6a;
+controls 1e5aa906c156f95277fd8e393937acd4df998c1d6ce5e9c94a69c9831c843aea;
+actual mutant d08cdb8c68e519968cf6f73a4e194f737dfaf4720fc6781d970fbb7e4e8a8bcc;
+restore 6a1cb3697f2b3f53eaefa44bb568d52f6ad4a2151b88a91e257f8f6f1c070b99;
+F1 repair a07e77640f71e754ed1f675971c36d049ee1cdcd524d4de7cd549379be9637ba;
+family guards 4e1b3620f7b05fff0c942e3e5274d8919f58c13e517027ed8981fc67c97a7b27;
+80-root RED f3bba7a0a9116cc8c44318ce21a541e910213ad80f116a272de5254b422fc31e;
+extra static RED e34df11a686919ba448f8a689a73194360f0cadcb386955e860f7e0f3c6221b2.
+
+Corpus1057/201 transitions, digest
+2b2593a909d77d46abb8ef78733bb6a3d449ee5711cf60089d6d40c7d29925af.
+Original893 tuples and24 receipts stay immutable. Named admissions121 ->120
+(121 excluding Docker's unqualified removal); no fresh global census/ratchet or
+zero-added-site/closure/restart claim. Existing watchlist/architecture disposition
+remains existing owners and component-vs-executable authority; the consolidated
+inventory decision stays on #2542, with no new issue or framework. M01/Docker remain
+qualification-open in #2353. No push or PR.

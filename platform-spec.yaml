@@ -6899,6 +6899,17 @@ engine:
                 add source, run, eligibility, status or reservation filters beyond those original predicates; invalid/raw/cancelled/closed
                 ownership and failed reads return no successful or provisional scalar. Fixed read SQL remains with runforkpersistence
                 and effectpersistence, while public fixture ports expose only identity coordinates and detached cardinality.
+              selected_fork_prospective_preflight_fixture: >-
+                The runless provider/MCP component fixture may supply its actual frozen provider catalog fingerprint as
+                test-local opaque prospective identity in the admitted-plan input slot; this is not a fixed-history certificate
+                and cannot bind, materialize, issue or claim executable selected authority. Source and configuration fingerprints
+                consume their existing canonical owners over actual admitted fixture source and configuration. Executable
+                preparation retains the private fixed-revision history requirement without a fallback. Physical surface readback
+                uses the existing managed-capability owner with exact surface, startup-probe authority, selected-fork-preparation
+                kind, preparation identity, NULL run and actor predicates; decoding and evidence checks remain in the consumer.
+                Four global physical counts for runs, agents, selected runtime executions and generation grants retain separate
+                ordered native read cuts and unconditional zero assertions, with no live/status/eligibility filtering or new-row
+                subtraction. Public ports expose bytes or scalars only; failed ownership/coordinates/read yields no evidence.
               selected_fork_diagnostic_lineage_storage_observation: >-
                 Selected-fork diagnostic witnesses consume the original native selected read coordinator for three separate cuts.
                 The event-record owner counts all rows at the exact fork run whose event_id or source_event_id equals the original

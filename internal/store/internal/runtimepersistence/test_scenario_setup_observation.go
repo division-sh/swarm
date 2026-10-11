@@ -99,6 +99,8 @@ func RemoveScenarioSetupReplayReceiptsForTest(ctx context.Context, selected any)
 		return err
 	}
 	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return attempt.WithSQL(ctx, apiidempotency.RemoveScenarioSetupReplayReceiptsTx)
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return apiidempotency.RemoveScenarioSetupReplayReceiptsTx(ctx, tx)
+		})
 	})
 }
