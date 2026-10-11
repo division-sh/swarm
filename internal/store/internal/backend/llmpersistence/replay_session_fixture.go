@@ -8,7 +8,7 @@ import (
 )
 
 // SeedReplayDeliverySessionTx preserves the historical session association used
-// by replay and trace witnesses. It does not acquire a live lease or mint a grant.
+// by delivery, replay and trace witnesses. It does not acquire a live lease or mint a grant.
 func SeedReplayDeliverySessionTx(ctx context.Context, tx *sql.Tx, postgres bool, sessionID string, identity agentidentity.Identity) error {
 	fields, err := identity.StorageFields()
 	if err != nil {

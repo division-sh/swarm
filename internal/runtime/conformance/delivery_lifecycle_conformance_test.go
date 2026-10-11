@@ -1677,8 +1677,7 @@ func deliveryLifecycleEventWithPayload(label string, payload json.RawMessage) ev
 func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, sessionID, runID, agentID string) {
 	t.Helper()
 	identity := agentidentitytest.RootRuntimeForRun(t, runID, agentID, "delivery-lifecycle-conformance")
-	fields, err := identity.StorageFields()
-	if err != nil {
+	if _, err := identity.StorageFields(); err != nil {
 		t.Fatalf("seed delivery agent identity: %v", err)
 	}
 	selected, ok := backend.selected.(storetest.AgentFixtureStore)
@@ -1692,24 +1691,7 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 		},
 		Status: "active", HiredBy: "delivery-lifecycle-conformance", StartedAt: time.Now().UTC(),
 	})
-	sessionQuery := `
-			INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)`
-	if !backend.postgres {
-		sessionQuery = `
-			INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	}
-	identityArgs := []any{
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-	}
-	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
-	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionArgs...); err != nil {
+	if err := storetest.SeedReplayDeliverySession(ctx, backend.selected, sessionID, identity); err != nil {
 		t.Fatalf("seed delivery agent session: %v", err)
 	}
 }

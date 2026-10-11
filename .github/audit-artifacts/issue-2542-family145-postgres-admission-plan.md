@@ -564,3 +564,33 @@ native serveapp U1000 passed. Finite corpus remains975 rows /109 transitions,
 digest ebd7d7cb10179f11b95d1ce62ccf4a5dbd538bf199351affd9b9f44d9e3cf5ef.
 Named Admit inventory stays151, or152 excluding the still-unqualified candidate.
 No global census/ratchet, tier, push, PR or closure claim.
+
+## Delivery Conformance Session Dependency
+
+The complete seedDeliveryAgentSession definition and all three use sites now
+reuse the same fixed llmpersistence association operation as replay/trace. Its
+duplicate nine-column dialect INSERT is deleted, not preserved beside a second
+owner. Exact supplied session/run identity, all seven agent storage coordinates,
+native defaults and original static-agent fixture admission are unchanged.
+No lease is fabricated or acquired. The actual claim/bind/settlement path and
+the foreign/absent/terminated-session schema cuts retain their original assertions.
+The spec now explicitly names this sibling consumer of the unchanged operation.
+
+delivery-session-association-consumers.jsonl: both stores' exact-route claim/
+binding/settlement/outcome cell and disconnected-lifecycle-schema cell passed
+under race/count1/GOMAXPROCS2, 13.341s. These four cells execute all three changed
+seed call sites. Unrelated conformance cells are not credited or repeated.
+delivery-session-controls.jsonl: affected finite/current/historical controls
+PASS13.684s, preserving every helper assertion. delivery-session-unused.log:
+native conformance U1000 passed. delivery-session-inert.json is Changes=[].
+Unchanged both-store original-writer/identity/no-grant/refusal evidence carries
+from replay-native-owners-repaired.jsonl; no extra domain operation was added.
+
+The conformance pool carrier, raw schema/fault/observation cuts and both supplied-
+pool peer constructors remain explicitly in this family's migration tail; this
+dependency does not claim their closure or native construction. Named Admit
+count remains151 (152 excluding the unqualified Docker candidate). Current
+corpus976 rows /110 transitions, digest
+ef3a3675ec939449c1c41292a6a7ab464ff86d052e7530c489d9d99629bb5ca6.
+All893 immutable historical records and the repaired24-receipt pin are unchanged.
+No fresh census, baseline change, push, PR, tier or whole-family closure.
