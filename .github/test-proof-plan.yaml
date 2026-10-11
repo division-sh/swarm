@@ -536,6 +536,10 @@ units:
       - github.com/division-sh/swarm/internal/apiv1
       - github.com/division-sh/swarm/internal/runtime/llm
       - github.com/division-sh/swarm/internal/runtime/bus
+    required_children:
+      TestPublicCompletionCapacityNativeMixedBothStores: [sqlite, postgres]
+      TestFeedOnlyRunStartReplayPrecedenceBothStores: [sqlite, postgres]
+      TestPublicCompletionExactOccurrenceSurvivesRuntimeFence: [runtime, standing, selected, manager-standing]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -993,6 +997,10 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
+      TestPublicPublicationCompletionBoundaryBothStores: [default_sqlite, explicit_postgres]
+      TestPublicPublicationCompletionExactBytesBothStores: [default_sqlite, explicit_postgres]
+      TestPublicFeedOnlyCompletionUnloadRestartBothStores: [default_sqlite, explicit_postgres]
+      TestPublicPublicationRetirementRecoveryBothStores: [default_sqlite, explicit_postgres]
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
       TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]

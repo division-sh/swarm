@@ -14,12 +14,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
@@ -27,7 +30,8 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			endpoint, _, hash := startPublicInputRollbackRuntime(t, backend)
+			h, _, hash := startChannelAnchorJourney(t, backend, "completion-boundary-test", false)
+			endpoint := h.rpcEndpoint()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan publicationAuditHTTPResult, 1)
@@ -42,6 +46,9 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 			probe.mu.Unlock()
 			if !committed.Acknowledged {
 				t.Fatal("readiness cut lacks exact native COMMIT acknowledgment")
+			}
+			if count := probe.process.PublicCompletionCount(); count != 1 {
+				t.Fatalf("held consequence released its reservation: %d", count)
 			}
 			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
 			if err != nil || !found {
@@ -68,12 +75,105 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 	}
 }
 
+func TestPublicFeedOnlyCompletionUnloadRestartBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			probe := installPublicationCompletionAudit(t, false)
+			h := newChannelOnboardingE2EHarness(t, backend, false)
+			h.opts.SourceRoot = canonicalrouting.CopyPublicCompletionFeedOnly(t)
+			managers := make(chan *runtimepkg.RuntimeContextManager, 2)
+			h.opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
+			h.start(t)
+			t.Cleanup(func() { h.stop(t) })
+			manager := <-managers
+			var identity apiv1.RuntimeIdentityResult
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+			if len(identity.SourceArtifacts) != 1 {
+				t.Fatalf("initial source selection: %+v", identity)
+			}
+			hash := identity.SourceArtifacts[0].BundleHash
+			params := map[string]any{
+				"bundle_hash": hash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
+				"data": map[string]any{"imports": []any{map[string]any{
+					"source_invocation_id": uuid.NewString(), "declaration": map[string]any{"flow_path": ".", "event": "scan.requested"},
+					"expected_head": map[string]any{"state": "absent"},
+					"input":         map[string]any{"format": "jsonl", "content_base64": ""},
+				}}, "pins": []any{}},
+			}
+			first := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", params)
+			if first.err != nil || first.rpcError != nil {
+				t.Fatalf("initial feed-only start: error=%v rpc=%s", first.err, first.rpcError)
+			}
+			probe.mu.Lock()
+			native, request, committed, process := probe.native, probe.request, probe.deployment, probe.process
+			probe.mu.Unlock()
+			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			if err != nil || !found || committed == nil || !committed.Acknowledged || !bytes.Equal(first.result, stored.Response) || !bytes.Equal(first.result, committed.Completion.Response) {
+				t.Fatalf("initial native/store/wire completion differs: found=%t err=%v", found, err)
+			}
+			deadline := time.Now().Add(20 * time.Second)
+			for process.PublicCompletionCount() != 0 {
+				if time.Now().After(deadline) {
+					t.Fatal("feed-only activation retained its public responsibility")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			unloaded := manager.DeactivateBundleHash(hash, runtimepkg.RuntimeContextCauseUnloaded)
+			if !unloaded.Found || !unloaded.Changed || unloaded.ShutdownErr != nil || unloaded.State != runtimepkg.RuntimeContextStateUnloaded || manager.LookupBundleHashStatus(hash).Loaded() {
+				t.Fatalf("source remained executable: %+v", unloaded)
+			}
+			assertPureReplay := func(label string) {
+				t.Helper()
+				probe.mu.Lock()
+				owner := probe.native
+				probe.mu.Unlock()
+				before, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				replay := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", params)
+				if replay.err != nil || replay.rpcError != nil || !bytes.Equal(replay.result, first.result) {
+					t.Fatalf("%s exact replay failed: error=%v rpc=%s result=%s", label, replay.err, replay.rpcError, replay.result)
+				}
+				changed := make(map[string]any, len(params))
+				for key, value := range params {
+					changed[key] = value
+				}
+				changed["run_id"] = uuid.NewString()
+				conflict := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", changed)
+				var refusal struct {
+					Data struct {
+						Code string `json:"code"`
+					} `json:"data"`
+				}
+				if conflict.err != nil || json.Unmarshal(conflict.rpcError, &refusal) != nil || refusal.Data.Code != apiv1.IdempotencyConflictCode {
+					t.Fatalf("%s conflict lost precedence: error=%v rpc=%s", label, conflict.err, conflict.rpcError)
+				}
+				after, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), owner)
+				if err != nil || before != after {
+					t.Fatalf("%s replay/conflict changed rows: before=%+v after=%+v err=%v", label, before, after, err)
+				}
+			}
+			assertPureReplay("unloaded")
+			h.stop(t)
+			h.opts.SourceRoot = canonicalrouting.CopyPublicCompletionReplacement(t)
+			h.start(t)
+			manager = <-managers
+			if lookup := manager.LookupBundleHashStatus(hash); lookup.Loaded() {
+				t.Fatalf("restart resurrected original source: %+v", lookup)
+			}
+			assertPureReplay("restarted-with-source-unavailable")
+		})
+	}
+}
+
 func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, false)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			endpoint, _, hash := startPublicInputRollbackRuntime(t, backend)
+			h, _, hash := startChannelAnchorJourney(t, backend, "completion-bytes-test", false)
+			endpoint := h.rpcEndpoint()
 			params := publicationAuditParams(hash, "audit1930-bytes")
 			first := publicationAuditHTTP(t.Context(), endpoint, params)
 			if first.err != nil || first.rpcError != nil || len(first.result) == 0 {
@@ -108,6 +208,52 @@ func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 	}
 }
 
+func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			probe := installPublicationCompletionAudit(t, true)
+			defer probe.releaseOnce.Do(func() { close(probe.release) })
+			h, _, hash := startChannelAnchorJourney(t, backend, "completion-retirement-test", false)
+			params := publicationAuditParams(hash, "completion-retirement")
+			first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
+			if first.err != nil || first.rpcError != nil {
+				t.Fatalf("first native acknowledgment: error=%v rpc=%s", first.err, first.rpcError)
+			}
+			select {
+			case <-probe.entered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("accepted consequence did not reach readiness cut")
+			}
+			probe.mu.Lock()
+			process, native, request := probe.process, probe.native, probe.request
+			probe.mu.Unlock()
+			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			if err != nil || !found || !bytes.Equal(first.result, stored.Response) || process.PublicCompletionCount() != 1 {
+				t.Fatalf("held exact responsibility: found=%t err=%v count=%d", found, err, process.PublicCompletionCount())
+			}
+			h.stop(t)
+			if count := process.PublicCompletionCount(); count != 0 {
+				t.Fatalf("served shutdown released dependencies before responsibility joined: %d", count)
+			}
+			probe.mu.Lock()
+			probe.hold = false
+			probe.mu.Unlock()
+			h.start(t)
+			replay := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
+			if replay.err != nil || replay.rpcError != nil || !bytes.Equal(replay.result, stored.Response) {
+				t.Fatalf("recovered response: error=%v rpc=%s result=%s", replay.err, replay.rpcError, replay.result)
+			}
+			probe.mu.Lock()
+			commits := probe.commits
+			probe.mu.Unlock()
+			if commits != 1 {
+				t.Fatalf("restart/replay performed %d API commits", commits)
+			}
+			waitPublicationCompletionDisposition(t, probe)
+		})
+	}
+}
+
 type publicationAuditHTTPResult struct {
 	result   json.RawMessage
 	rpcError json.RawMessage
@@ -115,7 +261,11 @@ type publicationAuditHTTPResult struct {
 }
 
 func publicationAuditHTTP(ctx context.Context, endpoint string, params map[string]any) publicationAuditHTTPResult {
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "event.publish", "params": params})
+	return publicationCompletionHTTPMethod(ctx, endpoint, "event.publish", params)
+}
+
+func publicationCompletionHTTPMethod(ctx context.Context, endpoint, method string, params map[string]any) publicationAuditHTTPResult {
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
 	if err != nil {
 		return publicationAuditHTTPResult{err: err}
 	}
@@ -145,8 +295,8 @@ func publicationAuditHTTP(ctx context.Context, endpoint string, params map[strin
 }
 
 func publicationAuditParams(hash, key string) map[string]any {
-	return map[string]any{"bundle_hash": hash, "event_name": "inbound.telegram.text_message", "idempotency_key": key,
-		"payload": map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "completion boundary audit"}}
+	return map[string]any{"bundle_hash": hash, "event_name": "work.requested", "idempotency_key": key,
+		"payload": map[string]any{"seed": true}}
 }
 
 type publicationCompletionAudit struct {
@@ -157,6 +307,7 @@ type publicationCompletionAudit struct {
 	process     *worklifetime.Process
 	request     apiidempotency.Request
 	committed   runtimebus.CommittedAPIEventPublication
+	deployment  *runtimebus.CommittedDeploymentRunCreation
 	commits     int
 	run         string
 	hold        bool
@@ -213,6 +364,12 @@ func (s *publicationAuditSQLite) CommitAPIEventPublication(ctx context.Context, 
 	return s.probe.commit(ctx, s.SQLiteRuntimeStore, command)
 }
 
+func (s *publicationAuditSQLite) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
+	result, err := s.SQLiteRuntimeStore.CommitDeploymentRunCreation(ctx, command)
+	s.probe.observeDeployment(ctx, command, result)
+	return result, err
+}
+
 type publicationAuditPostgres struct {
 	*store.PostgresStore
 	probe *publicationCompletionAudit
@@ -220,6 +377,20 @@ type publicationAuditPostgres struct {
 
 func (s *publicationAuditPostgres) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
 	return s.probe.commit(ctx, s.PostgresStore, command)
+}
+
+func (s *publicationAuditPostgres) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
+	result, err := s.PostgresStore.CommitDeploymentRunCreation(ctx, command)
+	s.probe.observeDeployment(ctx, command, result)
+	return result, err
+}
+
+func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, command runtimebus.DeploymentRunCreationCommand, result runtimebus.CommittedDeploymentRunCreation) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.deployment = &result
+	p.request = command.Idempotency
+	p.process, _ = worklifetime.ProcessFromContext(ctx)
 }
 
 type publicationAuditReadiness struct {
@@ -247,11 +418,14 @@ func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx contex
 func waitPublicationCompletionDisposition(t *testing.T, p *publicationCompletionAudit) {
 	t.Helper()
 	p.mu.Lock()
-	native, committed, workflow, plan, process := p.native, p.committed, p.workflow, p.plan, p.process
+	native, committed, workflow, process := p.native, p.committed, p.workflow, p.process
 	runID := p.run
 	p.mu.Unlock()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
+		p.mu.Lock()
+		plan := p.plan
+		p.mu.Unlock()
 		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, runID, committed.Completion.ResourceID)
 		ready := false
 		if plan.RunID != "" {
@@ -261,7 +435,7 @@ func waitPublicationCompletionDisposition(t *testing.T, p *publicationCompletion
 			}
 			ready = readiness.Phase == pipeline.FlowAttachmentReady
 		}
-		if evidence.PipelineReceiptCount == 1 && ready && process != nil && process.PublicCompletionCount() == 0 {
+		if evidence.PipelineReceiptCount == 1 && evidence.PipelineReceiptOutcome == "success" && evidence.PipelineReceiptFailure == nil && ready && process != nil && process.PublicCompletionCount() == 0 {
 			if !evidence.RecordFound || evidence.CommittedScope == "" {
 				t.Fatal("settlement lost the exact committed publication")
 			}

@@ -1,6 +1,7 @@
 package apiidempotency
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 			idempotency_key TEXT NOT NULL,
 			request_hash TEXT NOT NULL,
 			resource_id TEXT NOT NULL,
-			response JSONB NOT NULL,
+			response JSON NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL,
 			expires_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (method, actor_kind, actor_id, idempotency_key)
@@ -96,8 +97,9 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 				Now:            time.Now().UTC(),
 				TTL:            time.Hour,
 			}
+			response := json.RawMessage(`{"z":[2,1], "a":9007199254740993, "u":"\u003c"}`)
 			completion, replay, err := owner.WithAPIIdempotency(context.Background(), req, func(context.Context) (apiidempotencycontract.Completion, error) {
-				return apiidempotencycontract.Completion{ResourceID: req.ResourceID, Response: json.RawMessage(`{"ok":true}`)}, nil
+				return apiidempotencycontract.Completion{ResourceID: req.ResourceID, Response: response}, nil
 			})
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("terminal release error = %v, want %q", err, tc.wantError)
@@ -126,7 +128,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 			if err != nil {
 				t.Fatalf("reacquire/replay: %v", err)
 			}
-			if !replay || executed || completion.ResourceID != req.ResourceID || string(completion.Response) != `{"ok": true}` {
+			if !replay || executed || completion.ResourceID != req.ResourceID || !bytes.Equal(completion.Response, response) {
 				t.Fatalf("reacquire result = completion=%+v replay=%v executed=%v", completion, replay, executed)
 			}
 			if got := backend.CapacityReservationsForTest(); got != 0 {
