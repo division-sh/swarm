@@ -650,9 +650,26 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 	return runtimeOwner, admission, nil
 }
 
-func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics) error {
+func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics, recoverTopology bool) error {
 	if r == nil || r.manager == nil {
 		return errors.New("selected execution requires its prepared lifecycle manager")
+	}
+	var startup runtimemanager.DynamicFlowRuntimeStartupReadiness
+	topologyCtx := ctx
+	if recoverTopology {
+		var err error
+		topologyCtx, err = r.bus.AdmitSourceArtifactFact(ctx)
+		if err != nil {
+			return fmt.Errorf("bind recovered selected readiness source: %w", err)
+		}
+		source, present := runtimecorrelation.SourceArtifactFactFromContext(topologyCtx)
+		if !present {
+			return errors.New("recovered selected readiness lacks its admitted source")
+		}
+		startup, err = r.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(topologyCtx, source, true)
+		if err != nil {
+			return fmt.Errorf("admit recovered selected child readiness: %w", err)
+		}
 	}
 	if err := completeSelectedContractFlowRoutes(ctx, pipeline, r.bus, r.pendingActivations, diagnostics); err != nil {
 		return err
@@ -664,7 +681,15 @@ func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipel
 		}
 		r.pendingActivations = r.pendingActivations[1:]
 	}
-	return r.manager.RunAuthoritativeDeliveryOnly(ctx)
+	if err := r.manager.RunAuthoritativeDeliveryOnly(ctx); err != nil {
+		return err
+	}
+	if recoverTopology {
+		if err := r.manager.CompleteDynamicFlowRuntimeStartupTopology(topologyCtx, startup); err != nil {
+			return fmt.Errorf("restore recovered selected child topology: %w", err)
+		}
+	}
+	return nil
 }
 
 func issueSelectedContractAgentRuntimeGenerationGrant(

@@ -579,26 +579,8 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if agentRuntime.completionExecutor == nil {
 		return errors.New("selected serving requires its exact completion owner")
 	}
-	var recoveredReadiness runtimemanager.DynamicFlowRuntimeStartupReadiness
-	readinessCtx := runCtx
-	if req.Prepared.recoveryFromExecutionID != "" {
-		var err error
-		readinessCtx, err = agentRuntime.bus.AdmitSourceArtifactFact(runCtx)
-		if err != nil {
-			return fmt.Errorf("bind recovered selected readiness source: %w", err)
-		}
-		recoveredReadiness, err = agentRuntime.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(readinessCtx, req.LoadedSource.SourceArtifactFact, true)
-		if err != nil {
-			return fmt.Errorf("admit recovered selected child readiness: %w", err)
-		}
-	}
-	if err := agentRuntime.startExecution(runCtx, attachment.pipeline, c.diagnostics); err != nil {
+	if err := agentRuntime.startExecution(runCtx, attachment.pipeline, c.diagnostics, req.Prepared.recoveryFromExecutionID != ""); err != nil {
 		return fmt.Errorf("start activated selected execution: %w", err)
-	}
-	if req.Prepared.recoveryFromExecutionID != "" {
-		if err := agentRuntime.manager.CompleteDynamicFlowRuntimeStartupTopology(readinessCtx, recoveredReadiness); err != nil {
-			return fmt.Errorf("restore recovered selected child topology: %w", err)
-		}
 	}
 	bus, pipeline := agentRuntime.bus, attachment.pipeline
 	continuationFailures := make(chan error, 1)
