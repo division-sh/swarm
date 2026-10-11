@@ -332,7 +332,9 @@ func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, run string
 		},
 	})
 	var fields, state string
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT), current_state FROM entity_state WHERE CAST(run_id AS TEXT)=$1`, run).Scan(&fields, &state); err != nil {
+	if err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.current_state
+		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+		WHERE CAST(es.run_id AS TEXT)=$1`, run).Scan(&fields, &state); err != nil {
 		t.Fatal(err)
 	}
 	var entity map[string]any
