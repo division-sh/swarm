@@ -106,7 +106,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	issue642WaitFutureProviderRetirement(t, rt, fork.ForkRunID, baseline, terminalDeadline)
 }
 
-func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixture, runID string, baseline int, deadline time.Time) {
+func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixture, runID string, baseline uint64, deadline time.Time) {
 	t.Helper()
 	var last storetest.SelectedExecutionStorage
 	for time.Now().Before(deadline) {

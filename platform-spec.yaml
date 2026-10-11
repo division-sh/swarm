@@ -21097,6 +21097,9 @@ run_model:
         runs only after exact selected activation, under current child authority; a source declaration, materialized
         row or preparation receipt alone cannot start it. The retained manager admits readiness from the canonical
         constructor and observes each actual future provider through its existing selected gateway hook before execution.
+        After terminal business and delivery settlement, the retained manager joins provider lifecycle self-release
+        while the exact selected execution grant is still current, before executor quiesce/close. Scheduler and
+        completion serving work join after the serving goroutine exits; failed joins retain exact cleanup ownership.
         Missing owners, failed construction admission or stale authority still refuse before dependent execution. The admission is
         carried through selected execution admission and every container construction. Exact fan-out barrier historical
         materialization is separately admitted by the fan_out fork contract; copying that family does not authorize

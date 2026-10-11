@@ -808,6 +808,14 @@ func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx c
 			if err := c.ports.runtimeExecution.RequireRunForkSelectedContractExecutionSettlement(ctx, c.authority, c.req.SourceEvents, c.req.LoadedSource.Source); err != nil {
 				return err
 			}
+			// Manager self-release needs the still-current selected grant. The
+			// other serving owners are joined after this serving goroutine exits.
+			if manager := c.attachment.runtime.manager; manager != nil {
+				if err := manager.Shutdown(); err != nil {
+					return err
+				}
+				c.attachment.runtime.manager = nil
+			}
 			if err := c.Quiesce(ctx); err != nil {
 				return err
 			}
