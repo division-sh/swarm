@@ -15,10 +15,20 @@ import (
 // LoadFanOutBarrierContinuationTx consumes the existing row reader. It grants
 // neither a historical cut nor delivery/execution authority.
 func LoadFanOutBarrierContinuationTx(ctx context.Context, tx *sql.Tx, postgres bool, key fanoutobligation.IntentKey) (fanoutbarrier.Barrier, error) {
+	return readFanOutBarrierContinuationTx(ctx, tx, postgres, key, true)
+}
+
+// ReadFanOutBarrierContinuationTx shares the complete decoder without acquiring
+// a mutation lock. It is observation only, never a completion admission.
+func ReadFanOutBarrierContinuationTx(ctx context.Context, tx *sql.Tx, postgres bool, key fanoutobligation.IntentKey) (fanoutbarrier.Barrier, error) {
+	return readFanOutBarrierContinuationTx(ctx, tx, postgres, key, false)
+}
+
+func readFanOutBarrierContinuationTx(ctx context.Context, tx *sql.Tx, postgres bool, key fanoutobligation.IntentKey, forUpdate bool) (fanoutbarrier.Barrier, error) {
 	if err := key.Validate(); err != nil {
 		return fanoutbarrier.Barrier{}, err
 	}
-	rows, err := loadFanOutBarriers(ctx, tx, postgres, key.RunID, "", &key)
+	rows, err := loadFanOutBarriers(ctx, tx, postgres, key.RunID, "", &key, forUpdate)
 	if err != nil {
 		return fanoutbarrier.Barrier{}, err
 	}

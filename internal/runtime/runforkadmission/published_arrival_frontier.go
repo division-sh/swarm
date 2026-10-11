@@ -16,7 +16,7 @@ import (
 // pubsub cannot turn it into a new output or bind it to a later stage entry.
 func admitPublishedJoinFrontier(source semanticview.Source, plan runfork.RunForkPlan, publication runfork.PublishedJoinOccurrence) (forkrecipient.Evidence, error) {
 	event := publication.Event()
-	recipient, target, handler, found, err := pipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(source, event)
+	recipient, target, handler, found, err := pipeline.ResolvePublishedJoinOccurrenceDeliveryTarget(source, publication)
 	if err != nil || !found {
 		return forkrecipient.Evidence{}, fmt.Errorf("resolve retained join declaration: found=%v: %w", found, err)
 	}

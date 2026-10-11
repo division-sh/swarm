@@ -117,3 +117,14 @@ func CopyForkFanOutBarrierReceiver(t testing.TB) string {
 		"    - start.checkpointed\n", "    - start.checkpointed\n    - batch.completed\n")
 	return root
 }
+
+// This counterfactual keeps the same barrier contract but fails while evaluating
+// its completion write, before the stage, business state or output can commit.
+func CopyForkFanOutBarrierCompletionFailure(t testing.TB) string {
+	t.Helper()
+	root := CopyForkFanOutBarrierReceiver(t)
+	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"),
+		"writes: [{target_field: marker, value: 'producer-owned'}]",
+		"writes: [{target_field: marker, value: string(1 / (join.total - join.total))}]")
+	return root
+}
