@@ -2704,3 +2704,46 @@ watchlist/architecture tracking suffices; no new framework, dual owner or issue.
 M01, Docker, semantic drain, D3 SQL-order, M07 possession loss and rollback remain
 unwaived. Next ready dependency: inbound acknowledgment fixture and its complete
 four-root chain, reusing existing receipt/cardinality ports without new SQL.
+
+## Whole inbound acknowledgment fixture and four-root caller chain
+
+inboundAcknowledgedSelectedFixture and every consumer now return only the native
+selected role, original context and exact target. Its sole supplied-pool opening,
+SQLite raw getter, raw return carrier and both caller queries are retired together.
+Native PostgreSQL cleanup retains the original consumer-before-store-before-sandbox
+order. All source-aware setup and acknowledgment-fault wrappers remain unchanged;
+the wrapper delegates the genuine selected commit before injecting the original
+post-commit error, changed result, hidden lookup or missing acknowledgment cut.
+
+| Owner | Complete consumption / precise distinction |
+| --- | --- |
+| existing native selected construction / source-aware inbound setup | Shared constructor and all four roots use original native fixture locations and exact standing target; no pool, dialect or returned DB. |
+| existing pipeline receipt cardinality | Committed-sibling recovery reads each event's exact platform/pipeline receipt count through CountPipelineEventReceiptStorage. The original exact-one assertion, independent per-event read cut and absence of outcome/run filters remain. |
+| existing closed delivery physical cardinality | Operator-claim non-delivery uses CountPhysicalEventDeliveries, retaining all rows across runs/subscribers/statuses and the original no-caller-context read via context.Background. No new SQL owner or selector. |
+| existing standing/runtime/process worklifetime | Exact standing identity/generation validation and genuine occurrence.Begin remain. Standing and runtime retirement plus process join still precede store cleanup. This Begin is authenticated work admission, not a SQL transaction protocol; the whole-file guard classifies only its exact unchanged declaration and rejects body/type changes, missing/duplicate owner and restored raw calls. |
+| existing finite codemod | Five exact constructor/caller mappings extend324 transitions /1150 recipes; immutable historical Before inputs remain. Original behavioral conditions stay in order; exact receipt/cardinality calls, real recovery/join and acknowledgment/fault cuts are hostile-controlled. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Committed sibling publication/finalization uncertainty and standing recovery | reproduced and fixed: TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores under race on both stores; exact two notifications, durable batch, original standing work, each receipt, duplicate response and joined cleanup |
+| Genuine acknowledged commit with later cleanup error, duplicate commit and no redispatch | execution-proven through the same corrected path: TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothStores under race on both stores; original commit counts, marker/delivery counts and identity preserved |
+| Changed created-result execution facts | execution-proven through the same corrected path: TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores under race for every original fact/store row; actual HTTP refusal and commit cardinality retained |
+| Operator claim acknowledgment, corruption, missing ack and whole-store no-delivery | execution-proven through the same corrected path: TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores under race; original principal/operation identity, disposition, state, commit counts and zero physical deliveries |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/inbound-ack-*:
+four original roots PASS27.351s; finite/source/hostile guards PASS2.623s, with exact
+standing-work classification separately rechecked. Dry-run Changes=[] and affected
+U1000 clean. Unchanged canonical port/error/owner controls and boundary/partition
+receipts carry from the prior connector checkpoint; actual rewritten runtime
+package compiles and executes under race on both stores. No repeated exhaustive
+matrix, overlay tier, new unit, proof-selection or timing policy change.
+
+Downward ratchet PASS26.130s:9068 ->9051,17 removals,0 additions; confirmed raw
+operation debt6541 ->6530 and excluded uncertainty67 unchanged. Broader collector
+54691 findings /38999 raw sites includes legitimate owners. Supplied-pool queue
+98 ->97 =95 external +2 private, provisional M0/D60/S37; cumulative qualified
+openings37. Collector and one-way retained stage-completion debt remain unchanged.
+Signed-head complexity is recorded with the receipts. Parent scope and all M01,
+Docker, drain, D3, M07 and rollback qualifications remain open and unwaived.
+No new architecture owner/framework, issue, watchlist node, push, PR, server2 or
+local tier. Next ready dependency: configured-channel journal/carrier chain.
