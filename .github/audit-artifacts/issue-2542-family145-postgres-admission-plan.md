@@ -482,9 +482,45 @@ The finite corpus now has 973 rows / 104 exact transitions, digest
 62df45fb0ff2fca7d3ec20cd35fe9809689dd98f55f98cfce54ba093a5e88e6d.
 All 893 historical Before/After/Mechanical records are retained; the two raw
 replay update helpers have explicit finite retirement rows. The complete tool
-package is being rerun for F1; its result is not yet claimed here.
+package rerun for F1 (replay-codemod-package.jsonl) is RED at the unchanged
+ten-minute aggregate timeout, 600.085s, with 171 completed roots and no earlier
+root failure. All repaired historical, affected family and immutable/current
+controls passed; the complete actual candidate-overlay type check also passed
+(310.19s). The interruption occurred in an unchanged engine-bucket oracle, not
+F1. No retry, skip, limit increase or aggregate PASS is claimed. Future cohorts
+retain focused affected controls and carry unchanged evidence, per the gate;
+uncompleted unrelated package roots are not credited by this receipt.
 Named live Admit calls: 156 -> 153 (202 initially), plus the separately removed
 ordinary NewPostgresStoreForTest/bootstrap chain. The one Docker candidate is
 still unqualified, so the proven-cohort count is 154. No fresh global census,
 baseline decrease, global zero-additions, tier, push, PR or whole-family closure
 is claimed. Last qualified global census remains 10698 / 7754 / 67 unresolved.
+
+## Shared API Source-Identity Carrier Cohort
+
+The shared assertRunBundleIdentity witness now consumes the existing original-
+coordinator strict bundle-hash read, preserving exact run equality, NULL/read
+failure and hash comparison. Its four uses receive the already-owned selected
+store, not a pool. The complete runtime-context fixture loses its raw db field
+and opens natively once for all twelve consumers; the canonical directive root
+does the same. No new read/fault/domain operation, classifier or runtime semantics
+is introduced. All real bus/manager/context ownership and teardown cuts remain.
+Both caller files now have no raw pool, getter, SQL or supplied-pool constructor.
+
+api-source-identity-native.jsonl: all 13 affected original PostgreSQL roots
+passed under race/count1/GOMAXPROCS2, 21.158s, with no failure/skip. Includes
+every runtime-context fixture consumer, idempotency after unload, unavailable/
+conflicting source refusals, existing-run routing, agent/decision controls and
+the canonical directive source assertion. api-source-identity-controls.jsonl:
+finite/current/historical recipe controls and raw-capability negatives passed,
+52.324s. api-source-identity-unused.log: affected native API U1000 passed.
+api-source-identity-inert.json reports Write=false and Changes=[]. Existing
+adjacent store/event guard and unchanged both-store read-owner receipts carry;
+no repeated broader matrix or package-wide run is claimed.
+
+Finite corpus: 975 rows / 109 transitions; digest
+cdf9b1d38a426cb3213cf8db0f83a3088e97d8a6c872bd6a77316647f7105237.
+The immutable 893 historical records and repaired 24-receipt pin remain intact.
+Named live Admit inventory: 153 -> 151 (202 initially). The single unqualified
+Docker removal remains distinguished, so the proven-cohort count is 152. No
+fresh global census, baseline edit, push, PR, tier or whole-family closure.
