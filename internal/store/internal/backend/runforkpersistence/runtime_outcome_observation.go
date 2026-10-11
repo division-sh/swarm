@@ -28,3 +28,9 @@ func CountClosedFirstSelectedRuntimeExecutionStorageTx(ctx context.Context, tx *
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND generation=1 AND state='closed'`, forkRunID).Scan(&count)
 	return count, err
 }
+
+func CountSelectedForkSourceEventLineageStorageTx(ctx context.Context, tx *sql.Tx, forkRunID, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id=$1 AND source_event_id=$2`, forkRunID, sourceEventID).Scan(&count)
+	return count, err
+}

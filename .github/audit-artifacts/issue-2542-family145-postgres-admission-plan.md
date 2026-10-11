@@ -1899,3 +1899,60 @@ sites, restart or parent closure claim. platform-spec.yaml records these exact p
 scopes. Existing watchlist/architecture disposition remains appropriate: use the original
 native construction and effect owner, not a new fixture framework. M01/Docker remain
 qualification-open in #2353. No push, PR, tier or server2 run.
+
+## Diagnostic lineage construction and physical witness cohort
+
+The complete diagnostic-lineage root now opens its original PostgreSQL store with
+StartPostgresRuntimeStore instead of borrowing and re-admitting a pool. Its native
+compiled-source publication, lineage-only diagnostic, revision capture, genuine
+process capability and selected execution remain unchanged. All original frontier,
+route, exact-one execution, diagnostic-absence and selected-lineage assertions remain.
+
+Canonical eventrecord owns the exact fork-run event-id OR source-event-id count;
+canonical runforkpersistence owns the separate exact fork/source-event lineage count.
+The three original read cuts remain in order, with diagnostic and selected source
+coordinates distinct. SQL NULL source identity cannot match a valid nonempty UUID,
+so removing the old PostgreSQL COALESCE/text casts preserves the exact union predicate
+on both stores. Physical duplicate rows count separately; a row matching both union
+arms counts once. No eligibility, decoder, admission, status, source-run or fork-event
+restriction is added. Public ports return scalars only through the original selected
+native read owner and refuse invalid/raw/foreign/cancelled/closed ownership without
+provisional evidence.
+
+Systematic consumption: all three raw witnesses in the diagnostic root are migrated.
+The source/fork/event quadruple lineage count in the full lineage root and the
+fork-only cleanup count are different scopes; neither may substitute for this count
+and both remain explicitly in the broader family145 migration. The event/source
+union is not interchangeable with exact event-id, event-name or foreign-run counts.
+There is no alternate constructor, dialect shim or SQL callback in this cohort.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Diagnostic-lineage supplied-pool construction and three raw witnesses | reproduced and fixed | Complete original TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage under race, retaining every original assertion and native source/materialization/execution |
+| Original read owner, exact diagnostic/source coordinates and failure behavior | execution-proven through the same corrected path | Both-store native event/absence, four separate read commits, zero writes, invalid/raw/foreign/cancelled/closed controls; finite source-pinned caller guard rejects wrong reader, coordinates and weakened counts |
+| Physical event/source union and lineage multiplicity | execution-proven through the same corrected path | Backend query-only predicate matrices include NULL, both union arms, duplicates and foreign runs/events/source-run/fork-event rows; no runtime authority is fabricated |
+| Source-event matching accidentally removed | reproduced and fixed | Actual eventrecord SQL mutation drops the source-event union arm: RED at 1 vs3; restore GREEN |
+
+Vemew: original root GREEN7.859s(package); native both-store controls GREEN12.819s;
+fork-lineage query unit GREEN1.116s. New eventrecord query unit initially RED because
+its SQLite driver import was missing; the import repair yields GREEN1.079s. Actual
+SQL mutant RED0.066s and restore GREEN1.109s. Complete cheap family145/historical/
+finite/successor/native-run-setup guards GREEN14.936s; five affected owner guards
+GREEN1.213s(store)/8.846s(private). No retries, skip, timeout change or weakened proof.
+Affected U1000, dry-run Changes=[], diff and committed-head complexity are checked
+with this checkpoint; no broader tier is run.
+
+Receipts ~/.cache/swarm-2542-family145/diagnostic-lineage-*:
+initial focused bff6f5bd5a48d5a6c93024715671a282e4412c7aa19a02192621291d96e2dbf9;
+query-unit repair 2ecca9d954e6904db8af05877db4fcec1e573023df676a2828995b62ec7703ea;
+actual mutant f9775332692e4af18f8879c301076ac126332a219273367cc65530956d1293f1;
+restore 517236c3f2b65525116c3325f93e499668195f9a1ff8597bf3262d39a1c222bb;
+family guards dd0b1c1a516338a3e9d2c81326ddc74f805ab4c27bcf9fa6f94ed7425c4da36f.
+
+Corpus1055/199 transitions, digest
+846812406ea629bbe0c0bd14d433862ec10e9ddf6ef9cbe20a7b622d0fa0659e.
+Original893 tuples/24 historical receipts remain immutable. Named ordinary admissions
+122 ->121 (122 excluding Docker's unqualified removal), not a global debt census.
+The architecture/watchlist decision remains existing owners and explicit remaining
+family145/#2542/#2151 debt; no new issue/framework or closure credit. M01/Docker stay
+qualification-open in #2353. No push, PR, tier, server2 or process-restart claim.

@@ -10,6 +10,67 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestSelectedDiagnosticLineageCountsUseOriginalOwnerBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			selected, ctx := backend.open(t).store, testAuthorActivityContext()
+			event := runForkSnapshotFixtureEvent(t, ctx, selected)
+			probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			if got, err := CountRunEventOrSourceEventStorageForTest(ctx, selected, event.RunID(), event.ID()); err != nil || got != 1 {
+				t.Fatalf("native exact event lost physical identity: %d/%v", got, err)
+			}
+			readers := []func(context.Context, any, string, string) (int, error){
+				CountRunEventOrSourceEventStorageForTest,
+				CountSelectedForkSourceEventLineageStorageForTest,
+			}
+			absent := uuid.NewString()
+			for _, read := range readers {
+				if got, err := read(ctx, selected, event.RunID(), absent); err != nil || got != 0 {
+					t.Fatalf("absent diagnostic fact supplied evidence: %d/%v", got, err)
+				}
+			}
+			if got, err := CountSelectedForkSourceEventLineageStorageForTest(ctx, selected, event.RunID(), event.ID()); err != nil || got != 0 {
+				t.Fatalf("source event fabricated fork lineage: %d/%v", got, err)
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 4 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("diagnostic observations escaped original coordinator or collapsed cuts: %+v", counts)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			for _, read := range readers {
+				if got, err := read(cancelled, selected, event.RunID(), absent); !errors.Is(err, context.Canceled) || got != 0 {
+					t.Fatalf("cancelled diagnostic read supplied evidence: %d/%v", got, err)
+				}
+				for _, owner := range []any{nil, struct{}{}, &sql.DB{}} {
+					if got, err := read(ctx, owner, event.RunID(), absent); err == nil || got != 0 {
+						t.Fatalf("foreign/raw diagnostic owner supplied evidence: %T/%d/%v", owner, got, err)
+					}
+				}
+				for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
+					if got, err := read(ctx, selected, invalid, absent); err == nil || got != 0 {
+						t.Fatalf("invalid diagnostic run supplied evidence: %q/%d/%v", invalid, got, err)
+					}
+					if got, err := read(ctx, selected, event.RunID(), invalid); err == nil || got != 0 {
+						t.Fatalf("invalid diagnostic event supplied evidence: %q/%d/%v", invalid, got, err)
+					}
+				}
+			}
+			if err := selected.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			for _, read := range readers {
+				if got, err := read(ctx, selected, event.RunID(), absent); err == nil || got != 0 {
+					t.Fatalf("closed diagnostic owner supplied evidence: %d/%v", got, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSelectedCompetitionStorageCountsUseOriginalReadOwnerBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {

@@ -6899,6 +6899,14 @@ engine:
                 add source, run, eligibility, status or reservation filters beyond those original predicates; invalid/raw/cancelled/closed
                 ownership and failed reads return no successful or provisional scalar. Fixed read SQL remains with runforkpersistence
                 and effectpersistence, while public fixture ports expose only identity coordinates and detached cardinality.
+              selected_fork_diagnostic_lineage_storage_observation: >-
+                Selected-fork diagnostic witnesses consume the original native selected read coordinator for three separate cuts.
+                The event-record owner counts all rows at the exact fork run whose event_id or source_event_id equals the original
+                diagnostic event, preserving union semantics and physical multiplicity including NULL source identity.
+                The fork persistence owner separately counts exact fork/source-event lineage for the diagnostic and selected source.
+                No source-run, fork-event, admission, eligibility, status or decoding filter may hide residue. These detached scalars
+                are physical observations, not execution authority; invalid/raw/foreign/cancelled/closed ownership or read failure
+                yields no provisional evidence. Public fixture bridges expose identity coordinates and scalars only.
               selected_fork_authored_http_storage_observation: >-
                 Authored-HTTP component witnesses preserve three distinct original selected read cuts through effectpersistence.
                 The initial attempt/operation join counts exact execution, selected-contract authority, HTTP-target effect,

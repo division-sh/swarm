@@ -6,6 +6,14 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
+func CountSelectedForkSourceEventLineageStorage(ctx context.Context, selected any, forkRunID, sourceEventID string) (int, error) {
+	return private.CountSelectedForkSourceEventLineageStorageForTest(ctx, selected, forkRunID, sourceEventID)
+}
+
+func CountRunEventOrSourceEventStorage(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	return private.CountRunEventOrSourceEventStorageForTest(ctx, selected, runID, eventID)
+}
+
 func CountSelectedExecutionAttemptsStorage(ctx context.Context, selected any, executionID string) (int, error) {
 	return private.CountSelectedExecutionAttemptsStorageForTest(ctx, selected, executionID)
 }

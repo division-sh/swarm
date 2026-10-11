@@ -3621,8 +3621,7 @@ func (selectedContractCleanupRuntime) ProviderContract() runtimellm.ProviderCont
 }
 
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -3673,42 +3672,24 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 		t.Fatalf("selected execution retained unresolved route blocker: materialization=%#v activation=%#v", result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
 	}
 
-	var diagnosticCopies int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND (
-			event_id = $2::uuid
-			OR COALESCE(source_event_id::text, '') = $2::text
-		  )
-	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticCopies); err != nil {
+	diagnosticCopies, err := storetest.CountRunEventOrSourceEventStorage(ctx, pg, result.Materialization.ForkRunID, diagnosticEventID)
+	if err != nil {
 		t.Fatalf("count copied diagnostic events: %v", err)
 	}
 	if diagnosticCopies != 0 {
 		t.Fatalf("diagnostic platform events copied into fork = %d, want 0", diagnosticCopies)
 	}
 
-	var diagnosticExecutionLineage int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM run_fork_selected_contract_executions
-		WHERE fork_run_id = $1::uuid
-		  AND source_event_id = $2::uuid
-	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticExecutionLineage); err != nil {
+	diagnosticExecutionLineage, err := storetest.CountSelectedForkSourceEventLineageStorage(ctx, pg, result.Materialization.ForkRunID, diagnosticEventID)
+	if err != nil {
 		t.Fatalf("count diagnostic execution lineage: %v", err)
 	}
 	if diagnosticExecutionLineage != 0 {
 		t.Fatalf("diagnostic platform execution lineage rows = %d, want 0", diagnosticExecutionLineage)
 	}
 
-	var selectedExecutionLineage int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM run_fork_selected_contract_executions
-		WHERE fork_run_id = $1::uuid
-		  AND source_event_id = $2::uuid
-	`, result.Materialization.ForkRunID, sourceEventID).Scan(&selectedExecutionLineage); err != nil {
+	selectedExecutionLineage, err := storetest.CountSelectedForkSourceEventLineageStorage(ctx, pg, result.Materialization.ForkRunID, sourceEventID)
+	if err != nil {
 		t.Fatalf("count selected execution lineage: %v", err)
 	}
 	if selectedExecutionLineage != 1 {
