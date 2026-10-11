@@ -66,8 +66,8 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 				}
 				seedWorkflowHeaderProjectionFixture(t, targetCtx, db, childRun, childRun, childRun, effect.FlowID, "default", "operating", "{}", now)
 				if _, err := db.ExecContext(targetCtx, `INSERT INTO entity_state
-				(run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,accumulator,entered_state_at,created_at,updated_at)
-				VALUES ($1,$1,$2,'default','operating','{}','{}','{}',$3,$3,$3)`, childRun, childRun, now); err != nil {
+				(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at)
+				VALUES ($1,$1,$2,'default','{}',$3,$3)`, childRun, childRun, now); err != nil {
 					t.Fatal(err)
 				}
 				projection, err := projectRunForkEntityOwnership(sourceRun, childRun, sourceRun, sourceRun)
@@ -79,24 +79,39 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
-				apply := func() error {
+				apply := func(c *loopruntime.ForkCorrespondence) error {
 					return runSelectedFixtureMutation(targetCtx, selected, "materialize rejected effect history", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 						switch s := selected.(type) {
 						case *PostgresStore:
-							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, c, now.Add(2*time.Minute), nil)
 						case *SQLiteRuntimeStore:
-							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, c, now.Add(2*time.Minute), nil)
 						default:
 							t.Fatalf("unsupported selected owner %T", selected)
 							return nil
 						}
 					})
 				}
-				if err := apply(); err != nil {
+				if !afterPoint {
+					crossed, err := loopruntime.NewForkCorrespondence(nil, childRun, uuid.NewString())
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, invalid := range []*loopruntime.ForkCorrespondence{nil, {}, crossed} {
+						before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
+						if err := apply(invalid); err == nil || err.Error() != "fork correspondence does not own the exact child run and entity" {
+							t.Fatalf("nonpending source card bypassed exact correspondence: %v", err)
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
+							t.Fatal("refused nonpending correspondence changed durable evidence")
+						}
+					}
+				}
+				if err := apply(correspondence); err != nil {
 					t.Fatal(err)
 				}
 				beforeRepeat := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
-				if err := apply(); err != nil {
+				if err := apply(correspondence); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(beforeRepeat, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
