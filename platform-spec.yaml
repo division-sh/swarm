@@ -5629,6 +5629,7 @@ engine:
         receiver_handoff: EventBus copies this typed route fact into its closed receiver projection. It never preserves a publisher context value tree to carry reply authority.
         creation: Request publication creates the full reply_contexts row in the same typed event mutation after the request
           event exists and before provider delivery commits. Recipient preflight computes the deterministic id but performs no write.
+        enclosing: A request emitted by a turn holding an open inbound reply reference retains that exact enclosing_reply_context_id as a nullable self-reference on its own context row. The atomic owner validates the same-run provider/requester relation and fresh open admission. Its return restores only this reference beside ReturnJoins; it neither claims the enclosing row nor guesses a parent from provider-global state, events or payload correlation. Fork projection maps every enclosing link through child context IDs from the immediate captured cut. No inline tree or suspended agent-session owner is implied.
         identity: Deterministic from request event, paired topology, and normalized origin route. Logical resolution identity
           is (origin_instance_id, request_correlation_id) within the paired topology.
         consumption: Only publication through the declared provider reply output consumes the ref and terminally claims it.
@@ -5658,7 +5659,8 @@ engine:
       persistence:
         owner: store.ReplyContextStore
         backends: [postgres, sqlite]
-        full_record: reply_contexts owns request/topology/origin/correlation/lifecycle/accepted-event facts.
+        full_record: reply_contexts owns logical request/topology/origin/correlation/lifecycle/accepted-event facts, nullable enclosing continuation, and an immutable evidence-only original source_run_id/source_request_event_id pair. Fresh publication initializes the pair from its actual request; projection preserves it. Resolution reads only its own context row and never dereferences the original event. The physical original event FK and checked non-null original-run owner key enforce exact run ownership including genuinely runless evidence; logical projected request/accepted coordinates require no fabricated physical event.
+        correlation_scope: Same-run correlation uniqueness is retained by one partial unique index including run_id; a separate runless partial unique index retains runless collision enforcement. Different runs and sibling forks do not share claims. This does not expand runless runtime admission.
         durable_refs: [event_deliveries.delivery_context, activity_attempts.reply_context_id, timers.reply_context_id, mailbox.reply_context_id]
         rule: Durable consumers store only the opaque reply_context_id.
       terminal_claim:
@@ -5674,8 +5676,7 @@ engine:
       replay_and_fork:
         restart: Event deliveries and continuation rows restore refs only from their typed columns.
         same_run_replay: Uses the persisted delivery route context; it does not reconstruct reply identity.
-        timestamp_fork: A source run with an open reply context at the selected frontier fails closed with
-          open_reply_context_unsupported. The context is never copied or reopened in the fork.
+        timestamp_fork: Exact captured contexts project child-local logical request, accepted-reply, origin, return and enclosing-reference coordinates while preserving their original physical evidence and captured lifecycle. Projection itself never copies a request/reply event or reopens a terminal context; independently owed deliveries use ordinary replay. Executable continuation still requires the existing admission and actual current selected execution authority, not projection or original provenance.
       observability:
         graph: Generated connect route plans expose both request and response roles and name the paired request/reply/provider pins.
         trace: run.trace exposes reply_context_id from event_deliveries.delivery_context for platform debugging; business payload remains unchanged.
@@ -15955,6 +15956,7 @@ platform_tables:
             event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'instance_publication', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID NOT NULL UNIQUE,
             run_id                      UUID REFERENCES runs(run_id),
+            run_owner_key               TEXT NOT NULL,
             event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
             task_id                     TEXT CHECK (task_id IS NULL OR task_id = TRIM(task_id)),
             entity_id                   UUID,
@@ -15997,6 +15999,8 @@ platform_tables:
             CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'deployment_feed') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
             CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('root', 'flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
+            CHECK ((run_id IS NULL AND run_owner_key = '') OR (run_id IS NOT NULL AND run_owner_key = ('run:' || CAST(run_id AS TEXT)))),
+            UNIQUE (event_id, run_owner_key),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
             INDEX idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,
@@ -17570,6 +17574,12 @@ platform_tables:
         request event, paired request/reply topology, concrete origin route, and request correlation.
         Terminal claim is atomic: the first reply event wins, replay of that same event is idempotent,
         and a distinct later reply fails closed as platform.reply_already_terminal.
+        The original source_run_id/source_request_event_id pair is separately constrained physical evidence,
+        never execution authority. Projected request_event_id and accepted_reply_event_id are logical coordinates.
+        A nullable enclosing_reply_context_id retains the publishing turn's own open inbound obligation;
+        nested returns restore that reference with ReturnJoins. Correlation uniqueness is run-local, with
+        separate unchanged collision enforcement for runless rows. Preserved contexts prevent destructive
+        cleanup of their original or enclosing evidence; cleanup never broadens its explicit run set or nulls those refs.
         origin_route is one closed typed object carrying the concrete route and any exact join_admissions
         frozen by this request. Its reader rejects malformed UTF-8, duplicate JSON keys, alternate field
         spellings, unknown fields and null roots before decoding. Return receipts stay scoped to the
@@ -17579,7 +17589,11 @@ platform_tables:
         CREATE TABLE reply_contexts (
             reply_context_id        TEXT PRIMARY KEY,
             run_id                  UUID REFERENCES runs(run_id),
-            request_event_id        UUID NOT NULL REFERENCES events(event_id),
+            request_event_id        UUID NOT NULL,
+            source_run_id           UUID REFERENCES runs(run_id),
+            source_request_event_id UUID NOT NULL REFERENCES events(event_id),
+            source_run_owner_key    TEXT NOT NULL,
+            enclosing_reply_context_id TEXT REFERENCES reply_contexts(reply_context_id),
             requester_flow_id       TEXT NOT NULL,
             request_output_pin      TEXT NOT NULL,
             reply_input_pin         TEXT NOT NULL,
@@ -17590,12 +17604,16 @@ platform_tables:
             request_correlation_id  TEXT NOT NULL,
             correlation_key         TEXT,
             state                   TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'terminal')),
-            accepted_reply_event_id UUID REFERENCES events(event_id),
+            accepted_reply_event_id UUID,
             created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at             TIMESTAMPTZ,
             CHECK ((state = 'open' AND accepted_reply_event_id IS NULL AND terminal_at IS NULL) OR (state = 'terminal' AND accepted_reply_event_id IS NOT NULL AND terminal_at IS NOT NULL)),
-            UNIQUE (requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route),
+            CHECK ((source_run_id IS NULL AND source_run_owner_key = '') OR (source_run_id IS NOT NULL AND source_run_owner_key = ('run:' || CAST(source_run_id AS TEXT)))),
+            FOREIGN KEY (source_request_event_id, source_run_owner_key) REFERENCES events(event_id, run_owner_key),
+            CHECK (enclosing_reply_context_id IS NULL OR enclosing_reply_context_id <> reply_context_id),
+            UNIQUE INDEX idx_reply_contexts_runful_identity (run_id, requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route) WHERE run_id IS NOT NULL,
+            UNIQUE INDEX idx_reply_contexts_runless_identity (requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route) WHERE run_id IS NULL,
             INDEX idx_reply_contexts_run_state (run_id, state),
             INDEX idx_reply_contexts_request (request_event_id),
             INDEX idx_reply_contexts_correlation (request_correlation_id, state)

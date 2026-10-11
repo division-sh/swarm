@@ -36,7 +36,7 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 		runsDDL = "CREATE TABLE runs (run_id UUID PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id UUID)"
 	}
 	columns := []string{}
-	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority") {
+	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority run_owner_key") {
 		columns = append(columns, name+" TEXT")
 	}
 	for _, name := range strings.Fields("event_id run_id entity_id source_event_id operator_reference_event_id") {

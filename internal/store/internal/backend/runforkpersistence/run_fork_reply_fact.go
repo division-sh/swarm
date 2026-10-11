@@ -102,6 +102,8 @@ func decodeRunForkHistoricalReplyStringFields(fields map[string]semanticvalue.Va
 		"provider_output_pin": &record.ProviderOutputPin, "request_correlation_id": &record.RequestCorrelationID,
 		"correlation_key": &record.CorrelationKey, "state": &state,
 		"accepted_reply_event_id": &record.AcceptedReplyEventID,
+		"source_run_id":           &record.SourceRunID, "source_request_event_id": &record.SourceRequestEventID,
+		"enclosing_reply_context_id": &record.EnclosingReplyContextID,
 	}
 	for name := range fields {
 		switch name {
@@ -129,12 +131,18 @@ func validateRunForkHistoricalReplyIdentity(record replycontext.Record, context 
 	}
 	for name, id := range map[string]string{
 		"request_event_id": record.RequestEventID, "accepted_reply_event_id": record.AcceptedReplyEventID,
+		"source_request_event_id": record.SourceRequestEventID,
 	} {
 		if name == "accepted_reply_event_id" && id == "" {
 			continue
 		}
 		if _, err := uuid.Parse(id); err != nil {
 			return fmt.Errorf("%s identity: %w", name, err)
+		}
+	}
+	if record.SourceRunID != "" {
+		if id, err := uuid.Parse(record.SourceRunID); err != nil || id == uuid.Nil || id.String() != record.SourceRunID {
+			return fmt.Errorf("source_run_id requires exact original ownership")
 		}
 	}
 	return nil

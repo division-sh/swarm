@@ -151,8 +151,8 @@ func insertRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (b
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
-		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin, run_owner_key
+		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), COALESCE('run:' || CAST(NULLIF(?, '') AS TEXT), ''))
 		ON CONFLICT(event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
@@ -160,7 +160,7 @@ func insertRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (b
 		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin), record.RunID)
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}

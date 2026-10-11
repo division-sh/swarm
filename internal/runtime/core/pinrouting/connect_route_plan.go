@@ -997,6 +997,8 @@ func (r ConnectRoutePlanReplyResolution) requestRecord(evt events.Event, origin 
 	record := runtimereplycontext.Record{
 		RunID:                evt.RunID(),
 		RequestEventID:       evt.ID(),
+		SourceRunID:          evt.RunID(),
+		SourceRequestEventID: evt.ID(),
 		RequesterFlowID:      r.requesterFlowID.value,
 		RequestOutputPin:     r.requestOutputPin.value,
 		ReplyInputPin:        r.replyInputPin.value,

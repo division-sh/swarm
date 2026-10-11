@@ -9,7 +9,9 @@ func replyContextProjectionSpec() projectionSpec {
 		r.provider_input_pin, r.provider_output_pin, r.origin_route,
 		r.request_correlation_id, COALESCE(r.correlation_key, ''), r.state,
 		COALESCE(CAST(r.accepted_reply_event_id AS TEXT), ''),
-		r.created_at, r.updated_at, r.terminal_at
+		r.created_at, r.updated_at, r.terminal_at,
+		COALESCE(CAST(r.source_run_id AS TEXT), ''), CAST(r.source_request_event_id AS TEXT),
+		COALESCE(r.enclosing_reply_context_id, '')
 		FROM reply_contexts r WHERE r.run_id = $1`
 	return projectionSpec{
 		query: query, source: "reply_contexts r", runAlias: "r",
@@ -20,7 +22,8 @@ func replyContextProjectionSpec() projectionSpec {
 			"request_output_pin", "reply_input_pin", "provider_flow_id",
 			"provider_input_pin", "provider_output_pin", "origin_route",
 			"request_correlation_id", "correlation_key", "state",
-			"accepted_reply_event_id", "created_at", "updated_at", "terminal_at"),
+			"accepted_reply_event_id", "created_at", "updated_at", "terminal_at",
+			"source_run_id", "source_request_event_id", "enclosing_reply_context_id"),
 		parts: []projectionPart{{query: query, alias: "r"}},
 	}
 }

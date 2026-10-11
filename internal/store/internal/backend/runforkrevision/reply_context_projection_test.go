@@ -18,6 +18,7 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 	spec := replyContextProjectionSpec()
 	fields := map[string]string{
 		"ID": "reply_context_id", "RunID": "run_id", "RequestEventID": "request_event_id",
+		"SourceRunID": "source_run_id", "SourceRequestEventID": "source_request_event_id", "EnclosingReplyContextID": "enclosing_reply_context_id",
 		"RequesterFlowID": "requester_flow_id", "RequestOutputPin": "request_output_pin", "ReplyInputPin": "reply_input_pin",
 		"ProviderFlowID": "provider_flow_id", "ProviderInputPin": "provider_input_pin", "ProviderOutputPin": "provider_output_pin",
 		"Origin": "origin_route", "ReturnJoins": "origin_route", "RequestCorrelationID": "request_correlation_id",
@@ -35,8 +36,8 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 		}
 		kinds[column.name] = column.kind
 	}
-	if len(kinds) != 17 || spec.build != nil {
-		t.Fatalf("projection should retain exactly the 17 native columns: %#v", spec)
+	if len(kinds) != 20 || spec.build != nil {
+		t.Fatalf("projection should retain exactly the 20 native columns: %#v", spec)
 	}
 	for i := 0; i < recordType.NumField(); i++ {
 		field := recordType.Field(i).Name
@@ -100,6 +101,7 @@ func TestReplyContextProjectionNormalizesWithoutLosingOriginOrDisposition(t *tes
 	}
 	want := replycontext.Record{
 		ID: "reply/opaque", RunID: entry.RunID, RequestEventID: "33333333-3333-4333-8333-333333333333",
+		SourceRunID: entry.RunID, SourceRequestEventID: "33333333-3333-4333-8333-333333333333",
 		RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker",
 		ProviderInputPin: "request", ProviderOutputPin: "return", RequestCorrelationID: "request-42", CorrelationKey: "item.id",
 		Origin:      events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID},
@@ -115,6 +117,7 @@ func TestReplyContextProjectionNormalizesWithoutLosingOriginOrDisposition(t *tes
 		t.Run(map[bool]string{false: "open", true: "terminal"}[terminal], func(t *testing.T) {
 			values := map[string]any{
 				"reply_context_id": want.ID, "run_id": want.RunID, "request_event_id": want.RequestEventID,
+				"source_run_id": want.SourceRunID, "source_request_event_id": want.SourceRequestEventID, "enclosing_reply_context_id": want.EnclosingReplyContextID,
 				"requester_flow_id": want.RequesterFlowID, "request_output_pin": want.RequestOutputPin, "reply_input_pin": want.ReplyInputPin,
 				"provider_flow_id": want.ProviderFlowID, "provider_input_pin": want.ProviderInputPin, "provider_output_pin": want.ProviderOutputPin,
 				"origin_route": origin, "request_correlation_id": want.RequestCorrelationID, "correlation_key": want.CorrelationKey,

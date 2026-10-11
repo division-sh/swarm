@@ -19,6 +19,7 @@ import (
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Frozen pre-batch validator. Do not delegate its checks to the production
@@ -115,7 +116,7 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 	}
 	db.SetMaxOpenConns(1)
 	columns := []string{}
-	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority") {
+	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority run_owner_key") {
 		columns = append(columns, name+" TEXT")
 	}
 	idType, jsonType, bytesType, timeType := "TEXT", "TEXT", "BLOB", "TIMESTAMP"
@@ -217,6 +218,10 @@ func TestPublicationOutcomeSelectionKeepsDeploymentAndHandlerOriginsDistinct(t *
 }
 
 func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record eventrecord.Record) error {
+	runOwnerKey := "COALESCE('run:' || CAST($3 AS TEXT), '')"
+	if _, postgres := db.Driver().(*pq.Driver); postgres {
+		runOwnerKey = "COALESCE('run:' || CAST($3::uuid AS TEXT), '')"
+	}
 	jsonValue := func(raw []byte) any {
 		if len(raw) == 0 {
 			return nil
@@ -228,8 +233,8 @@ func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record 
 		payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,payload_schema_digest,payload_schema_class,
 		execution_mode,chain_depth,produced_by,produced_by_type,source_event_id,created_at,
 		routing_source_kind,routing_source_authority,source_route,target_route,target_set,route_settlement,
-		operator_reference_event_id,inherited_fan_out_origin
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+		operator_reference_event_id,inherited_fan_out_origin,run_owner_key
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,`+runOwnerKey+`)`,
 		record.Class, record.EventID, nullableText(record.RunID), record.EventName, nullableText(record.TaskID), nullableText(record.EntityID), nullableText(record.FlowInstance), record.Scope,
 		jsonValue(record.Payload), record.Payload, record.PayloadSchemaBundleHash, nullableText(record.PayloadSchemaFlowID), record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass,
 		record.ExecutionMode, record.ChainDepth, record.ProducedBy, record.ProducedByType, nullableText(record.SourceEventID), record.CreatedAt,

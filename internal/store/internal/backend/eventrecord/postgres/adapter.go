@@ -146,13 +146,14 @@ func insertRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (e
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin, run_owner_key
 		) VALUES (
 			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
 			$11, NULLIF($12,''), $13, $14, $15,
 			$16, $17, $18, $19, NULLIF($20,'')::uuid, $21,
 			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
-			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb
+			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb,
+			COALESCE('run:' || CAST(NULLIF($3,'')::uuid AS TEXT), '')
 		) ON CONFLICT (event_id) DO NOTHING
 		RETURNING event_id::text, COALESCE(run_id::text, '')
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,

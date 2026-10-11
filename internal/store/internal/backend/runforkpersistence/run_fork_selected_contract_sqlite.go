@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -171,7 +172,7 @@ func guardSQLiteSelectedContractForkDependencies(ctx context.Context, tx *sql.Tx
 		ORDER BY run_id LIMIT 1
 	`, forkRunID).Scan(&dependentRunID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return storeadmin.GuardReplyContextEvidenceDependencies(ctx, tx, []string{forkRunID}, true)
 	}
 	if err != nil {
 		return fmt.Errorf("inspect selected-contract fork dependencies: %w", err)

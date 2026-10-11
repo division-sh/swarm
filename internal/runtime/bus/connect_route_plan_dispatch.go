@@ -454,6 +454,18 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 	if r.replyStore == nil {
 		return nil, nil, fmt.Errorf("ReplyContextStore is required for resolution mode reply")
 	}
+	if enclosingID := events.DeliveryContextFromContext(ctx).ReplyContextID(); enclosingID != "" {
+		enclosing, err := r.replyStore.LoadReplyContext(ctx, enclosingID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load enclosing reply context: %w", err)
+		}
+		if enclosing.ID != enclosingID {
+			return nil, nil, fmt.Errorf("enclosing reply lookup returned a different obligation")
+		}
+		if err := record.BindEnclosing(enclosing); err != nil {
+			return nil, nil, err
+		}
+	}
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
 	for i := range routes {
 		routes[i].Context = deliveryContext
@@ -535,6 +547,9 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 			}
 		}
 		deliveryContext := events.DeliveryContext{}
+		if record.EnclosingReplyContextID != "" {
+			deliveryContext.Reply = &events.ReplyContextRef{ID: record.EnclosingReplyContextID}
+		}
 		if node, isNode := subscriber.Recipient.Node(); isNode {
 			for _, receipt := range record.ReturnJoins {
 				if receipt.Ref.Node().Equal(node) {

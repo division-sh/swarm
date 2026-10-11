@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -73,6 +72,7 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	}
 	record := replycontext.Record{
 		RunID: sourceRun, RequestEventID: request, RequesterFlowID: owner.ScopeKey, RequestOutputPin: "request", ReplyInputPin: "return",
+		SourceRunID: sourceRun, SourceRequestEventID: request,
 		ProviderFlowID: "worker", ProviderInputPin: "request", ProviderOutputPin: "return",
 		Origin:               events.RouteIdentity{FlowID: owner.ScopeKey, EntityID: owner.EntityID, FlowInstance: owner.InstancePath},
 		ReturnJoins:          []events.JoinAdmissionReceipt{{Ref: bound, Disposition: events.JoinAdmissionBound}, {Ref: early, Disposition: events.JoinAdmissionEarly}},
@@ -100,6 +100,64 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	return plan, childRun, record
 }
 
+func runForkReplyCapturedChildPlan(t *testing.T, source runfork.RunForkPlan, childRun string) runfork.RunForkPlan {
+	t.Helper()
+	records, err := projectRunForkReplyContexts(source, childRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entities := make([]runfork.RunForkEntityState, 0, len(source.Entities))
+	for _, entity := range source.Entities {
+		constructor, err := projectRunForkConstructionReceipt(source, childRun, entity, time.Unix(200, 0).UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if constructor.CreationEvent != nil {
+			t.Fatal("context-only model fixture cannot carry a construction event")
+		}
+		raw, err := pipeline.EncodeFlowConstructionReceipt(constructor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata := *entity.MaterializationMetadata
+		projection, err := runfork.ProjectEntityOwnership(source.SourceRunID, childRun, entity.EntityID, metadata.FlowInstance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bookkeeping, accumulator, _, err := projectRunForkEntityExecutionState(entity, source.SourceRunID, childRun, projection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entity.EntityID, entity.Bookkeeping, entity.Accumulator = projection.Fork.EntityID, bookkeeping, accumulator
+		metadata.FlowInstance, metadata.FlowTemplate = constructor.Identity.InstancePath, constructor.Identity.TemplateID
+		metadata.InitialMaterialization = raw
+		entity.MaterializationMetadata = &metadata
+		entities = append(entities, entity)
+	}
+	// Model-only B-cut capture: constructor and reply rows, without copied events.
+	return (runfork.RunForkPlan{
+		SourceRunID: childRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 2},
+		Entities: entities, ReplyContexts: records,
+	}).WithHistoricalEvents(2, nil)
+}
+
+func runForkReplyEnclosingPlanFixture(t *testing.T, state replycontext.State) (runfork.RunForkPlan, string, replycontext.Record, replycontext.Record) {
+	t.Helper()
+	plan, childRun, source := runForkReplyPlanFixture(t, state, false, true)
+	enclosing := source
+	enclosing.ID, enclosing.RequestEventID = "enclosing:"+source.ID, uuid.NewString()
+	enclosing.SourceRequestEventID = enclosing.RequestEventID
+	enclosing.ProviderFlowID, enclosing.RequestCorrelationID = source.RequesterFlowID, "outer-item-42"
+	enclosing.ReturnJoins = nil
+	enclosing.State, enclosing.AcceptedReplyEventID, enclosing.TerminalAt = replycontext.StateOpen, "", nil
+	if err := source.BindEnclosing(enclosing); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately child-first to exercise the materializer's row dependency order.
+	plan.ReplyContexts = []replycontext.Record{source, enclosing}
+	return plan, childRun, source, enclosing
+}
+
 func TestRunForkReplyProjectionPreservesOpenTerminalAndOldReturn(t *testing.T) {
 	for _, state := range []replycontext.State{replycontext.StateOpen, replycontext.StateTerminal} {
 		for _, root := range []bool{false, true} {
@@ -113,6 +171,8 @@ func TestRunForkReplyProjectionPreservesOpenTerminalAndOldReturn(t *testing.T) {
 					}
 					if child.ID != deterministicRunForkReplyContextID(childRun, source.ID) || child.RunID != childRun ||
 						child.RequestEventID != deterministicRunForkReplayEventID(childRun, source.RequestEventID) || child.State != source.State ||
+						child.SourceRunID != source.SourceRunID || child.SourceRequestEventID != source.SourceRequestEventID ||
+						child.EnclosingReplyContextID != source.EnclosingReplyContextID ||
 						child.RequestCorrelationID != source.RequestCorrelationID || child.CorrelationKey != source.CorrelationKey ||
 						child.RequesterFlowID != source.RequesterFlowID || child.ProviderFlowID != source.ProviderFlowID ||
 						child.RequestOutputPin != source.RequestOutputPin || child.ReplyInputPin != source.ReplyInputPin ||
@@ -168,14 +228,25 @@ func TestRunForkReplyProjectionRejectsUncapturedAndCorruptBindings(t *testing.T)
 	}{
 		{"missing_state", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.State = "" }},
 		{"invalid_request", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.RequestEventID = "not-an-event" }},
+		{"missing_request", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.RequestEventID = "" }},
+		{"zero_request", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.RequestEventID = uuid.Nil.String() }},
+		{"noncanonical_request", func(_ *runfork.RunForkPlan, r *replycontext.Record) {
+			r.RequestEventID = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+		}},
 		{"invalid_accepted", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.AcceptedReplyEventID = "not-an-event" }},
+		{"missing_accepted", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.AcceptedReplyEventID = "" }},
+		{"zero_accepted", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.AcceptedReplyEventID = uuid.Nil.String() }},
+		{"noncanonical_accepted", func(_ *runfork.RunForkPlan, r *replycontext.Record) {
+			r.AcceptedReplyEventID = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+		}},
 		{"wrong_run", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.RunID = uuid.NewString() }},
 		{"wrong_origin", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.Origin.EntityID = uuid.NewString() }},
 		{"wrong_scope", func(_ *runfork.RunForkPlan, r *replycontext.Record) { r.Origin.FlowID = "sibling" }},
 		{"uncaptured", func(p *runfork.RunForkPlan, _ *replycontext.Record) { p.ReplyContexts = nil }},
 		{"duplicate", func(p *runfork.RunForkPlan, r *replycontext.Record) { p.ReplyContexts = append(p.ReplyContexts, *r) }},
 		{"unknown_history", func(p *runfork.RunForkPlan, _ *replycontext.Record) { p.ForkPoint.Revision++ }},
-		{"out_of_cut", func(p *runfork.RunForkPlan, _ *replycontext.Record) { *p = p.WithHistoricalEvents(1, nil) }},
+		{"missing_history", func(p *runfork.RunForkPlan, _ *replycontext.Record) { *p = p.WithHistoricalEvents(0, nil) }},
+		{"invalid_fork_point", func(p *runfork.RunForkPlan, _ *replycontext.Record) { p.ForkPoint.Kind = "invalid" }},
 		{"missing_constructor", func(p *runfork.RunForkPlan, _ *replycontext.Record) {
 			p.Entities[0].MaterializationMetadata.InitialMaterialization = nil
 		}},
@@ -183,7 +254,7 @@ func TestRunForkReplyProjectionRejectsUncapturedAndCorruptBindings(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateTerminal, false, false)
 			test.mutate(&plan, &source)
-			if err := source.Validate(); err == nil && len(plan.ReplyContexts) == 1 {
+			if len(plan.ReplyContexts) == 1 {
 				plan.ReplyContexts[0] = source
 			}
 			if _, err := projectRunForkReplyContext(plan, childRun, source); err == nil {
@@ -193,6 +264,217 @@ func TestRunForkReplyProjectionRejectsUncapturedAndCorruptBindings(t *testing.T)
 	}
 }
 
+func TestRunForkReplyProjectionRequiresCompleteCapturedRecord(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		alter func(replycontext.Record) replycontext.Record
+	}{
+		{"logical_request", func(r replycontext.Record) replycontext.Record { r.RequestEventID = uuid.NewString(); return r }},
+		{"original_run", func(r replycontext.Record) replycontext.Record { r.SourceRunID = uuid.NewString(); return r }},
+		{"original_request", func(r replycontext.Record) replycontext.Record { r.SourceRequestEventID = uuid.NewString(); return r }},
+		{"enclosing", func(r replycontext.Record) replycontext.Record {
+			r.EnclosingReplyContextID = uuid.NewString()
+			return r
+		}},
+		{"correlation", func(r replycontext.Record) replycontext.Record { r.RequestCorrelationID = "other"; return r }},
+		{"pairing", func(r replycontext.Record) replycontext.Record { r.ProviderOutputPin = "other"; return r }},
+		{"return", func(r replycontext.Record) replycontext.Record { r.ReturnJoins = nil; return r }},
+		{"accepted", func(r replycontext.Record) replycontext.Record { r.AcceptedReplyEventID = uuid.NewString(); return r }},
+		{"created", func(r replycontext.Record) replycontext.Record { r.CreatedAt = r.CreatedAt.Add(time.Second); return r }},
+		{"updated", func(r replycontext.Record) replycontext.Record { r.UpdatedAt = r.UpdatedAt.Add(time.Second); return r }},
+		{"terminal_time", func(r replycontext.Record) replycontext.Record {
+			at := r.UpdatedAt.Add(time.Second)
+			r.TerminalAt = &at
+			return r
+		}},
+		{"reopened", func(r replycontext.Record) replycontext.Record {
+			r.State, r.AcceptedReplyEventID, r.TerminalAt = replycontext.StateOpen, "", nil
+			return r
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan, childRun, captured := runForkReplyPlanFixture(t, replycontext.StateTerminal, false, true)
+			changed := test.alter(captured)
+			if err := changed.Validate(); err != nil {
+				t.Fatalf("fixture must reach captured equality validation: %v", err)
+			}
+			if _, err := projectRunForkReplyContext(plan, childRun, changed); err == nil {
+				t.Fatal("valid but uncaptured record acquired fixed-cut reply authority")
+			}
+		})
+	}
+}
+
+func TestRunForkReplyProjectionRejectsInvalidRunOwnership(t *testing.T) {
+	for _, variant := range []string{"same_run", "invalid_child", "zero_child", "noncanonical_child", "invalid_source", "zero_source"} {
+		t.Run(variant, func(t *testing.T) {
+			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
+			switch variant {
+			case "same_run":
+				childRun = plan.SourceRunID
+			case "invalid_child":
+				childRun = "not-a-run"
+			case "zero_child":
+				childRun = uuid.Nil.String()
+			case "noncanonical_child":
+				childRun = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+			case "invalid_source":
+				plan.SourceRunID = "not-a-run"
+			case "zero_source":
+				plan.SourceRunID = uuid.Nil.String()
+			}
+			if _, err := projectRunForkReplyContext(plan, childRun, source); err == nil {
+				t.Fatal("inexact or same-run ownership acquired child reply authority")
+			}
+		})
+	}
+}
+
+func TestRunForkReplyContextOnlyReforkProjectionModel(t *testing.T) {
+	for _, state := range []replycontext.State{replycontext.StateOpen, replycontext.StateTerminal} {
+		for _, root := range []bool{false, true} {
+			t.Run(string(state)+map[bool]string{false: "/keyed", true: "/root"}[root], func(t *testing.T) {
+				originalPlan, bRun, original := runForkReplyPlanFixture(t, state, root, true)
+				bPlan := runForkReplyCapturedChildPlan(t, originalPlan, bRun)
+				if history, admitted := bPlan.HistoricalEventIDs(bPlan.ForkPoint.Revision); !admitted || len(history) != 0 {
+					t.Fatal("B-cut fixture must admit an empty physical event inventory")
+				}
+				b := bPlan.ReplyContexts[0]
+				cRun := uuid.NewString()
+				c, err := projectRunForkReplyContext(bPlan, cRun, b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if c.ID != deterministicRunForkReplyContextID(cRun, b.ID) || c.RunID != cRun ||
+					c.RequestEventID != deterministicRunForkReplayEventID(cRun, b.RequestEventID) ||
+					c.SourceRunID != original.SourceRunID || c.SourceRequestEventID != original.SourceRequestEventID ||
+					c.State != state || c.RequestCorrelationID != original.RequestCorrelationID || c.CorrelationKey != original.CorrelationKey ||
+					!c.CreatedAt.Equal(original.CreatedAt) || !c.UpdatedAt.Equal(original.UpdatedAt) || len(c.ReturnJoins) != len(original.ReturnJoins) {
+					t.Fatalf("context-only refork changed captured authority: B=%+v C=%+v", b, c)
+				}
+				wantOrigin := b.Origin
+				if root {
+					wantOrigin.EntityID, wantOrigin.FlowInstance = cRun, cRun
+				}
+				if c.Origin != wantOrigin {
+					t.Fatal("context-only refork lost captured constructor origin")
+				}
+				if state == replycontext.StateTerminal {
+					if c.AcceptedReplyEventID != deterministicRunForkReplayEventID(cRun, b.AcceptedReplyEventID) ||
+						c.TerminalAt == b.TerminalAt || !c.TerminalAt.Equal(*original.TerminalAt) {
+						t.Fatal("context-only terminal refork reopened or lost the accepted outcome")
+					}
+				} else if c.AcceptedReplyEventID != "" || c.TerminalAt != nil {
+					t.Fatal("context-only open refork acquired a terminal outcome")
+				}
+				for i, receipt := range c.ReturnJoins {
+					if receipt.Disposition == events.JoinAdmissionEarly {
+						if !reflect.DeepEqual(receipt, original.ReturnJoins[i]) {
+							t.Fatal("context-only refork armed an early return")
+						}
+						continue
+					}
+					entry := receipt.Ref.StageEntry()
+					if entry.RunID != cRun || entry.OriginRunID != originalPlan.SourceRunID || entry.Stage != "awaiting" ||
+						entry.OccurrenceID != "original-return-arm" || entry.EntityID != c.Origin.EntityID || entry.InstancePath != c.Origin.FlowInstance ||
+						!receipt.Ref.Declaration().Equal(original.ReturnJoins[i].Ref.Declaration()) {
+						t.Fatal("context-only refork selected a newer return arm or changed provenance")
+					}
+				}
+				tx, mock := startSnapshotTransaction(t)
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(cRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+				owner := &runForkReplyOwnerProbe{}
+				admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: state == replycontext.StateOpen})
+				_, err = materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, bPlan, cRun, false, admission)
+				if err != nil || len(owner.written) != 1 || !sameRunForkReplyRecord(owner.written[0], c) {
+					t.Fatalf("context-only model materialization/readback failed: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestRunForkReplyEnclosingChildMappingAndParentFirstWritesModel(t *testing.T) {
+	for _, state := range []replycontext.State{replycontext.StateOpen, replycontext.StateTerminal} {
+		t.Run(string(state), func(t *testing.T) {
+			plan, childRun, source, enclosing := runForkReplyEnclosingPlanFixture(t, state)
+			projected, err := projectRunForkReplyContexts(plan, childRun)
+			if err != nil || len(projected) != 2 {
+				t.Fatalf("enclosing model projection failed: %v", err)
+			}
+			parent, child := projected[0], projected[1]
+			if parent.ID != deterministicRunForkReplyContextID(childRun, enclosing.ID) || parent.EnclosingReplyContextID != "" ||
+				child.ID != deterministicRunForkReplyContextID(childRun, source.ID) || child.EnclosingReplyContextID != parent.ID ||
+				child.SourceRunID != source.SourceRunID || child.SourceRequestEventID != source.SourceRequestEventID ||
+				parent.SourceRunID != enclosing.SourceRunID || parent.SourceRequestEventID != enclosing.SourceRequestEventID {
+				t.Fatal("enclosing mapping changed original evidence or exact captured parent identity")
+			}
+			tx, mock := startSnapshotTransaction(t)
+			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+			owner := &runForkReplyOwnerProbe{}
+			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true})
+			_, err = materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission)
+			if err != nil || !reflect.DeepEqual(owner.written, projected) {
+				t.Fatalf("model owner did not write/read exact parents before children: %v", err)
+			}
+			bPlan := runForkReplyCapturedChildPlan(t, plan, childRun)
+			cRun := uuid.NewString()
+			reforked, err := projectRunForkReplyContexts(bPlan, cRun)
+			if err != nil || len(reforked) != 2 {
+				t.Fatalf("enclosing context-only refork failed: %v", err)
+			}
+			if reforked[1].EnclosingReplyContextID != reforked[0].ID ||
+				reforked[0].ID != deterministicRunForkReplyContextID(cRun, parent.ID) ||
+				reforked[1].EnclosingReplyContextID == deterministicRunForkReplyContextID(cRun, enclosing.ID) ||
+				reforked[1].SourceRunID != source.SourceRunID || reforked[1].SourceRequestEventID != source.SourceRequestEventID {
+				t.Fatal("refork resolved an ancestor instead of the exact immediate-source enclosing row")
+			}
+			bPlan.ReplyContexts[1].EnclosingReplyContextID = enclosing.ID
+			if _, err := projectRunForkReplyContexts(bPlan, cRun); err == nil {
+				t.Fatal("uncaptured ancestor enclosing reference became immediate-source authority")
+			}
+		})
+	}
+}
+
+func TestRunForkReplyEnclosingProjectionRejectsInvalidCapturedChainsBeforeWriter(t *testing.T) {
+	for _, variant := range []string{"missing", "foreign_run", "foreign_provider", "same", "cyclic", "duplicate"} {
+		t.Run(variant, func(t *testing.T) {
+			plan, childRun, source, enclosing := runForkReplyEnclosingPlanFixture(t, replycontext.StateOpen)
+			switch variant {
+			case "missing":
+				plan.ReplyContexts = []replycontext.Record{source}
+			case "foreign_run":
+				plan.ReplyContexts[1].RunID = uuid.NewString()
+			case "foreign_provider":
+				plan.ReplyContexts[1].ProviderFlowID = "sibling"
+			case "same":
+				plan.ReplyContexts[0].EnclosingReplyContextID = source.ID
+			case "cyclic":
+				plan.ReplyContexts[0].ProviderFlowID = enclosing.RequesterFlowID
+				plan.ReplyContexts[1].EnclosingReplyContextID = source.ID
+			case "duplicate":
+				plan.ReplyContexts = append(plan.ReplyContexts, enclosing)
+			}
+			_, err := projectRunForkReplyContexts(plan, childRun)
+			if err == nil {
+				t.Fatal("invalid enclosing chain acquired projected reply authority")
+			}
+			if variant == "cyclic" && !strings.Contains(err.Error(), "cyclic") {
+				t.Fatalf("cycle fixture failed before dependency-cycle validation: %v", err)
+			}
+			tx, _ := startSnapshotTransaction(t)
+			owner := &runForkReplyOwnerProbe{}
+			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true})
+			got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission)
+			if err == nil || len(owner.written) != 0 || !reflect.DeepEqual(got, admission) {
+				t.Fatal("invalid enclosing chain reached the writer or discharged admission")
+			}
+		})
+	}
+}
+
+// This owner is a model probe, not a native integrity or served-execution proof.
 type runForkReplyOwnerProbe struct {
 	records  map[string]replycontext.Record
 	written  []replycontext.Record
@@ -204,6 +486,12 @@ type runForkReplyOwnerProbe struct {
 func (p *runForkReplyOwnerProbe) CreateWithinTransaction(_ context.Context, _ *mutationprotocol.Attempt, record replycontext.Record) error {
 	if p.writeErr != nil {
 		return p.writeErr
+	}
+	if record.EnclosingReplyContextID != "" {
+		enclosing, found := p.records[record.EnclosingReplyContextID]
+		if !found || enclosing.RunID != record.RunID || enclosing.ProviderFlowID != record.RequesterFlowID {
+			return errors.New("probe requires the exact enclosing row before its child")
+		}
 	}
 	p.written = append(p.written, record)
 	if p.records == nil {
@@ -227,122 +515,36 @@ func (p *runForkReplyOwnerProbe) LoadWithinTransaction(_ context.Context, _ *sql
 	return record, nil
 }
 
-func runForkReplyEventRecord(t *testing.T, plan runfork.RunForkPlan, childRunID, sourceEventID, eventID, flowID string, origin *events.RouteIdentity) eventrecord.Record {
-	t.Helper()
-	var routing events.RoutingSource
-	var err error
-	if origin == nil {
-		routing, err = events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: "worker/one", EntityID: flowidentity.EntityID("worker/one")})
-	} else if origin.FlowID == "." {
-		routing, err = events.NewRootRoutingSource(childRunID)
-	} else {
-		routing, err = events.NewConcreteTemplateInstanceRoutingSource(*origin)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	lineage, err := events.NewSelectedForkLineage(childRunID, plan.SourceRunID, sourceEventID, runfork.RunForkDeliveryEventReplayOwner, "", executionmode.Live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admission, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowID: flowID, EventKey: "request.reply",
-		SchemaDigest: "sha256:" + strings.Repeat("b", 64), SchemaClass: events.PayloadSchemaAuthored,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := events.NewPayloadAdmission([]byte(`{"correlation":"item-42"}`), admission)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Lineage: lineage, Facts: events.EventFacts{
-		ID: eventID, Type: "request.reply", Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: runfork.RunForkDeliveryEventReplayOwner},
-		Payload: payload.Payload(), RoutingSource: routing, Envelope: events.EnvelopeForSourceRoute(events.EventEnvelope{}, routing.Route()),
-		CreatedAt: time.Unix(200, 0).UTC(), ExecutionMode: executionmode.Live,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	event, err = events.ApplyPayloadAdmission(event, payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	settlement, err := events.NewDeliverySettlement(events.EventWriteHistoricalRunForkReplay, events.ConnectEvaluationLedger{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	record, err := eventrecord.FromAdmitted(admitted, settlement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return record
-}
-
-func expectRunForkReplyEvents(t *testing.T, mock sqlmock.Sqlmock, postgres bool, plan runfork.RunForkPlan, source, child replycontext.Record) {
-	t.Helper()
-	request := runForkReplyEventRecord(t, plan, child.RunID, source.RequestEventID, child.RequestEventID, child.RequesterFlowID, &child.Origin)
-	mock.ExpectQuery(`FROM events e`).WithArgs(child.RequestEventID).WillReturnRows(selectedInputRecordRows(request, !postgres, true))
-	if child.State == replycontext.StateTerminal {
-		reply := runForkReplyEventRecord(t, plan, child.RunID, source.AcceptedReplyEventID, child.AcceptedReplyEventID, child.ProviderFlowID, nil)
-		mock.ExpectQuery(`FROM events e`).WithArgs(child.AcceptedReplyEventID).WillReturnRows(selectedInputRecordRows(reply, !postgres, true))
-	}
-}
-
-func TestRunForkReplyChildProducerRequiresCanonicalRoot(t *testing.T) {
-	plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, true, true)
-	child, err := projectRunForkReplyContext(plan, childRun, source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record := runForkReplyEventRecord(t, plan, childRun, source.RequestEventID, child.RequestEventID, child.RequesterFlowID, &child.Origin)
-	admitted, err := record.Decode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := admitted.Event()
-	if event.RoutingSource().Kind() != events.RoutingSourceRoot || event.RoutingSource().Route().FlowID != "" {
-		t.Fatal("root fixture contradicts canonical routing owner")
-	}
-	if err := validateRunForkReplyChildProducer(event, ".", nil); err != nil {
-		t.Fatalf("canonical root provider rejected: %v", err)
-	}
-	for _, test := range []struct {
-		name   string
-		flowID string
-		origin events.RouteIdentity
-	}{
-		{"declaration", "sibling", child.Origin},
-		{"origin_scope", ".", events.RouteIdentity{FlowID: "sibling", EntityID: childRun, FlowInstance: childRun}},
-		{"origin_entity", ".", events.RouteIdentity{FlowID: ".", EntityID: plan.SourceRunID, FlowInstance: childRun}},
-		{"origin_instance", ".", events.RouteIdentity{FlowID: ".", EntityID: childRun, FlowInstance: plan.SourceRunID}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if err := validateRunForkReplyChildProducer(event, test.flowID, &test.origin); err == nil {
-				t.Fatal("root producer acquired sibling or source origin authority")
+func TestRunForkReplyRootProjectionRequiresExactCapturedConstructorOrigin(t *testing.T) {
+	for _, variant := range []string{"origin_scope", "origin_entity", "origin_instance", "constructor_run"} {
+		t.Run(variant, func(t *testing.T) {
+			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, true, true)
+			source.ReturnJoins = nil
+			switch variant {
+			case "origin_scope":
+				source.Origin.FlowID = "sibling"
+			case "origin_entity":
+				source.Origin.EntityID = uuid.NewString()
+			case "origin_instance":
+				source.Origin.FlowInstance = uuid.NewString()
+			case "constructor_run":
+				plan.SourceRunID = uuid.NewString()
+				source.RunID = plan.SourceRunID
+			}
+			if err := source.Validate(); err != nil {
+				t.Fatalf("fixture must reach captured constructor validation: %v", err)
+			}
+			plan.ReplyContexts[0] = source
+			if _, err := projectRunForkReplyContext(plan, childRun, source); err == nil {
+				t.Fatal("root row acquired sibling or foreign constructor origin authority")
 			}
 		})
-	}
-	foreignRoot := uuid.NewString()
-	foreignOrigin := events.RouteIdentity{FlowID: ".", EntityID: foreignRoot, FlowInstance: foreignRoot}
-	foreign := runForkReplyEventRecord(t, plan, foreignRoot, source.RequestEventID, child.RequestEventID, ".", &foreignOrigin)
-	foreign.RunID = childRun
-	foreignAdmitted, err := foreign.Decode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRunForkReplyChildProducer(foreignAdmitted.Event(), ".", nil); err == nil {
-		t.Fatal("foreign root event acquired child provider authority")
 	}
 }
 
 func TestRunForkReplyMaterializationDischargesOnlyAfterExactReadback(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres], func(t *testing.T) {
+		t.Run(map[bool]string{false: "sqlite_argument", true: "postgres_argument"}[postgres], func(t *testing.T) {
 			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
 			child, err := projectRunForkReplyContext(plan, childRun, source)
 			if err != nil {
@@ -351,9 +553,7 @@ func TestRunForkReplyMaterializationDischargesOnlyAfterExactReadback(t *testing.
 			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true, ActiveSession: true})
 			before := append([]runfork.RunForkUnsupportedBlocker(nil), admission.UnsupportedBlockers...)
 			tx, mock := startSnapshotTransaction(t)
-			expectRunForkReplyEvents(t, mock, postgres, plan, source, child)
 			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-			expectRunForkReplyEvents(t, mock, postgres, plan, source, child)
 			owner := &runForkReplyOwnerProbe{}
 			got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, postgres, admission)
 			if err != nil || len(owner.written) != 1 || !sameRunForkReplyRecord(owner.written[0], child) {
@@ -384,6 +584,21 @@ func TestRunForkReplyReadbackRejectsLifecycleAndBindingCorruption(t *testing.T) 
 			{"time", func(r replycontext.Record) replycontext.Record { r.UpdatedAt = r.UpdatedAt.Add(time.Second); return r }},
 			{"return", func(r replycontext.Record) replycontext.Record { r.ReturnJoins = nil; return r }},
 			{"accepted", func(r replycontext.Record) replycontext.Record { r.AcceptedReplyEventID = uuid.NewString(); return r }},
+			{"owner_run", func(r replycontext.Record) replycontext.Record { r.RunID = uuid.NewString(); return r }},
+			{"logical_request", func(r replycontext.Record) replycontext.Record { r.RequestEventID = uuid.NewString(); return r }},
+			{"original_run", func(r replycontext.Record) replycontext.Record { r.SourceRunID = uuid.NewString(); return r }},
+			{"original_request", func(r replycontext.Record) replycontext.Record { r.SourceRequestEventID = uuid.NewString(); return r }},
+			{"enclosing", func(r replycontext.Record) replycontext.Record {
+				r.EnclosingReplyContextID = uuid.NewString()
+				return r
+			}},
+			{"origin", func(r replycontext.Record) replycontext.Record { r.Origin.FlowInstance = "sibling/one"; return r }},
+			{"created", func(r replycontext.Record) replycontext.Record { r.CreatedAt = r.CreatedAt.Add(time.Second); return r }},
+			{"terminal_time", func(r replycontext.Record) replycontext.Record {
+				at := r.UpdatedAt.Add(time.Second)
+				r.TerminalAt = &at
+				return r
+			}},
 		} {
 			t.Run(string(state)+"/"+test.name, func(t *testing.T) {
 				plan, childRun, source := runForkReplyPlanFixture(t, state, false, true)
@@ -393,7 +608,6 @@ func TestRunForkReplyReadbackRejectsLifecycleAndBindingCorruption(t *testing.T) 
 				}
 				tx, mock := startSnapshotTransaction(t)
 				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-				expectRunForkReplyEvents(t, mock, false, plan, source, child)
 				owner := &runForkReplyOwnerProbe{records: map[string]replycontext.Record{child.ID: child}, alter: test.alter}
 				admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: state == replycontext.StateOpen})
 				got, err := requireMaterializedRunForkReplyContexts(context.Background(), tx, owner, plan, childRun, false, admission)
@@ -405,18 +619,16 @@ func TestRunForkReplyReadbackRejectsLifecycleAndBindingCorruption(t *testing.T) 
 	}
 }
 
-func TestRunForkReplyTerminalMaterializationPreservesAcceptedOutcomeBothDialects(t *testing.T) {
+func TestRunForkReplyTerminalMaterializationPreservesAcceptedOutcomeBothDialectArguments(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres], func(t *testing.T) {
+		t.Run(map[bool]string{false: "sqlite_argument", true: "postgres_argument"}[postgres], func(t *testing.T) {
 			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateTerminal, true, true)
 			child, err := projectRunForkReplyContext(plan, childRun, source)
 			if err != nil {
 				t.Fatal(err)
 			}
 			tx, mock := startSnapshotTransaction(t)
-			expectRunForkReplyEvents(t, mock, postgres, plan, source, child)
 			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-			expectRunForkReplyEvents(t, mock, postgres, plan, source, child)
 			owner := &runForkReplyOwnerProbe{}
 			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{})
 			got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, postgres, admission)
@@ -440,67 +652,97 @@ func TestRunForkReplyReadbackRefusesInventoryGapOrExtra(t *testing.T) {
 	}
 }
 
-func TestRunForkReplyMaterializationRejectsWrongProducerOrLineage(t *testing.T) {
-	for _, corruption := range []string{"producer", "lineage", "child_run", "accepted_missing"} {
-		t.Run(corruption, func(t *testing.T) {
-			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateTerminal, false, true)
+func TestRunForkReplyReadbackPreservesInventoryAndOwnerFailures(t *testing.T) {
+	for _, variant := range []string{"inventory_error", "missing_row", "load_error"} {
+		t.Run(variant, func(t *testing.T) {
+			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
 			child, err := projectRunForkReplyContext(plan, childRun, source)
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := runForkReplyEventRecord(t, plan, childRun, source.RequestEventID, child.RequestEventID, child.RequesterFlowID, &child.Origin)
-			switch corruption {
-			case "producer":
-				request.SourceRoute = []byte(`{"flow_id":"sibling","flow_instance":"sibling/one","entity_id":"` + flowidentity.EntityID("sibling/one") + `"}`)
-			case "lineage":
-				request.SelectedForkSourceRunID = uuid.NewString()
-			case "child_run":
-				request.RunID = plan.SourceRunID
-			}
 			tx, mock := startSnapshotTransaction(t)
-			mock.ExpectQuery(`FROM events e`).WithArgs(child.RequestEventID).WillReturnRows(selectedInputRecordRows(request, true, true))
-			if corruption == "accepted_missing" {
-				mock.ExpectQuery(`FROM events e`).WithArgs(child.AcceptedReplyEventID).WillReturnRows(selectedInputRecordRows(eventrecord.Record{}, true, false))
+			failure := errors.New("reply readback refused")
+			owner := &runForkReplyOwnerProbe{records: map[string]replycontext.Record{child.ID: child}}
+			inventory := mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun)
+			if variant == "inventory_error" {
+				inventory.WillReturnError(failure)
+			} else {
+				inventory.WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+				if variant == "missing_row" {
+					owner.records, failure = nil, replycontext.ErrNotFound
+				} else {
+					owner.loadErr = failure
+				}
 			}
-			owner := &runForkReplyOwnerProbe{}
-			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{})
-			if _, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission); err == nil || len(owner.written) != 0 {
-				t.Fatal("wrong request/reply producer or lineage acquired child reply authority")
+			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true})
+			got, err := requireMaterializedRunForkReplyContexts(context.Background(), tx, owner, plan, childRun, false, admission)
+			if !errors.Is(err, failure) || !reflect.DeepEqual(got, admission) || len(owner.written) != 0 {
+				t.Fatal("reply readback failure became repair, a write or continuation authority")
 			}
 		})
 	}
 }
 
-func TestRunForkReplyMaterializationRejectsMissingChildRequestBeforeWriter(t *testing.T) {
-	plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
-	child, err := projectRunForkReplyContext(plan, childRun, source)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRunForkReplyMaterializationReadbackFailureKeepsAdmission(t *testing.T) {
+	plan, childRun, _ := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
 	tx, mock := startSnapshotTransaction(t)
-	mock.ExpectQuery(`FROM events e`).WithArgs(child.RequestEventID).WillReturnRows(selectedInputRecordRows(eventrecord.Record{}, true, false))
-	owner := &runForkReplyOwnerProbe{}
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(childRun).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	failure := errors.New("reply owner readback refused")
+	owner := &runForkReplyOwnerProbe{loadErr: failure}
 	admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true})
 	got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission)
-	if err == nil || !reflect.DeepEqual(got, admission) || len(owner.written) != 0 {
-		t.Fatal("missing child request became source fallback, a write or reply authority")
+	if !errors.Is(err, failure) || len(owner.written) != 1 || !reflect.DeepEqual(got, admission) {
+		t.Fatal("model write without exact readback discharged reply admission")
+	}
+}
+
+func TestRunForkReplyMaterializationRejectsCorruptCapturedAuthorityBeforeWriter(t *testing.T) {
+	for _, corruption := range []string{"origin", "source_run", "missing_constructor", "foreign_constructor", "malformed_constructor", "invalid_request", "invalid_accepted", "missing_history"} {
+		t.Run(corruption, func(t *testing.T) {
+			plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateTerminal, false, true)
+			switch corruption {
+			case "origin":
+				source.Origin.FlowID = "sibling"
+			case "source_run":
+				source.RunID = childRun
+			case "missing_constructor":
+				plan.Entities[0].MaterializationMetadata.InitialMaterialization = nil
+			case "foreign_constructor":
+				foreign, _, _ := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
+				plan.Entities[0].MaterializationMetadata.InitialMaterialization = foreign.Entities[0].MaterializationMetadata.InitialMaterialization
+			case "malformed_constructor":
+				plan.Entities[0].MaterializationMetadata.InitialMaterialization = []byte(`{}`)
+			case "invalid_request":
+				source.RequestEventID = uuid.Nil.String()
+			case "invalid_accepted":
+				source.AcceptedReplyEventID = uuid.Nil.String()
+			case "missing_history":
+				plan = plan.WithHistoricalEvents(0, nil)
+			}
+			plan.ReplyContexts[0] = source
+			tx, _ := startSnapshotTransaction(t)
+			owner := &runForkReplyOwnerProbe{}
+			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{})
+			got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission)
+			if err == nil || !reflect.DeepEqual(got, admission) || len(owner.written) != 0 {
+				t.Fatal("corrupt captured row or constructor acquired child reply authority")
+			}
+		})
 	}
 }
 
 func TestRunForkReplyMaterializationPreservesCancellationAndWriterFailure(t *testing.T) {
-	plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
+	plan, childRun, _ := runForkReplyPlanFixture(t, replycontext.StateOpen, false, true)
 	admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{OpenReplyContext: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := materializeRunForkReplyContexts(ctx, nil, nil, nil, plan, childRun, false, admission); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
-	child, err := projectRunForkReplyContext(plan, childRun, source)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := requireMaterializedRunForkReplyContexts(ctx, nil, nil, plan, childRun, false, admission); !errors.Is(err, context.Canceled) {
+		t.Fatalf("readback cancellation lost: %v", err)
 	}
-	tx, mock := startSnapshotTransaction(t)
-	expectRunForkReplyEvents(t, mock, false, plan, source, child)
+	tx, _ := startSnapshotTransaction(t)
 	failure := errors.New("reply owner refused")
 	owner := &runForkReplyOwnerProbe{writeErr: failure}
 	got, err := materializeRunForkReplyContexts(context.Background(), tx, &mutationprotocol.Attempt{}, owner, plan, childRun, false, admission)

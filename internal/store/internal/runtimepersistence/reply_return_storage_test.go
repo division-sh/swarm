@@ -40,9 +40,9 @@ func TestReplyReturnStoragePreservesHistoryDuplicateAndEventRunScopesBothStores(
 					id := uuid.NewString()
 					if _, err := tx.ExecContext(ctx, `INSERT INTO reply_contexts
 						(reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,
-						provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,accepted_reply_event_id,created_at,updated_at,terminal_at)
-						VALUES ($1,$2,$3,'requester','out','reply','provider','in','out','{}',$1,$4,$5,$6,$6,$7)`,
-						id, row.run, row.event, row.state, row.accepted, now, row.terminal); err != nil {
+						provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,accepted_reply_event_id,created_at,updated_at,terminal_at,source_run_id,source_request_event_id,source_run_owner_key)
+						VALUES ($1,$2,$3,'requester','out','reply','provider','in','out','{}',$1,$4,$5,$6,$6,$7,$8,$3,`+replyFixtureRunOwnerKey("$8", fixture.dialect == "postgres")+`)`,
+						id, row.run, row.event, row.state, row.accepted, now, row.terminal, map[bool]string{false: runID, true: otherRun}[row.event == otherEvent]); err != nil {
 						return err
 					}
 				}
@@ -111,8 +111,8 @@ func TestReplyReturnStorageRefusesInvalidOwnersAndUnavailableEvidenceBothStores(
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `INSERT INTO reply_contexts
 					(reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,
-					provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at)
-					VALUES ($1,$2,$3,'requester','out','reply','provider','in','out','{}',$1,'open',$4,$4)`,
+					provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at,source_run_id,source_request_event_id,source_run_owner_key)
+					VALUES ($1,$2,$3,'requester','out','reply','provider','in','out','{}',$1,'open',$4,$4,$2,$3,`+replyFixtureRunOwnerKey("$2", fixture.dialect == "postgres")+`)`,
 					uuid.NewString(), runID, eventID, now)
 				return err
 			}); err != nil {
@@ -150,4 +150,11 @@ func TestReplyReturnStorageRefusesInvalidOwnersAndUnavailableEvidenceBothStores(
 			}
 		})
 	}
+}
+
+func replyFixtureRunOwnerKey(parameter string, postgres bool) string {
+	if postgres {
+		parameter += "::uuid"
+	}
+	return "'run:' || CAST(" + parameter + " AS TEXT)"
 }

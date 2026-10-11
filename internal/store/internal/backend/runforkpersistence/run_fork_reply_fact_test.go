@@ -37,6 +37,7 @@ func historicalReplyRecord(t *testing.T) replycontext.Record {
 	stamp := time.Date(2026, 9, 8, 10, 11, 12, 123456789, time.UTC)
 	return replycontext.Record{
 		ID: "reply-v1:opaque/request|42", RunID: entry.RunID, RequestEventID: entry.EventID,
+		SourceRunID: entry.RunID, SourceRequestEventID: entry.EventID,
 		RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker",
 		ProviderInputPin: "request", ProviderOutputPin: "return", RequestCorrelationID: "request-42", CorrelationKey: "item.id",
 		Origin:      events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID},
@@ -53,6 +54,7 @@ func historicalReplyBody(t *testing.T, record replycontext.Record) map[string]an
 	}
 	return map[string]any{
 		"reply_context_id": record.ID, "run_id": record.RunID, "request_event_id": record.RequestEventID,
+		"source_run_id": record.SourceRunID, "source_request_event_id": record.SourceRequestEventID, "enclosing_reply_context_id": record.EnclosingReplyContextID,
 		"requester_flow_id": record.RequesterFlowID, "request_output_pin": record.RequestOutputPin, "reply_input_pin": record.ReplyInputPin,
 		"provider_flow_id": record.ProviderFlowID, "provider_input_pin": record.ProviderInputPin, "provider_output_pin": record.ProviderOutputPin,
 		"origin_route": json.RawMessage(origin), "request_correlation_id": record.RequestCorrelationID, "correlation_key": record.CorrelationKey,

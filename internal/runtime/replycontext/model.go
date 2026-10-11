@@ -19,30 +19,36 @@ const (
 )
 
 type Record struct {
-	ID                   string
-	RunID                string
-	RequestEventID       string
-	RequesterFlowID      string
-	RequestOutputPin     string
-	ReplyInputPin        string
-	ProviderFlowID       string
-	ProviderInputPin     string
-	ProviderOutputPin    string
-	Origin               events.RouteIdentity
-	ReturnJoins          []events.JoinAdmissionReceipt
-	RequestCorrelationID string
-	CorrelationKey       string
-	State                State
-	AcceptedReplyEventID string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	TerminalAt           *time.Time
+	ID                      string
+	RunID                   string
+	RequestEventID          string
+	SourceRunID             string
+	SourceRequestEventID    string
+	EnclosingReplyContextID string
+	RequesterFlowID         string
+	RequestOutputPin        string
+	ReplyInputPin           string
+	ProviderFlowID          string
+	ProviderInputPin        string
+	ProviderOutputPin       string
+	Origin                  events.RouteIdentity
+	ReturnJoins             []events.JoinAdmissionReceipt
+	RequestCorrelationID    string
+	CorrelationKey          string
+	State                   State
+	AcceptedReplyEventID    string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	TerminalAt              *time.Time
 }
 
 func (r Record) Normalized() Record {
 	r.ID = strings.TrimSpace(r.ID)
 	r.RunID = strings.TrimSpace(r.RunID)
 	r.RequestEventID = strings.TrimSpace(r.RequestEventID)
+	r.SourceRunID = strings.TrimSpace(r.SourceRunID)
+	r.SourceRequestEventID = strings.TrimSpace(r.SourceRequestEventID)
+	r.EnclosingReplyContextID = strings.TrimSpace(r.EnclosingReplyContextID)
 	r.RequesterFlowID = strings.TrimSpace(r.RequesterFlowID)
 	r.RequestOutputPin = strings.TrimSpace(r.RequestOutputPin)
 	r.ReplyInputPin = strings.TrimSpace(r.ReplyInputPin)
@@ -72,8 +78,11 @@ func (r Record) Normalized() Record {
 
 func (r Record) Validate() error {
 	r = r.Normalized()
-	if r.ID == "" || r.RequestEventID == "" || r.RequesterFlowID == "" || r.RequestOutputPin == "" || r.ReplyInputPin == "" || r.ProviderFlowID == "" || r.ProviderInputPin == "" || r.ProviderOutputPin == "" || r.RequestCorrelationID == "" {
+	if r.ID == "" || r.RequestEventID == "" || r.SourceRequestEventID == "" || r.RequesterFlowID == "" || r.RequestOutputPin == "" || r.ReplyInputPin == "" || r.ProviderFlowID == "" || r.ProviderInputPin == "" || r.ProviderOutputPin == "" || r.RequestCorrelationID == "" {
 		return fmt.Errorf("reply context requires stable id, request identity, paired topology, and correlation")
+	}
+	if r.EnclosingReplyContextID == r.ID {
+		return fmt.Errorf("reply context cannot enclose itself")
 	}
 	if r.Origin.Empty() {
 		return fmt.Errorf("reply context origin route is required")
@@ -113,6 +122,9 @@ func (r Record) SameIdentity(other Record) bool {
 	return r.ID == other.ID &&
 		r.RunID == other.RunID &&
 		r.RequestEventID == other.RequestEventID &&
+		r.SourceRunID == other.SourceRunID &&
+		r.SourceRequestEventID == other.SourceRequestEventID &&
+		r.EnclosingReplyContextID == other.EnclosingReplyContextID &&
 		r.RequesterFlowID == other.RequesterFlowID &&
 		r.RequestOutputPin == other.RequestOutputPin &&
 		r.ReplyInputPin == other.ReplyInputPin &&
@@ -123,6 +135,37 @@ func (r Record) SameIdentity(other Record) bool {
 		r.sameReturnJoins(other) &&
 		r.RequestCorrelationID == other.RequestCorrelationID &&
 		r.CorrelationKey == other.CorrelationKey
+}
+
+// BindEnclosing retains the inbound obligation of this request's publishing
+// turn. The provider is serving that enclosing request, not a global last caller.
+func (r *Record) BindEnclosing(enclosing Record) error {
+	if r == nil {
+		return fmt.Errorf("reply request is required")
+	}
+	if err := r.ValidateEnclosing(enclosing); err != nil {
+		return err
+	}
+	enclosing = enclosing.Normalized()
+	if enclosing.State != StateOpen {
+		return fmt.Errorf("reply request requires its publishing turn's open enclosing obligation")
+	}
+	r.EnclosingReplyContextID = enclosing.ID
+	return nil
+}
+
+func (r Record) ValidateEnclosing(enclosing Record) error {
+	r, enclosing = r.Normalized(), enclosing.Normalized()
+	if err := enclosing.Validate(); err != nil {
+		return err
+	}
+	if enclosing.ID == r.ID || enclosing.RunID != r.RunID || enclosing.ProviderFlowID != r.RequesterFlowID {
+		return fmt.Errorf("enclosing reply context contradicts the publishing requester")
+	}
+	if r.EnclosingReplyContextID != "" && r.EnclosingReplyContextID != enclosing.ID {
+		return fmt.Errorf("reply request changed its enclosing obligation")
+	}
+	return nil
 }
 
 func DeterministicID(requestEventID, requesterFlowID, requestOutputPin, replyInputPin, providerFlowID string, origin events.RouteIdentity) string {
