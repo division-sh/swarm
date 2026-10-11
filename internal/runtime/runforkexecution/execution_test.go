@@ -2723,42 +2723,35 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 	return response, runtimellm.ValidateCLIProviderCapabilitySurface(observed, response)
 }
 
-func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore) selectedContractForkLocalRuntimeContainer {
+func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, selected *store.PostgresStore) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
-	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
-	bindingID := uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
-		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
-	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, revision, forkEventID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: runForkTestSourceArtifact, StartedAt: now,
+	storetest.CommitSemanticEvent(t, ctx, selected, eventtest.ExistingRunRootIngressWithRoutingSource(
+		forkEventID, "selected.proof", "selected-proof", "", []byte(`{}`), 0, sourceRunID,
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(sourceRunID), now))
+	captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
+	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+	fork, err := selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+		SourceRunID: sourceRunID, At: forkEventID, ContractSelection: &selection,
+		SourceArtifactFact:      testEphemeralSourceArtifactFact(runForkTestBundleHash),
+		EffectiveSourceIdentity: testEffectiveSourceIdentity(testEphemeralSourceArtifactFact(runForkTestBundleHash)),
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings
-			(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at)
-		VALUES ($1::uuid,$2::uuid,$3::uuid,'event',$4,$5::uuid,'selected_contracts',$6)
-	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
+	if err != nil {
 		t.Fatalf("seed selected-fork proof binding: %v", err)
 	}
-	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+	forkRunID := fork.ForkRunID
 	selectedSource := testSelectedSource(selection)
 	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, ForkRunID: forkRunID, SourceRunID: sourceRunID,
-		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: revision, EventID: forkEventID}, ForkEventID: forkEventID,
+		ForkPoint: fork.ForkPoint, ForkEventID: forkEventID,
 		ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 		AdmissionOwner: runfork.RunForkContractFrontierAdmissionOwner, AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
@@ -2808,7 +2801,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	_, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	container := buildSelectedForkProofContainer(t, ctx, db, selected)
+	container := buildSelectedForkProofContainer(t, ctx, selected)
 	proof := container.Proof()
 	var requests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -3062,64 +3055,37 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 }
 
 func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected, openPeer := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	ctx := runForkTestContext(t)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
-	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
-	bindingID := uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
-		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
-	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, revision, forkEventID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: runForkTestSourceArtifact, StartedAt: now,
+	storetest.CommitSemanticEvent(t, ctx, selected, eventtest.ExistingRunRootIngressWithRoutingSource(
+		forkEventID, "selected.test", "selected-test", "", []byte(`{}`), 0, sourceRunID,
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(sourceRunID), now))
+	captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
+	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+	fork, err := selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+		SourceRunID: sourceRunID, At: forkEventID, ContractSelection: &selection,
+		SourceArtifactFact:      testEphemeralSourceArtifactFact(runForkTestBundleHash),
+		EffectiveSourceIdentity: testEffectiveSourceIdentity(testEphemeralSourceArtifactFact(runForkTestBundleHash)),
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings
-			(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at)
-		VALUES ($1::uuid,$2::uuid,$3::uuid,'event',$4,$5::uuid,'selected_contracts',$6)
-	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
+	if err != nil {
 		t.Fatalf("seed selected-contract container competition binding: %v", err)
 	}
-
-	servedDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open served PostgreSQL handle: %v", err)
-	}
-	defer servedDB.Close()
-	standaloneDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open standalone PostgreSQL handle: %v", err)
-	}
-	defer standaloneDB.Close()
-	if err := servedDB.PingContext(ctx); err != nil {
-		t.Fatalf("ping served PostgreSQL handle: %v", err)
-	}
-	if err := standaloneDB.PingContext(ctx); err != nil {
-		t.Fatalf("ping standalone PostgreSQL handle: %v", err)
-	}
-	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
-	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
+	forkRunID := fork.ForkRunID
+	servedStore := openPeer()
+	standaloneStore := openPeer()
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
 	fixedPlan, err := servedStore.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	selection := runfork.RunForkContractSelection{
-		Mode: "selected_contracts",
-	}
 	selectedSource := testSelectedSource(selection)
 	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
@@ -3422,14 +3388,16 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("close winning %s container: %v", winner.surface, err)
 	}
 
-	var authorities, attempts, reservations int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND generation=1 AND state='closed'`, forkRunID).Scan(&authorities); err != nil {
+	authorities, err := storetest.CountClosedFirstSelectedRuntimeExecutionStorage(ctx, selected, forkRunID)
+	if err != nil {
 		t.Fatalf("count served/standalone authority rows: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1::uuid AND a.state='settled'`, proof.RuntimeExecutionID).Scan(&attempts); err != nil {
+	attempts, err := storetest.CountSelectedExecutionSettledAttemptsStorage(ctx, selected, proof.RuntimeExecutionID)
+	if err != nil {
 		t.Fatalf("count served/standalone completion attempts: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, handle.Attempt().AttemptID).Scan(&reservations); err != nil {
+	reservations, err := storetest.CountCompletionAttemptBudgetReservationsStorage(ctx, selected, handle.Attempt().AttemptID)
+	if err != nil {
 		t.Fatalf("count no-cap completion reservations: %v", err)
 	}
 	if authorities != 1 || attempts != 1 || reservations != 0 {

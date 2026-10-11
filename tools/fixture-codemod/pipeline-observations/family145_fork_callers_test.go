@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 199 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "5bf1ab93883e4baf3129eea5187aa888d6ecb3218020fa4cedee02cb125db08a" {
+	if err != nil || len(rows) != 199 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "10c9fdbd62db16ab0471916573d0b6d2a8a93d5901727586cc740515df0c4bf9" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "buildSelectedForkProofContainer" || function == "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority" {
+		if err := family145NativeBindingConstructionError(function, beforeSource, afterSource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if function == "selectedContractTestRuntimeAuthority" {
 		if err := family145ComponentRuntimeAuthorityError(afterSource); err != nil {
 			t.Fatal(err)
@@ -221,6 +227,8 @@ func family145SemanticOwner(function string) bool {
 	case "selectedPreparationDatabaseSnapshot":
 		return true
 	case "selectedContractTestRuntimeAuthority":
+		return true
+	case "buildSelectedForkProofContainer", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority":
 		return true
 	}
 	return false

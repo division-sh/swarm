@@ -4,9 +4,58 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
+
+func CountClosedFirstSelectedRuntimeExecutionStorageForTest(ctx context.Context, selected any, forkRunID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, forkRunID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = runforkpersistence.CountClosedFirstSelectedRuntimeExecutionStorageTx(ctx, tx, forkRunID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func CountSelectedExecutionSettledAttemptsStorageForTest(ctx context.Context, selected any, executionID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, executionID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = effectpersistence.CountSelectedExecutionSettledAttemptsStorageTx(ctx, tx, executionID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func CountCompletionAttemptBudgetReservationsStorageForTest(ctx context.Context, selected any, attemptID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, attemptID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = effectpersistence.CountCompletionAttemptBudgetReservationsStorageTx(ctx, tx, attemptID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
 
 func CountSelectedForkRunsForSourceForTest(ctx context.Context, selected any, sourceRunID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, sourceRunID); err != nil {

@@ -1765,3 +1765,67 @@ zero-additions claim. Other same-class helpers remain explicit #2542/#2151 debt;
 M01/Docker remain qualification-open in #2353. Existing watchlist/architecture
 disposition stands, with native owners rather than another framework. No push,
 PR, server2, tier run or parent-closure claim.
+
+## Remaining component binding and independent-peer cohort
+
+The remaining two manual component binding producers in runforkexecution are
+removed: buildSelectedForkProofContainer and the served/standalone competition
+root. Their exact event names, external producers, empty payloads, global envelopes,
+source artifact and event/revision coordinates remain. The original selected
+semantic publication/revision owners and MaterializeRunFork create the paused
+fork/binding; runtime identities consume its returned fork ID. The full runtime
+container still computes/claims its own genuine preparation and execution evidence.
+No INSERT into run_fork_selected_contract_bindings survives in the package's test
+sources. The authored HTTP helper has no pool; its unrelated effect observations
+and ordinary constructor remain explicitly tracked debt rather than a hidden getter.
+
+Competition opens its primary and two independent peers through the existing native
+StartPostgresRuntimeStoreWithReopen owner. This is same-database contention, not
+process-restart proof. The original concurrent start channel, exactly one winner,
+authority refusal, one actual provider launch, frame/capability/model/usage checks,
+settlement, quiesce and close remain. Only the four raw-handle open/ping error checks
+are subsumed by the established native constructor's fail-closed opening contract.
+Native construction retains early close registration and joined component cleanup.
+
+Three exact scalar ports replace the root's physical readbacks, with three separate
+original selected native read transactions in their original order. The first keeps
+fork_run_id, generation=1 and state=closed through runforkpersistence; the second
+keeps the complete attempt/operation join, selected_execution_id and settled-state
+predicate through effectpersistence; the last counts every reservation at exact
+attempt_id through effectpersistence. No additional filter or DISTINCT narrows them.
+Public bridges expose only fixed identity coordinates and scalars, not query, table,
+pool or callback selection. Native/raw/invalid/cancelled/closed refusal controls return
+no evidence. Backend query-unit hostile rows exercise physical predicate/multiplicity
+only; their bounded schemas/transactions are not runtime construction or execution
+authority and never escape the private backend owner.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Last manual component fork/binding writers | reproduced and fixed | Exact finite helper/root mappings and package test-source inventory; original authored HTTP/root authority execution under race |
+| Borrowed-pool primary and peer construction | reproduced and fixed | Actual served/standalone competition under race through three independent native openings; hostile collapsed-peer guard; original peer/lifetime constructor receipts carry |
+| Runtime/effect/budget count bypasses | reproduced and fixed | Native three-read-coordinator controls on both stores; original real competition exact 1/1/0 outcome; backend multiplicity/fork/generation/state/join/orphan/attempt controls |
+| Changed native observation scope | execution-proven through the same corrected path | Actual SQL generation=2 and removed-settled-filter mutants each RED at its exact physical count assertion, restore GREEN; finite foreign-materializer/foreign-execution/lost-reservation assertion controls |
+| Authored HTTP capability and hostile admissions | execution-proven through the same corrected path | TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission under race preserves one real HTTP request, settled evidence, module refusal, cross-run/managed-authority refusal and no additional dispatch |
+
+Vemew: original two roots GREEN9.490s. Native storage/refusal both-store root
+GREEN11.498s; backend scope/multiplicity units GREEN1.176s/2.337s. Real SQL
+mutants RED0.155s/0.100s, restored GREEN1.179s/1.099s. Complete cheap family145
+and related historical/finite/successor/native-run-setup set GREEN15.047s;
+five affected native projection/closed-delivery/revision-inventory guards
+GREEN1.243s(store)/8.804s(runtimepersistence). No full package/tier rerun.
+
+Receipts in ~/.cache/swarm-2542-family145/native-component-binding-*:
+original roots3675a8ab1e0c9cba6a3221687e877fd73b2aca524876e4883c6fcbd736f763eb;
+native controls344e880e1f585d1fd9a5e70610224317074019a88a49337ba129d2c91a862b74;
+family guardsb708a9de082da6c9848464c1d97b777fa6b73999f4d444c358fc36f941ee91c8;
+store guards4427e794da9e51716c5e5a6d2c3025c5a701a8cf290e10eec4c01368c1b5a9dd;
+real mutants9336085f481e13e194f34d6a0f83af909b48ba9eeb92aae66f7868af37707048.
+
+Corpus1055/199 transitions, digest
+10c9fdbd62db16ab0471916573d0b6d2a8a93d5901727586cc740515df0c4bf9.
+Original893 tuples/24 historical receipts unchanged. Exact finite successor/candidate
+mappings, codemod Changes=[], affected U1000 and diff clean; committed-head complexity
+checked separately. Named admissions126 ->123 (124 excluding unqualified Docker).
+Not a fresh global census, zero-additions assertion, restart proof or parent closure.
+Existing watchlist/architecture disposition stands. M01/Docker stay qualification-open
+under #2353. No push, PR, tier, server2 run or broader production semantic change.

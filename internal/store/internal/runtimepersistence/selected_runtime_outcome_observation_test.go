@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -8,6 +9,58 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
+
+func TestSelectedCompetitionStorageCountsUseOriginalReadOwnerBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			selected, ctx := backend.open(t).store, context.Background()
+			probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			readers := []func(context.Context, any, string) (int, error){
+				CountClosedFirstSelectedRuntimeExecutionStorageForTest,
+				CountSelectedExecutionSettledAttemptsStorageForTest,
+				CountCompletionAttemptBudgetReservationsStorageForTest,
+			}
+			id := uuid.NewString()
+			for _, read := range readers {
+				if got, err := read(ctx, selected, id); err != nil || got != 0 {
+					t.Fatalf("absent competition fact supplied evidence: %d/%v", got, err)
+				}
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 3 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("competition observations escaped original read owner or collapsed cuts: %+v", counts)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			for _, read := range readers {
+				if got, err := read(cancelled, selected, id); !errors.Is(err, context.Canceled) || got != 0 {
+					t.Fatalf("cancelled competition read supplied evidence: %d/%v", got, err)
+				}
+				for _, owner := range []any{nil, struct{}{}, &sql.DB{}} {
+					if got, err := read(ctx, owner, id); err == nil || got != 0 {
+						t.Fatalf("foreign or raw competition owner supplied evidence: %T/%d/%v", owner, got, err)
+					}
+				}
+				for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
+					if got, err := read(ctx, selected, invalid); err == nil || got != 0 {
+						t.Fatalf("invalid competition coordinate supplied evidence: %q/%d/%v", invalid, got, err)
+					}
+				}
+			}
+			if err := selected.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			for _, read := range readers {
+				if got, err := read(ctx, selected, id); err == nil || got != 0 {
+					t.Fatalf("closed competition owner supplied evidence: %d/%v", got, err)
+				}
+			}
+		})
+	}
+}
 
 func TestSelectedRuntimeOutcomeScalarsPreservePhysicalScopeAndOriginalCoordinatorBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
