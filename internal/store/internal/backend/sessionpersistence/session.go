@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/trace"
 
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -26,6 +27,8 @@ type Owner struct {
 }
 
 func Open(ctx context.Context, path, expectedAccount string, nonempty bool) (*Owner, error) {
+	region := trace.StartRegion(ctx, "whatsapp.private.open")
+	defer region.End()
 	owner, err := openDatabase(path)
 	if err != nil {
 		return nil, err
@@ -36,7 +39,9 @@ func Open(ctx context.Context, path, expectedAccount string, nonempty bool) (*Ow
 		err = ErrSessionAccount
 	}
 	if err == nil {
-		err = owner.container.Upgrade(ctx)
+		trace.WithRegion(ctx, "whatsapp.private.sdk-upgrade", func() {
+			err = owner.container.Upgrade(ctx)
+		})
 	}
 	if err == nil {
 		_, err = owner.CurrentDevice(ctx, expectedAccount)
@@ -61,6 +66,8 @@ func openDatabase(path string) (*Owner, error) {
 func (o *Owner) Close() error { return o.db.Close() }
 
 func (o *Owner) CurrentDevice(ctx context.Context, expectedAccount string) (*store.Device, error) {
+	region := trace.StartRegion(ctx, "whatsapp.private.current-device")
+	defer region.End()
 	devices, err := o.container.GetAllDevices(ctx)
 	if err != nil {
 		return nil, err
