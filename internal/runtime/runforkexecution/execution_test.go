@@ -953,7 +953,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`, result.Materialization.ForkRunID, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
 		t.Fatalf("load fork entity state: %v", err)
 	}
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
@@ -5545,13 +5545,11 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$4, $4, $4
+			'{}'::jsonb, $4, $4
 		)
 	`, sourceRunID, entityID, entityType, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
