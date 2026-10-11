@@ -219,6 +219,7 @@ func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplann
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	return plan
 }
 
@@ -231,6 +232,7 @@ func TestCommittedCLICommandBudgetBoundariesAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	for _, tc := range []struct {
 		name                       string
 		cliSeconds, siblingSeconds float64
@@ -307,6 +309,39 @@ func TestCommandEvidenceRejectsPerformanceConfirmation(t *testing.T) {
 	evidence.PlanDigest = "wrong"
 	if problems := ValidateCommandEvidence(evidence, plan); !strings.Contains(strings.Join(problems, ";"), "plan_digest") {
 		t.Fatalf("wrong-plan problems = %v", problems)
+	}
+}
+
+func TestCommandEvidenceRequiresBoundCurrentPlan(t *testing.T) {
+	for _, field := range []string{"unbound", "goos", "goarch", "cgo"} {
+		t.Run(field, func(t *testing.T) {
+			plan, receipt := rootEvidenceFixture(t)
+			if problems := ValidateCommandEvidence(receipt, plan); len(problems) != 0 {
+				t.Fatalf("bound complete control refused: %v", problems)
+			}
+			switch field {
+			case "unbound":
+				plan.BuildContext = testplanning.BuildContext{}
+			case "goos":
+				plan.BuildContext.GOOS = ""
+			case "goarch":
+				plan.BuildContext.GOARCH = ""
+			case "cgo":
+				plan.BuildContext.CGOEnabled = ""
+			}
+			receipt.BuildContext = plan.BuildContext
+			rebindTimingFixture(t, &plan, &receipt)
+			if field == "unbound" {
+				if err := plan.Validate(); err != nil {
+					t.Fatalf("pre-bind planning should still validate: %v", err)
+				}
+			}
+			for _, problems := range [][]string{ValidateCommandIdentity(receipt, plan), ValidateCommandEvidence(receipt, plan)} {
+				if !strings.Contains(strings.Join(problems, " "), "requires a bound plan") {
+					t.Fatalf("incomplete current plan passed shared admission: %v", problems)
+				}
+			}
+		})
 	}
 }
 
@@ -767,7 +802,14 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	return plan
+}
+
+func bindTimingFixtureBuild(t *testing.T, plan *testplanning.RunPlan) {
+	t.Helper()
+	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1"}
+	rebindTimingFixture(t, plan, &CommandEvidence{})
 }
 
 func timingTestPolicy() BudgetPolicy {
@@ -800,6 +842,9 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		PlanDigest:      plan.Digest,
 		Profile:         plan.Profile,
 		HeadSHA:         plan.HeadSHA,
+		BuildContext:    plan.BuildContext,
+		WorkloadProfile: unit.WorkloadProfile,
+		ExecutionTier:   unit.ExecutionTier,
 		UnitID:          unit.ID,
 		Surface:         unit.ID,
 		Attempt:         attempt,

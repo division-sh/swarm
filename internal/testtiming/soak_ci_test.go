@@ -34,6 +34,7 @@ func soakCIPlan(t *testing.T, policy testplanning.Policy, profile string) testpl
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	return plan
 }
 
