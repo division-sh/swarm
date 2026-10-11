@@ -39,8 +39,11 @@ func TestTestTimeReviewedCodemodPlacementIsFiniteAndFullyCharged(t *testing.T) {
 					}
 					candidate[1].Seconds = 100.001
 					row, problems = compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode)
-					if len(problems) == 0 || row.AddedSeconds != 100.001 || row.StrictStatus != BudgetFail {
-						t.Fatalf("placement waived aggregate bounds: %+v / %v", row, problems)
+					if (len(problems) != 0) != (mode == TestTimePR || !approved) || row.AddedSeconds != 100.001 || row.StrictStatus != BudgetFail {
+						t.Fatalf("placement or counterfactual lost aggregate cost: %+v / %v", row, problems)
+					}
+					if approved && mode == TestTimeStrict && (len(row.Warnings) != 2 || !strings.Contains(row.Warnings[0], testTimeCodemodPlacementApproval) || !strings.Contains(row.Warnings[1], "strict aggregate growth is advisory")) {
+						t.Fatalf("advisory cost lost placement provenance: %+v", row)
 					}
 				})
 			}

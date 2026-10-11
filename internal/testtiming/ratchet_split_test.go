@@ -21,18 +21,18 @@ func TestTestTimePRStrictVerdictMatrix(t *testing.T) {
 		name                     string
 		baseline, after, removed float64
 		added                    []float64
-		pr, strict               BudgetStatus
+		pr, strict, cadence      BudgetStatus
 	}{
-		{"historical-core-totals", 2569.890, 2648.340, 0, splitTimingCost(99.360, 171), BudgetWarn, BudgetFail},
-		{"retained-only", 100, 110, 0, nil, BudgetWarn, BudgetFail},
-		{"added-boundary", 100, 100, 0, []float64{5}, BudgetPass, BudgetPass},
-		{"added-over-limit", 100, 100, 0, []float64{5.001}, BudgetFail, BudgetFail},
-		{"speedup-cannot-subsidize", 100, 80, 0, []float64{8}, BudgetFail, BudgetPass},
-		{"removed-neutral", 100, 100, 3000, splitTimingCost(160, 8), BudgetFail, BudgetFail},
-		{"placement-within-total", 2000, 2000, 0, []float64{30.001}, BudgetFail, BudgetFail},
-		{"placement-boundary", 2000, 2000, 0, []float64{30}, BudgetPass, BudgetPass},
-		{"600-boundary", 20000, 20000, 0, splitTimingCost(600, 20), BudgetPass, BudgetPass},
-		{"600-over-limit", 20000, 20000, 0, splitTimingCost(600.001, 21), BudgetFail, BudgetFail},
+		{"historical-core-totals", 2569.890, 2648.340, 0, splitTimingCost(99.360, 171), BudgetWarn, BudgetFail, BudgetWarn},
+		{"retained-only", 100, 110, 0, nil, BudgetWarn, BudgetFail, BudgetWarn},
+		{"added-boundary", 100, 100, 0, []float64{5}, BudgetPass, BudgetPass, BudgetPass},
+		{"added-over-limit", 100, 100, 0, []float64{5.001}, BudgetFail, BudgetFail, BudgetWarn},
+		{"speedup-cannot-subsidize", 100, 80, 0, []float64{8}, BudgetFail, BudgetPass, BudgetPass},
+		{"removed-neutral", 100, 100, 3000, splitTimingCost(160, 8), BudgetFail, BudgetFail, BudgetWarn},
+		{"placement-within-total", 2000, 2000, 0, []float64{30.001}, BudgetFail, BudgetFail, BudgetFail},
+		{"placement-boundary", 2000, 2000, 0, []float64{30}, BudgetPass, BudgetPass, BudgetPass},
+		{"600-boundary", 20000, 20000, 0, splitTimingCost(600, 20), BudgetPass, BudgetPass, BudgetPass},
+		{"600-over-limit", 20000, 20000, 0, splitTimingCost(600.001, 21), BudgetFail, BudgetFail, BudgetWarn},
 	} {
 		for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
 			t.Run(tc.name+"/"+string(mode), func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestTestTimePRStrictVerdictMatrix(t *testing.T) {
 				if len(problems) != 0 {
 					status = BudgetFail
 				}
-				want := tc.strict
+				want := tc.cadence
 				if mode == TestTimePR {
 					want = tc.pr
 				}
@@ -66,6 +66,44 @@ func TestTestTimePRStrictVerdictMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestStrictAggregateAdvisoryPreservesCommandCeilings(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		seconds float64
+		want    BudgetStatus
+	}{
+		{"within-command-ceiling", 20, BudgetWarn},
+		{"over-command-ceiling", timingTestPolicy().Hard.MaxShardCommandSeconds.LimitSeconds*commandBudgetBuffer + 1, BudgetFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, receipt := rootEvidenceFixture(t)
+			roots, err := observedRootTimes(plan, TestTimeReferenceRunID, 1, []CommandEvidence{receipt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reference := TestTimeReference{BuildContext: plan.BuildContext, Roots: timingReferenceRoots(t, roots, rootTimingPolicy())}
+			receipt.ElapsedSeconds = tc.seconds
+			receipt.Report.Tests[0].Elapsed = tc.seconds
+			receipt.Report.Packages[0].Elapsed = tc.seconds
+			receipt.Report.Summary.PackageElapsedSec = tc.seconds
+			ratchet := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{receipt}, TestTimeStrict)
+			if ratchet.Status != BudgetWarn || len(ratchet.Problems) != 0 || len(ratchet.Tiers) != 3 {
+				t.Fatalf("aggregate drift still fatal or unreported: %+v", ratchet)
+			}
+			for _, tier := range ratchet.Tiers {
+				if tier.StrictStatus != BudgetFail || len(tier.RetainedCells) != 1 || tier.RetainedDelta != tc.seconds-roots[0].Seconds {
+					t.Fatalf("aggregate counterfactual or retained evidence lost: %+v", tier)
+				}
+			}
+			result := EvaluateBudget(timingTestPolicy(), EvaluationOptions{Plan: plan, WorkflowRunID: TestTimeReferenceRunID, WorkflowAttempt: 1}, []CommandEvidence{receipt})
+			result.AttachTestTime(ratchet)
+			if result.Status != tc.want || (result.ExitCode() == 0) != (tc.want == BudgetWarn) {
+				t.Fatalf("command ceiling softened: %+v", result)
+			}
+		})
 	}
 }
 

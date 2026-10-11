@@ -24078,7 +24078,7 @@ test_specification:
         reference membership or changing the timing anchor/thresholds. Absent full cells remain removal-neutral and earn no execution credit;
         new/promoted roots retain the unchanged placement rule. The trusted workflow event selects cost enforcement:
         PRs hard-charge independent added/promoted cost and report retained drift as advisory; fresh full master cadence
-        enforces the complete retained-plus-added aggregate. Named extras cannot evade either comparison or change the reference epoch.
+        reports the complete retained-plus-added aggregate as advisory. Named extras cannot evade either comparison or change the reference epoch.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
@@ -24135,7 +24135,7 @@ test_specification:
         fixture admission, never from runtime output. Corpus generation itself grants no execution or closure credit.
       timing_publication_and_cadence: >-
         PR command-latency overruns become advisory only after complete successful plan-bound proof is admitted;
-        missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
+        missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master command ceilings stay enforced.
         The independent test-time ratchet uses the single reviewed exact-source re-pin approved by issue #2535
         comment 6103962032: full hosted run 38086512667 attempt 1, workflow head
         3d87f2ba3598b0728e754512c8e7f57e9a96d17a and exact execution source
@@ -24166,7 +24166,13 @@ test_specification:
         and 600 test-seconds. Retained speedups and removed/renamed cells cannot subsidize that new-work charge.
         Retained-cell drift is reported with exhaustive exact cell identities and baseline/candidate/signed-delta attribution;
         when the original aggregate would exceed its allowance, valid PR proof receives an explicit advisory warning.
-        Fresh full schedule/manual/master cadence retains hard enforcement of the complete retained-plus-added aggregate.
+        Fresh full schedule/manual/master cadence reports the complete retained-plus-added aggregate as advisory under
+        the user-ratified LEAD ruling #2535 comment 6110280108 (2026-10-11). The strict_aggregate mode retains its name,
+        tier table, exhaustive retained-cell deltas, unchanged allowance and strict counterfactual; aggregate growth
+        alone produces a warning and cannot fail the summary. The pr_added_cost mode, independent added/promoted-cost
+        bounds, new-root placement admission, proof validity and per-unit command ceilings remain unchanged and hard.
+        No reference re-pin, numeric allowance change or codemod retier follows from this disposition. Diffuse real
+        creep below command ceilings may remain advisory; humans inspect the nightly table and every reviewed re-pin's growth table.
         Removed/renamed roots are reported separately and remain cost-neutral in that comparison, never credited as savings.
         JSON retains the decision mode, independent added cost, retained totals/cells, unchanged allowance and strict aggregate
         counterfactual. Human summaries label any bounded drift display and point to the exhaustive JSON.

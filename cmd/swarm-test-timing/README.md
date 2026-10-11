@@ -96,11 +96,17 @@ must satisfy both 5% of the frozen tier baseline and 600 seconds. Retained
 speedups and removed roots cannot subsidize new work. Retained drift that would
 fail the original aggregate is an explicit PR warning, not a proof waiver.
 
-Fresh schedule/manual/master evaluation requires a full hosted plan and retains
-the original complete aggregate enforcement. Missing or unknown events never
-enable advisory comparison. The pinned reference, command budgets, selection
-syntax, cadence and gate freshness stay unchanged. A real retained slowdown may
-therefore first block the next full nightly, as explicitly accepted under #2535.
+Fresh schedule/manual/master evaluation requires a full hosted plan and reports
+complete aggregate growth as advisory under the user-ratified
+[LEAD ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-6110280108).
+The `strict_aggregate` mode keeps its name, full tier table, exhaustive retained
+deltas and strict counterfactual; excess aggregate cost produces `WARN`, not a
+failing summary. Missing or unknown events still require the same full-plan
+admission. PR added-cost bounds, placement admission, command ceilings and
+invalid-evidence failures stay hard. The pinned reference, numbers, selection
+syntax, cadence and gate freshness are unchanged. Diffuse real creep below unit
+ceilings remains visible in nightly tables and every reviewed re-pin's growth
+table rather than automatically blocking the next full nightly.
 
 JSON records `comparison_mode`, independent added cost, exhaustive
 `tiers[].retained_cells` identities/before/after/delta and strict counterfactual.

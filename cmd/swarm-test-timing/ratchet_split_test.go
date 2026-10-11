@@ -204,7 +204,7 @@ func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
 			cfg.event = event
 			err := run(cfg)
 			result := readRatchetCLIResult(t, cfg)
-			want, mode := testtiming.BudgetFail, testtiming.TestTimeStrict
+			want, mode := testtiming.BudgetWarn, testtiming.TestTimeStrict
 			if event == "pull_request" {
 				want, mode = testtiming.BudgetWarn, testtiming.TestTimePR
 			}
@@ -215,7 +215,7 @@ func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, text := range []string{string(mode), "Strict counterfactual", "tiers[].retained_cells"} {
+			for _, text := range []string{string(mode), "Strict counterfactual", "tiers[].retained_cells", "cadence reports aggregate growth as advisory"} {
 				if !strings.Contains(string(markdown), text) {
 					t.Fatalf("CLI report lost %q", text)
 				}
@@ -224,6 +224,86 @@ func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
 				if tier.AddedSeconds != 0 || tier.Retained != len(tier.RetainedCells) || tier.RetainedDelta != 2000 || tier.StrictStatus != testtiming.BudgetFail {
 					t.Fatalf("CLI JSON lost exact decomposition: %+v", tier)
 				}
+			}
+		})
+	}
+}
+
+func TestEvaluateBudgetCadenceCommandCeilingStaysHard(t *testing.T) {
+	for _, event := range []string{"push", "schedule", "workflow_dispatch"} {
+		t.Run(event, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 2000, false)
+			cfg.event = event
+			receipt, err := readEvidence(filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy, err := readBudgetPolicy(cfg.budgetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.Hard.MaxShardCommandSeconds.LimitSeconds = receipt.ElapsedSeconds / 2
+			raw, err := yaml.Marshal(map[string]any{
+				"version": policy.Version,
+				"hard": map[string]testtiming.CommandBudget{
+					"max_shard_command_seconds":        policy.Hard.MaxShardCommandSeconds,
+					"full_conformance_command_seconds": policy.Hard.FullConformanceCommandSeconds,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cfg.budgetPath, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(cfg); err == nil {
+				t.Fatal("over-ceiling command earned success")
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != testtiming.BudgetFail || result.ExitCode() == 0 || result.TestTime == nil || result.TestTime.Status != testtiming.BudgetWarn || len(result.Surfaces) != 1 || result.Surfaces[0].Status != testtiming.BudgetFail {
+				t.Fatalf("aggregate advisory softened the command ceiling: %+v", result)
+			}
+		})
+	}
+}
+
+func TestEvaluateBudgetCadenceInvalidEvidenceStaysFatal(t *testing.T) {
+	for _, defect := range []string{"missing", "duplicate", "wrong-run", "wrong-attempt", "wrong-head", "wrong-plan"} {
+		t.Run(defect, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 2000, false)
+			cfg.event = "schedule"
+			path := filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json")
+			receipt, err := readEvidence(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch defect {
+			case "missing":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			case "duplicate":
+				path = filepath.Join(cfg.evidenceRoot, "duplicate-evidence.json")
+			case "wrong-run":
+				receipt.WorkflowRunID++
+			case "wrong-attempt":
+				receipt.WorkflowAttempt++
+			case "wrong-head":
+				receipt.HeadSHA = "foreign"
+			case "wrong-plan":
+				receipt.PlanDigest = "foreign"
+			}
+			if defect != "missing" {
+				if err := writeJSON(path, receipt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := run(cfg); err == nil {
+				t.Fatal("invalid cadence evidence earned success")
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 {
+				t.Fatalf("invalid proof became advisory: %+v", result)
 			}
 		})
 	}
