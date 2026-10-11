@@ -24020,6 +24020,21 @@ test_specification:
         900-second soak cells, and the hosted native Linux/Darwin unused-check union. All hosted tiers retain macOS
         SQLite possession. Every lower-tier omitted root explicitly names its minimum tier and retained full owner;
         it earns no execution credit. New ordinary roots enter core; an unowned special root blocks every tier.
+      pipeline_root_partition: >-
+        The runtime/pipeline package is special and executes exactly once across pipeline-activation,
+        pipeline-timer-join and pipeline-rest in core, lifecycle and full, through the existing native
+        policy, partition census and execution-binding owners. Activation owns whole Test roots prefixed
+        A2, CompiledTransition, Guard, PipelineCompiled, WorkflowCurrentTransition or JoinCapturedLoop.
+        Timer/join owns whole Test roots prefixed WorkflowTimer, WorkflowJoin, AcceptedWorkflowTimer,
+        MutationFreeAcceptedEventTimer or Issue2564M09. Rest explicitly selects ^(Test|Fuzz|Example)
+        and excludes only the exact anchored union of those separately executed families. Policy admits
+        that exclusion only for this single package, exact run/skip shape, count-1, broad budget class
+        and default timeout; no foreign Skip, empty rest Run or backend/descendant filter is admitted.
+        Future roots remain subject to the same complete active-source ownership census. Original
+        backend/case assertions, venue-specific recipes and workloads remain unchanged, as do unrelated
+        full-package coverage, command budgets and strict aggregate reference/allowances. The partition
+        changes command granularity, not proof frequency or aggregate test cost credit; actual hosted
+        wall time, runner-minutes and concurrency must be measured before claiming savings.
       fixture_codemod_qualification: >-
         The pipeline-observations codemod package has an exhaustive explicit special-package partition.
         codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader
