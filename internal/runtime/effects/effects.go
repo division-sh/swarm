@@ -53,6 +53,7 @@ const (
 	KindChannelDelivery       Kind = "channel_delivery"
 	KindChannelActionAck      Kind = "channel_action_ack"
 	KindChannelNativeSetting  Kind = "channel_native_setting"
+	KindChannelLogout         Kind = "channel_logout"
 )
 
 type LifecycleToken struct {
@@ -202,6 +203,7 @@ var registrations = []Registration{
 	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelDeliveryJournalBothStores"),
 	registration(KindChannelActionAck, EffectWriteOrUnknown, "channel_action_ack", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelActionAckEffectOutcomes"),
 	registration(KindChannelNativeSetting, EffectWriteOrUnknown, "channel_native_setting", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelNativeSettingEffectOutcomes"),
+	registration(KindChannelLogout, EffectWriteOrUnknown, "channel_logout_whatsapp", "in_process", "internal/runtime/effects/channel_logout.go", []string{"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1"}, "TestSessionLogoutJournalBothStores"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes"),
@@ -1581,6 +1583,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	} else if registration.Kind == KindChannelActionAck {
 		if authority.Kind != AuthorityChannelActionAck || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelActionAck.EffectOperationID {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_action_ack_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else if registration.Kind == KindChannelLogout {
+		if authority.Kind != AuthorityChannelLogout || req.CapabilitySurface != nil || req.AgentFrame != nil ||
+			req.OperationID != authority.ChannelLogout.EffectOperationID || req.RequestFingerprint != authority.ChannelLogout.TargetFingerprint || len(req.Lineage) != 0 {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_logout_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else if registration.Kind == KindChannelNativeSetting {
 		if authority.Kind != AuthorityChannelNativeSetting || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelNativeSetting.EffectOperationID {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -53,7 +54,7 @@ func TestChannelLogoutAPIPrincipalAndRevisionAdmission(t *testing.T) {
 		ChannelPackID: "provider.whatsapp.hitl_channel", ChannelPackVersion: "0.1.0",
 		ChannelManifestHash: "sha256:logout-api-proof", SemanticGeneration: "logout-api-proof"}.Normalized()
 	operationID, teardownID := uuid.NewString(), uuid.NewString()
-	effectID, err := channelonboarding.SessionLogoutEffectOperationID(teardownID)
+	effectID, err := effects.ChannelLogoutOperationID(teardownID)
 	if err != nil {
 		t.Fatal(err)
 	}

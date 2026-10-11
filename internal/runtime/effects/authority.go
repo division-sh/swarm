@@ -30,6 +30,7 @@ const (
 	AuthorityChannelDelivery      AuthorityKind = "channel_delivery"
 	AuthorityChannelActionAck     AuthorityKind = "channel_action_ack"
 	AuthorityChannelNativeSetting AuthorityKind = "channel_native_setting"
+	AuthorityChannelLogout        AuthorityKind = "channel_logout"
 )
 
 type UsageTargetKind string
@@ -342,6 +343,7 @@ type Authority struct {
 	ChannelDelivery      ChannelDeliveryAuthority
 	ChannelActionAck     ChannelActionAckAuthority
 	ChannelNativeSetting ChannelNativeSettingAuthority
+	ChannelLogout        ChannelLogoutAuthority
 	ExecutionOwner       string
 	LeaseExpiresAt       time.Time
 	FenceGeneration      uint64
@@ -370,6 +372,9 @@ func NormalAgentAuthority(token LifecycleToken, executionOwner string, leaseExpi
 }
 
 func (a Authority) Valid() bool {
+	if a.ChannelLogout != (ChannelLogoutAuthority{}) && a.Kind != AuthorityChannelLogout {
+		return false
+	}
 	if a.StartupProbe.Preparation != nil && a.Kind != AuthorityStartupProbe {
 		return false
 	}
@@ -377,6 +382,8 @@ func (a Authority) Valid() bool {
 		return false
 	}
 	switch a.Kind {
+	case AuthorityChannelLogout:
+		return a.validChannelLogout()
 	case AuthorityNormalAgent:
 		return a.Normal.Valid() && a.ID == strings.TrimSpace(a.Normal.AgentID)
 	case AuthoritySelectedContractFork:
@@ -473,7 +480,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery, AuthorityChannelActionAck, AuthorityChannelNativeSetting:
+	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery, AuthorityChannelActionAck, AuthorityChannelNativeSetting, AuthorityChannelLogout:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -644,6 +651,15 @@ func (a Authority) Evidence() map[string]any {
 		evidence["context_publication_generation"] = setting.ContextPublicationGeneration
 		evidence["plan_generation"] = setting.PlanGeneration.Diagnostic()
 		evidence["target_generation"] = setting.TargetGeneration
+	case AuthorityChannelLogout:
+		logout := a.ChannelLogout
+		evidence["effect_operation_id"] = logout.EffectOperationID
+		evidence["teardown_id"] = logout.TeardownID
+		evidence["teardown_revision"] = logout.TeardownRevision
+		evidence["principal_id"] = logout.PrincipalID
+		evidence["bundle_hash"] = logout.BundleHash
+		evidence["runtime_instance_id"] = logout.RuntimeInstanceID
+		evidence["target_fingerprint"] = logout.TargetFingerprint
 	}
 	return evidence
 }

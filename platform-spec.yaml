@@ -11322,6 +11322,19 @@ tool_model:
         refuse with rollback. A pending logout conflicts with any overlapping identity or source teardown; unrelated
         connections remain independent. Exact request replay returns the original immutable responsibility, not a new
         target. This private evidence is not an SDK execution permit and is omitted from public teardown serialization.
+      session_explicit_logout_effect: >
+        The existing selected effect journal owns one channel_logout operation deterministically derived from the
+        exact teardown UUID, never the caller key, account or successor occurrence. Its closed live authority binds
+        teardown revision, principal, source, runtime and the fingerprint of the complete frozen private target.
+        Authorization and launch consume the strict teardown owner and require the retired original admission,
+        without a live business activation. The original RuntimeConnection separately admits its exact paired SDK
+        occurrence. Production unlink has no unjournaled convenience path: callback, send and SDK-store drains
+        precede the durable launch marker, which precedes unlink. Caller cancellation releases the bounded wait;
+        counted work retains settlement and cleanup. Complete success requires SDK unlink, original device deletion
+        and the original callback/socket/private-store join. Failure after launch is uncertain, even if remote unlink
+        may have succeeded. Journal settlement and teardown result commit atomically. Startup recovery consumes the
+        same frozen evidence and projection, abandoning authorized work or marking launched work uncertain without
+        reconnect, deletion, success fabrication or redispatch. Terminal exact replay cannot create another attempt.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
@@ -17677,7 +17690,7 @@ platform_tables:
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             bundle_hash        TEXT NOT NULL,
-            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting')),
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting', 'channel_logout')),
             authority_id       TEXT NOT NULL,
             agent_run_id       UUID,
             agent_id           TEXT,
@@ -17701,10 +17714,10 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
+            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting', 'channel_logout') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
             CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),
-            CHECK ((authority_kind = 'normal_agent' AND agent_run_id IS NOT NULL AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind IN ('channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting') AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
+            CHECK ((authority_kind = 'normal_agent' AND agent_run_id IS NOT NULL AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind IN ('channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting', 'channel_logout') AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
             INDEX idx_runtime_external_effect_operations_authority (authority_kind, authority_id, created_at),
@@ -41884,6 +41897,16 @@ managed_external_effect_authority:
       principal, binding and connected activation plus its compiled coordinate. Provider acknowledgment does not
       decide a card or settle the inbound intent. A launched or uncertain acknowledgment never redispatches
       automatically; the canonical card mutation retains its own admission and idempotency authority.
+    channel_logout: >
+      Explicit session unlink consumes the exact reserved destructive responsibility and original live paired
+      RuntimeConnection, never confirmation, message-delivery, native-setting or business-tool authority. The journal
+      operation UUID derives solely from the teardown UUID; immutable authority binds principal, source, runtime,
+      frozen teardown revision and target fingerprint. Selected-store admission and launch require the original
+      operation to remain retired by that reservation and no executable activation of the connection. The actual
+      private SDK owner drains work before launch and sends at most one unlink. Settlement verifies original journal
+      evidence, not current execution authority, and atomically projects the retained teardown. Success requires
+      unlink, device deletion and complete original join evidence. Prelaunch failure retains pairing; launched failure
+      and startup recovery report uncertainty without another attempt, automatic reconnect or local force deletion.
     gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. Managed Claude CLI MCP tools/call requests MUST carry the provider-owned non-empty params._meta["claudecode/toolUseId"] call-occurrence coordinate. The gateway refines the preserved provider-turn identity with that coordinate and fails closed before executor admission when it is absent. JSON-RPC id, progressToken, method, tool name, arguments, and other request content are correlation or fingerprint evidence, never occurrence identity; identical sibling calls remain distinct while replay of one provider call remains stable across transport-correlation replacement.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
@@ -41941,7 +41964,7 @@ managed_external_effect_authority:
     launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and acknowledges terminal-target provider settlement when the last drain closes without rewriting the lifecycle cell. The original attempt's session grant is historical evidence, not authority to touch a replacement session. Recovery with an expired or replaced grant commits only permitted immutable evidence and exact-origin effects, never an agent_sessions timestamp, revision fact, conversation or provider head. Recovery may restore a bounded delivery or directive lease only for the exact still-open origin token/version while holding that origin's lifecycle row; any newer origin, foreign execution owner or identity mismatch fails closed. It does not reacquire a session grant to settle abandoned work. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
     channel_source_projection: >
-      Ordinary startup channel_delivery and channel_native_setting recovery loads exact original
+      Ordinary startup channel_delivery, channel_native_setting and channel_logout recovery loads exact original
       committed operation/attempt authority, execution coordinates and available observed evidence
       inside the journal transaction, then consumes the same typed settlement owners as foreground
       execution. Attempt/operation terminalization and required receipt/plan or native-setting
@@ -42047,6 +42070,7 @@ managed_external_effect_authority:
     channel_confirmation: [channel_confirmation]
     channel_delivery: [channel_delivery]
     channel_action_ack: [channel_action_ack]
+    channel_logout: [channel_logout_whatsapp]
     tool: [authored_http_tool, managed_credential, native_web_search]
     mcp: [mcp_tools_call_http, mcp_tools_call_stdio]
     native: [native_bash, native_read_file, native_write_file]
