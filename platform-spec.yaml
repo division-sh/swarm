@@ -1005,6 +1005,9 @@ contract_formats:
         of recipient kind; it never creates a second route or chooses a receiver.
         The native publication fence still checks the complete
         projected source-delivery partition; transferred evidence is not execution authority.
+        A terminal reply publication refusal retains the same canonical failure class
+        and detail in its pipeline receipt and dead letter. Reply-already-terminal
+        and stale-arrival refusals are not generic target or internal-construction failures.
         Ordinary and selected materialization consume the same exact captured-row
         projection and native readback. Prospective validation can admit reconstruction
         of the open-reply family only; it cannot discharge any other capability blocker.

@@ -40,7 +40,7 @@ func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *run
 	if failure.Empty() {
 		return nil
 	}
-	canonical := runtimefailures.Normalize(runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", nil), "eventbus", "resolve_delivery_target")
+	canonical := canonicalTargetDeliveryFailure(failure, nil).Failure
 	return &canonical
 }
 

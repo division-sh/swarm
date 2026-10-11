@@ -11,10 +11,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -162,6 +165,9 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	if !sourceIDs[incoming.ID] {
 		t.Fatal("original activity lost its exact source return row")
 	}
+	if nested {
+		proveTwoLevelExecutedReplyRefusals(t, h, selected, sourceRows)
+	}
 	loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 	owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 	options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
@@ -244,6 +250,52 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	afterRows, rowsErr := storetest.ReadReplyContextRecords(ctx, reader, catalogRuntimeRunID)
 	if err != nil || rowsErr != nil || !found || !reflect.DeepEqual(afterJournal, original) || !reflect.DeepEqual(afterRows, sourceRows) || calls.Load() != 1 || finished != 1 {
 		t.Fatalf("child redispatched, missed final return or changed source: calls=%d child_finished=%d source_found=%t errors=%v/%v", calls.Load(), finished, found, err, rowsErr)
+	}
+}
+
+func proveTwoLevelExecutedReplyRefusals(t *testing.T, h *runtimeHarness, owner interface {
+	bus.PreparedPublishEventReader
+	replycontext.Store
+}, rows []replycontext.Record) {
+	t.Helper()
+	for _, row := range rows {
+		accepted, found, err := owner.LoadPreparedPublishEvent(h.ctx, row.AcceptedReplyEventID)
+		if err != nil || !found {
+			t.Fatalf("refusal lacks its actual accepted publication: %+v found=%t error=%v", row, found, err)
+		}
+		for _, target := range rows {
+			name, wantClass, wantCode := "second/"+row.ProviderFlowID, failures.ClassReplyAlreadyTerminal, "reply_already_terminal"
+			if target.ID != row.ID {
+				name, wantClass, wantCode = "wrong_level/"+row.ProviderFlowID+"_to_"+target.ProviderFlowID, failures.ClassStaleArrival, "stale_arrival"
+			}
+			t.Run(name, func(t *testing.T) {
+				original := accepted.Event.Event()
+				event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), original.Type(), original.Producer(), "", original.Payload(), original.ChainDepth(),
+					events.LineageFromEvent(original), events.EnvelopeForSourceRoute(events.EventEnvelope{}, original.Envelope().Source), original.RoutingSource(), time.Now().UTC())
+				ctx, cancel := context.WithTimeout(events.WithDeliveryContext(h.ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: target.ID}}), 20*time.Second)
+				defer cancel()
+				// Execute publication and its durable terminal refusal, not a preview.
+				if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
+					t.Fatalf("publish the second/wrong-level response: %v", err)
+				}
+				stored, found, err := owner.LoadPreparedPublishEvent(ctx, event.ID())
+				if err != nil || !found || len(stored.DeliveryRoutes) != 0 {
+					t.Fatalf("refused response created executable recipients: %+v found=%t error=%v", stored, found, err)
+				}
+				receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, owner, event.ID())
+				count, countErr := storetest.CountDeadLettersForOriginalEvent(ctx, owner, event.ID())
+				var failure failures.Envelope
+				decodeErr := json.Unmarshal(receipt.Failure, &failure)
+				if err != nil || countErr != nil || decodeErr != nil || !receipt.Found || receipt.Outcome != "dead_letter" || failure.Class != wantClass || failure.Detail.Code != wantCode || count != 1 {
+					t.Fatalf("publication did not settle the exact refusal: outcome=%+v failure=%+v dead_letters=%d errors=%v/%v/%v want=%s/%s", receipt, failure, count, err, countErr, decodeErr, wantClass, wantCode)
+				}
+				after, err := storetest.ReadReplyContextRecords(ctx, owner, catalogRuntimeRunID)
+				finished, finishedErr := storetest.ReadLifecycleEventCardinality(ctx, owner, catalogRuntimeRunID, "request.finished")
+				if err != nil || finishedErr != nil || !reflect.DeepEqual(rows, after) || finished != 1 {
+					t.Fatalf("executed refusal changed a level or completed the requester again: finished=%d errors=%v/%v", finished, err, finishedErr)
+				}
+			})
+		}
 	}
 }
 
