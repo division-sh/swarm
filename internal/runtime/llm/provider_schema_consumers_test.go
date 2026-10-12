@@ -45,13 +45,14 @@ func testProviderSchemaHTTPConstructor(t *testing.T, responses bool) {
 	session := &Session{ID: "session", AgentID: "agent", SystemPrompt: "system", Tools: []ToolDefinition{
 		{Name: " inspect ", Description: " description ", Schema: schema},
 		{Name: "empty", Schema: nil},
+		{Name: "typed-nil", Schema: map[string]any(nil)},
 	}}
 	before := providerSchemaJSON(t, session.Tools)
 	request, err := build(session, Message{Role: "user", Content: "hello"}, " model ")
 	requireProviderSchemaError(t, err, "")
-	want := `{"model":"model","messages":[{"role":"system","content":"system"},{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}}},{"type":"function","function":{"name":"empty","parameters":{"properties":{},"type":"object"}}}]}`
+	want := `{"model":"model","messages":[{"role":"system","content":"system"},{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}}},{"type":"function","function":{"name":"empty","parameters":{"properties":{},"type":"object"}}},{"type":"function","function":{"name":"typed-nil","parameters":null}}]}`
 	if responses {
-		want = `{"model":"model","instructions":"system","input":[{"role":"user","content":"hello"}],"tools":[{"type":"function","name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}},{"type":"function","name":"empty","parameters":{"properties":{},"type":"object"}}]}`
+		want = `{"model":"model","instructions":"system","input":[{"role":"user","content":"hello"}],"tools":[{"type":"function","name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}},{"type":"function","name":"empty","parameters":{"properties":{},"type":"object"}},{"type":"function","name":"typed-nil","parameters":null}]}`
 	}
 	if got := providerSchemaJSON(t, request); got != want {
 		t.Fatalf("request bytes = %s, want %s", got, want)
@@ -66,7 +67,7 @@ func testProviderSchemaHTTPConstructor(t *testing.T, responses bool) {
 	wantError := "provider tool schema first: first.input_schema.properties.a.type has unsupported JSON Schema type \"bad\""
 	_, err = build(session, Message{Role: "user", Content: "hello"}, "")
 	requireProviderSchemaError(t, err, wantError)
-	// Execute the real continuation up to schema admission, not just its builder.
+	// Execute the real continuation up to schema admission, not just construction.
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent", Model: "regular"})
 	if responses {
 		_, err = responseRuntime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
