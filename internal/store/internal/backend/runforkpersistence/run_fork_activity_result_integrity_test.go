@@ -122,7 +122,7 @@ func TestPhysicalActivityResultImmediateSourceIntegrityBothStores(t *testing.T) 
 								if err != nil {
 									t.Fatal(err)
 								}
-								err = requireActivityPublicationCutLineage(context.Background(), tx, binding, physical, parent, reference)
+								err = requireSelectedPublicationCutLineage(context.Background(), tx, binding, physical, parent, reference)
 								_ = tx.Rollback()
 								if fault != "missing_lineage" {
 									if _, deleteErr := db.Exec(`DELETE FROM run_fork_selected_contract_executions WHERE fork_run_id=$1`, binding.ForkRunID); deleteErr != nil {

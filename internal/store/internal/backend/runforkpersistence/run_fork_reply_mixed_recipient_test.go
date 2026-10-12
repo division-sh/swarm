@@ -1,6 +1,7 @@
 package runforkpersistence
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -88,7 +89,7 @@ func TestIssue642SettledReplyDoesNotBlockOtherPendingRecipient(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := projectionJSON(t, snapshot)
-			got, err := capturedRunForkRequestReplies(snapshot, eventID)
+			got, err := capturedRunForkRequestReplies(context.Background(), nil, snapshot, eventID)
 			if fault == "pending_terminal_reply" {
 				if err == nil {
 					t.Fatal("actual pending request execution accepted a terminal reply")
@@ -109,7 +110,7 @@ func TestIssue642NativeRequestPartitionIncludesOnlyUnfinishedRecipients(t *testi
 			snapshot, eventID, child, _, routes := mixedRequestRecipientFixture(t)
 			snapshot.Deliveries[0].Snapshot.Status = status
 			before := projectionJSON(t, snapshot)
-			partitions, err := requestPendingPublications(snapshot)
+			partitions, err := requestPendingPublications(context.Background(), nil, snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -130,7 +131,7 @@ func TestIssue642NativeRequestPartitionIncludesOnlyUnfinishedRecipients(t *testi
 				}
 			}
 			if snapshot.Deliveries[0].Snapshot.Terminal() {
-				projected, err := projectContinuedRequestSourceRoutes(snapshot, eventID, child)
+				projected, err := projectContinuedRequestSourceRoutes(context.Background(), nil, snapshot, eventID, child)
 				if err != nil || !reflect.DeepEqual(projected, routes[1:]) {
 					t.Fatalf("non-reply observer projection changed: %+v error=%v", projected, err)
 				}

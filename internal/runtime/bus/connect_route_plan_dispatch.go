@@ -102,6 +102,7 @@ type connectRoutePlanDispatch struct {
 	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
 	ReplyCreations       []runtimereplycontext.Record
 	ReplyContinuations   []runtimepinrouting.ReplyRequestContinuation
+	ReplyReturns         []runtimepinrouting.ReplyReturnContinuation
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
@@ -282,9 +283,11 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			replyContextConsumed = true
 			if claim != nil {
 				out.ReplyClaims = append(out.ReplyClaims, *claim)
+			} else {
+				out.ReplyReturns = append(out.ReplyReturns, runtimepinrouting.ReplyReturnContinuation{Record: replyRecord, Plan: plan})
 			}
 			receiverEvent := plan.ReceiverLocalEvent()
-			intents, err := routePlanDeliveryIntentsFromConnectRoutes(evt.RunID(), routes, routeIntentProducerConnectRoutePlan, receiverEvent)
+			intents, err := replyResponseDeliveryIntents(evt.RunID(), plan, routes, receiverEvent)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
@@ -424,6 +427,21 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	return out, nil
 }
 
+func replyResponseDeliveryIntents(runID string, plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute, receiverEvent events.EventType) ([]RoutePlanDeliveryIntent, error) {
+	identity, err := runtimepinrouting.ConnectPlanIdentity(plan)
+	if err != nil {
+		return nil, err
+	}
+	intents, err := routePlanDeliveryIntentsFromConnectRoutes(runID, routes, routeIntentProducerConnectRoutePlan, receiverEvent)
+	if err != nil {
+		return nil, err
+	}
+	for i := range intents {
+		intents[i].ConnectPlan = identity
+	}
+	return intents, nil
+}
+
 func stampConnectExecutionClaims(plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute) ([]runtimepinrouting.ConnectDeliveryRoute, error) {
 	for index := range routes {
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, routes[index])
@@ -530,7 +548,11 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	}
 	claimed := record
 	outcome := runtimereplycontext.ClaimAccepted
-	if templateInstanceLifecyclePreview(ctx) {
+	retained, err := selectedForkReplyReturn(ctx, evt, record)
+	if err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+	if !retained && templateInstanceLifecyclePreview(ctx) {
 		if record.State == runtimereplycontext.StateTerminal {
 			if record.AcceptedReplyEventID == evt.ID() {
 				outcome = runtimereplycontext.ClaimIdempotent
@@ -544,9 +566,13 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		detail["accepted_reply_event_id"] = claimed.AcceptedReplyEventID
 		return nil, nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil
 	}
-	claim := runtimereplycontext.ClaimCommand{Expected: record, ReplyEventID: evt.ID()}.Normalized()
-	if err := claim.Validate(); err != nil {
-		return nil, nil, nil, 0, nil, err
+	var claim *runtimereplycontext.ClaimCommand
+	if !retained {
+		command := runtimereplycontext.ClaimCommand{Expected: record, ReplyEventID: evt.ID()}.Normalized()
+		if err := command.Validate(); err != nil {
+			return nil, nil, nil, 0, nil, err
+		}
+		claim = &command
 	}
 	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
@@ -594,7 +620,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	detail["request_event_id"] = record.RequestEventID
 	detail["request_correlation_id"] = record.RequestCorrelationID
 	detail["reply_claim_outcome"] = outcome
-	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), &claim, 0, detail, nil
+	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), claim, 0, detail, nil
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {

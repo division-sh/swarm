@@ -218,6 +218,7 @@ type RoutePlan struct {
 	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
 	ReplyCreations       []runtimereplycontext.Record
 	ReplyContinuations   []runtimepinrouting.ReplyRequestContinuation
+	ReplyReturns         []runtimepinrouting.ReplyReturnContinuation
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences  []runtimepipeline.WorkflowJoinAdmissionFence
 }
@@ -363,6 +364,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), p.ActivationPlans...)
 	p.ReplyCreations = append([]runtimereplycontext.Record(nil), p.ReplyCreations...)
 	p.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), p.ReplyContinuations...)
+	p.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), p.ReplyReturns...)
 	p.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), p.ReplyClaims...)
 	p.ContradictionReason = strings.TrimSpace(p.ContradictionReason)
 	if p.CycleEscalation != nil {
@@ -380,6 +382,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 		p.ActivationPlans = nil
 		p.ReplyCreations = nil
 		p.ReplyContinuations = nil
+		p.ReplyReturns = nil
 		p.ReplyClaims = nil
 	}
 	return p

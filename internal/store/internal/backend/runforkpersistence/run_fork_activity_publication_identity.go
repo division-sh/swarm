@@ -119,7 +119,7 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	if err != nil {
 		return events.Event{}, false, err
 	}
-	if err := requireActivityPublicationCutLineage(ctx, tx, binding, physical, previous, reference); err != nil {
+	if err := requireSelectedPublicationCutLineage(ctx, tx, binding, physical, previous, reference); err != nil {
 		return events.Event{}, false, err
 	}
 	if err := pipeline.ValidateSelectedActivityResultPayload(request, physical); err != nil {
@@ -128,7 +128,7 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	return physical, true, nil
 }
 
-func requireActivityPublicationCutLineage(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, physical, parent events.Event, reference *loopruntime.ForkChildReference) error {
+func requireSelectedPublicationCutLineage(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, physical, parent events.Event, reference *loopruntime.ForkChildReference) error {
 	lineage, selected := physical.SelectedForkLineage()
 	if !selected || lineage.SourceRunID() != binding.SourceRunID || lineage.SourceEventID() != parent.ID() ||
 		physical.RunID() != binding.ForkRunID || parent.RunID() != binding.SourceRunID || physical.Type() != parent.Type() || physical.ExecutionMode() != parent.ExecutionMode() {

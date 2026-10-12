@@ -326,6 +326,39 @@ func requireOpenReplyContinuation(expected, actual runtimereplycontext.Record) e
 	return actual.ValidateContinuationFrom(expected, expected.CreatedAt)
 }
 
+func (s *ReplyPostgresOwner) RequireTerminalWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("retained return requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadPostgresReplyContext(ctx, tx, expected.ID, true)
+		if err != nil {
+			return err
+		}
+		return requireTerminalReplyContinuation(expected, actual)
+	})
+}
+
+func (s *ReplySQLiteOwner) RequireTerminalWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("retained return requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadSQLiteReplyContext(ctx, tx, expected.ID)
+		if err != nil {
+			return err
+		}
+		return requireTerminalReplyContinuation(expected, actual)
+	})
+}
+
+func requireTerminalReplyContinuation(expected, actual runtimereplycontext.Record) error {
+	if expected.State != runtimereplycontext.StateTerminal || actual.State != runtimereplycontext.StateTerminal {
+		return fmt.Errorf("retained return requires its existing terminal obligation")
+	}
+	return actual.ValidateContinuationFrom(expected, expected.CreatedAt)
+}
+
 func (s *ReplyPostgresOwner) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
 	type claimResult struct {
 		record  runtimereplycontext.Record

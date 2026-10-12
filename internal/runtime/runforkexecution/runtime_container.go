@@ -807,7 +807,7 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 	if err != nil {
 		return nil, err
 	}
-	if !continuing && !request && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 {
+	if !continuing && !request && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 && source.ContinuedReplyReturn == nil {
 		return ctx, nil
 	}
 	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {
@@ -821,6 +821,9 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 	}
 	if len(source.ContinuedReplyRequests) != 0 {
 		return runtimebus.WithSelectedForkRequestReplies(ctx, event, source.ContinuedReplyRequests)
+	}
+	if source.ContinuedReplyReturn != nil {
+		return runtimebus.WithSelectedForkReplyReturn(ctx, event, *source.ContinuedReplyReturn)
 	}
 	return ctx, nil
 }

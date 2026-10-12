@@ -194,7 +194,7 @@ func (a runForkSourceStateAdmission) admitInheritedActivityResultAtCut(ctx conte
 	}
 	// A result can be committed before the inherited request is published in
 	// this child. Its exact earlier binding, never later history, owns identity.
-	if err := requireActivityPublicationCutLineage(ctx, tx, binding, result, previous, reference); err != nil {
+	if err := requireSelectedPublicationCutLineage(ctx, tx, binding, result, previous, reference); err != nil {
 		return generation, false, err
 	}
 	if reference != nil {

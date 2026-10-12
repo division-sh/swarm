@@ -37,7 +37,7 @@ import (
 
 type selectedForkLineageOwner interface {
 	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
-	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute, []pinrouting.ReplyRequestContinuation) error
+	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute, []pinrouting.ReplyRequestContinuation, []pinrouting.ReplyReturnContinuation) error
 	RequireSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
 
@@ -335,6 +335,14 @@ func (s *EventPostgresOwner) requireReplyContextContinuationTx(ctx context.Conte
 
 func (s *EventSQLiteOwner) requireReplyContextContinuationTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
 	return s.ReplySQLiteOwner.RequireOpenWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventPostgresOwner) requireReplyContextReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.RequireTerminalWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventSQLiteOwner) requireReplyContextReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.RequireTerminalWithinTransaction(ctx, attempt, record)
 }
 
 func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {

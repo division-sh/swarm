@@ -497,11 +497,15 @@ type CommitPublishRequest struct {
 	DeadLetter          *runtimedeadletters.Record
 	ReplyCreations      []runtimereplycontext.Record
 	ReplyContinuations  []runtimepinrouting.ReplyRequestContinuation
+	ReplyReturns        []runtimepinrouting.ReplyReturnContinuation
 	ReplyClaims         []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	if err := r.validateReplyReturns(); err != nil {
+		return err
+	}
 	if err := r.validateReplyContinuations(); err != nil {
 		return err
 	}
@@ -518,6 +522,28 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 		Settlement:     r.RouteSettlement,
 		DeliveryRoutes: r.DeliveryRoutes,
 	}).Validate()
+}
+
+func (r CommitPublishRequest) validateReplyReturns() error {
+	if len(r.ReplyReturns) == 0 {
+		return nil
+	}
+	if r.Event.Class() != events.EventAdmissionSelectedForkReplay || len(r.ReplyCreations) != 0 || len(r.ReplyClaims) != 0 || len(r.ReplyContinuations) != 0 || len(r.ReplyReturns) != 1 {
+		return fmt.Errorf("retained return requires one selected terminal obligation without a new claim")
+	}
+	continuation := r.ReplyReturns[0]
+	if err := continuation.Validate(); err != nil {
+		return err
+	}
+	if continuation.Record.RunID != r.Event.Event().RunID() {
+		return fmt.Errorf("retained return has foreign context ownership")
+	}
+	for _, route := range r.DeliveryRoutes {
+		if route.Target.Route() == continuation.Record.Origin {
+			return nil
+		}
+	}
+	return fmt.Errorf("retained return lacks its context-owned recipient")
 }
 
 func (r CommitPublishRequest) validateReplyContinuations() error {

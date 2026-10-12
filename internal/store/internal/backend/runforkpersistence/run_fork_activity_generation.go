@@ -366,13 +366,26 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 
 func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
 	var err error
-	projected.ContinuedReplyRequests, err = a.projectRequestReplies(source.SourceEventID)
+	projected.ContinuedReplyRequests, err = a.projectRequestReplies(ctx, tx, source.SourceEventID)
 	if err != nil {
 		return projected, err
 	}
-	projected.ContinuedRecipientRoutes, err = projectContinuedSourceRecipientRoutes(a.snapshot, source.SourceEventID, a.forkRunID, projected.ContinuedReplyRequests)
+	projected.ContinuedRecipientRoutes, err = projectContinuedSourceRecipientRoutes(ctx, tx, a.snapshot, source.SourceEventID, a.forkRunID, projected.ContinuedReplyRequests)
 	if err != nil {
 		return projected, err
+	}
+	projected.ContinuedReplyReturn, err = a.projectReplyReturn(ctx, tx, source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if projected.ContinuedReplyReturn != nil {
+		if len(projected.ContinuedReplyRequests) != 0 {
+			return projected, fmt.Errorf("source publication has competing request and accepted-return ownership")
+		}
+		projected.ContinuedRecipientRoutes, err = projectReplyReturnRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
+		if err != nil {
+			return projected, err
+		}
 	}
 	activityRoutes, activityResult, err := a.publishedActivityResultRoutes(ctx, tx, source.SourceEventID)
 	if err != nil {
@@ -380,7 +393,9 @@ func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.C
 	}
 	if activityResult {
 		if len(projected.ContinuedRecipientRoutes) != 0 {
-			return projected, fmt.Errorf("activity result has competing fan-out continuation ownership")
+			if err := requireExactRunForkRequestRoutes(projected.ContinuedRecipientRoutes, activityRoutes); err != nil {
+				return projected, fmt.Errorf("activity result has competing recipient continuation ownership: %w", err)
+			}
 		}
 		projected.ContinuedRecipientRoutes = activityRoutes
 	}

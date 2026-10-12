@@ -80,11 +80,14 @@ func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, wan
 	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres)
 }
 
-func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) error {
+func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, true); err != nil {
+			return err
+		}
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true); err != nil {
 			return err
 		}
@@ -98,11 +101,14 @@ func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context
 	})
 }
 
-func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) error {
+func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, false); err != nil {
+			return err
+		}
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false); err != nil {
 			return err
 		}

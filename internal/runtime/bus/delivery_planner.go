@@ -462,6 +462,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	routePlan.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), connectPlan.ActivationPlans...)
 	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
 	routePlan.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), connectPlan.ReplyContinuations...)
+	routePlan.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), connectPlan.ReplyReturns...)
 	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
 	return routePlan.Normalized()
 }

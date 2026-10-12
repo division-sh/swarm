@@ -14,11 +14,13 @@ import (
 // This is a narrowed resolution input, not execution authority. The selected
 // owner and final exact recipient guard remain required for publication.
 type selectedForkRecipientPlan struct {
-	eventID    string
-	lineage    events.SelectedForkLineage
-	recipients []forkrecipient.Evidence
-	contexts   map[events.DeliveryRouteIdentity]events.DeliveryContext
-	requests   []replycontext.Record
+	eventID      string
+	lineage      events.SelectedForkLineage
+	recipients   []forkrecipient.Evidence
+	contexts     map[events.DeliveryRouteIdentity]events.DeliveryContext
+	requests     []replycontext.Record
+	returnReply  *replycontext.Record
+	returnRoutes []events.DeliveryRoute
 }
 
 type selectedForkRecipientPlanKey struct{}
@@ -48,7 +50,7 @@ func WithSelectedForkRequestReplies(ctx context.Context, event events.Event, rec
 		return nil, err
 	}
 	plan, ok := selectedForkRecipientPlanFromContext(ctx, event)
-	if !ok || len(records) == 0 || plan.requests != nil {
+	if !ok || len(records) == 0 || plan.requests != nil || plan.returnReply != nil {
 		return nil, fmt.Errorf("inherited request requires its exact unfinished publication scope")
 	}
 	seen := make(map[string]bool, len(records))
@@ -92,6 +94,43 @@ func selectedForkRequestReply(ctx context.Context, event events.Event, draft rep
 	return matched, true, nil
 }
 
+func WithSelectedForkReplyReturn(ctx context.Context, event events.Event, record replycontext.Record) (context.Context, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	plan, ok := selectedForkRecipientPlanFromContext(ctx, event)
+	if !ok || plan.returnReply != nil || len(plan.requests) != 0 {
+		return nil, fmt.Errorf("retained return requires its exact unfinished publication scope")
+	}
+	if err := record.ValidateContinuationFrom(record, record.CreatedAt); err != nil {
+		return nil, err
+	}
+	if record.RunID != event.RunID() || record.State != replycontext.StateTerminal {
+		return nil, fmt.Errorf("retained return requires its own terminal child context")
+	}
+	record = record.Normalized()
+	plan.returnReply = &record
+	ctx = context.WithValue(ctx, selectedForkRecipientPlanKey{}, plan)
+	return events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}), nil
+}
+
+func selectedForkReplyReturn(ctx context.Context, event events.Event, record replycontext.Record) (bool, error) {
+	plan, selected := selectedForkRecipientPlanFromContext(ctx, event)
+	if !selected || plan.returnReply == nil {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if record.State != replycontext.StateTerminal {
+		return false, fmt.Errorf("retained return lost its terminal child context")
+	}
+	if err := record.ValidateContinuationFrom(*plan.returnReply, plan.returnReply.CreatedAt); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Captured context is data, not recipient or execution authority. Resolution
 // must produce the same exact routes before this owner can restore their context.
 func WithSelectedForkRecipientContexts(ctx context.Context, event events.Event, routes []events.DeliveryRoute) (context.Context, error) {
@@ -109,6 +148,9 @@ func WithSelectedForkRecipientContexts(ctx context.Context, event events.Event, 
 		return nil, err
 	}
 	plan.contexts = make(map[events.DeliveryRouteIdentity]events.DeliveryContext, len(routes))
+	if plan.returnReply != nil {
+		plan.returnRoutes = append([]events.DeliveryRoute(nil), routes...)
+	}
 	for _, route := range routes {
 		key, err := selectedForkContextRouteIdentity(route)
 		if err != nil {
@@ -136,6 +178,13 @@ func restoreSelectedForkRecipientContexts(ctx context.Context, event events.Even
 		return routes, nil
 	}
 	routes = routes.Normalized()
+	if selected.returnReply != nil {
+		contexts, err := selectedForkReturnContexts(selected, routes.ReplyReturns)
+		if err != nil {
+			return RoutePlan{}, err
+		}
+		selected.contexts = contexts
+	}
 	seen := make(map[events.DeliveryRouteIdentity]bool, len(selected.contexts))
 	for i, intent := range routes.DeliveryIntents {
 		if !intent.Persist {
@@ -156,6 +205,31 @@ func restoreSelectedForkRecipientContexts(ctx context.Context, event events.Even
 		return RoutePlan{}, fmt.Errorf("selected receiver context is missing a resolved recipient")
 	}
 	return routes.Normalized(), nil
+}
+
+func selectedForkReturnContexts(selected selectedForkRecipientPlan, returns []pinrouting.ReplyReturnContinuation) (map[events.DeliveryRouteIdentity]events.DeliveryContext, error) {
+	if len(returns) != 1 || returns[0].Validate() != nil || returns[0].Record.ValidateContinuationFrom(*selected.returnReply, selected.returnReply.CreatedAt) != nil {
+		return nil, fmt.Errorf("retained return context restoration lacks its exact response plan")
+	}
+	contexts := make(map[events.DeliveryRouteIdentity]events.DeliveryContext, len(selected.returnRoutes))
+	for _, route := range selected.returnRoutes {
+		if route.Target.Route() == selected.returnReply.Origin {
+			claim, err := returns[0].ClaimForDelivery(route)
+			if err != nil {
+				return nil, err
+			}
+			route.ConnectClaim = claim
+		}
+		key, err := selectedForkContextRouteIdentity(route)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := contexts[key]; duplicate {
+			return nil, fmt.Errorf("retained return has duplicate projected recipient claims")
+		}
+		contexts[key] = route.Context.Normalized()
+	}
+	return contexts, nil
 }
 
 func (p selectedForkRecipientPlan) allows(actual forkrecipient.Evidence) bool {

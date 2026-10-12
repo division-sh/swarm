@@ -203,6 +203,7 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 				if !reflect.DeepEqual(terminal, childRows[0]) {
 					t.Fatal("ordinary observer reopened or changed settled reply history")
 				}
+				proveMixedRequestObserverOnlyReforkPartition(t, wait, selected, staged.ForkRunID, inputID)
 			} else {
 				returned, found, err := selected.LoadPreparedPublishEvent(wait, terminal.AcceptedReplyEventID)
 				if err != nil || !found || len(returned.DeliveryRoutes) != 1 || returned.DeliveryRoutes[0].Target.Route() != terminal.Origin {
@@ -219,6 +220,23 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 				t.Fatalf("mixed child publication rewrote source domain: %v", err)
 			}
 		})
+	}
+}
+
+func proveMixedRequestObserverOnlyReforkPartition(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, child, inputID string) {
+	t.Helper()
+	publication, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
+	if err != nil || !found || len(publication.DeliveryRoutes) != 1 || publication.DeliveryRoutes[0].Context.ReplyContextID() != "" {
+		t.Fatalf("refork source invented a provider or reply ref: publication=%+v found=%t error=%v", publication, found, err)
+	}
+	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: child, At: inputID})
+	if err != nil {
+		t.Fatalf("native observer-only refork planning: %v", err)
+	}
+	partition, present, err := plan.RequestPendingRecipientPartition(inputID)
+	id, idErr := deliverylifecycle.DeliveryID(inputID, publication.DeliveryRoutes[0])
+	if err != nil || idErr != nil || !present || len(partition) != 1 || partition[0] != id {
+		t.Fatalf("native physical refork lost exact observer: partition=%v present=%t error=%v/%v", partition, present, err, idErr)
 	}
 }
 

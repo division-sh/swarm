@@ -241,7 +241,7 @@ func planRunForkSnapshot(
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
-	requests, err := requestPendingPublications(snapshot)
+	requests, err := requestPendingPublications(ctx, tx, snapshot)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
