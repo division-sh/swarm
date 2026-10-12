@@ -2,14 +2,13 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConnection(t *testing.T) {
@@ -17,10 +16,10 @@ func TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConn
 }
 
 func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	db.SetMaxOpenConns(1)
+	selected := storetest.StartPostgresRuntimeStore(t)
+	if err := storetest.LimitPostgresAdministrativeFixturePool(context.Background(), selected); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	capability := acquireAdministrativeResetCapability(t, selected)
@@ -43,10 +42,20 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 		_, err := executeRuntimeNuke(ctx, req, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC())
 		result <- err
 	}()
+	joined := false
+	defer func() {
+		cancel()
+		external.release()
+		if !joined {
+			<-result
+		}
+	}()
 	external.waitUntilBlocked(t, ctx)
-	assertAdministrativeUnrelatedQueryProgresses(t, ctx, db)
+	assertAdministrativeUnrelatedQueryProgresses(t, ctx, selected)
 	external.release()
-	if err := <-result; err != nil {
+	err := <-result
+	joined = true
+	if err != nil {
 		t.Fatalf("runtime.nuke layered execution: %v", err)
 	}
 	if _, err := executeRuntimeNuke(ctx, req, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC()); err != nil {
@@ -58,7 +67,7 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	if err := capability.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertAdministrativeCapacityReleased(t, db)
+	assertAdministrativeCapacityReleased(t, selected)
 }
 
 type blockingAdministrativeExternalWork struct {
@@ -117,12 +126,12 @@ func (w *blockingAdministrativeExternalWork) release() {
 	}
 }
 
-func assertAdministrativeUnrelatedQueryProgresses(t *testing.T, ctx context.Context, db *sql.DB) {
+func assertAdministrativeUnrelatedQueryProgresses(t *testing.T, ctx context.Context, selected any) {
 	t.Helper()
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	var value int
-	if err := db.QueryRowContext(queryCtx, `SELECT 1`).Scan(&value); err != nil {
+	value, err := storetest.ReadPostgresAdministrativeUnrelatedProgress(queryCtx, selected)
+	if err != nil {
 		t.Fatalf("unrelated database work while external work is blocked: %v", err)
 	}
 	if value != 1 {
@@ -130,47 +139,57 @@ func assertAdministrativeUnrelatedQueryProgresses(t *testing.T, ctx context.Cont
 	}
 }
 
-func assertAdministrativeCapacityReleased(t *testing.T, db *sql.DB) {
+func assertAdministrativeCapacityReleased(t *testing.T, selected any) {
 	t.Helper()
-	if got := db.Stats().MaxOpenConnections; got != 1 {
+	if got := storetest.ObserveSelectedPool(t, selected).MaxOpenConnections; got != 1 {
 		t.Fatalf("administrative retained capacity after completion = %d, want 1", got)
 	}
 }
 
 func TestAdministrativeLeaseDoesNotBorrowSurroundingTransaction(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	db.SetMaxOpenConns(1)
+	selected := storetest.StartPostgresRuntimeStore(t)
+	if err := storetest.LimitPostgresAdministrativeFixturePool(context.Background(), selected); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tx, err := db.BeginTx(ctx, nil)
+	surrounding, err := storetest.HoldPostgresAdministrativeSurroundingRead(ctx, selected)
 	if err != nil {
 		t.Fatalf("begin surrounding transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := surrounding.Close(); err != nil {
+			t.Errorf("join surrounding transaction rollback: %v", err)
+		}
+	}()
 	lease, acquired, err := selected.AcquireDestructiveReset(ctx)
 	if err != nil || !acquired || lease == nil {
 		t.Fatalf("acquire operation lease with surrounding transaction: lease=%v acquired=%v err=%v", lease, acquired, err)
 	}
-	if err := lease.Release(ctx); err != nil {
+	release := sync.OnceValue(func() error { return lease.Release(ctx) })
+	defer func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := release(); err != nil {
 		t.Fatalf("release exact operation lease session: %v", err)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT 1`).Scan(new(int)); err != nil {
+	if _, err := surrounding.ReadAfterLeaseRelease(ctx); err != nil {
 		t.Fatalf("surrounding transaction after lease release: %v", err)
 	}
-	if got := db.Stats().MaxOpenConnections; got != 1 {
+	if got := storetest.ObserveSelectedPool(t, selected).MaxOpenConnections; got != 1 {
 		t.Fatalf("capacity after exact lease release = %d, want 1", got)
 	}
 }
 
 func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.T) {
 	t.Run("runtime nuke", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
-		db.SetMaxOpenConns(1)
+		selected := storetest.StartPostgresRuntimeStore(t)
+		if err := storetest.LimitPostgresAdministrativeFixturePool(context.Background(), selected); err != nil {
+			t.Fatal(err)
+		}
 		capability := acquireAdministrativeResetCapability(t, selected)
 
 		external := newBlockingAdministrativeExternalWork()
@@ -191,11 +210,21 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 			}, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC())
 			result <- err
 		}()
+		joined := false
+		defer func() {
+			cancel()
+			external.release()
+			if !joined {
+				<-result
+			}
+		}()
 		blockedCtx, blockedCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer blockedCancel()
 		external.waitUntilBlocked(t, blockedCtx)
 		cancel()
-		if err := <-result; !errors.Is(err, context.Canceled) {
+		err := <-result
+		joined = true
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("runtime.nuke cancellation error = %v, want context canceled", err)
 		}
 		if count := countAPIIdempotencyRows(t, selected); count != 0 {
@@ -204,7 +233,7 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 		if err := capability.Release(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		assertAdministrativeCapacityReleased(t, db)
+		assertAdministrativeCapacityReleased(t, selected)
 		leaseCtx, leaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer leaseCancel()
 		lease, acquired, err := selected.AcquireDestructiveReset(leaseCtx)

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 354 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "90078d7f436f7a59dfa6baebf5dfdbd16386718fad3d961186a4e9e076dc1338" {
+	if err != nil || len(rows) != 359 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "69cfca9a9489ca3116c95820a1cd5257d5d32b34261aaabfe783c67a069e0086" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -139,6 +139,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration" {
 			if err := family145ResetCompletionProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145AdministrativeLayeringCuts[row.Function]; ok {
+			if err := family145AdministrativeLayeringProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

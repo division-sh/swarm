@@ -3179,3 +3179,64 @@ No production reset lifecycle, source admission, cache TTL or cleanup catalog
 changes. Broader #2542/#2151, M01/Docker/drain/D3/M07/rollback holds stay open;
 existing watchlist/architecture disposition needs no new node or issue. No push,
 PR, server2, tier/full, budget/timeout raise, compatibility path or new framework.
+
+### Complete Administrative Pool And Surrounding-Transaction Dependency
+
+All three remaining supplied-pool entries in operator_administrative_layering
+and their two shared scalar/capacity helpers now consume the existing native
+PostgreSQL construction, pool/capacity and transaction owners. The complete file
+has no pool, getter, SQL, borrowed transaction, transaction-context protocol or
+reconstructed coordinator. Its actual process capability, destructive-reset
+coordinator/planner/quiescer/cleaner, blocking external-work collaborator and
+idempotency owner remain unchanged. The real surrounding transaction is not
+replaced by a value stub, earlier refusal, synthetic lease or fresh authority.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native location constructor and original PostgreSQL pool owner | All three openings use StartPostgresRuntimeStore at their original opening point. The fixed setup changes ONLY MaxOpenConnections to1, preserving original idle/base policy. It refuses existing reservations and active connection work before probing the pool; neither constructing another backend nor resizing a live lease is permitted. Existing ObserveSelectedPool owns detached physical stats. |
+| Original independent pool read | The blocked-external-work helper queries exactly SELECT1 through the same pool with the original nested2s context, retaining actual result=1 and error assertions. It is not a ping-only substitution or borrowed administrative/transaction session. |
+| Original native transaction coordinator | One actual default-options transaction starts before the real AcquireDestructiveReset and remains live until after exact lease.Release. Its fixed SELECT1 uses the original cancellable caller context, not the drained writer SQL context. Opaque verification exposes only a scalar/error; Close joins the exact rollback and releases its connection, never commits. Physical pool/transaction counters prove independent lease capacity and preservation of the surrounding transaction. |
+| Existing joined native cleanup | Close is concurrent/idempotent and rejects post-close or cancelled evidence even if verification already produced a value. Only the exact private rollback marker or native cancellation/marker pair is stripped; unexpected or additional rollback/connection errors remain visible. Both external-work tests cancel/release and drain the launched result on assertion failure before capability/store teardown. Real lease release occurs once at the original pre-verification cut and remains cleanup-safe. |
+| Finite source/caller/SQL/assertion controls | Five complete function transitions preserve every original assertion, phase, actual lease/capacity call and10s/5s/2s bound. Two existing cardinality recipes gain exact Successors; three new rows make1173 recipes,359 transitions, with historical Before/After and24 mechanical receipts unchanged. Both original SELECT1 statements are compared exactly; complete file raw-escape absence and each owner/context/window/query/cleanup cut have hostile controls. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Idempotency lease plus blocked external reset leaves unrelated one-slot pool work possible and restores capacity | reproduced and fixed: TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConnection, original PostgreSQL scope under race, first/updated three-root aggregates9.377s/8.871s |
+| Real operation lease does not borrow or settle a surrounding transaction | reproduced and fixed: TestAdministrativeLeaseDoesNotBorrowSurroundingTransaction, original PostgreSQL root under race; original assertions retained, final caller-context aggregate7.736s |
+| Cancellation joins reset work, leaves no API receipt, restores capacity and permits reacquisition | reproduced and fixed: TestAdministrativeOperationCancellationReleasesLeaseAndCapacity, original PostgreSQL root under race in those same aggregates; no cancellation or correctness assertion waived |
+| Foreign/raw/typed-nil/cancelled/closed/uninitialized owners supply no scope or evidence | execution-proven through the same corrected path: TestAdministrativeLayeringPortsRefuseForeignCancelledAndClosedOwners, native PG and foreign SQLite under race |
+| One real pool/transaction across independent lease ownership and eight concurrent closes | execution-proven through the same corrected path: TestAdministrativeSurroundingReadPreservesExactNativePoolAndJoinedRollback, selected pool1 ->2 ->1, InUse1 ->2 ->1 ->0, begun1/active0/write-commits0 and no successful post-close receipt |
+| Cancellation and close before verification still join native rollback; extra cleanup errors stay visible | execution-proven through the same corrected path: TestAdministrativeSurroundingReadCancellationAndEarlyCloseJoinNativeOwner and TestAdministrativeSurroundingCleanupPreservesEveryUnexpectedNativeError, both cuts plus six exact error cases under race |
+| Whole helper/caller chain, original SQL/contexts/times, capacity and lifetime assertions | execution-proven through the same corrected path: TestFamily145AdministrativeLayeringEntireChainKeepsCapacityAndLifetimeAssertions with original-condition/native-cut hostile controls; final original-context/source controls PASS0.036s |
+
+The first owner run is explicitly ABORTED/RED: a new hostile retained-capacity
+control exposed this implementation's initial ping-before-reservation check.
+At both occupied slots the ping waited for capacity. Only the owned test process
+was stopped with SIGQUIT; its receipt pins DB.conn ->PingContext ->the new limit
+port, not pressure or an inherited flake. The repaired pre-probe refusal and all
+owner roots then passed under race11.613s. Final cancellation/zero-value/unknown-
+cleanup controls PASS12.173s(storetest) and1.028s(private error controls). The
+first finite source control RED0.022s only because the once-only release callback
+was canonicalized multiline; its exact source spelling was corrected, not its
+release context or semantics. Complete family145/historical/finite/idempotency/
+rename controls PASS9.304s; the final original caller-context/source receipt
+PASS0.036s. Final affected native lifetime executions are recorded in the
+preserved-query-context receipt; only those changed paths were rerun.
+
+Code inspection also preserved the original query context explicitly rather
+than using the native writer's drained SQL context. Only affected lifetime roots
+were rerun; unrelated healthy/cancellation and location receipts carry. Boundary/
+event/delivery/lifecycle/revision/writer guards PASS3.427s, retirement5.338s,
+affected U1000 clean and dry-run Changes=[]. Downward ratchet PASS145.550s
+removed29/added0:8869 ->8840, confirmed raw-operation debt6389 ->6369. Excluded
+uncertainty67 and collector/policy unchanged; broader54766/39054 is not debt.
+Supplied pools87 ->84 (82 external +2 private), provisional M0/D47/S37 and50
+cumulative qualified openings. Signed-head complexity is recorded with the
+checkpoint. Ordinary local runs Go1.25.0 while #2622 is OPEN, U1000Go1.26.8;
+all on vemew, no server2 load. This
+group is standalone administrative fixture authority, not public served lifecycle,
+process restart or elimination of the wider raw-construction class. Existing
+watchlist/architecture disposition remains narrow original-owner capabilities;
+no new framework or issue. #2542/#2151 and M01/Docker/drain/D3/M07/rollback holds
+remain unwaived. No push, PR, server2, tier/full, budget/timeout increase,
+classifier relaxation, compatibility seam or new scope decision.
