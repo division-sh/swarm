@@ -7008,18 +7008,68 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 			ShutdownGrace: runtimepkg.DefaultShutdownGrace, SelfCheck: true, Verbose: true,
 		}
 	}
-	assertLiveRefusal := func(t *testing.T, opts cliapp.ServeOptions) {
+	assertExclusiveHandoff := func(t *testing.T, opts cliapp.ServeOptions) {
 		t.Helper()
 		first := startServeRuntimeTestProcess(t, opts)
 		first.waitForReadyLine()
-		var out lockedBuffer
-		second := opts
-		second.Output = &out
-		if code := runFrom(context.Background(), repoRootForTest(), second); code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
-			t.Fatalf("second non-dev serve code=%d output:\n%s", code, out.String())
+		bound := make(chan net.Addr, 1)
+		successorOpts := opts
+		successorOpts.TestAPIListenerBound = func(addr net.Addr) { bound <- addr }
+		second := startServeRuntimeTestProcess(t, successorOpts)
+		// A failed standby assertion must release the holder before joining the
+		// successor's native wait; both existing process cleanups remain owned.
+		t.Cleanup(first.cleanup)
+		var addr net.Addr
+		select {
+		case addr = <-bound:
+		case <-time.After(3 * time.Second):
+			t.Fatal("non-dev successor did not expose its standby probe")
+		}
+		client := &http.Client{Timeout: time.Second}
+		for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable, "/v1/rpc": http.StatusServiceUnavailable} {
+			response, err := client.Get("http://" + addr.String() + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			if response.StatusCode != want {
+				t.Fatalf("non-dev standby %s=%d, want %d", path, response.StatusCode, want)
+			}
+		}
+		select {
+		case code := <-second.done:
+			second.recordStopped(code)
+			t.Fatalf("second non-dev serve refused instead of waiting: code=%d\n%s", code, second.outputString())
+		default:
+		}
+		if serveOutputIsReady(second.outputString()) {
+			t.Fatal("non-dev successor published readiness while the holder was healthy")
+		}
+		firstAddr := serveRuntimeAPIListenerFromOutput(t, first.outputString())
+		response, err := client.Get("http://" + firstAddr + "/readyz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("non-dev standby displaced its healthy holder: readiness=%d", response.StatusCode)
 		}
 		if code := first.stop(); code != 0 {
 			t.Fatalf("first non-dev serve code=%d output:\n%s", code, first.outputString())
+		}
+		second.waitForReadyLine()
+		if actual := serveRuntimeAPIListenerFromOutput(t, second.outputString()); actual != addr.String() {
+			t.Fatalf("non-dev successor changed its standby socket: %s, want %s", actual, addr)
+		}
+		if code := second.stop(); code != 0 {
+			t.Fatalf("second non-dev serve code=%d output:\n%s", code, second.outputString())
+		}
+		reclaimed, err := cliapp.ListenServeHTTPListener("api", addr.String())
+		if err != nil {
+			t.Fatalf("non-dev successor returned before joining its probe: %v", err)
+		}
+		if err := reclaimed.Close(); err != nil {
+			t.Fatal(err)
 		}
 	}
 
@@ -7027,11 +7077,11 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 		stubServeRuntimeWorkspaceLifecycle(t)
 		unsetStoreSelectorEnv(t)
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		assertLiveRefusal(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String()))
+		assertExclusiveHandoff(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String()))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-		assertLiveRefusal(t, base(writeServeRuntimeTestConfig(t), storebackend.BackendPostgres.String()))
+		assertExclusiveHandoff(t, base(writeServeRuntimeTestConfig(t), storebackend.BackendPostgres.String()))
 	})
 }
 
