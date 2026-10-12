@@ -66,7 +66,7 @@ type fanOutCapacityState struct {
 
 type FanOutServingRegistration struct {
 	grant            *generationGrant
-	occurrence       *worklifetime.RuntimeOccurrence
+	occurrence       worklifetime.Occurrence
 	ctx              context.Context
 	cancel           context.CancelFunc
 	done             chan struct{}
@@ -78,14 +78,14 @@ type FanOutServingRegistration struct {
 	lastCommit       *fanOutCommitTiming
 }
 
-// RegisterFanOutServing accepts only grants minted by the retained process
-// owner. Selected-fork deferred fan-out remains unsupported under its policy.
-func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurrence *worklifetime.RuntimeOccurrence, requestedWorkers *int) (*FanOutServingRegistration, error) {
-	live, ok := grant.(*liveGenerationGrant)
-	if !ok || live == nil || live.generationGrant == nil || live.owner == nil || occurrence == nil {
-		return nil, errors.New("fan-out registration requires a retained live grant and runtime occurrence")
+// RegisterFanOutServing consumes only process-minted authority and its exact
+// ordinary runtime or selected execution occurrence. Both share one budget.
+func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, requestedWorkers *int) (*FanOutServingRegistration, error) {
+	g, err := fanOutGenerationGrant(grant)
+	if err != nil {
+		return nil, err
 	}
-	g, p := live.generationGrant, live.owner
+	p := g.owner
 	p.opMu.Lock()
 	defer p.opMu.Unlock()
 	if err := p.proveCurrent(ctx); err != nil {
@@ -95,11 +95,10 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 	if err != nil {
 		return nil, err
 	}
-	identity := occurrence.Identity()
-	if evidence.State != GrantAdmitted || evidence.SelectedFork != nil || identity.RuntimeInstanceID != evidence.RuntimeInstanceID || identity.BundleHash != evidence.BundleHash {
+	if evidence.State != GrantAdmitted || !fanOutOccurrenceMatches(occurrence, evidence) {
 		return nil, errors.New("fan-out registration differs from the admitted runtime generation")
 	}
-	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
+	if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
 		return nil, err
 	}
 	reader, ok := p.session.(fanOutCapacityReader)
@@ -109,6 +108,16 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 	capacity, err := reader.FanOutServingCapacity()
 	if err != nil {
 		return nil, err
+	}
+	// Selected work joins the process's existing configured capacity; it does
+	// not reinterpret a loaded runtime's worker options or acquire another pool.
+	if evidence.SelectedFork != nil && requestedWorkers == nil {
+		p.mu.Lock()
+		if p.fanOutCapacity != nil {
+			limit := p.fanOutCapacity.limit
+			requestedWorkers = &limit
+		}
+		p.mu.Unlock()
 	}
 	limit, err := capacity.resolve(requestedWorkers)
 	if err != nil {
@@ -163,6 +172,34 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 		r.turns.Wait()
 	}()
 	return r, nil
+}
+
+func fanOutGenerationGrant(grant GenerationGrant) (*generationGrant, error) {
+	var g *generationGrant
+	switch grant := grant.(type) {
+	case *liveGenerationGrant:
+		if grant != nil {
+			g = grant.generationGrant
+		}
+	case *generationGrant:
+		g = grant
+	}
+	if g == nil || g.owner == nil {
+		return nil, errors.New("fan-out serving requires a process-minted generation grant")
+	}
+	return g, nil
+}
+
+func fanOutOccurrenceMatches(occurrence worklifetime.Occurrence, evidence GrantEvidence) bool {
+	if evidence.SelectedFork != nil {
+		selected, ok := occurrence.(*worklifetime.SelectedForkOccurrence)
+		return ok && selected != nil && selected.Identity() == (worklifetime.SelectedForkIdentity{
+			ExecutionID: evidence.SelectedFork.ExecutionID, RunID: evidence.SelectedFork.ForkRunID,
+			Generation: evidence.SelectedFork.ExecutionGeneration,
+		})
+	}
+	runtime, ok := occurrence.(*worklifetime.RuntimeOccurrence)
+	return ok && runtime != nil && runtime.Identity().RuntimeInstanceID == evidence.RuntimeInstanceID && runtime.Identity().BundleHash == evidence.BundleHash
 }
 
 func grantRetired(g *generationGrant) bool {

@@ -660,21 +660,19 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
 		return fmt.Errorf("release selected child wakeups: %w", err)
 	}
+	if err := c.admitSelectedDeploymentFeeds(runCtx); err != nil {
+		return err
+	}
+	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, pipeline)
+	if err != nil {
+		return fmt.Errorf("register selected fan-out serving: %w", err)
+	}
+	pipeline.InstallFanOutWorkNotifier(agentRuntime.fanOutServing)
 	if err := c.publishCommittedInputs(); err != nil {
 		return err
 	}
 	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
 		return fmt.Errorf("start activated selected completion owner: %w", err)
-	}
-	if agentRuntime.generationGrant == nil {
-		return errors.New("selected serving requires the admitted runtime generation grant")
-	}
-	grant, err := agentRuntime.generationGrant.Evidence()
-	if err != nil {
-		return fmt.Errorf("load selected generation grant: %w", err)
-	}
-	if err := c.serveSelectedDeploymentFeeds(runCtx, pipeline, grant); err != nil {
-		return err
 	}
 	if err := continuations.Synchronize(runCtx); err != nil {
 		return fmt.Errorf("synchronize selected delivery continuations: %w", err)
@@ -875,7 +873,14 @@ func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx c
 	}
 }
 
-func (c selectedContractForkLocalRuntimeContainer) serveSelectedDeploymentFeeds(ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, grant startupownership.GrantEvidence) error {
+func (c selectedContractForkLocalRuntimeContainer) admitSelectedDeploymentFeeds(ctx context.Context) error {
+	if c.attachment.runtime.generationGrant == nil {
+		return errors.New("selected serving requires the admitted runtime generation grant")
+	}
+	grant, err := c.attachment.runtime.generationGrant.Evidence()
+	if err != nil {
+		return fmt.Errorf("load selected generation grant: %w", err)
+	}
 	if err := grant.Validate(); err != nil {
 		return fmt.Errorf("selected deployment grant: %w", err)
 	}
@@ -889,72 +894,7 @@ func (c selectedContractForkLocalRuntimeContainer) serveSelectedDeploymentFeeds(
 	if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(feeds), c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
 		return err
 	}
-	if len(feeds) == 0 {
-		return nil
-	}
-	owner, err := c.ports.deploymentFanOut.BindSelectedDeploymentFanOutGrant(grant)
-	if err != nil {
-		return fmt.Errorf("bind selected deployment feed owner: %w", err)
-	}
-	for _, feed := range feeds {
-		for {
-			if feed.Status == fanoutobligation.StatusClosed {
-				break
-			}
-			if feed.Status != fanoutobligation.StatusOpen {
-				return fmt.Errorf("selected deployment feed %s is %s before serving", feed.Request.Key.DeploymentFeedID, feed.Status)
-			}
-			turn, err := coordinator.ServeFanOutCandidate(ctx, owner, feed.Request.Key)
-			if err != nil {
-				return fmt.Errorf("serve selected deployment feed: %w", err)
-			}
-			observed, err := c.ports.deploymentFanOut.ListSelectedDeploymentFeeds(ctx, grant)
-			if err != nil {
-				return fmt.Errorf("observe selected deployment feed after serving: %w", err)
-			}
-			if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(observed), c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
-				return err
-			}
-			current, err := exactSelectedDeploymentFeed(observed, feed)
-			if err != nil {
-				return err
-			}
-			complete, err := selectedDeploymentTurnComplete(feed, current, turn.Refill)
-			if err != nil {
-				return err
-			}
-			if complete {
-				break
-			}
-			feed = current
-		}
-	}
 	return nil
-}
-
-func selectedDeploymentTurnComplete(previous, current fanoutobligation.Intent, refill bool) (bool, error) {
-	if current.Status == fanoutobligation.StatusClosed {
-		return true, nil
-	}
-	if current.Status != fanoutobligation.StatusOpen || !refill || current.Cursor <= previous.Cursor {
-		return false, fmt.Errorf("selected deployment feed %s remains %s at %d/%d after serving", current.Request.Key.DeploymentFeedID, current.Status, current.Cursor, current.Request.Cardinality)
-	}
-	return false, nil
-}
-
-func exactSelectedDeploymentFeed(feeds []fanoutobligation.Intent, expected fanoutobligation.Intent) (fanoutobligation.Intent, error) {
-	for _, feed := range feeds {
-		if feed.Request.Key != expected.Request.Key {
-			continue
-		}
-		if feed.Request.Deployment == nil || expected.Request.Deployment == nil ||
-			*feed.Request.Deployment != *expected.Request.Deployment ||
-			feed.Request.Source != expected.Request.Source || feed.Request.Cardinality != expected.Request.Cardinality {
-			return fanoutobligation.Intent{}, errors.New("selected deployment feed changed its immutable source while serving")
-		}
-		return feed, nil
-	}
-	return fanoutobligation.Intent{}, errors.New("selected deployment feed disappeared while serving")
 }
 
 func selectedDeploymentFeedRequests(feeds []fanoutobligation.Intent) []fanoutobligation.IntentRequest {

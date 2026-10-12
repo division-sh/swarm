@@ -36,6 +36,16 @@ func capturedRunForkRequestReplies(snapshot *runForkRevisionSnapshot, eventID st
 		if !capturedReplyRequestPublication(cut, event, record) {
 			continue
 		}
+		owed := false
+		for _, delivery := range cut.deliveries {
+			if delivery.Snapshot.EventID == eventID && !delivery.Snapshot.Terminal() && delivery.Snapshot.Route.Context.ReplyContextID() == record.ID {
+				owed = true
+				break
+			}
+		}
+		if !owed {
+			continue
+		}
 		if record.RunID != snapshot.RunID || record.State != replycontext.StateOpen {
 			return nil, fmt.Errorf("inherited request has a foreign or settled captured reply")
 		}
@@ -155,12 +165,23 @@ func requireRunForkRequestRecipientPartition(snapshot *runForkRevisionSnapshot, 
 		if err != nil {
 			return err
 		}
-		if err := bindRunForkRequestRecipientClaim(delivery.Route, &projected, replies); err != nil {
-			return err
+		if runForkRequestReplyRecipient(projected, replies) {
+			if err := bindRunForkRequestRecipientClaim(delivery.Route, &projected, replies); err != nil {
+				return err
+			}
 		}
 		expected = append(expected, projected)
 	}
 	return requireExactRunForkRequestRoutes(expected, actual)
+}
+
+func runForkRequestReplyRecipient(route events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) bool {
+	for _, reply := range replies {
+		if route.Context.ReplyContextID() == reply.Record.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func bindRunForkRequestRecipientClaim(source events.DeliveryRoute, projected *events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) error {

@@ -348,7 +348,7 @@ func (s *fanOutSQLiteOwner) LoadFanOutEvaluation(ctx context.Context, claim fano
 }
 
 func admitAndLoadSelectedFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, grant startupownership.GrantEvidence, postgres bool, claim fanoutobligation.Claim, now func() time.Time) (fanoutobligation.Intent, error) {
-	if grant.SelectedFork == nil || claim.Key.DeploymentFeedID == "" || claim.Key.RunID != grant.SelectedFork.ForkRunID {
+	if grant.SelectedFork == nil || claim.Key.RunID != grant.SelectedFork.ForkRunID {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
 	}
 	if err := admitFanOutClaim(ctx, tx, admission, grant, postgres, claim); err != nil {

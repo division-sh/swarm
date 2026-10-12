@@ -5732,7 +5732,7 @@ engine:
         restart: Event deliveries and continuation rows restore refs only from their typed columns.
         same_run_replay: Uses the persisted delivery route context; it does not reconstruct reply identity.
         timestamp_fork: Exact captured contexts project child-local logical request, accepted-reply, origin, return and enclosing-reference coordinates while preserving their original physical evidence and captured lifecycle. Projection itself never copies a request/reply event or reopens a terminal context; independently owed deliveries use ordinary replay. Materialization and activation require the complete exact child reply inventory. Successor recovery rechecks each inherited immutable binding and permits only its unchanged open state or one monotonic terminal settlement; later child requests do not replace inherited evidence. Executable continuation still requires the existing admission and actual current selected execution authority, not projection or original provenance.
-        owed_request_publication: An independently owed request consumes its exact captured child reply row before the compiled publication owner generates the complete child execution claim, including the reply context. It does not create a second row. Native publication locks and rechecks the existing open row, immutable enclosing and return bindings, original evidence and clocks, and the complete unfinished recipient routes against immediate-parent cut evidence and canonical compiled claims. Logical request coordinates do not alias physical child publications; recursive physical requests retain their row through the immediate cut's admitted delivery context. Exact committed retries use ordinary duplicate/recovery evidence without reopening terminal rows. Fresh requests retain ordinary creation and correlation-collision admission.
+        owed_request_publication: An independently owed request consumes its exact captured child reply row before the compiled publication owner generates the complete child execution claim, including the reply context. It does not create a second row. Required bindings come only from the unfinished request-bearing delivery partition; a settled request/reply does not block unrelated pending recipients, but an actually pending request with a terminal context is contradictory and refuses. Only that request-bearing subset rebinds reply claims; other recipients retain their canonical complete projected route, context and claim. Native publication locks and rechecks the existing open row, immutable enclosing and return bindings, original evidence and clocks, and the complete unfinished recipient routes against immediate-parent cut evidence and canonical compiled claims. Logical request coordinates do not alias physical child publications; recursive physical requests retain their row through the immediate cut's admitted delivery context. Exact committed retries use ordinary duplicate/recovery evidence without reopening terminal rows. Fresh requests retain ordinary creation and correlation-collision admission.
       observability:
         graph: Generated connect route plans expose both request and response roles and name the paired request/reply/provider pins.
         trace: run.trace exposes reply_context_id from event_deliveries.delivery_context for platform debugging; business payload remains unchanged.
@@ -20328,9 +20328,16 @@ run_model:
       implicit retry. Cache and cleanup diagnostics cannot overwrite an acknowledged committed result.
     selected_deployment_feed_execution: >
       A selected fork with an exact child-live deployment feed may execute that finite feed through the existing
-      fan-out obligation pump and its selected fork-local EventBus. The selected grant binds the fork binding,
-      execution ID, generation, fence, lease, bundle and exact feed; it cannot authorize handler-origin fan-out or
-      normal execution. A changed pin retires only the inherited unissued suffix and creates a new child-live feed
+      process-owned fan-out obligation pump and its selected fork-local EventBus. Activated selected execution
+      registers its exact selected occurrence in the same process capacity and fairness owner as ordinary runtimes;
+      it does not create a normal runtime or another queue. That pump also serves handler-origin obligations
+      canonically created or projected in the same admitted child. The selected grant binds the fork binding,
+      execution ID, generation, fence, lease and bundle; it cannot authorize another child or normal execution.
+      Candidate observation is read-only and is never mutation authority. Claim, evaluation, publication and
+      settlement re-prove current process and selected execution authority and the exact intent/claim at their
+      existing mutation boundaries. Prepared but unactivated work is not serviceable. Retirement cancels and
+      joins this registration's finite work before retiring its grant. A changed pin retires only the inherited
+      unissued suffix and creates a new child-live feed
       at ordinal zero. Committed old-version events, attempts, deliveries and outcomes remain historical old-version
       facts; pending old work retains its original payload and route. Event-level obligations without a committed
       continuation handoff reconcile before their delivery rows can transfer. A successor fences the predecessor,

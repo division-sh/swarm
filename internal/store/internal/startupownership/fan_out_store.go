@@ -206,11 +206,6 @@ func loadAdmittedFanOutGrantsTx(ctx context.Context, tx *sql.Tx, authorityID str
 			(grant.SelectedFork != nil && grant.SelectedFork.BindingID != selectedBindingID.String) {
 			return nil, errors.New("fan-out grant snapshot differs from durable grant coordinates")
 		}
-		// Selected-fork execution is a separate, unsupported serving family.
-		// Validate its durable shape, but do not demand a live registration.
-		if grant.SelectedFork != nil {
-			continue
-		}
 		grants = append(grants, grant)
 	}
 	return grants, rows.Err()
@@ -232,6 +227,16 @@ func observeFanOutGrantFamilyTx(ctx context.Context, tx *sql.Tx, authority runti
 				continue
 			}
 			return nil, nil, err
+		}
+		if grant.SelectedFork != nil {
+			active, err := agentpersistence.ObserveSelectedForkGenerationGrantTx(ctx, tx, grant, sqlite)
+			if err != nil {
+				return nil, nil, err
+			}
+			if active {
+				current = append(current, grant)
+			}
+			continue
 		}
 		if prior, exists := bundles[grant.BundleHash]; exists && prior != grant.GrantID {
 			return nil, nil, errors.New("fan-out ordinary execution authority is ambiguous for the same bundle")
@@ -269,9 +274,6 @@ func currentFanOutGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) ([]runt
 }
 
 func (a *fanOutAdmission) ObserveFanOutRunTx(ctx context.Context, tx *sql.Tx, grant runtimeownership.GrantEvidence, runID string) (bool, error) {
-	if grant.SelectedFork != nil {
-		return false, errors.New("selected deployment serving requires mutation-time execution proof")
-	}
 	authority, err := a.proveProcess(ctx, tx, false)
 	if err != nil {
 		return false, err
@@ -281,6 +283,12 @@ func (a *fanOutAdmission) ObserveFanOutRunTx(ctx context.Context, tx *sql.Tx, gr
 	}
 	if _, _, err := observeFanOutGrantFamilyTx(ctx, tx, authority, a.sqlite); err != nil {
 		return false, err
+	}
+	if grant.SelectedFork != nil {
+		if runID != grant.SelectedFork.ForkRunID {
+			return false, nil
+		}
+		return agentpersistence.ObserveSelectedForkGenerationGrantTx(ctx, tx, grant, a.sqlite)
 	}
 	ownership, err := agentpersistence.ObserveOrdinaryRunExecutionOwnershipTx(ctx, tx, grant, runID, a.sqlite)
 	if err != nil {

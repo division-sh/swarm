@@ -32,7 +32,6 @@ import (
 )
 
 type SelectedDeploymentFanOutStore interface {
-	BindSelectedDeploymentFanOutGrant(startupownership.GrantEvidence) (runtimepipeline.FanOutObligationOwner, error)
 	ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
 }
 

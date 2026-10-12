@@ -95,8 +95,13 @@ func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *test
 				t.Fatalf("continued input did not settle once: delivery=%+v error=%v", delivery, err)
 			}
 			rows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
-			if err != nil || !reflect.DeepEqual(rows, childRows) {
-				t.Fatalf("request publication recreated or changed its inherited rows: %v", err)
+			if err != nil || len(rows) != len(childRows) {
+				t.Fatalf("request publication recreated its inherited rows: rows=%+v error=%v", rows, err)
+			}
+			for i, row := range rows {
+				if err := row.ValidateContinuationFrom(childRows[i], childRows[i].CreatedAt); err != nil {
+					t.Fatalf("request publication changed its inherited binding or regressed settlement: %v", err)
+				}
 			}
 			original, err := storetest.ReadReplyContextRecords(ctx, selected, catalogRuntimeRunID)
 			if err != nil || !reflect.DeepEqual(original, sourceRows) {

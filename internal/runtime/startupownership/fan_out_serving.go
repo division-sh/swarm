@@ -32,15 +32,15 @@ type fanOutServingService struct {
 	opportunity  *fanOutOpportunity
 }
 
-func StartFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurrence *worklifetime.RuntimeOccurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
+func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
 	if executor == nil {
 		return nil, errors.New("fan-out serving requires an exact runtime executor")
 	}
-	live, ok := grant.(*liveGenerationGrant)
-	if !ok || live == nil || live.owner == nil {
-		return nil, errors.New("fan-out serving requires a retained live generation")
+	g, err := fanOutGenerationGrant(grant)
+	if err != nil {
+		return nil, err
 	}
-	provider, ok := live.owner.session.(fanOutServingStoreProvider)
+	provider, ok := g.owner.session.(fanOutServingStoreProvider)
 	if !ok {
 		return nil, errors.New("selected process session does not supply the fan-out serving owner")
 	}
@@ -55,7 +55,7 @@ func StartFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurren
 	if err != nil {
 		return nil, err
 	}
-	p := live.owner
+	p := g.owner
 	p.mu.Lock()
 	budget := p.fanOutCapacity
 	evidence, evidenceErr := r.grant.Evidence()

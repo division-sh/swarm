@@ -222,6 +222,7 @@ type selectedContractAgentRuntime struct {
 	scheduler              *runtimepipeline.Scheduler
 	timerLifecycle         *runtimepipeline.PipelineCoordinator
 	genericSchedules       *genericschedule.Lifecycle
+	fanOutServing          *runtimestartupownership.FanOutServingRegistration
 	completionExecutor     *runlifecycle.Executor
 	completionRegistration runlifecycle.CandidateRegistration
 	completionDiagnostics  *selectedForkCommitDiagnostics
@@ -1002,6 +1003,10 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 }
 
 func (r *selectedContractAgentRuntime) stopExecutionWork() error {
+	if r.fanOutServing != nil {
+		r.fanOutServing.Close()
+		r.fanOutServing = nil
+	}
 	if r.timerLifecycle != nil {
 		if err := r.timerLifecycle.StopWorkflowTimerLifecycle(context.Background()); err != nil {
 			return err
