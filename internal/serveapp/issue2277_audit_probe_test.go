@@ -19,9 +19,9 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-// These are baseline classification probes, not assertions of the proposed
-// unloaded-target behavior. No execution admission is bypassed.
-func TestAudit2277ForkCompletionLoss(t *testing.T) {
+// This is a tripwire against restoring generic run.fork completion authority.
+// Current run.fork must never fire the trigger; this is not INSERT-failure recovery.
+func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyRootIngressServedFollowUp(t) })
@@ -50,9 +50,9 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method='run.fork'`).Scan(&completions); err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("AFTER LOSS response=%+v error=%+v forks=%d completions=%d", first, first.Error, forks, completions)
+			t.Logf("GENERIC COMPLETION TRIPWIRE response=%+v error=%+v forks=%d completions=%d", first, first.Error, forks, completions)
 			if first.Error != nil || forks != 1 || completions != 0 {
-				t.Fatal("durable fork result depended on expiring API completion")
+				t.Fatal("durable fork result depended on forbidden generic completion authority")
 			}
 			var forkID, forkStatus, executionState string
 			if err := rt.DB.QueryRow(`SELECT run_id,status FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkID, &forkStatus); err != nil {
@@ -63,7 +63,7 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 			}
 			t.Logf("COMMITTED DOMAIN fork=%s status=%s execution=%s", forkID, forkStatus, executionState)
 			if executionState != "closed" {
-				t.Fatal("selected execution did not finish before injected completion loss")
+				t.Fatal("selected execution did not finish before the first response")
 			}
 			before := repeatedStaticRunSnapshot(t, rt.DB, forkID)
 			if rt.Backend == "sqlite" {
