@@ -295,7 +295,7 @@ func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, o
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.BindProcessLease(lease); err != nil {
+	if err := schemastore.BindPostgresProcessLease(schema, lease); err != nil {
 		t.Fatal(err)
 	}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))

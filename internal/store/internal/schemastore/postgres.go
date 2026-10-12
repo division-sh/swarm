@@ -14,7 +14,8 @@ type Postgres struct {
 	schemaAdmission schemaAdmission
 }
 
-func (s *Postgres) BindProcessLease(lease *postgresbackend.AdvisoryLockLease) error {
+// BindPostgresProcessLease is constructor wiring, not a schema operation.
+func BindPostgresProcessLease(s *Postgres, lease *postgresbackend.AdvisoryLockLease) error {
 	if s == nil || lease == nil || lease.Session() == nil || s.processLease != nil {
 		return errors.New("PostgreSQL schema process lease must be bound exactly once")
 	}

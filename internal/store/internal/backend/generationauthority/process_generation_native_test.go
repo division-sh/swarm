@@ -78,7 +78,7 @@ func TestNativeProcessGenerationTransactionsBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := schema.BindProcessLease(lease); err != nil {
+				if err := schemastore.BindPostgresProcessLease(schema, lease); err != nil {
 					t.Fatal(err)
 				}
 				bootstrap, transact = schema.BootstrapSchema, lease.RunTransaction
