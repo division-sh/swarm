@@ -419,7 +419,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
-	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, sourceEvents, bus, pipeline)
+	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, sourceEvents, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
@@ -450,18 +450,18 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 
 // Bind fixed-cut accounting before preparing actors, so every initial and
 // recovered pipeline turn inherits the same decision without authorizing work.
-func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, sources []runfork.RunForkSelectedContractSourceEvent, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
+func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, req publishSelectedContractForkEventsRequest, sources []runfork.RunForkSelectedContractSourceEvent, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
 	publications := make([]activityresult.PublishedContinuation, 0)
 	for _, source := range sources {
 		if source.PublishedActivityResult.Present() {
 			publications = append(publications, source.PublishedActivityResult)
 		}
 	}
-	bound, err := runtimepipeline.WithSelectedActivityPublications(ctx, c.req.ForkRunID, publications)
+	bound, err := runtimepipeline.WithSelectedActivityPublications(ctx, req.ForkRunID, publications)
 	if err != nil {
 		return ctx, nil, managedexecution.Admission{}, err
 	}
-	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, c.req, bus, pipeline, c.diagnostics)
+	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, req, bus, pipeline, c.diagnostics)
 	return bound, runtime, admission, err
 }
 
