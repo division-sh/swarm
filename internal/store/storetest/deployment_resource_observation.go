@@ -26,6 +26,26 @@ func ReadRootReadyResourcePinStorage(ctx context.Context, selected any, runID st
 	return private.ReadRootReadyResourcePinStorageForTest(ctx, selected, runID)
 }
 
+func ReadPortfolioAccountResourcePinStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadPortfolioAccountResourcePinStorageForTest(ctx, selected, runID)
+}
+
+func CountAccountDeploymentReceiversStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountAccountDeploymentReceiversStorageForTest(ctx, selected, runID)
+}
+
+func CountDeploymentRouteObligationsStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountDeploymentRouteObligationsStorageForTest(ctx, selected, runID)
+}
+
+func CountPortfolioDeliveredDeploymentRowsStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountPortfolioDeliveredDeploymentRowsStorageForTest(ctx, selected, runID)
+}
+
+func CountPortfolioAllDeploymentRowsStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountPortfolioAllDeploymentRowsStorageForTest(ctx, selected, runID)
+}
+
 func ReadDeploymentIntentVersionStorage(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadDeploymentIntentVersionStorageForTest(ctx, selected, runID)
 }

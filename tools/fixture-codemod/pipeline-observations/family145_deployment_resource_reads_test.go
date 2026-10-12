@@ -194,7 +194,11 @@ func TestFamily145DeploymentObservationCallerPropagationChangesOnlyOriginalCarri
 		}
 		callers++
 		calls += count
-		if normalized != row.Before {
+		if row.Function == "assertDeploymentResourceRows" {
+			if err := family145DeploymentPublicRowProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+		} else if normalized != row.Before {
 			t.Fatalf("deployment propagation changed an original fixture, held-child/fault/replay/receipt/identity/public assertion: %s", row.Function)
 		}
 	}

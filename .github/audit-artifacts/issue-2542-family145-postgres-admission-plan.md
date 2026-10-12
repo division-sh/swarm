@@ -5405,3 +5405,47 @@ sufficient: no new issue, spec architecture change or exemption. Parent and
 M01/Docker/drain/D3/M07/integration holds stay open and unwaived. Local only,
 no push/PR/tier/server2; receipts
 ~/.cache/swarm-2542-family145/closed-receiver-authority-*.
+
+## Whole Ordinary Deployment Public-Row Witness Dependency
+
+Closed the complete ordinary row/receipt/pin witness and empty-feed refusal, using
+the existing deployment owners. All15 original query occurrences/13 distinct
+queries retain exact predicates, fields and ordering. Existing intent, outcome,
+event, delivery, receipt and status owners are REUSED. Five new bounded ports
+cover only the exact portfolio/account pin, account-template receiver count,
+run/event-joined routing obligation count, delivered-row count and unfiltered
+row-delivery count. Delivery SQL remains inside the CLOSED projection owner.
+
+The row helper and empty-feed root are now SQL/pool/dialect-free. Original initial
+counts, error-only counts/status section, later pin/version reads and public
+paginated document/delivery comparisons stay independent. Failed sections return
+no partial rows. Each count still binds its original destination; the original
+error/cardinality/empty refusal conditions and every nested document/identity/
+pagination assertion remain exact. The shared caller guard composes its already-
+reviewed logger-carrier rewrite with this named complete witness proof, retaining
+the six-caller/seven-call accounting rather than skipping the changed helper.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Canonical import/pin creates a fresh attempt with exact public documents, receivers and settlement | reproduced and fixed | Both original document/pin and empty-feed roots race before PASS24.979s, native after PASS22.591s, all four backend cells; all original public/identity/cardinality assertions unchanged |
+| Empty feed never invents an event, any-status delivery, account receiver or outcome | reproduced and fixed | Original both-store empty-feed root above, preserving all four independent zero/error assertions; exact unfiltered-versus-delivered query distinction |
+| Failed row witness still exposes every diagnostic count and ordered status | execution-proven through the same corrected path | Actual account-template predicate rebound to foreign: original SQLite/PostgreSQL cells RED15.110s, each executes all error-only counts/status plus the resource logger, recording children0 and actual delivered1; exact restoration GREEN18.436s |
+| Five bounded native ports, independent cuts and unavailable ownership | reproduced and fixed | Two native both-store roots race PASS15.878s:5 begins/4 read commits/zero writes or active work, full history/clock equality, raw/invalid/cancelled/closed and exact pin absence refusals |
+| Independent large-run progress/pool/PG-probe diagnostics and enclosing construction/faults | explicitly split / tracked separately | Existing #2542 debt; greater-than100 branch, wait helper, deadlines and probe remain unchanged. No large-cardinality rerun/performance/restart qualification claimed |
+
+Complete139-root cheap Family145/current/historical collection PASS14.116s,
+six persistence boundaries PASS3.699s; affected domain/private/conformance/script
+U1000 clean. Whole helper/empty-root assertion and field/context/cut hostile
+controls, exhaustive original-query consumption and the prior caller proof all
+pass. No collector/guard waiver, replay relaxation, retry or new framework.
+
+Corpus1282/505, digest
+b87034188db215f831c0c270924397a8cf20ea0a332ff094190e784ff2459e98;
+all24 historical receipts/previous successors retained. Census PASS277.350s:
+7987 ->7969 findings,5658 ->5641 raw sites,18/17 removals,ZERO additions,
+uncertainty67, supplied-pool calls56 unchanged. Final unchanged ratchet and
+signed-head complexity precede the local checkpoint. Binding raw_sql_policy and
+existing #2542/#2151 tracker/watchlist scope govern; no platform semantic change,
+new issue or exemption. Parent and M01/Docker/drain/D3/M07/integration holds remain
+open/unwaived. Local only, no push/PR/tier/server2. Receipts
+~/.cache/swarm-2542-family145/deployment-public-row-*.

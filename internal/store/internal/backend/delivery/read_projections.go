@@ -2777,6 +2777,18 @@ func ReadDeploymentDeliveryStatusStorageTx(ctx context.Context, tx *sql.Tx, runI
 
 type ClosedReceiverReadinessStorage struct{ Actors, Events, Deliveries int }
 
+func CountPortfolioDeliveredDeploymentRowsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered' AND d.status='delivered'`, runID).Scan(&count)
+	return count, err
+}
+
+func CountPortfolioAllDeploymentRowsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered'`, runID).Scan(&count)
+	return count, err
+}
+
 func ReadClosedReceiverReadinessStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, bridgeNodeID string) (ClosedReceiverReadinessStorage, error) {
 	query := `
 		SELECT

@@ -50,6 +50,26 @@ func ReadRootReadyResourcePinStorageForTest(ctx context.Context, selected any, r
 	return readDeploymentStorageForTest(ctx, selected, runID, storedurabledata.ReadRootReadyResourcePinStorageTx)
 }
 
+func ReadPortfolioAccountResourcePinStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, storedurabledata.ReadPortfolioAccountResourcePinStorageTx)
+}
+
+func CountAccountDeploymentReceiversStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountAccountDeploymentReceiversStorageTx)
+}
+
+func CountDeploymentRouteObligationsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountDeploymentRouteObligationsStorageTx)
+}
+
+func CountPortfolioDeliveredDeploymentRowsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, delivery.CountPortfolioDeliveredDeploymentRowsStorageTx)
+}
+
+func CountPortfolioAllDeploymentRowsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, delivery.CountPortfolioAllDeploymentRowsStorageTx)
+}
+
 func ReadDeploymentIntentVersionStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentVersionStorageTx)
 }

@@ -8,6 +8,19 @@ import (
 )
 
 type DeploymentIntentProgressStorage struct{ Intents, Cursor int }
+
+func CountAccountDeploymentReceiversStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`, runID).Scan(&count)
+	return count, err
+}
+
+func CountDeploymentRouteObligationsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM decision_card_route_obligations r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1`, runID).Scan(&count)
+	return count, err
+}
+
 type DeploymentIntentMetadataStorage struct {
 	Status, BundleHash, Origin                   string
 	SourceKind, FeedID, Blocked, Claimant, Retry delivery.WorkloadNullableText
