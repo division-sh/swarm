@@ -596,6 +596,12 @@ func ReadLastThreeFanOutRuntimeLogPayloadsForTest(ctx context.Context, selected 
 	})
 }
 
+func ReadStageLifecycleRuntimeLogPayloadsForTest(ctx context.Context, selected any) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadStageLifecycleRuntimeLogPayloadsTx(ctx, tx)
+	})
+}
+
 func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, name, parent string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run, parent}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadNestedSourceEventIDsTx(ctx, tx, run, name, parent)

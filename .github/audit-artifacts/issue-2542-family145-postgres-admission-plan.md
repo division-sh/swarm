@@ -3240,3 +3240,53 @@ watchlist/architecture disposition remains narrow original-owner capabilities;
 no new framework or issue. #2542/#2151 and M01/Docker/drain/D3/M07/rollback holds
 remain unwaived. No push, PR, server2, tier/full, budget/timeout increase,
 classifier relaxation, compatibility seam or new scope decision.
+
+### Complete Keyed Stage-Lifecycle Identity Diagnostic Dependency
+
+The entire workflow_stage_lifecycle_identity_conformance fixture now uses the
+existing native opening owners. Its PostgreSQL borrowed-pool admission, SQLite
+getter, three-value setup result and both raw helper parameters are retired.
+All four delivery-helper calls and its failure-only log helper consume the same
+selected store. There is no raw handle, query, transaction callback, dialect
+delegate or reconstructed coordinator left in that consumer file.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native PostgreSQL/SQLite opening and joined runtime-generation owners | Both setup arms return the original selected owner, without exporting its pool. The existing source-aware runtime, capability, publication interceptor, settlement, shutdown and next-generation construction are unchanged. |
+| eventrecord physical observation | The failure diagnostic preserves exactly SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT20. Scope remains whole-store, including both run-associated and standalone records; no run/source/status predicate or added ordering tiebreaker. Payloads remain database-rendered strings, not canonical event decoding, JSON normalization or the distinct three-row run-scoped fan-out diagnostic. |
+| Original selected read coordinator and existing event bridge | One native read transaction carries the fixed query through test_event_support.go, not an additional eventrecord import seam. Public storetest returns detached strings with no selector or callback. Query, scan, iteration, close, cancellation, foreign/raw/typed-nil and closed-owner failures discard provisional evidence. Original context-free caller read uses context.Background; the consumer retains JSON slice rendering, nil-owner empty diagnostic and error text. |
+| Finite complete caller/assertion inventory | Three exact function transitions preserve every original behavioral condition and diagnostic assertion, normalizing only the deleted raw diagnostic argument. All four route calls, both runtime generations, real decision admission/publication and two joined shutdowns remain. Hostile controls reject foreign owners/cuts and lost original conditions; the event owner SQL is compared to its immutable predecessor, including text rendering, order, limit and error settlement. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Keyed construction, delivery, persisted identity, timer/gate restart, decision and join completion | reproduced and fixed: TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends, unchanged original PostgreSQL/SQLite cells under race, package16.565s |
+| Failure diagnostic was previously reachable only through a raw pool | execution-proven through the same corrected path: TestStageLifecycleDiagnosticStoragePreservesGlobalTwentyPhysicalPayloadsBothStores,24 real log records including two distinct runs, newer unrelated event, exact last20 native payload texts and detached readback, both stores under race |
+| Empty, foreign/raw/typed-nil, cancelled and closed observation authority | execution-proven through the same corrected path: TestStageLifecycleDiagnosticStorageRefusesForeignCancelledAndClosedOwnersBothStores; combined owner package13.302s under race |
+| Entire helper/caller chain and exact physical query | execution-proven through the same corrected path: TestFamily145StageLifecycleCompleteCallerChainRetainsIdentityAndExecutionAssertions and TestFamily145StageLifecycleDiagnosticRetainsExactPhysicalQueryAndOwner, with original-condition and owner/cut hostile controls |
+
+This remains same-store runtime-generation reconstruction, not process/store
+restart qualification. All original gate/card hashes and anchors, delivery/stage/
+route/entity identities, timer clocks/payloads, partial open1/2 join, closed
+complete join, authored [11,22] order and zero ordinary TerminatedAt assertions
+remain. Both10s route/settlement polling bounds and10ms intervals are unchanged;
+there is no retry, new stage marker, fabricated source/lease or production change.
+
+Complete cheap family145/historical/finite/idempotency/rename controls PASS9.153s;
+affected event/delivery/lifecycle/revision/writer boundaries PASS4.336s,
+retirement inventory PASS6.485s, six-package U1000 clean and dry-run Changes=[].
+Three new finite rows make1176 recipes/362 transitions, digest
+4becace3e4dfb6c2c6d16858f6215e0ccd731b3c464f1e22d2e40b26faad52fe;
+all historical Before/After and24 mechanical receipts remain unchanged.
+
+Downward ratchet PASS143.048s removed19/added0:8840 ->8821 findings,
+confirmed raw-operation debt6369 ->6356. Excluded uncertainty67 and collector/
+policy unchanged; broader54756/39048 is not debt. Supplied pools84 ->83
+(81 external +2 private), provisional M0/D46/S37 and51 qualified openings.
+Signed-head complexity is recorded with the checkpoint. Receipts are in
+~/.cache/swarm-2542-family145/stage-lifecycle-* on vemew. Ordinary runs use
+Go1.25.0 while #2622 is OPEN; U1000 usesGo1.26.8, and subsequent ordinary runs
+will switch when the toolchain PR lands. No red test or qualification hold was
+waived. The closure is this complete fixture dependency; #2542/#2151, M01/
+Docker/drain/D3/M07/rollback remain open. Existing watchlist and narrow native-
+owner architecture disposition stand; no new issue or framework. No push, PR,
+server2, tier/full, timeout/budget change, ratchet exception or compatibility path.

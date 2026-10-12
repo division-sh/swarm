@@ -65,3 +65,26 @@ func CountTemplateEventIdentityTx(ctx context.Context, tx *sql.Tx, event string)
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, event).Scan(&count)
 	return count, err
 }
+
+// ReadStageLifecycleRuntimeLogPayloadsTx preserves physical payload text, not
+// decoded event bytes, for the bounded whole-store failure diagnostic.
+func ReadStageLifecycleRuntimeLogPayloadsTx(ctx context.Context, tx *sql.Tx) (out []string, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 20`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		out = append(out, payload)
+	}
+	return out, rows.Err()
+}

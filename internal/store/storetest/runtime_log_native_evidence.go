@@ -16,6 +16,10 @@ func ReadLatestRuntimeLogRecord(ctx context.Context, selected any) (events.Event
 	return private.ReadLatestRuntimeLogRecordForTest(ctx, selected)
 }
 
+func ReadStageLifecycleRuntimeLogPayloads(ctx context.Context, selected any) ([]string, error) {
+	return private.ReadStageLifecycleRuntimeLogPayloadsForTest(ctx, selected)
+}
+
 func ReadLatestStartupRecoveryDecisionRecord(ctx context.Context, selected any) (events.Event, error) {
 	return private.ReadLatestStartupRecoveryDecisionRecordForTest(ctx, selected)
 }
