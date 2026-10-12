@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 457 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c84f28cb828b8fee8f6b7c54ee3f7f4fad610d2af44c7a23b6ef49e677c746cc" {
+	if err != nil || len(rows) != 457 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "1ddd6a3f78c2361708cc4d0d29332fd475c82e4f0913158e576ca278eb494472" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -65,6 +65,11 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			}
 			if row.Function != "TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores" {
 				continue
+			}
+		}
+		if family145GateFinalDiagnosticCuts[row.Function] != nil {
+			if err := family145GateFinalDiagnosticProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
 			}
 		}
 		if row.Function == "a2CorruptBoundReplyEntry" {

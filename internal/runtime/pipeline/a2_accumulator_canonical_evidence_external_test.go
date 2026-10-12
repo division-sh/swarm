@@ -91,19 +91,13 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 					want := before
 					want.Revision++ // The new delivery settles without another business effect.
 					if got := a2CanonicalAccumulatorEvidence(t, proof); got != want {
-						rows, err := proof.selected.db.QueryContext(proof.ctx, `SELECT domain,path,CAST(old_value AS TEXT),CAST(new_value AS TEXT) FROM entity_mutations WHERE caused_by_event=$1`, duplicate.event.ID())
+						mutations, err := storetest.ReadGateDuplicateMutationDiagnostics(proof.ctx, proof.selected.events, duplicate.event.ID())
 						if err != nil {
 							t.Fatal(err)
 						}
-						for rows.Next() {
-							var domain, path, oldValue, newValue string
-							if err := rows.Scan(&domain, &path, &oldValue, &newValue); err != nil {
-								t.Fatal(err)
-							}
+						for _, mutation := range mutations {
+							domain, path, oldValue, newValue := mutation.Domain, mutation.Path, mutation.OldValue, mutation.NewValue
 							t.Logf("duplicate mutation: %s %s old=%s new=%s", domain, path, oldValue, newValue)
-						}
-						if err := rows.Close(); err != nil {
-							t.Fatal(err)
 						}
 						t.Errorf("canonical duplicate changed business/history/output: got=%#v want=%#v", got, want)
 					}

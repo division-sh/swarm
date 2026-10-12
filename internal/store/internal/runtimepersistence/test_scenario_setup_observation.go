@@ -18,6 +18,20 @@ type TemplateAccountIdentityStorage = entitystore.TemplateAccountIdentityStorage
 
 type TemplateAccountDiagnosticStorage = entitystore.TemplateAccountDiagnosticStorage
 
+type GateDuplicateMutationDiagnosticStorage = mutationlog.GateDuplicateMutationDiagnosticStorage
+
+func ReadGateDuplicateMutationDiagnosticsForTest(ctx context.Context, selected any, eventID string) ([]GateDuplicateMutationDiagnosticStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) ([]GateDuplicateMutationDiagnosticStorage, error) {
+		return mutationlog.ReadGateDuplicateMutationDiagnosticsTx(ctx, tx, eventID)
+	})
+}
+
+func ReadGateRunRootFieldsStorageForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+		return entitystore.ReadScenarioSetupFieldsStorageTx(ctx, tx, runID, runID)
+	})
+}
+
 func CountRunMutationStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return mutationlog.CountRunMutationStorageTx(ctx, tx, runID)

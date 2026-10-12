@@ -4987,3 +4987,46 @@ Two error-only diagnostics and two PostgreSQL JSONB behavior conditions remain
 in the original carrier inventory. Shared carrier/openers stay live; all
 M07/D3/Docker/M01/drain/integration obligations remain unwaived. Local only,
 no push/PR/tier/server2. Receipts ~/.cache/swarm-2542-family145/compound-footprints-*.
+
+## Shared Gate/A2 Dependency: Last Diagnostic-Only SQL Readers
+
+Both remaining error-only readers are confined without widening their purpose.
+Duplicate mutation diagnostics use mutationlog's fixed event-only projection:
+domain/path plus native CAST(old/new AS TEXT), no context-run filter, added order,
+JSON normalization or SQL-NULL default. The map writer's error branch reuses the
+existing entityruntime ReadScenarioSetupFieldsStorageTx, binding both its run
+and entity to the original root run ID. No second query owner was introduced.
+The consumer still logs all four strings before its original t.Errorf; the map
+branch retains readErr separately and reports the original marshal/comparison
+err. Ordinary success neither invokes diagnostics nor gains a new prerequisite.
+
+Original accumulator and both compiled-map roots PASS both-store race89.389s.
+Direct native proof uses genuine compiled construction, publication and ordinary
+mutation ownership. Its first incidental fixture wrongly reused a transition
+record with a stale stage entry; loading the actual current state/stage-entry
+identity corrected setup without changing production admission or assertions.
+Positive existing-value history matches the exact original physical SQL and
+retains event-only scope even under foreign context-run metadata. A subsequent
+real optional-field mutation establishes SQL-NULL old_value: both the original
+scan and canonical reader reject it and return no partial rows. Missing events,
+foreign root/keyed-child distinction, cancellation/raw/invalid/closed owners and
+complete storage/clock equality pass. Final private race PASS19.951s; actual
+compiled-root byte/detachment/full-projection proof PASS14.365s on both stores.
+No raw read or write was added to external callers for this proof.
+
+Finite proof retains every original business/refusal/replay assertion plus exact
+error-only branch, context/owner/event/root, text destinations, logging and final
+failure. Existing scalar controls remain independently executable. Complete
+cheap Family145/current/historical122-root collection PASS13.588s; six persistence
+boundaries PASS3.997s; U1000 clean. Corpus1241/457, digest
+1ddd6a3f78c2361708cc4d0d29332fd475c82e4f0913158e576ca278eb494472.
+All immutable historical inputs are retained and only exact current successors
+advance. Downward census PASS167.440s:8285 ->8278 findings,5901 ->5895 raw sites,
+seven/six removals and ZERO additions, uncertainty67; supplied-pool calls61 stay.
+
+Mapped Gate/A2 consumers now have no direct pool operations. Two PostgreSQL JSONB
+physical-behavior conditions still consume the old carrier flag; the carrier and
+openers remain live until that final propagation is qualified. M07/D3/Docker/
+M01/drain/integration holds remain explicit. Local only, no push/PR/tier/server2;
+final unchanged census and signed-head complexity follow. Receipts
+~/.cache/swarm-2542-family145/gate-final-diagnostics-*.

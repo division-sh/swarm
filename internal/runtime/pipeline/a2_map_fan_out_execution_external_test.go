@@ -969,8 +969,8 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 	}
 	written, err := json.Marshal(p.instance(t).Fields["items"])
 	if err != nil || a2AccumulatorJSONHash(t, written) != a2AccumulatorJSONHash(t, wantWritten) {
-		var persisted []byte
-		if readErr := p.selected.db.QueryRowContext(p.ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, p.runID, p.runID).Scan(&persisted); readErr != nil {
+		persisted, readErr := storetest.ReadGateRunRootFieldsStorage(p.ctx, p.selected.events, p.runID)
+		if readErr != nil {
 			t.Fatal(readErr)
 		}
 		t.Fatalf("compiled writer changed exact admitted map keys/values: %s; persisted=%s err=%v", written, persisted, err)

@@ -7,6 +7,16 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
+type GateDuplicateMutationDiagnosticStorage = private.GateDuplicateMutationDiagnosticStorage
+
+func ReadGateDuplicateMutationDiagnostics(ctx context.Context, selected any, eventID string) ([]GateDuplicateMutationDiagnosticStorage, error) {
+	return private.ReadGateDuplicateMutationDiagnosticsForTest(ctx, selected, eventID)
+}
+
+func ReadGateRunRootFieldsStorage(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return private.ReadGateRunRootFieldsStorageForTest(ctx, selected, runID)
+}
+
 func CountGateRunProposedEffectContinuations(ctx context.Context, selected any, run string) (int, error) {
 	return private.CountGateRunProposedEffectContinuationsForTest(ctx, selected, run)
 }
