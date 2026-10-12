@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "7e6b7fd0a26bb8fcd5ccf528b6b760b47f3f963d303c847496279bd431c04f0a"
+const targetDigest = "fb128dac4bc3b706c575e6dc69ee030be016ebf235150901213b4f559dc9c865"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -185,6 +185,8 @@ var files = []string{
 	"internal/serveapp/selected_fork_mailbox_controls_test.go",
 	"internal/serveapp/selected_fork_pending_input_evidence_test.go",
 	"internal/serveapp/mailbox_completion_fixture_test.go",
+	"internal/serveapp/agent_mock_supported_surface_test.go",
+	"internal/serveapp/agent_memory_supported_surface_test.go",
 	"internal/serveapp/numeric_timer_inspection_test.go",
 	"internal/serveapp/run_fork_runtime_test.go",
 	"internal/serveapp/run_fork_constructor_fixture_test.go",
@@ -275,6 +277,8 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/serveapp/agent_mock_supported_surface_test.go":         {"runMockAgentSupportedSurface": true},
+	"internal/serveapp/agent_memory_supported_surface_test.go":       {"runStandingTelegramMemorySupportedSurface": true},
 	"internal/serveapp/mailbox_completion_fixture_test.go":           {"newRetainedMailboxCompletionRuntimeConfigured": true},
 	"internal/serveapp/fork_receiver_ownership_test.go":              {"snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true},
 	"internal/serveapp/selected_fork_pending_input_test.go":          {"TestSelectedForkPendingInputBothStores": true, "TestExplicitTargetRestrictsConnectedSiblingsBothStores": true},

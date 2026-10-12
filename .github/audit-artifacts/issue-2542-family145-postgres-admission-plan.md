@@ -5680,3 +5680,44 @@ Unchanged ratchet and signed-head complexity precede the stacking report.
 Existing tracker/watchlist/contract suffice; M01/Docker/drain/D3/M07/integration
 holds remain. Local only, no push/PR/tier/server2. Receipts:
 ~/.cache/swarm-2542-family145/retained-mailbox-native-construction-*.
+
+## Whole mock/memory detached restart factory cohort (2026-10-12)
+
+Both shared entry points, runMockAgentSupportedSurface and
+runStandingTelegramMemorySupportedSurface, now use EXISTING selected.OpenRuntime
+with actual context/selection, original DSN and TTL. The entire runtimePG/openStore
+pre-open capability, explicit bootstrap/getter reconstruction, prepareRestart
+declaration/assignment and invocation are deleted. No observer consumed that
+detached adapter: all actual first/second serve startup, publication, post-stop
+readback and recovery already go through their existing process/observation
+owners. The real serve owner now owns the only writable adapter and its close.
+
+Exact whole-body inverse reconstructs ONLY the original detached plumbing and
+one constructor callback. It preserves all credentials, canonical source, mock
+posture, recovery-on/off options, actual restarts, stable binding, turn/session
+continuity, recorded effective source, provider absence, connector/card/usage,
+authoritative stop and every business assertion. The obsolete adapter-open error
+branch is removed WITH that deleted capability, not a workload assertion; native
+open failures still fail through the original served readiness/exit owner.
+Source-pinned finite guards reject surviving detached names and changed context,
+selection, DSN, TTL, source, restart, identity, cleanup or assertion cuts.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Mock approval/connector first and second native lifecycles | reproduced and fixed | Original TestMockAgentSupportedSurfaceSQLitePostgres BOTH stores under race, preserving approval, connector attempts, exact effective-frame source, sessions, usage and stop assertions |
+| Standing Telegram mock memory restart with recovery enabled AND disabled | reproduced and fixed | Original TestCanonicalTelegramAgentSupportedSurfaceSQLitePostgres all4 backend/recovery cuts under race, preserving payload-only target readback, duplicate/update identity, memory/session continuity and actual process restart |
+| No hidden constructor/prepareRestart consumer | execution-proven through the same corrected path | Exact whole-function inverse for BOTH shared helpers; no runtimePG/openStore/prepareRestart occurrence survives either helper; unchanged actual first/second startup and independent observation paths executed above |
+
+Original two-root race baseline PASS220.679s; native PASS322.588s. No performance
+gain or pressure cause is claimed from those unpaired nonquiet receipts.
+Complete cheap controls PASS30.542s; six boundaries PASS7.844s; affected U1000
+clean. All old Before,24 receipts and previous Successor survive;1290/531,
+digest fb128dac4bc3b706c575e6dc69ee030be016ebf235150901213b4f559dc9c865.
+Downward census PASS58.017s:7892 ->7884 findings,5582 ->5578 raw sites,
+8/4 removed, ZERO added, supplied-pool56 and uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Existing tracker/watchlist/contract suffice; other raw observations and all
+M01/Docker/drain/D3/M07/integration holds remain. Local only, no push/PR/tier/
+server2. Per the updated merge-order instruction, the rebase waits for #2617;
+#2624's exact policy/custody/cache integration conditions remain binding.
+Receipts:~/.cache/swarm-2542-family145/mock-memory-duplicate-construction-*.

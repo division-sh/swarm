@@ -29,9 +29,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -108,7 +107,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 
 	var location string
-	var prepareRestart func()
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -125,24 +123,13 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		location = dsn
-		var runtimePG *store.PostgresStore
-		openStore := func() {
-			var openErr error
-			runtimePG, openErr = store.NewPostgresStore(dsn)
-			if openErr != nil {
-				t.Fatalf("NewPostgresStore: %v", openErr)
-			}
-		}
-		openStore()
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() {
 			buildStoresForServe = oldBuildStores
 		})
-		prepareRestart = openStore
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
@@ -189,9 +176,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	before := loadStandingMemorySessions(t, backend, location)
 	requireMockSessionShape(t, before)
 
-	if prepareRestart != nil {
-		prepareRestart()
-	}
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())

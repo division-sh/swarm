@@ -29,7 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -352,7 +352,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	}
 
 	var storeLocation string
-	var prepareRestart func()
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -369,24 +368,13 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		storeLocation = dsn
-		var runtimePG *store.PostgresStore
-		openStore := func() {
-			var openErr error
-			runtimePG, openErr = store.NewPostgresStore(dsn)
-			if openErr != nil {
-				t.Fatalf("NewPostgresStore: %v", openErr)
-			}
-		}
-		openStore()
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() {
 			buildStoresForServe = oldBuildStores
 		})
-		prepareRestart = openStore
 		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", "")
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
@@ -435,9 +423,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		t.Fatalf("first serve exit = %d", code)
 	}
 
-	if prepareRestart != nil {
-		prepareRestart()
-	}
 	if !recoveryOnRestart {
 		sqlitePath := ""
 		if backend == "sqlite" {

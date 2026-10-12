@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 529 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "7e6b7fd0a26bb8fcd5ccf528b6b760b47f3f963d303c847496279bd431c04f0a" {
+	if err != nil || len(rows) != 531 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fb128dac4bc3b706c575e6dc69ee030be016ebf235150901213b4f559dc9c865" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -97,6 +97,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if family145ServedSnapshotProjection(row.Function) {
 			if err := family145ServedProjectionProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "runMockAgentSupportedSurface" || row.Function == "runStandingTelegramMemorySupportedSurface" {
+			if err := family145MockMemoryConstructionProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
