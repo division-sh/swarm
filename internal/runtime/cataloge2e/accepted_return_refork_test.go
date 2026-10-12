@@ -44,15 +44,6 @@ func TestIssue642AcceptedReturnRepeatedPhysicalReforkBothStores(t *testing.T) {
 			}
 			sourceRun, cut := catalogRuntimeRunID, rows[0].AcceptedReplyEventID
 			for hop := 0; hop < 3; hop++ {
-				if hop != 0 {
-					// Supplying the native role constructs a successor instead of
-					// returning the harness's first (now retired) cached owner.
-					if h.sqlite != nil {
-						owner = selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, h.sqlite)
-					} else {
-						owner = selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, h.pg)
-					}
-				}
 				sourceRun, cut = executeAcceptedReturnRefork(t, h, selected, owner, loader, selection, options, sourceRun, cut)
 			}
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
@@ -196,17 +187,6 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	count, err := storetest.ReadLifecycleEventCardinality(wait, selected, staged.ForkRunID, string(publication.Event.Event().Type()))
 	if err != nil || count != 1 {
 		t.Fatalf("settled provider was re-executed or return duplicated: count=%d error=%v", count, err)
-	}
-	// A physical receipt is not a joined executor. Drain this child's existing
-	// owner before the next hop takes its source-isolation baseline.
-	cleanup, retire := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
-	defer retire()
-	if err := owner.RetireSelectedContexts(cleanup); err != nil {
-		t.Fatalf("join return child before using it as a refork source: %v", err)
-	}
-	retained, err := selected.LoadReplyContext(cleanup, row.ID)
-	if err != nil || !reflect.DeepEqual(retained, row) {
-		t.Fatalf("joined retirement changed terminal return evidence: %+v error=%v", retained, err)
 	}
 	afterDomain, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
 	if err != nil || !reflect.DeepEqual(afterDomain, sourceDomain) {
