@@ -433,6 +433,16 @@ func SetEventChainDepthForTest(ctx context.Context, selected any, eventID string
 	})
 }
 
+func ClearEventRunForRecoveryForTest(ctx context.Context, selected any, eventID string) error {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.ClearEventRunForRecoveryTx(ctx, tx, postgres, eventID)
+	})
+}
+
 type SelectedCausalDiagnosticConservation struct {
 	Events, Pending int
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1393,9 +1394,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "system.parent", "system.recover.replay", "system.recover.skip")
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1459,7 +1458,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
 		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	))
-	if _, err := db.ExecContext(ctx, `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`, droppedEventID); err != nil {
+	if err := storetest.ClearEventRunForRecovery(ctx, pg, droppedEventID); err != nil {
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 
@@ -1481,9 +1480,6 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover before delivery continuation startup: %v", err)
 	}
-	if err := continuations.Start(ctx); err != nil {
-		t.Fatalf("start delivery continuation coordinator: %v", err)
-	}
 	defer func() {
 		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1491,6 +1487,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 			t.Fatalf("retire delivery continuation coordinator: %v", err)
 		}
 	}()
+	if err := continuations.Start(ctx); err != nil {
+		t.Fatalf("start delivery continuation coordinator: %v", err)
+	}
 	select {
 	case delivery := <-replayDeliveries:
 		if delivery.ID() != replayChildID {
@@ -1508,13 +1507,21 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		if err != nil {
 			t.Fatalf("guard continued local delivery: %v", err)
 		}
+		completeCarrier := sync.OnceValues(func() (worklifetime.DeliveryContinuationResolution, error) {
+			return carrier.Complete(nil)
+		})
+		defer func() {
+			if _, err := completeCarrier(); err != nil {
+				t.Errorf("join continued local delivery ownership: %v", err)
+			}
+		}()
 		if resolution, err := carrier.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
 			t.Fatalf("transfer continued local delivery into attempt: %v", err)
 		}
 		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle continued local delivery: %v", err)
 		}
-		if _, err := carrier.Complete(nil); err != nil {
+		if _, err := completeCarrier(); err != nil {
 			t.Fatalf("complete continued local delivery ownership: %v", err)
 		}
 	case <-time.After(5 * time.Second):

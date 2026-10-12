@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "681a3b16ceb02a6062983535a221903293b0d0558094566c9dd6d0f091f99289"
+const targetDigest = "c2cb9c82d0707685dd77502cd43a23c080feb35684ac4389795e0f1cf30cd205"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -201,6 +201,7 @@ var renamedHelpers = map[string]map[string]string{
 
 var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/conformance/persisted_surfaces_test.go": {
+		"TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader":             true,
 		"TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession":                          true,
 		"TestCLISessionFailureDoesNotRotateFromStderrProse":                                          true,
 		"TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset": true,

@@ -26,3 +26,22 @@ func SetFixtureEventChainDepthTx(ctx context.Context, tx *sql.Tx, postgres bool,
 	}
 	return nil
 }
+
+func ClearEventRunForRecoveryTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) error {
+	query := `UPDATE events SET run_id = NULL WHERE event_id = ?`
+	if postgres {
+		query = `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`
+	}
+	result, err := tx.ExecContext(ctx, query, eventID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("recovery run fault changed %d rows, want one exact event", changed)
+	}
+	return nil
+}

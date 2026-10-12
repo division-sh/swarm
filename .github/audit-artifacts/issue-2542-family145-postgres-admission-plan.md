@@ -3547,3 +3547,76 @@ semantic-posture cases, leaving provisional M0/D40/S35 and59 qualified openings.
 Affected six-package U1000 is clean; dry-run Changes=[]; retirement inventory
 PASS6.238s. Signed-head complexity is recorded with the checkpoint. No other
 semantic queue item, parent close obligation or prior hold is credited.
+
+### Complete Recovery Missing-Run Fault And Continuation Lifetime Group
+
+The replay/skip/drop aftermath root now opens its original selected PostgreSQL
+owner natively and injects its one exact missing-run corruption through the
+existing eventrecord owner and original unrevisioned writer coordinator. The
+public port accepts only the exact event ID, exposes no SQL/handle/callback and
+changes only run_id to NULL. Exactly one existing row must change; absent,
+invalid, raw, foreign, cancelled or closed input cannot claim a successful fault.
+Its existing event/counter/revision history is not deleted or rebuilt.
+
+| Canonical owner | Exhaustive changed consumption / preserved contract |
+| --- | --- |
+| Native construction and fixture lifetime | The original recovery root replaces its borrowed setup and premature pool defer with StartPostgresRuntimeStore at the original opening point. Source/catalog, logger, runtime occurrence, bus, actual publication, original event inputs/clocks, subscription, routes and pipeline acknowledgment are unchanged. |
+| eventrecord | ClearEventRunForRecoveryTx retains the exact original UPDATE of run_id by event UUID; native SQLite uses the same fixed write with its own placeholder. There is no extra status/name/run filter or generic selector, and no clock, payload, receipt or unrelated row is changed. |
+| Original selected writer | The event bridge stays in test_event_support.go and consumes runUnrevisionedEventFixtureTransactionForTest, preserving the original unrevisioned fault cut before activation/recovery. Native positive controls show exactly one write commit; cancellation and missing/foreign/closed failure do not provide successful corruption. |
+| Existing delivery continuation and carrier owners | Continuation retirement is registered before Start. The actually received and consumed carrier has a once-only Complete receipt registered before Consume, with normal completion still AFTER actual SettleSuccess. Fatal assertions release/join the same owners before fixture teardown; completion errors are retained, never retried or hidden. No delegating grant, alternative lifecycle or independent release authority is introduced. |
+| Original SQLite writer observer | A test-only scalar bridge exposes only QueuedWritersForTest on the exact selected backend; no production port/handle/callback/coordinator is exported. The existing native held-transaction fixture establishes the writer cut; actual queued admission is observed before cancellation, then zero queued writers, unchanged target and zero committed writes are required. |
+| Complete source/caller and physical-writer inventory | The single finite transition compares every original business condition/order, event/publication/claim/carrier/settlement input and complete assertion multiset, allowing only the exact added cleanup error assertion. Hostile controls reject lost source, owner, fault, lifetime, replay/skip/drop and no-redispatch checks. The writer census explicitly classifies the new exact fixture operation and its named execution proof, without excluding the file/table or changing production revision obligations. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Actual subscribed replay, recipient-free skip, missing-run drop and repeated-recovery no-redispatch; canonical three-row public log readback | reproduced and fixed: TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader under race; initial native PASS7.275s, restored after fatal control PASS8.030s, Go1.26.8 final PASS7.129s |
+| Exactly one native writer commit, NULL run while event/payload/history and sibling survive on both backends | execution-proven through the same corrected path: TestRecoveryRunFaultUsesExactNativeWriterAndRetainsPayloadAndSiblingBothStores under race; final Go1.26.8 storetest aggregate PASS12.375s |
+| Invalid/absent/raw/foreign/typed-nil/cancelled/closed input cannot mutate the valid target or claim success | execution-proven through the same corrected path: TestRecoveryRunFaultRefusesUnavailableIdentityAndOwnersBothStores under race in that same aggregate |
+| Actual SQLite original-writer queue gates the fault; cancellation settles while the holder remains live, preserves the run and leaks no work | execution-proven through the same corrected path: TestRecoveryRunFaultCancellationWaitsBehindExactSQLiteWriter under race, original queue observer, final Go1.26.8 PASS5.284s |
+| Fatal assertion after actual carrier Consume still completes and joins before native cleanup | execution-proven through the same corrected path: deliberately injected fatal control expected RED6.599s, only the intended failure and no retirement/carrier/process/store timeout/error; exact restored root GREEN8.030s |
+| Every original input/assertion/fault/lifetime cut and closed writer/source inventory | execution-proven through the same corrected path: both TestFamily145RecoveryRunFault roots, complete finite controls and event/delivery/lifecycle/revision/writer boundaries; Go1.26.8 repaired finite set PASS10.668s and boundaries PASS3.639s |
+
+The first admission control was RED because the transaction observer is captured
+only after SQLite's permit acquisition; zero active transactions cannot prove
+queued writers. It now uses the already authoritative exact-coordinator queue
+observer, not an extended scheduler/probe or a sleep heuristic. Positive/refusal
+receipts were retained; only the discriminating admission control was repaired.
+The initial boundary sweep also correctly found the new physical writer missing
+from its census; one explicit classified row with exact ownership/finalization
+and named proofs repairs the inventory, not an exemption. The finite generic
+assertion ledger rejected the added cleanup assertion/registration ordering;
+its exact caller now consumes the stricter source proof, preserving every old
+assertion plus only the named new error report. Neither red is waived.
+
+One new row makes1192 recipes/379 transitions, digest
+c2cb9c82d0707685dd77502cd43a23c080feb35684ac4389795e0f1cf30cd205;
+immutable predecessor and24 historical mechanical receipts remain. The initial
+Go1.25 census PASS128.506s removes5/added0:8714 ->8709 findings, raw6273 ->6270,
+uncertainty67 unchanged. #2622 merged during this group; final affected execution,
+guards and census use Go1.26.8. U1000 is clean, including the final guard delta;
+unchanged retirement inventory PASS5.768s. Signed-head complexity, dry-run and
+final toolchain census receipt are recorded with the checkpoint.
+
+Final Go1.26.8 census PASS427.078s:8709 findings/6270 raw-operation debt,
+uncertainty67, no further addition or deletion after the initial five removals.
+The fixed source/policy identity remains26701e7b187579220dffe72e01debd2675 /
+fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9.
+Dry-run Changes=[]; no repeated tier or integrated matrix was run.
+
+Supplied pools75 ->74 (72 external +2 private), provisional M0/D40/S34 and60
+qualified openings. The malformed gate-path fixture is the remaining borrowed
+opening in this file, explicitly retained in S. Its existing accumulator probe
+is not equivalent: it changes domain/value and returns an error even after an
+accepted write, which would defeat the original err==nil refusal oracle.
+That probe must not be used as a convenience replacement; a later exact gate
+probe must distinguish genuine schema rejection from acceptance/transport errors
+and must not leave accepted corruption behind. This is a named remaining
+fixture/schema dependency under #2542, not a parent closure or new framework.
+
+The original user-visible recovery proof is PG-only; both native fault backends
+are execution-proven but not mislabeled as both-backend process restart. Existing
+bounded-fixture contract/watchlist disposition stands; no production recovery,
+source, session or architecture semantics changed. #2542/#2151, M01/Docker/drain/
+D3/M07/rollback and the earlier run-state warning remain open. Receipts:
+~/.cache/swarm-2542-family145/recovery-run-fault-* on vemew. No push, PR, server2,
+tier/full, timeout/budget increase, legacy shim or ratchet/classifier relaxation.
