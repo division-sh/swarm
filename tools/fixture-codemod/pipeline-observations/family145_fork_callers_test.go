@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 510 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e72e5bbcfd8fbed3814dafdf1b51960f639d0be052eaa0e93ebac9bae59e6422" {
+	if err != nil || len(rows) != 529 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "371441a7d48b3fd5bb4cfd68d0b9d7455966bf3319cef1f361847f3d6eaa2da2" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -91,6 +91,42 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "gateCompletionHarness" {
 			if err := family145GateCompletionConstructorProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145ServedSnapshotProjection(row.Function) {
+			if err := family145ServedProjectionProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "snapshotForkReceiverApplication" {
+			if err := family145ServedForkSnapshotProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "forkReceiverChangedTables" || row.Function == "TestSelectedForkPendingInputMixedCompletionBothStores" {
+			if err := family145ServedSnapshotConsumerProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "readRetainedRootJoins" {
+			if err := family145RetainedJoinReaderProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "testServedJoinWriterCompletedHistoryRefusal" {
+			if err := family145RetainedJoinConsumerProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145ServedSnapshotCallers[row.Function] != 0 {
+			if err := family145ServedSnapshotCallerProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

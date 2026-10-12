@@ -57,12 +57,12 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					wantDone = 1
 				}
 				if mode == "ordinary_child" || mode == "ordinary_root" {
-					before := snapshotForkReceiverApplication(t, rt)
+					before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 					response := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 					if response.Data["code"] != apiv1.EventNotDeclaredCode {
 						t.Fatalf("private/non-input publication must fail admission: %+v", response)
 					}
-					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 						t.Fatal("rejected publication changed application state")
 					}
 					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
@@ -76,13 +76,13 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if mode == "ambiguous_artifact" {
 					// Duplicate endpoint identity is rejected by canonical artifact
 					// compilation, before a selectable artifact or fork can exist.
-					before := snapshotForkReceiverApplication(t, rt)
+					before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 					candidate := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputDuplicateEndpoint)
 					_, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), candidate, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 					if err == nil || !strings.Contains(err.Error(), "declared more than once") {
 						t.Fatalf("ambiguous input artifact: %v", err)
 					}
-					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 						t.Fatal("invalid artifact changed application state")
 					}
 					return
@@ -195,13 +195,13 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if replayed.EventID != point.EventID || !reflect.DeepEqual(replayed.Deliveries, point.Deliveries) {
 				t.Fatalf("idempotent replay = %+v, want %+v", replayed, point)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			invalid := map[string]any{
 				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "invalid"},
 				"target": map[string]any{"flow_instance": "child", "entity_id": siblingEntity}, "idempotency_key": "target-invalid",
 			}
 			response := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", invalid)
-			if response.Data["code"] != apiv1.EventNotDeclaredCode || !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+			if response.Data["code"] != apiv1.EventNotDeclaredCode || !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 				t.Fatalf("invalid target changed application state: %+v", response)
 			}
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-resume"})

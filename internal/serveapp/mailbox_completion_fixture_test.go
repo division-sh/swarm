@@ -48,7 +48,13 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedparity.Backend, root, configSuffix string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	if len(tokens) == 0 {
 		tokens = []string{apiv1.DefaultLoopbackAPIToken}
 	}
@@ -111,7 +117,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		process.waitForReadyLine()
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		rt := servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		rt := servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
 		var owner cursorMailboxStore = sq
 		if pg != nil {
 			owner = pg

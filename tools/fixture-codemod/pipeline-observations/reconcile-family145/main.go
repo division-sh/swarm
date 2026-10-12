@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "e72e5bbcfd8fbed3814dafdf1b51960f639d0be052eaa0e93ebac9bae59e6422"
+const targetDigest = "371441a7d48b3fd5bb4cfd68d0b9d7455966bf3319cef1f361847f3d6eaa2da2"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -173,6 +173,18 @@ var files = []string{
 	"internal/serveapp/receiver_restart_test.go",
 	"internal/serveapp/mailbox_cursor_restart_test.go",
 	"internal/serveapp/issue2277_audit_probe_test.go",
+	"internal/serveapp/fork_receiver_ownership_test.go",
+	"internal/serveapp/typed_receiver_fork_refusal_test.go",
+	"internal/serveapp/selected_fork_pending_input_mixed_test.go",
+	"internal/serveapp/fork_retained_join_test.go",
+	"internal/serveapp/selected_fork_pending_input_test.go",
+	"internal/serveapp/selected_fork_notice_controls_test.go",
+	"internal/serveapp/lifecycle_transition_fork_test.go",
+	"internal/serveapp/lifecycle_transition_template_test.go",
+	"internal/serveapp/fork_historical_context_test.go",
+	"internal/serveapp/selected_fork_mailbox_controls_test.go",
+	"internal/serveapp/selected_fork_pending_input_evidence_test.go",
+	"internal/serveapp/mailbox_completion_fixture_test.go",
 	"internal/serveapp/numeric_timer_inspection_test.go",
 	"internal/serveapp/run_fork_runtime_test.go",
 	"internal/serveapp/run_fork_constructor_fixture_test.go",
@@ -263,6 +275,18 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/serveapp/mailbox_completion_fixture_test.go":           {"newRetainedMailboxCompletionRuntimeConfigured": true},
+	"internal/serveapp/fork_receiver_ownership_test.go":              {"snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true},
+	"internal/serveapp/selected_fork_pending_input_test.go":          {"TestSelectedForkPendingInputBothStores": true, "TestExplicitTargetRestrictsConnectedSiblingsBothStores": true},
+	"internal/serveapp/selected_fork_notice_controls_test.go":        {"TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores": true},
+	"internal/serveapp/lifecycle_transition_fork_test.go":            {"requireLifecycleFrozenGateControlRefusal": true},
+	"internal/serveapp/lifecycle_transition_template_test.go":        {"TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores": true},
+	"internal/serveapp/fork_historical_context_test.go":              {"TestRunForkHistoricalIdentityPublicExecutionBothStores": true},
+	"internal/serveapp/selected_fork_mailbox_controls_test.go":       {"TestSelectedForkMailboxControlRefusalsBothStores": true},
+	"internal/serveapp/selected_fork_pending_input_evidence_test.go": {"TestSelectedForkPendingInputEvidenceBothStores": true},
+	"internal/serveapp/typed_receiver_fork_refusal_test.go":          {"forkReceiverChangedTables": true},
+	"internal/serveapp/selected_fork_pending_input_mixed_test.go":    {"TestSelectedForkPendingInputMixedCompletionBothStores": true},
+	"internal/serveapp/fork_retained_join_test.go":                   {"testServedJoinWriterCompletedHistoryRefusal": true, "readRetainedRootJoins": true},
 	"internal/apiv1/agent_snapshot_atomicity_test.go": {
 		"seedTurnWithOutputContract/agentSnapshotBoundaryFixture": true,
 	},

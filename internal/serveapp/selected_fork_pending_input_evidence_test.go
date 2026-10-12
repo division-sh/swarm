@@ -106,7 +106,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if _, err := rt.DB.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND family='events' AND fact_key=$3 AND revision=$4`, string(changed), seed.RunID, point.EventID, revision); err != nil {
 					t.Fatal(err)
 				}
-				before := snapshotForkReceiverApplication(t, rt)
+				before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 				direct, ok := family.Availability().(forkHistoricalSelectedStore)
 				if !ok {
 					t.Fatal("missing direct store fixture")
@@ -115,7 +115,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if err == nil || materialized.ForkRunID != "" {
 					t.Fatalf("stale preparation admitted: %+v %v", materialized, err)
 				}
-				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 					t.Fatal("stale preparation changed application state")
 				}
 			})

@@ -61,13 +61,13 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 					t.Run(phase+"/"+operation.name, func(t *testing.T) {
 						operation.params["card_id"] = cardID
 						operation.params["idempotency_key"] = phase + operation.name + "-selected-refusal"
-						before := snapshotForkReceiverApplication(t, rt)
+						before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 						refusal := requireServedJSONRPCError(t, rt.Endpoint, operation.name, operation.params)
 						details, ok := refusal.Data["details"].(map[string]any)
 						if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != operation.name {
 							t.Fatalf("mailbox control did not reject the exact selected binding: %+v", refusal)
 						}
-						after := snapshotForkReceiverApplication(t, rt)
+						after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 						if phase == "retired" && !reflect.DeepEqual(before, after) {
 							for table, rows := range before {
 								if !reflect.DeepEqual(rows, after[table]) {

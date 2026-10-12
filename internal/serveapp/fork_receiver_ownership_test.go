@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type forkReceiverRow struct {
@@ -87,80 +87,16 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 
 // Refusal snapshots cover all application base tables, not merely the child
 // tables that a successful fork would populate. Internal DB objects are excluded.
-func snapshotForkReceiverApplication(t *testing.T, rt servedControlProofRuntime) map[string][]string {
+func snapshotForkReceiverApplication(t *testing.T, read func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
-	opts := &sql.TxOptions{ReadOnly: true}
-	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
-	if rt.Backend == "postgres" {
-		opts.Isolation = sql.LevelRepeatableRead
-		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
+	if read == nil {
+		t.Fatal("application snapshot requires its exact selected serving projection")
 	}
-	tx, err := rt.DB.BeginTx(context.Background(), opts)
+	snapshot, err := read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	rows, err := tx.Query(query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	out := map[string][]string{}
-	for _, table := range tables {
-		rows, err := tx.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, err := json.Marshal(columns)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[table+"/columns"] = []string{string(encoded)}
-		out[table] = []string{}
-		for rows.Next() {
-			values, pointers := make([]any, len(columns)), make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				t.Fatal(err)
-			}
-			for i, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[table] = append(out[table], string(encoded))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		sort.Strings(out[table])
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return snapshot
 }
 
 func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID string) map[string]forkReceiverRow {
@@ -650,7 +586,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if !ok {
 			t.Fatal("missing actual fork executor")
 		}
-		beforeRefusal := snapshotForkReceiverApplication(t, rt)
+		beforeRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 		for attempt := 0; attempt < 2; attempt++ {
 			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
@@ -661,7 +597,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), missingReceiver) || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
 				t.Fatalf("required missing receiver must reject before materialization: executions=%d child=%q err=%v", result.ExecutedEventCount, result.Materialization.ForkRunID, err)
 			}
-			if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, after) {
+			if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(beforeRefusal, after) {
 				t.Fatalf("required-missing attempt %d changed application state", attempt)
 			}
 		}
@@ -764,7 +700,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 				t.Fatalf("dynamic source did not settle: %d %v", incomplete, err)
 			}
 			requireReceiverPublicReadback(t, rt, seed.RunID)
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
 				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
@@ -780,7 +716,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 				if err != nil || string(raw) != `["dynamic_flow_instance_creation"]` {
 					t.Fatalf("wrong exact capability set: %s error=%v", raw, err)
 				}
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+				if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(before, after) {
 					t.Fatalf("capability refusal attempt %d changed application tables", attempt)
 				}
 			}

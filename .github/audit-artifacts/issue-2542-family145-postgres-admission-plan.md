@@ -5556,3 +5556,88 @@ classified as a different concept or waived. Existing raw_sql_policy and
 new issue or exemption. M01/Docker/drain/D3/M07/integration holds stay unwaived.
 Local only, no push/PR/tier/server2; receipts
 ~/.cache/swarm-2542-family145/served-restart-duplicate-construction-*.
+
+## Served fork whole-application snapshot chain (2026-10-12)
+
+Chosen class: the local whole-application SQL snapshot interpreter and its raw
+carrier propagation, not every served constructor or fork observer. The real
+owner already exists: storetest.ReadSelectedForkApplicationStorageSnapshot ->
+the private initialized native observer -> its ORIGINAL RunReadTransaction.
+PostgreSQL retains repeatable-read/read-only; SQLite uses the original read
+coordinator. Exact application-table inventory, escaped SELECT *, all columns,
+typed/NULL/byte values, every duplicate row and native timestamp instants remain.
+The local schema scan, transaction, SELECT *, row decoder and commit are deleted.
+There is no new storage port, selectable query/table callback or legacy encoder.
+
+Four actual serving entry points capture the named ReadApplicationSnapshot
+function from their EXISTING selected projection hook: control, test-setup,
+lifecycleRestartHarness and retained mailbox completion. Each closure binds
+that occurrence's p.deps.EventStore, not the old installer facade, reconstructed
+coordinator or a mutable successor pointer. The restart and retained-mailbox
+paths were found by fresh executions, initially RED on missing reader wiring;
+both are repaired and independently GREEN on BOTH stores. Existing raw DB and
+adapter fields remain explicitly tracked debt for OTHER operations; this is
+not constructor closure or removal credit for those capabilities.
+
+All32 calls in13 declarations move mechanically to rt.ReadApplicationSnapshot.
+Exact body inverses preserve every refusal, row/key equality, replay, sibling,
+history, notice and joined-cleanup assertion. The pure changed-table comparator
+is now generic because it also serves the DIFFERENT run/path-filtered companion
+snapshot. That companion reader and its header-progress decoder are UNCHANGED.
+Only three mixed-input diagnostic accesses adapt to typed Columns/Rows. The
+complete owned-source caller inventory rejects missing, extra, raw and foreign
+bindings; four entry-point bodies and the read helper are source-pinned, with
+hostile owner, refusal, context, complete-result and assertion controls.
+
+A reproduced NARROW fixture synchronization defect prevented the retained-join
+snapshot from being reachable: the original race baseline failed on BOTH stores
+before snapshot execution. Discriminating SQLite evidence was status=closed,
+close_reason=complete, outputs=1, timer_cancelled=false, outcome_pending=true,
+outcome_fired=false. Pipeline receipt settlement precedes scheduled outcome
+publication/cancellation. The existing read helper now waits for the nonempty
+join set's cancellation and publication flags before either rearm or completed-
+history inspection. Same existing60s deadline; read/decode errors fail immediately.
+Both original join roots/four backend cuts pass under race. Every attempt,
+activation, cardinality, status/output, exact policy refusal, revision, replay
+and cleanup assertion remains; hostile pending/empty/read-error/deadline controls
+reject regression. No runtime change, retry-until-green or timeout inflation.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Control runtime and public run-fork refusal whole-store snapshot | reproduced and fixed | Original TestServedParityHarnessRunForkLifecycle BOTH stores under race; exact capture and caller inverses |
+| Test-setup source, acquisition, frozen-gate, target and pending-input snapshot consumers | reproduced and fixed | Original acquisition, required-missing, historical identity, frozen-gate, input/evidence/mixed/explicit-target roots BOTH stores under race; complete32-call inventory |
+| Lifecycle nested-template snapshot capture | reproduced and fixed | Fresh both-store missing-reader RED, then original template sibling capability/refusal root race PASS87.566s with all exact gate and table comparisons |
+| Retired execution's supported notice acknowledgment | reproduced and fixed | PostgreSQL missing-reader RED, original both-store notice/acknowledgment/replay root race PASS49.526s after retained-mailbox capture; no omitted domain table |
+| Retained ordinary join completion before rearm/history refusal | reproduced and fixed | Original baseline race RED before snapshot; named six-flag diagnosis; both original join roots and all4 backend cuts GREEN under race with identical assertions |
+| Complete original caller chain and unexecuted variants | execution-proven through the same corrected path | All13 declarations/32 calls have exact inverse and source inventory;16 original roots have BOTH-store race receipts, including the actual required-missing branch; unaffected variants are not claimed freshly executed |
+
+Execution accounting is NON-aggregate: the overlarge13-root command was RED at
+its unchanged600s package limit, with the next PostgreSQL pause/resume case only
+0s old. That is not proof of an individual deadlock or pressure cause. Completed
+root receipts are retained; the interrupted pending-input root and two unreached
+roots ran separately at the SAME settings/deadline, PASS114.647s and32.420s.
+No successful aggregate is claimed. One earlier SQLite notice event.publish
+client deadline occurred BEFORE its snapshot; the diagnostic remains unclassified,
+not a demonstrated inherited failure or cause. The corrected exact reader path
+now has a positive both-store receipt; no historical failure is waived.
+
+Removing capture, while keeping the return field well-typed, deterministically
+fails the original acquisition root at its first snapshot on BOTH stores and
+fails the source-pinned owner guard. Exact restoration returns GREEN. An earlier
+nil-return-field attempt only failed compilation and is NOT counted as execution
+proof. The reviewed corpus retains every original Before,24 immutable receipts
+and existing Successor, with exact finite new After/Successor propagation:
+1288 recipes/529 transitions, digest
+371441a7d48b3fd5bb4cfd68d0b9d7455966bf3319cef1f361847f3d6eaa2da2.
+
+Downward census:7945 ->7895 findings;5630 ->5584 raw sites,50/46 removals,
+ZERO additions, uncertainty67 and supplied-pool56 unchanged. The attempted raw-
+carrier return-type conversion was rejected by the real ratchet; it is NOT a
+baseline increase or approved transition. The final named read port removes
+those raw calls instead. Final cheap collection, six persistence boundaries,
+typed snapshot controls, unchanged ratchet, U1000 and signed-head complexity
+precede the stacking report. Existing raw_sql_policy/#2542/#2151 governing
+context, tracker and watchlist suffice; fixture wiring changes no authoritative
+runtime semantics. M01/Docker/drain/D3/M07/integration holds stay unwaived.
+Local only, no push/PR/tier/server2. Receipts:
+~/.cache/swarm-2542-family145/served-fork-native-snapshot-*.

@@ -153,7 +153,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 	}
 }
 
-func forkReceiverChangedTables(before, after map[string][]string) []string {
+func forkReceiverChangedTables[T any](before, after map[string]T) []string {
 	keys := make(map[string]struct{}, len(before)+len(after))
 	for key := range before {
 		keys[key] = struct{}{}

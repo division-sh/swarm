@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -83,6 +84,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
 			}
 			for _, join := range sourceJoins {
+				t.Logf("JOIN_COMPLETION_CUT status=%s close_reason=%s outputs=%d timer_cancelled=%t outcome_pending=%t outcome_fired=%t", join.Status, join.CloseReason, len(join.Outputs), join.TimerCancelled, join.OutcomePending, join.OutcomeFired)
 				if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || len(join.Outputs) != 1 || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
 				}
@@ -138,7 +140,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if err := rt.Runtime.Shutdown(); err != nil {
 				t.Fatalf("join source runtime before refusal snapshot: %v", err)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			owner, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing fork owner")
@@ -163,7 +165,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) {
 					t.Fatalf("refusal lost canonical blocker evidence: %+v", child.UnsupportedBlockers)
 				}
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+				if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(before, after) {
 					for table, rows := range after {
 						if !reflect.DeepEqual(before[table], rows) {
 							t.Errorf("refused join-history materialization changed table %s", table)
@@ -178,25 +180,43 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 
 func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID string) (loopruntime.Activation, []joinruntime.Activation) {
 	t.Helper()
-	var raw []byte
-	if err := rt.DB.QueryRow(`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var raw []byte
+		if err := rt.DB.QueryRow(`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var persisted map[string]any
+		if err := json.Unmarshal(raw, &persisted); err != nil {
+			t.Fatal(err)
+		}
+		carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, persisted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		loop, found, err := loopruntime.Load(carrier.StateBuckets, ".", "revision")
+		if err != nil || !found {
+			t.Fatalf("root loop missing: found=%v err=%v", found, err)
+		}
+		joins, err := joinruntime.List(carrier.StateBuckets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Pipeline settlement precedes the scheduled join outcome and cancellation.
+		// Do not rearm the loop or measure completed history before both settle.
+		settled := len(joins) > 0
+		for _, join := range joins {
+			settled = settled && join.TimerCancelled && !join.OutcomePending && join.OutcomeFired
+		}
+		if settled {
+			return loop, joins
+		}
+		if !time.Now().Before(deadline) {
+			for _, join := range joins {
+				t.Logf("JOIN_COMPLETION_PENDING status=%s close_reason=%s outputs=%d timer_cancelled=%t outcome_pending=%t outcome_fired=%t", join.Status, join.CloseReason, len(join.Outputs), join.TimerCancelled, join.OutcomePending, join.OutcomeFired)
+			}
+			t.Fatal("retained join outcome/cancellation did not settle before the existing proof deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	var persisted map[string]any
-	if err := json.Unmarshal(raw, &persisted); err != nil {
-		t.Fatal(err)
-	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, persisted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loop, found, err := loopruntime.Load(carrier.StateBuckets, ".", "revision")
-	if err != nil || !found {
-		t.Fatalf("root loop missing: found=%v err=%v", found, err)
-	}
-	joins, err := joinruntime.List(carrier.StateBuckets)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return loop, joins
 }

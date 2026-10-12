@@ -29,6 +29,13 @@ func family145ServedRestartConstructionInverse(before, after string) (string, er
 }
 
 func family145ServedRestartConstructionProofError(function, before, after string) error {
+	if function == "lifecycleRestartHarness" {
+		var err error
+		after, err = family145ServedSnapshotCaptureInverse(after, 1)
+		if err != nil {
+			return err
+		}
+	}
 	sqliteFile, known := family145ServedRestartConstructors[function]
 	if !known {
 		return fmt.Errorf("unreviewed serving constructor: %s", function)

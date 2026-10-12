@@ -174,7 +174,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	before := snapshotForkReceiverApplication(t, rt)
+	before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 	for attempt := 0; attempt < 2; attempt++ {
 		refusal := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", childParams)
 		details, ok := refusal.Data["details"].(map[string]any)
@@ -183,7 +183,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 			details["required_capability"] != "selected_fork_deferred_execution" {
 			t.Fatalf("wrong selected refusal: %+v", refusal)
 		}
-		after := snapshotForkReceiverApplication(t, rt)
+		after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 		if !reflect.DeepEqual(before, after) {
 			for table, rows := range before {
 				if !reflect.DeepEqual(rows, after[table]) {

@@ -350,7 +350,7 @@ func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStore
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "template-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.observed", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-frontier"})
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
 				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
@@ -366,7 +366,7 @@ func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStore
 				if err != nil || string(capabilities) != `["dynamic_flow_instance_creation"]` {
 					t.Fatalf("wrong exact capability set: %s error=%v", capabilities, err)
 				}
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+				if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(before, after) {
 					for table, rows := range after {
 						if !reflect.DeepEqual(before[table], rows) {
 							t.Errorf("refusal changed table %s", table)

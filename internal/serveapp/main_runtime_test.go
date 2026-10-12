@@ -1481,18 +1481,19 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
-	Endpoint            string
-	DB                  *sql.DB
-	Backend             string
-	BundleHash          string
-	Probe               *lifecycletest.Probe
-	Runtime             *runtimepkg.Runtime
-	Contexts            *runtimepkg.RuntimeContextManager
-	Postgres            *store.PostgresStore
-	SQLite              *store.SQLiteRuntimeStore
-	ForkRuntime         selectedForkRuntimeProofOptions
-	ReceiverStateReader receiverProofStateReader
-	ReadRunDeliveries   servedRunDeliveryReader
+	Endpoint                string
+	DB                      *sql.DB
+	Backend                 string
+	BundleHash              string
+	Probe                   *lifecycletest.Probe
+	Runtime                 *runtimepkg.Runtime
+	Contexts                *runtimepkg.RuntimeContextManager
+	Postgres                *store.PostgresStore
+	SQLite                  *store.SQLiteRuntimeStore
+	ForkRuntime             selectedForkRuntimeProofOptions
+	ReceiverStateReader     receiverProofStateReader
+	ReadRunDeliveries       servedRunDeliveryReader
+	ReadApplicationSnapshot func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
@@ -1639,7 +1640,13 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	var contexts *runtimepkg.RuntimeContextManager
 	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	switch backend {
@@ -1670,7 +1677,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1692,7 +1699,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			TestLifecycleProbe:           probe,
 			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1790,7 +1797,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	beforeRefusal := snapshotForkReceiverApplication(t, rt)
+	beforeRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 	// A selected fork cannot acquire future ordinary ingress from the loaded
 	// same-hash runtime. Retained controls still own its explicit terminal stop.
 	refused := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
@@ -1811,7 +1818,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
 		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
 	}
-	if afterRefusal := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
+	if afterRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
 		t.Fatalf("refused selected ingress changed persisted state: tables=%v", forkReceiverChangedTables(beforeRefusal, afterRefusal))
 	}
 	var stopped struct {
@@ -2481,7 +2488,13 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
 		if !realWorkspace {
@@ -2540,7 +2553,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2564,7 +2577,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}

@@ -57,7 +57,7 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			// rows. Notice acknowledgment remains available without a live context.
 			var stopped map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID}, &stopped)
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			var notified bool
 			if err := rt.DB.QueryRow(`SELECT notified FROM mailbox WHERE item_id=$1`, noticeID).Scan(&notified); err != nil || notified {
 				t.Fatalf("fresh supported notice notification: notified=%v err=%v", notified, err)
@@ -80,7 +80,7 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			if err := rt.DB.QueryRow(`SELECT notified FROM mailbox WHERE item_id=$1`, noticeID).Scan(&notified); err != nil || !notified {
 				t.Fatalf("supported notice acknowledgment not persisted: notified=%v err=%v", notified, err)
 			}
-			after := snapshotForkReceiverApplication(t, rt)
+			after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			for _, table := range []string{"runs", "events", "event_deliveries", "event_delivery_attempts", "entity_state", "agents", "agent_turns", "runtime_external_effect_attempts", "run_fork_selected_contract_runtime_executions"} {
 				if !reflect.DeepEqual(before[table], after[table]) {
 					t.Fatalf("notice acknowledgment acquired execution or changed domain %s: before=%v after=%v", table, before[table], after[table])
@@ -90,7 +90,7 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			if !ack.OK || ack.Kind != "notice" || !ack.Replayed {
 				t.Fatalf("supported acknowledgment did not replay exact result: %+v", ack)
 			}
-			if !reflect.DeepEqual(after, snapshotForkReceiverApplication(t, rt)) {
+			if !reflect.DeepEqual(after, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 				t.Fatal("repeated acknowledgment mutated state")
 			}
 		})

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -26,7 +27,13 @@ import (
 func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
@@ -70,7 +77,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
+		return process, servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
 	}
 }
 

@@ -105,7 +105,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if !found {
 				t.Fatal("pending child disappeared from frontier")
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "allow_source_freeze": true, "idempotency_key": "mixed-fork"})
 			if response.Error == nil {
 				t.Fatal("historical non-agent delivery replay was enabled")
@@ -118,13 +118,13 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if refusal == nil || refusal.Error() != "selected-contract fork execution materialization blocked: non_agent_delivery_replay_unsupported" {
 				t.Fatalf("historical replay refusal changed: %v", refusal)
 			}
-			after := snapshotForkReceiverApplication(t, rt)
+			after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			if !reflect.DeepEqual(before["runs"], after["runs"]) {
-				t.Logf("changed runs columns=%v", before["runs/columns"])
-				for _, row := range before["runs"] {
+				t.Logf("changed runs columns=%v", before["runs"].Columns)
+				for _, row := range before["runs"].Rows {
 					t.Logf("runs before: %s", row)
 				}
-				for _, row := range after["runs"] {
+				for _, row := range after["runs"].Rows {
 					t.Logf("runs after: %s", row)
 				}
 			}
