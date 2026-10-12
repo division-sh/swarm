@@ -54,10 +54,10 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	}
 	// The authored source gate stays intact: describe/verify must not bypass
 	// malformed recursive definitions simply to produce a projection.
-	writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "name: broken\ncontext:\n  malformed: {type: array}\n")
+	writeReleaseFile(t, filepath.Join(source, "tools.yaml"), "schema_guard:\n  description: schema admission guard\n  input_schema: {type: array}\n")
 	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--portable", "--json", "--config", config)
-	if result.err == nil {
-		t.Fatalf("compiled verify accepted malformed schema: %s", result.output)
+	if result.err == nil || !strings.Contains(result.output, "array requires items") {
+		t.Fatalf("compiled verify did not reach canonical schema refusal: %v\n%s", result.err, result.output)
 	}
 }
 
