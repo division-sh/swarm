@@ -59,6 +59,13 @@ func TestIssue642PublishedBarrierCrashProcessHelper(t *testing.T) {
 	TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t)
 }
 
+func TestIssue642UnpublishedBarrierCrashProcessHelper(t *testing.T) {
+	if os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND") == "" {
+		return
+	}
+	TestIssue642UnpublishedTransferredBarrierReforkBothStores(t)
+}
+
 func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *storeselected.Owner, result runforkexecution.SelectedContractExecutionResult, original string, observed forkEngineObservation, sourceRevision int) {
 	t.Helper()
 	claim, valid := deliverylifecycle.ClaimFromContext(observed.ctx)
@@ -88,6 +95,14 @@ func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *
 // SIGKILL occurs after acknowledged activation/publication and the exact child
 // claim, before any handler or graceful retirement can settle that occurrence.
 func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
+	verifyBarrierCrashRestartBothStores(t, false)
+}
+
+func TestIssue642UnpublishedBarrierCrashSuccessorBothStores(t *testing.T) {
+	verifyBarrierCrashRestartBothStores(t, true)
+}
+
+func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			address := filepath.Join(t.TempDir(), "published-barrier-crash.db")
@@ -97,9 +112,13 @@ func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
 				request.Selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
 				request.PostgresDSN = address
 			}
-			checkpoint := killSelectedReceiverAtClaim(t, "TestIssue642PublishedBarrierCrashProcessHelper", []string{
-				"SWARM_PUBLISHED_BARRIER_CRASH_BACKEND=" + backend, "SWARM_PUBLISHED_BARRIER_CRASH_ADDRESS=" + address,
-			})
+			helper, prefix := "TestIssue642PublishedBarrierCrashProcessHelper", "SWARM_PUBLISHED_BARRIER_CRASH_"
+			actor, key, transport := "published-barrier-crash", "pending-cut", "published-barrier-crash-transport"
+			if pendingSource {
+				helper, prefix = "TestIssue642UnpublishedBarrierCrashProcessHelper", "SWARM_UNPUBLISHED_BARRIER_CRASH_"
+				actor, key, transport = "pending-barrier-refork", "parent-start", "pending-barrier-refork-transport"
+			}
+			checkpoint := killSelectedReceiverAtClaim(t, helper, []string{prefix + "BACKEND=" + backend, prefix + "ADDRESS=" + address})
 			selected, err := storeselected.OpenRuntime(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -162,13 +181,33 @@ func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
 			baseline := process.ActiveCount()
 			wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			original, found, err := family.Operations().LoadForkOperation(wait, "published-barrier-crash", "pending-cut", "published-barrier-crash-transport")
+			original, found, err := family.Operations().LoadForkOperation(wait, actor, key, transport)
 			if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.ForkRunID != checkpoint.Proof.ChildRunID || original.Result == nil || original.Request.ResolvedPoint == nil {
 				t.Fatalf("barrier crash lost its permanent cut/activation acknowledgment: %+v found=%t err=%v", original, found, err)
 			}
 			before, err := storetest.ReadSelectedForkSourceDomain(wait, selected.RuntimeDeps().DeliveryStore, checkpoint.Proof.SourceRunID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			var pending *fanoutbarrier.TransferredOccurrence
+			var ancestorBefore map[string]storetest.SelectedForkStorageTableSnapshot
+			if pendingSource {
+				cut, err := family.Plan(wait, runfork.RunForkPlanRequest{SourceRunID: checkpoint.Proof.SourceRunID, AtStart: true})
+				if err != nil || len(cut.FanOutObligations) != 1 || cut.FanOutObligations[0].Barrier == nil || cut.FanOutObligations[0].Barrier.TransferredOccurrence == nil {
+					t.Fatalf("pending crash source lost its admitted barrier: %+v error=%v", cut, err)
+				}
+				pending = cut.FanOutObligations[0].Barrier.TransferredOccurrence
+				if pending.Publication.EventID != checkpoint.Proof.SourceEventID || cut.FanOutObligations[0].Barrier.Status != fanoutbarrier.StatusClosedPending ||
+					original.Request.ResolvedPoint.Kind != runfork.RunForkPointRunStart || !original.Result.SourceFrozen {
+					t.Fatal("pending crash source changed its obligation or start cut")
+				}
+				if _, physical := cut.HistoricalJoinPublication(pending.Publication.EventID); physical {
+					t.Fatal("pending crash source invented a physical parent event")
+				}
+				ancestorBefore, err = storetest.ReadSelectedForkSourceDomain(wait, selected.RuntimeDeps().DeliveryStore, pending.Publication.CommittedCause.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "producer")
 			if err != nil {
@@ -186,8 +225,26 @@ func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
 			recovered, err := family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
 			})
-			if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.Proof.ChildRunID || recovered[0].ExecutionID != checkpoint.Proof.ExecutionID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+			if err != nil {
 				t.Fatalf("published barrier native successor: %+v err=%v", recovered, err)
+			}
+			want := 1
+			if pendingSource {
+				want = 2
+			}
+			if len(recovered) != want {
+				t.Fatalf("barrier successor lost a source boundary: %+v want=%d", recovered, want)
+			}
+			for _, entry := range recovered {
+				if pendingSource && entry.RunID == checkpoint.Proof.SourceRunID {
+					if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != "" || entry.Continuation != nil {
+						t.Fatalf("materialized-only source acquired execution authority: %+v", entry)
+					}
+					continue
+				}
+				if entry.RunID != checkpoint.Proof.ChildRunID || entry.ExecutionID != checkpoint.Proof.ExecutionID || entry.Disposition != runfork.SelectedForkRecoveryResume {
+					t.Fatalf("barrier native successor changed its acknowledged occurrence: %+v", entry)
+				}
 			}
 			var observed forkEngineObservation
 			select {
@@ -233,6 +290,24 @@ func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
 			if barrier.Status != fanoutbarrier.StatusFired || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) || barrier.ScheduleActivationID != "" ||
 				barrier.TransferredOccurrence == nil || barrier.TransferredOccurrence.Publication.EventID != observed.id || barrier.TransferredOccurrence.Publication.SourceEventID != checkpoint.Proof.SourceEventID {
 				t.Fatalf("native barrier recovery changed retained lineage/summary or invented a timer: %+v", barrier)
+			}
+			if pendingSource {
+				transferred := barrier.TransferredOccurrence
+				if transferred.Publication.SourceRunID != checkpoint.Proof.SourceRunID || transferred.Publication.CommittedCause != pending.Publication.CommittedCause || !transferred.DueAt.Equal(pending.DueAt) {
+					t.Fatal("pending barrier recovery flattened its parent or changed cause/due")
+				}
+				event := storetest.LoadCanonicalEventRecord(t, wait, selected.RuntimeDeps().DeliveryStore, observed.id)
+				lineage, valid := event.SelectedForkLineage()
+				if !valid || lineage.SourceRunID() != checkpoint.Proof.SourceRunID || lineage.SourceEventID() != pending.Publication.EventID || !event.CreatedAt().Equal(pending.DueAt) {
+					t.Fatal("pending barrier successor lost exact event lineage or due")
+				}
+				if count, err := storetest.ReadLifecycleEventCardinality(wait, selected.RuntimeDeps().DeliveryStore, checkpoint.Proof.SourceRunID, "platform.join_complete"); err != nil || count != 0 {
+					t.Fatalf("pending barrier successor invented EB: count=%d error=%v", count, err)
+				}
+				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected.RuntimeDeps().DeliveryStore, pending.Publication.CommittedCause.RunID)
+				if err != nil || !reflect.DeepEqual(ancestorBefore, after) {
+					t.Fatalf("pending barrier successor changed ancestor cause/business facts: %v", err)
+				}
 			}
 			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected.RuntimeDeps().DeliveryStore, checkpoint.Proof.ChildRunID, "platform.join_complete"); err != nil || count != 1 {
 				t.Fatalf("native successor duplicated its published occurrence: count=%d err=%v", count, err)

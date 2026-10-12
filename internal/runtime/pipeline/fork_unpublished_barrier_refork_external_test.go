@@ -2,6 +2,8 @@ package pipeline_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -31,7 +33,18 @@ import (
 )
 
 func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
+	verifyUnpublishedTransferredBarrierRefork(t, false)
+}
+
+func TestIssue642UnpublishedBarrierIgnoresLateSourcePublicationBothStores(t *testing.T) {
+	verifyUnpublishedTransferredBarrierRefork(t, true)
+}
+
+func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		if crashBackend := os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
+			continue
+		}
 		t.Run(backend, func(t *testing.T) {
 			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "producer")
 			if err != nil {
@@ -43,7 +56,7 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			}
 			probe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
-			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, probe)
+			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, probe, os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_ADDRESS"))
 			var release sync.Once
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -96,6 +109,7 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
+			parentRequest := request
 			prepared, err := family.Prepare(phase, request)
 			if err != nil {
 				t.Fatal(err)
@@ -137,16 +151,94 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
+			if os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
+				childProbe.resume = make(chan struct{})
+				t.Cleanup(func() { close(childProbe.resume) })
+			}
 			request.SourceRunID, request.At, request.AtStart = parent.ForkRunID, "", true
 			request.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-barrier-refork", IdempotencyKey: "parent-start",
 				TransportHash: "pending-barrier-refork-transport", SourceRunID: parent.ForkRunID, AtStart: true,
 				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection}
 			request.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: childProbe}
-			child, err := family.Execute(phase, request)
-			if err != nil || !child.Activation.Activated {
-				t.Fatalf("continue pending barrier: %+v error=%v", child, err)
+			var child runforkexecution.SelectedContractExecutionResult
+			if latePublication {
+				childPrepared, err := family.Prepare(phase, request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := childPrepared.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				materialization, err := childPrepared.MaterializationRequest()
+				if err != nil {
+					t.Fatal(err)
+				}
+				materialization.ForkOperation = request.ForkOperation
+				child.Materialization, err = writer.MaterializeRunForkForSelectedContractExecution(phase, materialization)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cutBefore, err := family.Plan(phase, runfork.RunForkPlanRequest{SourceRunID: child.Materialization.ForkRunID, AtStart: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parentProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
+				parentRequest.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: parentProbe}
+				parentResult, err := family.Execute(phase, parentRequest)
+				if err != nil || !parentResult.Activation.Activated || parentResult.Materialization.ForkRunID != parent.ForkRunID {
+					t.Fatalf("late parent's exact selected barrier execution: %+v error=%v", parentResult, err)
+				}
+				if _, err := parentProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: occurrence.Publication.EventID, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
+					t.Fatal(err)
+				}
+				var output string
+				select {
+				case output = <-parentProbe.completed:
+				case <-phase.Done():
+					t.Fatal(phase.Err())
+				}
+				if _, err := parentProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: output, SubscriberID: final.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
+					t.Fatal(err)
+				}
+				waitPublishedBarrierPipelineReceipts(t, phase, selected.RuntimeDeps().DeliveryStore, occurrence.Publication.EventID, output)
+				before = waitUnpublishedBarrierDispatchWitness(t, phase, selected.RuntimeDeps().DeliveryStore, parent.ForkRunID, occurrence.Publication.EventID)
+				cutAfter, err := family.Plan(phase, runfork.RunForkPlanRequest{SourceRunID: child.Materialization.ForkRunID, AtStart: true})
+				if err != nil || !reflect.DeepEqual(cutBefore.Entities, cutAfter.Entities) || !reflect.DeepEqual(cutBefore.FanOutObligations, cutAfter.FanOutObligations) {
+					t.Fatalf("late EB changed the child's already admitted pending cut: %v", err)
+				}
+				if err := childPrepared.Close(); err != nil {
+					t.Fatal(err)
+				}
+				childRun := child.Materialization.ForkRunID
+				child, err = family.Execute(phase, request)
+				if err != nil || !child.Activation.Activated || child.Activation.SourceFrozen || child.Materialization.ForkRunID != childRun {
+					t.Fatalf("late-source child must execute its exact retained branch: %+v error=%v", child, err)
+				}
+			} else {
+				child, err = family.Execute(phase, request)
+				if err != nil || !child.Activation.Activated {
+					t.Fatalf("continue pending barrier: %+v error=%v", child, err)
+				}
 			}
 			id := activityidentity.ForkLineageEventID(child.Materialization.ForkRunID, occurrence.Publication.EventID)
+			if childProbe.resume != nil {
+				var observed forkEngineObservation
+				select {
+				case observed = <-childProbe.claim:
+				case <-phase.Done():
+					t.Fatal(phase.Err())
+				}
+				if observed.id != id {
+					t.Fatal("pending barrier crash acquired another occurrence")
+				}
+				source, err := selected.Entities().LoadOperatorEntity(phase, parent.ForkRunID, parent.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publishBarrierCrashCheckpoint(t, phase, selected, child, occurrence.Publication.EventID, observed, source.Entity.Revision)
+			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +259,7 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			for _, count := range []struct {
 				runID string
 				want  int
-			}{{parent.ForkRunID, 0}, {child.Materialization.ForkRunID, 1}} {
+			}{{parent.ForkRunID, map[bool]int{false: 0, true: 1}[latePublication]}, {child.Materialization.ForkRunID, 1}} {
 				got, err := storetest.ReadLifecycleEventCardinality(phase, selected.RuntimeDeps().DeliveryStore, count.runID, "platform.join_complete")
 				if err != nil || got != count.want {
 					t.Fatalf("exact barrier publication count=%d want%d error=%v", got, count.want, err)
@@ -191,6 +283,11 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, parent.ForkRunID)
 			if err != nil || !reflect.DeepEqual(before, after) {
+				for table, prior := range before {
+					if !reflect.DeepEqual(prior, after[table]) {
+						t.Logf("pending barrier source difference table=%s before=%+v after=%+v", table, prior, after[table])
+					}
+				}
 				t.Fatalf("pending child changed its parent's business facts: %v", err)
 			}
 			if err := prepared.Close(); err != nil {
@@ -219,5 +316,55 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 				t.Fatalf("pending barrier retained process work after exact joined retirement: got%d error=%v", process.ActiveCount(), err)
 			}
 		})
+	}
+}
+
+// The selected dispatcher records its final diagnostic after the ordinary
+// pipeline receipt. Await that exact write before measuring source immutability;
+// do not drop diagnostics from the complete source witness.
+func waitUnpublishedBarrierDispatchWitness(t *testing.T, ctx context.Context, selected any, runID, eventID string) map[string]storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snapshot, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["events"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			name, err := row["event_name"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != "platform.runtime_log" {
+				continue
+			}
+			raw, err := row["payload_bytes"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var log struct {
+				Details struct {
+					Action  string `json:"action"`
+					EventID string `json:"event_id"`
+					RunID   string `json:"run_id"`
+				} `json:"details"`
+			}
+			if err := json.Unmarshal([]byte(raw), &log); err != nil {
+				t.Fatal(err)
+			}
+			if log.Details.Action == "selected_contract_event_dispatched" && log.Details.EventID == eventID && log.Details.RunID == runID {
+				return snapshot
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("late parent did not commit its exact dispatch witness: %v", ctx.Err())
+		}
 	}
 }

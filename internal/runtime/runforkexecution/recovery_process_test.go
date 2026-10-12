@@ -164,7 +164,7 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 		cmd.Args = append(cmd.Args, "-test.v")
 	}
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
-	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
+	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_pending_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
 		// The killed child cannot release its sealed source projections. Keep
 		// every private scratch root under the parent's exact cleanup ownership.
 		root := t.TempDir()
@@ -294,6 +294,10 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_pending_join_") {
+		runUnpublishedArrivalCrashHelper(t, ctx, capabilityStore, owner, capability)
+		return
+	}
 	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_activity_") {
 		runSelectedActivityResultCrashHelper(t, ctx, backend, db, selected, owner, capability)
 		return
