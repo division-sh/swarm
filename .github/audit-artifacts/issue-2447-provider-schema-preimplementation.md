@@ -1,8 +1,8 @@
 # Pre-Implementation Coverage Audit: Provider JSON-Schema Subset Family
 
 Agent-g, 2026-10-12. Integrated source `730c17b988303b84c1a82bb6345fa25d600784d8`
-(actual Go1.26 master after2622); separate worktree/branch from pending PR2626. **Gate requested,
-not approved. No production/test/spec edits.** A PR2626 finding takes priority.
+(actual Go1.26 master after2622); separate worktree/branch from pending PR2626.
+**Coding approved as first slice at6117802058.** A PR2626 finding takes priority.
 The original intake source wascc369e5eb5.2622 actually merged; this audit-only
 branch is rebased, not speculatively stacked. Target provider-schema blob is
 unchanged across both masters and PR2626. Old Go1.25 controls remain historical
@@ -159,8 +159,9 @@ provider-schema value. Existing2349/pack-interface watchlist ONLY for now, no ne
 framework/constructor/type work. Rough2-4 days across producers/consumers if
 promoted, medium ROI, low-confidence effort until the transport boundary census.
 
-Proposed small implementation: private properties and ordered-composition phases
-inside the existing five-function owner; preserve every type switch, nil rule,
+Proposed small implementation: node-shape/properties admission followed by one
+private ordered-constraints phase inside the existing five-function owner;
+preserve every type switch, nil rule,
 sorted-property/error order and recursion exactly. No fresh validator, generic
 walker, callback engine, compatibility seam, vendor or behavior/spec migration.
 Can close the chosen maintenance class in one PR; other same-parent interpreters
@@ -206,3 +207,19 @@ adds the already-proven semantic manifestation explicitly split to2627, total32
 accounted rows. Correct existing2447 issue/watchlist entries before requesting
 the short re-gate. No production/test/spec edit, constructor rewrite, validation
 change, budget waiver, vendor or type-model implementation is authorized here.
+
+## Coding Gate And Characterization Checkpoint (6117802058)
+
+The independent short re-gate approves the repaired first slice. All earlier
+audit-only statements above describe their historical checkpoint, not a current
+coding prohibition. P01-P23 are added in a new test file and must pass and be
+committed on the unchanged production owner before extraction. Existing tests
+remain unchanged. The post-gate open-PR2612/2614/2616/2617/2624/2626 file census
+finds no edit to the owner, original tests or proposed characterization file.
+
+The production proposal uses the standard-library sorted map-key iterator for
+the existing lexical traversal and one explicit tail call to the ordered
+constraints phase. This avoids adding a generic walker or a positive-net size
+exception. Actual gross/net and callable metrics will be checked before claiming
+Q02. No provider consumer, schema law, request shape or authoritative contract
+changes. Anthropic remains A01 split to2627; all C/Q proofs remain outstanding.
