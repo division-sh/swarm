@@ -150,8 +150,11 @@ func TestPostgresRetainedGenerationCommitDisposition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := schema.BindProcessLease(lease); err != nil {
+			if err := BindPostgresProcessLease(schema, lease); err != nil {
 				t.Fatal(err)
+			}
+			if err := BindPostgresProcessLease(schema, lease); err == nil || err.Error() != "PostgreSQL schema process lease must be bound exactly once" {
+				t.Fatalf("constructor accepted repeated lease binding: %v", err)
 			}
 			if err := schema.BootstrapSchema(ctx, SchemaBootstrapRequest{PlatformPlans: plans, Origin: RuntimeStoreOrigin{
 				SwarmVersion: "process-generation-ack", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
@@ -307,7 +310,7 @@ func TestPostgresBootstrapOwnsSQLAndCommitOutcome(t *testing.T) {
 							t.Error(err)
 						}
 					}()
-					if err := store.BindProcessLease(lease); err != nil {
+					if err := BindPostgresProcessLease(store, lease); err != nil {
 						t.Fatal(err)
 					}
 				}
