@@ -13,7 +13,7 @@ helper's JSON-map dialect, nil behavior or private phases. Binding maintenance
 contract: preserve the existing admitted behavior, branch/error ordering,
 provider payload bytes and tests. Adjacent authoritative constraints reread:
 
-- engine.agent_session_management.provider_adapter_contract.required_contract_dimensions.tool_schema
+- engine.agent_session_management.llm_provider_adapter_contract.required_contract_dimensions.tool_schema
   (platform-spec.yaml7600): translate and validate provider-visible input before
   provider execution; provider results are a different normalization dimension.
 - engine.persistence_model.role_scoped_entity_tools.generated_schema_closure
@@ -61,7 +61,7 @@ remain unchanged.
 | llm/fork_chat_transport.go newForkChatToolDispatch | Already consumes list owner after exact fork/actor/executor validation and before freezing JSON. New C05 malformed/frozen-definition controls; retain existing exact authority/foreign-coordinate test. |
 | contracts ToolInputSchema definition/value, ToolSchemaEntry, directional subset | Different semantic concepts: immutable typed definition/instance/entry/relation, not delivered JSON-map syntax.2509 matrix and unchanged canonical schema/relation tests; no factoring here. |
 | tools validator and runtime/eventschema acceptance | Different concept: payload inhabitance, not validation of the delivered schema document. Existing nested typed-enum and runtime extras-refusal proofs; no shared owner introduced. |
-| Anthropic buildRequest | Does NOT call this subset helper: direct schema serialization, not a second local subset interpreter. Explicit parent-consumption observation; universal pre-provider validation cannot be credited from this maintenance PR. Existing frame proof establishes serialization only. Reviewer must settle whether current upstream admission suffices or this needs a separately gated semantic correction. |
+| Anthropic buildRequest | Does NOT call this subset helper: direct schema serialization, not a second local subset interpreter. Explicit parent-consumption observation; universal pre-provider validation cannot be credited from this maintenance PR. Planned unchanged frame proof establishes serialization only. Reviewer must settle whether current upstream admission suffices or this needs a separately gated semantic correction. |
 | Claude MCP catalog/managed-capability admission | Separate catalog/exact-definition authority; no local copy of this JSON-subset interpreter found. Existing managed/native/MCP boundary controls, not blanket syntax-admission proof. No ownership or MCP transport change. |
 
 Full relevant path: authored/imported source admission -> typed registry/event
