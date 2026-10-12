@@ -7074,8 +7074,21 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 		assertExclusiveHandoff(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String()))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-		assertExclusiveHandoff(t, base(writeServeRuntimeTestConfig(t), storebackend.BackendPostgres.String()))
+		stubServeRuntimeWorkspaceLifecycle(t)
+		unsetStoreSelectorEnv(t)
+		_, parameters, _ := testutil.StartEmptyPostgresProcessLeaseProof(t)
+		t.Setenv("SWARM_NON_DEV_HANDOFF_PASSWORD", parameters.Password)
+		path := writeServeRuntimeTestConfig(t)
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents = append(contents, []byte(fmt.Sprintf("database:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: SWARM_NON_DEV_HANDOFF_PASSWORD\n  sslmode: %q\n",
+			parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode))...)
+		if err := os.WriteFile(path, contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		assertExclusiveHandoff(t, base(path, storebackend.BackendPostgres.String()))
 	})
 }
 
