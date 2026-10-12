@@ -19,6 +19,24 @@ import (
 )
 
 func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
+	verifyUnpublishedTransferredArrivalRefork(t, false)
+}
+
+func TestIssue642UnpublishedArrivalIgnoresLateSourcePublicationBothStores(t *testing.T) {
+	verifyUnpublishedTransferredArrivalRefork(t, true)
+}
+
+type unpublishedJoinLateSourceActivation struct {
+	SelectedContractForkLifecycle
+	before func()
+}
+
+func (s unpublishedJoinLateSourceActivation) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	s.before()
+	return s.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
+}
+
+func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
@@ -114,8 +132,36 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-descendant", IdempotencyKey: "parent-start",
 				TransportHash: "unpublished-descendant-transport", SourceRunID: parentRun, AtStart: true,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			childOwner := owner
+			if latePublication {
+				childPorts := *owner.ports
+				childOwner.ports = &childPorts
+				childOwner.ports.fork = unpublishedJoinLateSourceActivation{SelectedContractForkLifecycle: owner.ports.fork, before: func() {
+					// The child already owns its immutable cut/materialization. Let B
+					// physically publish EB before C acquires execution authority.
+					releaseParent()
+					select {
+					case parentResult := <-parentDone:
+						parentJoined = true
+						if parentResult.err != nil || !parentResult.result.Activation.Activated {
+							t.Fatalf("late parent publication activation: %+v error=%v", parentResult.result, parentResult.err)
+						}
+					case <-time.After(15 * time.Second):
+						t.Fatal("late parent publication activation did not join")
+					}
+					waitUnpublishedReforkRunCompletion(t, ctx, selected, parentRun)
+					original := storetest.LoadCanonicalEventRecord(t, ctx, selected, pending.Publication.EventID)
+					if original.RunID() != parentRun || !original.CreatedAt().Equal(cause.CurrentDueAt) {
+						t.Fatal("late immediate-source publication changed its owner or original due")
+					}
+					before, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, parentRun)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}}
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
-				AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+				AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("continue the immediate parent's admitted unpublished obligation: %+v error=%v", result, err)
@@ -133,8 +179,8 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 				!event.CreatedAt().Equal(cause.CurrentDueAt) {
 				t.Fatal("continued arrival lost immediate-parent identity or original due")
 			}
-			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists {
-				t.Fatalf("child publication fabricated the parent's occurrence: exists=%t error=%v", exists, err)
+			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists != latePublication {
+				t.Fatalf("child publication changed the parent's physical occurrence: exists=%t error=%v", exists, err)
 			}
 			if count, err := storetest.ReadLifecycleEventCardinality(ctx, selected, child, "platform.join_complete"); err != nil || count != 1 {
 				t.Fatalf("continued arrival publication count=%d error=%v", count, err)
@@ -152,14 +198,16 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			releaseParent()
-			select {
-			case parentResult := <-parentDone:
-				parentJoined = true
-				if parentResult.err != nil || !parentResult.result.Activation.Activated {
-					t.Fatalf("late parent activation: %+v error=%v", parentResult.result, parentResult.err)
+			if !parentJoined {
+				select {
+				case parentResult := <-parentDone:
+					parentJoined = true
+					if parentResult.err != nil || !parentResult.result.Activation.Activated {
+						t.Fatalf("late parent activation: %+v error=%v", parentResult.result, parentResult.err)
+					}
+				case <-time.After(15 * time.Second):
+					t.Fatal("late parent activation did not finish")
 				}
-			case <-time.After(15 * time.Second):
-				t.Fatal("late parent activation did not finish")
 			}
 			parentDeadline := time.Now().Add(15 * time.Second)
 			var parentState storetest.SelectedExecutionStorage
@@ -173,11 +221,15 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if !result.Activation.SourceFrozen || parentState.State != "closed" || parentState.RunStatus != "forked" {
-				t.Fatalf("late execution must retain the explicit frozen-source outcome: activation=%+v parent=%+v", result.Activation, parentState)
+			wantParentStatus := "forked"
+			if latePublication {
+				wantParentStatus = "completed"
 			}
-			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists {
-				t.Fatalf("retired frozen parent invented its pending publication: exists=%t error=%v", exists, err)
+			if result.Activation.SourceFrozen == latePublication || parentState.State != "closed" || parentState.RunStatus != wantParentStatus {
+				t.Fatalf("late execution must retain the exact frozen/diverged source outcome: activation=%+v parent=%+v", result.Activation, parentState)
+			}
+			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists != latePublication {
+				t.Fatalf("retired parent changed its actual publication evidence: exists=%t error=%v", exists, err)
 			}
 			childAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, child)
 			if err != nil || !reflect.DeepEqual(childBefore, childAfter) {

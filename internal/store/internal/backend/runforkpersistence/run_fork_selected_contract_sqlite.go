@@ -142,7 +142,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				out[idx] = prepared
 			}
 			out = append(out, pendingInputs...)
-			return nil
+			return orderRunForkSourceJoinInputs(out, stateAdmission.snapshot)
 		})
 		return struct{}{}, err
 	})

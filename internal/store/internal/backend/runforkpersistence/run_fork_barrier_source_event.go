@@ -52,7 +52,7 @@ func (a runForkSourceStateAdmission) publishedBarrier(ctx context.Context, tx *s
 		}
 		reference = &projected
 	}
-	continuation, route, err := prepareRunForkPublishedBarrierTransfer(a.snapshot, *source, a.forkRunID, child.Registration.PlanRef, reference, child.Registration.CreatedAt)
+	continuation, route, err := prepareRunForkBarrierTransfer(ctx, tx, a.snapshot, *source, a.forkRunID, child.Registration.PlanRef, reference, child.Registration.CreatedAt)
 	if err != nil {
 		return event, err
 	}

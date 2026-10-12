@@ -54,32 +54,40 @@ func ResolvePublishedJoinOccurrenceDeliveryTarget(source semanticview.Source, pu
 	if original.Mode() != timeridentity.JoinRefModeFanOutDelivery {
 		return ResolveWorkflowJoinOccurrenceDeliveryTarget(source, publication.Event())
 	}
-	retained, valid := original.FanOutDelivery()
-	selected, found := semanticview.WorkflowJoinPlanForHandler(source, original.Node(), original.HandlerEvent())
-	if !valid || !found || selected.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery || selected.Spec.EffectiveID() != original.JoinID() ||
-		selected.FanOut.FanOut.ElementRef != runtimecontracts.FanOutElementRefFrom(retained.DeclarationIdentity()) {
-		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("published barrier has no exact selected declaration counterpart")
-	}
-	carriage, err := semanticview.CompileFanOutPlanCarriage(source)
-	if err != nil {
-		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
-	}
-	compiled, _, err := carriage.Resolve(selected.FanOut.FanOut.ElementRef)
-	if err != nil {
-		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
-	}
-	if compiled != selected.FanOut.FanOut {
-		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("published barrier selected join contradicts its compiled fan-out evidence")
-	}
-	handler, found := source.ExecutableNodeEventHandlers(original.Node())[original.HandlerEvent()]
-	if !found || handler.Join == nil {
-		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("published barrier selected declaration has no executable handler")
-	}
-	ref, err := workflowJoinDeclarationRef(source, original.Node(), original.HandlerEvent(), handler)
+	ref, err := selectedRetainedBarrierDeclaration(source, original)
 	if err != nil {
 		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
 	}
 	return workflowJoinOccurrenceDeliveryTarget(source, publication.Event(), ref)
+}
+
+func selectedRetainedBarrierDeclaration(source semanticview.Source, original timeridentity.JoinRef) (timeridentity.JoinRef, error) {
+	retained, valid := original.FanOutDelivery()
+	selected, found := semanticview.WorkflowJoinPlanForHandler(source, original.Node(), original.HandlerEvent())
+	if !valid || !found || selected.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery || selected.Spec.EffectiveID() != original.JoinID() ||
+		selected.FanOut.FanOut.ElementRef != runtimecontracts.FanOutElementRefFrom(retained.DeclarationIdentity()) {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier has no exact selected declaration counterpart")
+	}
+	carriage, err := semanticview.CompileFanOutPlanCarriage(source)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	compiled, _, err := carriage.Resolve(selected.FanOut.FanOut.ElementRef)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	if compiled != selected.FanOut.FanOut {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier selected join contradicts its compiled fan-out evidence")
+	}
+	handler, found := source.ExecutableNodeEventHandlers(original.Node())[original.HandlerEvent()]
+	if !found || handler.Join == nil {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier selected declaration has no executable handler")
+	}
+	ref, err := workflowJoinDeclarationRef(source, original.Node(), original.HandlerEvent(), handler)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	return ref, nil
 }
 
 func workflowJoinOccurrenceDeliveryTarget(source semanticview.Source, evt events.Event, ref timeridentity.JoinRef) (events.DeliveryRecipient, events.RouteIdentity, DeliveryTargetHandler, bool, error) {
@@ -100,7 +108,13 @@ func ResolvePendingJoinOccurrenceDeliveryTarget(source semanticview.Source, occu
 	if !valid {
 		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join lacks exact retained declaration")
 	}
-	if _, found := semanticview.WorkflowJoinPlanForRef(source, ref); !found {
+	if ref.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+		var err error
+		ref, err = selectedRetainedBarrierDeclaration(source, ref)
+		if err != nil {
+			return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
+		}
+	} else if _, found := semanticview.WorkflowJoinPlanForRef(source, ref); !found {
 		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join references unknown exact selected declaration")
 	}
 	handler, found := source.ExecutableNodeEventHandlers(ref.Node())[ref.HandlerEvent()]

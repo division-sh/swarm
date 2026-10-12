@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -143,4 +145,55 @@ func admitRunForkPendingJoinInput(ctx context.Context, tx *sql.Tx, admission run
 		EventName: source.Command.EventType, ExecutionMode: source.Command.ExecutionMode,
 		Scope: string(projected.Scope()), RoutingSource: projected.RoutingSource(), Payload: projected.Payload(),
 		JoinContinuation: continuation, JoinRoute: route}, nil
+}
+
+// Pending inputs retain their original due, while physical inputs retain their
+// captured publication time. Appending one variant must not reorder the other.
+func orderRunForkSourceJoinInputs(inputs []runfork.RunForkSelectedContractSourceEvent, snapshot *runForkRevisionSnapshot) error {
+	hasPending := false
+	for _, input := range inputs {
+		_, pending := input.JoinContinuation.PendingSource()
+		hasPending = hasPending || pending
+	}
+	if !hasPending {
+		return nil
+	}
+	if snapshot == nil {
+		return fmt.Errorf("mixed join inputs require their exact source cut")
+	}
+	physical := make(map[string]time.Time, len(snapshot.Events))
+	for _, event := range snapshot.Events {
+		if event.RunID != snapshot.RunID {
+			return fmt.Errorf("mixed join inputs contain a foreign captured publication")
+		}
+		if _, duplicate := physical[event.EventID]; duplicate {
+			return fmt.Errorf("mixed join inputs repeat a captured publication")
+		}
+		physical[event.EventID] = event.CreatedAt
+	}
+	times := make(map[string]time.Time, len(inputs))
+	for _, input := range inputs {
+		if _, duplicate := times[input.SourceEventID]; duplicate {
+			return fmt.Errorf("mixed join inputs repeat an execution coordinate")
+		}
+		at, published := physical[input.SourceEventID]
+		if source, pending := input.JoinContinuation.PendingSource(); pending {
+			if published || source.Command.RunID != snapshot.RunID || source.Publication.EventID != input.SourceEventID {
+				return fmt.Errorf("pending join input contradicts its captured source coordinate")
+			}
+			at = source.Command.Due.Absolute
+		}
+		if at.IsZero() {
+			return fmt.Errorf("mixed join input lacks its captured time")
+		}
+		times[input.SourceEventID] = at
+	}
+	sort.Slice(inputs, func(i, j int) bool {
+		left, right := inputs[i].SourceEventID, inputs[j].SourceEventID
+		if times[left].Equal(times[right]) {
+			return left < right
+		}
+		return times[left].Before(times[right])
+	})
+	return nil
 }

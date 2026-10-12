@@ -702,7 +702,7 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				out[idx] = prepared
 			}
 			out = append(out, pendingInputs...)
-			return nil
+			return orderRunForkSourceJoinInputs(out, stateAdmission.snapshot)
 		})
 		return struct{}{}, err
 	})

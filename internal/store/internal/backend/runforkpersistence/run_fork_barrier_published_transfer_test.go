@@ -1,6 +1,7 @@
 package runforkpersistence
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func transferredBarrierHistoryFixture(t *testing.T, root bool, mode executionmod
 		fanoutbarrier.Summary{Total: 2, Succeeded: 1, DeadLettered: 1}, attemptgeneration.Generation{})
 	source := *obligations[0].Barrier
 	childRun, born := uuid.NewString(), source.UpdatedAt.Add(time.Hour)
-	continuation, route, err := prepareRunForkPublishedBarrierTransfer(snapshot, source, childRun, source.Registration.PlanRef, nil, born)
+	continuation, route, err := prepareRunForkBarrierTransfer(context.Background(), nil, snapshot, source, childRun, source.Registration.PlanRef, nil, born)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestPublishedBarrierTransferRetainsReforkableExactEvidenceWithoutTimer(t *t
 			t.Run(map[bool]string{false: "flow", true: "root"}[root]+"/"+string(mode), func(t *testing.T) {
 				snapshot, barrier := transferredBarrierHistoryFixture(t, root, mode)
 				childRun := uuid.NewString()
-				continued, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, barrier, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour))
+				continued, _, err := prepareRunForkBarrierTransfer(context.Background(), nil, snapshot, barrier, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -144,8 +145,8 @@ func TestUnpublishedBarrierProjectionRetainsCommittedCause(t *testing.T) {
 				if event, found, err := runForkTransferredJoinEvent(snapshot, source); err != nil || found || event.ID() != "" {
 					t.Fatalf("cause-only projection fabricated parent publication: found=%t error=%v", found, err)
 				}
-				if _, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, barrier, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour)); err == nil {
-					t.Fatal("pending evidence entered the physical-publication adapter")
+				if _, _, err := prepareRunForkBarrierTransfer(context.Background(), nil, snapshot, barrier, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour)); err == nil {
+					t.Fatal("pending evidence bypassed native committed-cause admission")
 				}
 			})
 		}
@@ -174,7 +175,7 @@ func TestPublishedBarrierTransferRefusesMissingOrContradictoryCut(t *testing.T) 
 			case "missing_due":
 				barrier.TransferredOccurrence.DueAt = time.Time{}
 			}
-			if continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, barrier, uuid.NewString(), barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour)); err == nil || continuation.Present() {
+			if continuation, _, err := prepareRunForkBarrierTransfer(context.Background(), nil, snapshot, barrier, uuid.NewString(), barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour)); err == nil || continuation.Present() {
 				t.Fatal("invalid cut authorized barrier continuation")
 			}
 		})

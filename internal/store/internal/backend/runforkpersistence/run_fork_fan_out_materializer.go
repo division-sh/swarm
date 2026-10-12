@@ -474,7 +474,12 @@ func materializeRunForkObligationBarrier(ctx context.Context, attempt *mutationp
 	}
 	var published *genericschedule.JoinContinuation
 	if barrier.Status == fanoutbarrier.StatusClosedPending && (barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
-		continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, *barrier, childRun, selected, generation, at)
+		var continuation genericschedule.JoinContinuation
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			continuation, _, err = prepareRunForkBarrierTransfer(ctx, tx, snapshot, *barrier, childRun, selected, generation, at)
+			return err
+		})
 		if err != nil {
 			return err
 		}

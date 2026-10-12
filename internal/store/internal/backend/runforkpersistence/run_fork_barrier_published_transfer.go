@@ -1,6 +1,8 @@
 package runforkpersistence
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -14,7 +16,7 @@ import (
 
 // The sealed frame consumes fixed-cut event/delivery membership separately from
 // child correspondence. Neither retained metadata nor a fired timer rearms work.
-func prepareRunForkPublishedBarrierTransfer(snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, childRunID string, selected contracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) (genericschedule.JoinContinuation, events.DeliveryRoute, error) {
+func prepareRunForkBarrierTransfer(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, childRunID string, selected contracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) (genericschedule.JoinContinuation, events.DeliveryRoute, error) {
 	if snapshot == nil || snapshot.Revision <= 0 || snapshot.RunID != barrier.Registration.IntentKey.RunID {
 		return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("published barrier transfer requires its exact bound source cut")
 	}
@@ -24,14 +26,22 @@ func prepareRunForkPublishedBarrierTransfer(snapshot *runForkRevisionSnapshot, b
 			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}
 		original, found, err := runForkTransferredJoinEvent(snapshot, source)
-		if err != nil || !found {
-			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("transferred barrier lacks its exact committed publication: %w", err)
-		}
-		route, err := requireRunForkPublishedBarrierDelivery(snapshot, barrier, original, true)
 		if err != nil {
 			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}
 		child, err := projectRunForkBarrierContinuationCommand(barrier, childRunID, selected, generation, source.Command.Due.Absolute, at)
+		if err != nil {
+			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
+		}
+		if !found {
+			var route events.DeliveryRoute
+			if err := requireRunForkTransferredJoinCause(ctx, tx, source, make(map[string]bool), &route); err != nil {
+				return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
+			}
+			continuation, err := genericschedule.ProjectPendingJoinContinuation(source, child)
+			return continuation, route, err
+		}
+		route, err := requireRunForkPublishedBarrierDelivery(snapshot, barrier, original, true)
 		if err != nil {
 			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}

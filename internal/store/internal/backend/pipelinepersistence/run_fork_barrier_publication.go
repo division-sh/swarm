@@ -13,7 +13,7 @@ func runForkFanOutBarrierTransferredOccurrence(source fanoutbarrier.Barrier, sch
 		return nil, fmt.Errorf("published barrier materialization requires exact unfinished work")
 	}
 	original := publication.SourceEvent()
-	if original.RunID() != source.Registration.IntentKey.RunID {
+	if publication.SourceRunID() != source.Registration.IntentKey.RunID {
 		return nil, fmt.Errorf("published barrier materialization contradicts its source owner")
 	}
 	var due = publication.ChildCommand().Due.Absolute
@@ -25,7 +25,16 @@ func runForkFanOutBarrierTransferredOccurrence(source fanoutbarrier.Barrier, sch
 		if err != nil {
 			return nil, err
 		}
-		if err := occurrence.ValidateEvent(original); err != nil {
+		if retained, pending := publication.PendingSource(); pending {
+			want, err := occurrence.EvidenceDigest()
+			if err != nil {
+				return nil, err
+			}
+			got, err := retained.EvidenceDigest()
+			if err != nil || got != want {
+				return nil, fmt.Errorf("pending barrier contradicts its exact retained source obligation")
+			}
+		} else if err := occurrence.ValidateEvent(original); err != nil {
 			return nil, err
 		}
 		if !due.Equal(occurrence.Command.Due.Absolute) {
