@@ -416,20 +416,10 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx := selectedContractRuntimeContainerLineageContext(lease.Context(), c.proof)
 	runCtx = runtimecorrelation.WithRunID(runCtx, req.ForkRunID)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
-	publications := make([]activityresult.PublishedContinuation, 0)
-	for _, source := range sourceEvents {
-		if source.PublishedActivityResult.Present() {
-			publications = append(publications, source.PublishedActivityResult)
-		}
-	}
-	runCtx, err = runtimepipeline.WithSelectedActivityPublications(runCtx, req.ForkRunID, publications)
-	if err != nil {
-		return errors.Join(err, lease.Done())
-	}
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
-	agentRuntime, admission, err := prepareSelectedContractAgentRuntime(runCtx, req, bus, pipeline, c.diagnostics)
+	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, sourceEvents, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
@@ -456,6 +446,23 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	}
 	attached = true
 	return nil
+}
+
+// Bind fixed-cut accounting before preparing actors, so every initial and
+// recovered pipeline turn inherits the same decision without authorizing work.
+func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, sources []runfork.RunForkSelectedContractSourceEvent, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
+	publications := make([]activityresult.PublishedContinuation, 0)
+	for _, source := range sources {
+		if source.PublishedActivityResult.Present() {
+			publications = append(publications, source.PublishedActivityResult)
+		}
+	}
+	bound, err := runtimepipeline.WithSelectedActivityPublications(ctx, c.req.ForkRunID, publications)
+	if err != nil {
+		return ctx, nil, managedexecution.Admission{}, err
+	}
+	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, c.req, bus, pipeline, c.diagnostics)
+	return bound, runtime, admission, err
 }
 
 func (c selectedContractForkLocalRuntimeContainer) RetainActivated(prepared *PreparedSelectedFork, diagnostic error) {
