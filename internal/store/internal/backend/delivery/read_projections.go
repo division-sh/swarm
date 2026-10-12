@@ -2665,3 +2665,112 @@ WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id 
 	}
 	return out, nil
 }
+
+type DeploymentDeliveryStorage struct {
+	DeliveryID, EventID, SubscriberType, SubscriberID, Status string
+	RetryCount, ClaimVersion                                  int64
+	NextEligible, Handoff, Reason, Failure                    WorkloadNullableText
+}
+type DeploymentAttemptStorage struct {
+	DeliveryID, Closure      string
+	ClaimVersion             int64
+	Outcome, Reason, Failure WorkloadNullableText
+}
+type DeploymentDeliveryStatusStorage struct {
+	Status string
+	Count  int
+}
+
+func CountDeploymentPendingDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, runID).Scan(&out)
+	return out, err
+}
+
+func CountDeploymentFailedDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('failed','dead_letter')`, runID).Scan(&out)
+	return out, err
+}
+
+func CountDeploymentStampedHandoffsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND continuation_handoff_at IS NOT NULL`, runID).Scan(&out)
+	return out, err
+}
+
+func CountRootReadyDeliveredStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.status='delivered'`, runID).Scan(&out)
+	return out, err
+}
+
+func CountRootReadyStampedHandoffsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.continuation_handoff_at IS NOT NULL`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadDeploymentDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentDeliveryStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),subscriber_type,subscriber_id,status,retry_count,claim_version,CAST(next_eligible_at AS TEXT),CAST(continuation_handoff_at AS TEXT),CAST(reason_code AS TEXT),CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY created_at,delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentDeliveryStorage
+	for rows.Next() {
+		var row DeploymentDeliveryStorage
+		var nextEligible, handoff, reason, failure sql.NullString
+		if err := rows.Scan(&row.DeliveryID, &row.EventID, &row.SubscriberType, &row.SubscriberID, &row.Status, &row.RetryCount, &row.ClaimVersion, &nextEligible, &handoff, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.NextEligible, row.Handoff, row.Reason, row.Failure = WorkloadNullableText(nextEligible), WorkloadNullableText(handoff), WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeploymentAttemptStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentAttemptStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(a.delivery_id AS TEXT),a.claim_version,a.closure_kind,CAST(a.outcome AS TEXT),CAST(a.reason_code AS TEXT),CAST(a.failure AS TEXT) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 ORDER BY a.delivery_id,a.claim_version`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentAttemptStorage
+	for rows.Next() {
+		var row DeploymentAttemptStorage
+		var outcome, reason, failure sql.NullString
+		if err := rows.Scan(&row.DeliveryID, &row.ClaimVersion, &row.Closure, &outcome, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.Outcome, row.Reason, row.Failure = WorkloadNullableText(outcome), WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeploymentDeliveryStatusStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentDeliveryStatusStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status,COUNT(*) FROM event_deliveries WHERE run_id=$1 GROUP BY status ORDER BY status`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentDeliveryStatusStorage
+	for rows.Next() {
+		var row DeploymentDeliveryStatusStorage
+		if err := rows.Scan(&row.Status, &row.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

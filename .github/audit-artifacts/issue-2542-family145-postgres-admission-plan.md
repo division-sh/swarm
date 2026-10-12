@@ -5288,3 +5288,59 @@ with M01/Docker/drain/D3/M07/integration holds unwaived. Existing native fixture
 and typed read ownership suffice; no new architecture/spec semantics/watchlist
 node/issue. Local only, no push/PR/tier/server2. Receipts
 ~/.cache/swarm-2542-family145/numeric-timer-native-inspection-*.
+
+## Whole Selected Deployment Resource Observation Chain
+
+Retired the ENTIRE five-helper observation dependency: selected-fork diagnostics,
+root-event polling, exact selected operation snapshots, selected row-set evidence,
+and the indirect resource-failure logger. All six outer callers/seven calls carry
+the original selected owner instead of its pool. Their construction, source,
+held-child/fault, receipt, changed-pin, lost-response and public-replay bodies are
+otherwise byte-for-byte inverse-proven. Other resource construction, progress
+probe, integrity faults and row witnesses remain named parent debt; no carrier,
+process-restart, performance or parent-completion credit is claimed here.
+
+All44 original query occurrences have exhaustive exact-owner equality. Existing
+durabledata, pipelinepersistence, runforkpersistence, runlifecycle, eventrecord and
+generationauthority row owners consume their physical predicates/columns/order.
+Executable-delivery queries reside ONLY in the existing closed read_projections
+owner. Existing outcome/event/delivery/flow counts and CountRunNamedEventStorage
+are reused; no parallel count layer survives. Private named bridges retain one
+ORIGINAL native transaction per query, returning detached complete rows; public
+ports expose no handles, callbacks, table names or arbitrary predicates.
+
+Every original count, error-only section, wake, deadline, sleep and read cut stays
+separate. Nullable String/Valid facts, payload bytes/native CAST clocks, event
+ordering, fixed deployment/root.ready scopes, unfiltered current claim history,
+and ALL-generation closed-execution count stay intact. Failed row sections return
+no partial evidence. Missing root-event polling preserves the EXACT sql.ErrNoRows
+sentinel only after successful native read completion; other errors are not
+normalized. The strict original comparison and poll bounds remain unchanged.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Changed pin, original source identity, selected fork and lost-response replay | reproduced and fixed | Both original source/event roots, root/singleton x SQLite/PostgreSQL, race PASS68.472s, all eight cells; exact rows/receipts/public identities unchanged |
+| Five-helper/44-query scope, all diagnostic fields and independent timing cuts | execution-proven through the same corrected path | Complete source-pinned SQL inventory plus helper field/argument/order/wake/clock hostile controls; six caller/seven-call inverse equality; all29 native read ports execute on both stores |
+| No-row poll and foreign, raw, invalid, cancelled or closed ownership | reproduced and fixed | Native three-root both-store race PASS23.037s; exact missing-row sentinel;29 begins/22 read commits/zero writes or active transactions; complete history/clock equality |
+| Lawful pin, feed, strict NULL metadata and native clock fields | reproduced and fixed | Genuine compiled data import and manager-sealed activation/CommitDeploymentRunCreation; complete metadata/feed private-oracle equality; actual pin predicate rebound to foreign RED on BOTH stores, exact restore GREEN above |
+| Surviving resource setup, pool/progress probes and other independent raw seams | explicitly split / tracked separately | Already-tracked #2542 census; outer unchanged consumers keep those cuts; no reconstruction or broad source/lifecycle certification claimed |
+
+The initial original-run SQLite RED exposed wrapped no-row polling, not a waived
+flake: preserve the exact sentinel through native settlement, then all eight
+original cells pass. The initial closed-delivery guard RED exposed file placement:
+move the unchanged bodies into the existing closed owner, WITHOUT an exemption.
+Final six persistence boundary roots PASS; shared134-root finite/historical guard
+collection PASS19.123s; affected eleven-package/script U1000 clean. Unchanged
+business receipts carry through the same-package file move/count-owner reuse.
+
+Corpus1277/500, digest
+b5346c668cf2c635979bd8409c3179bf5130f00a1e1602bc047e2613167a18b8;
+all24 immutable historical receipts and earlier successors remain intact.
+Downward census:8157 ->8047 findings,5801 ->5703 raw sites,110/98 removals,
+ZERO additions, excluded uncertainty67; supplied-pool calls57 unchanged.
+Final unchanged ratchet and actual signed-head complexity receipt precede this
+whole-family stacking checkpoint. Binding raw_sql_policy governs this fixture/
+observation migration; no production contract/platform semantic change, new
+framework, issue or watchlist node. M01/Docker/drain/D3/M07/integration holds remain
+explicit and unwaived. Local only, no push/PR/tier/server2. Receipts
+~/.cache/swarm-2542-family145/deployment-resource-observation-*.

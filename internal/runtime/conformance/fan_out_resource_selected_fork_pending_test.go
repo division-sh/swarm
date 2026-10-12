@@ -128,7 +128,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 			newRows := []byte("{\"account_id\":\"new\",\"document\":{\"version\":2}}\n")
 			newVersion := selectedDeploymentVersion(t, f, newRows)
 			sourceRunID := start("old", oldRows)
-			pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.db, sourceRunID, f.runtime.fanOutServing.Wake)
+			pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 			waitCtx, cancelWait := context.WithTimeout(f.ctx, 10*time.Second)
 			defer cancelWait()
 			for matched := false; !matched; {

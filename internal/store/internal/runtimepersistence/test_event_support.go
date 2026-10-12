@@ -1703,6 +1703,43 @@ func ReadRunNamedEventIdentitiesStorageForTest(ctx context.Context, selected any
 	return ids, nil
 }
 
+type DeploymentRuntimeLogStorage = eventrecord.DeploymentRuntimeLogStorage
+type DeploymentRecentEventStorage = eventrecord.DeploymentRecentEventStorage
+
+func ReadFirstRootReadyEventStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return "", err
+	}
+	var out string
+	var found bool
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadFirstRootReadyEventStorageTx(ctx, tx, runID)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	// Return exact absence only after the read has settled successfully. Joined
+	// cancellation or cleanup errors must not be mistaken for an empty poll.
+	if !found {
+		return "", sql.ErrNoRows
+	}
+	return out, nil
+}
+
+func ReadDeploymentRuntimeLogStorageForTest(ctx context.Context, selected any, runID string) ([]DeploymentRuntimeLogStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, eventrecord.ReadDeploymentRuntimeLogStorageTx)
+}
+
+func ReadDeploymentRecentEventStorageForTest(ctx context.Context, selected any, runID string) ([]DeploymentRecentEventStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, eventrecord.ReadDeploymentRecentEventStorageTx)
+}
+
 func ReadRunLifecycleProjectionLogPayloadsForTest(ctx context.Context, selected any, runID string) ([][]byte, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
 		return nil, err

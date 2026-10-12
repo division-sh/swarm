@@ -98,7 +98,7 @@ func assertTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *h
 	t.Helper()
 	defer func() {
 		if t.Failed() {
-			logDeploymentResourceFailure(t, f.db, runID)
+			logDeploymentResourceFailure(t, f.selected, runID)
 		}
 	}()
 	waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 3*time.Minute)

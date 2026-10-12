@@ -1,0 +1,132 @@
+package pipelinepersistence
+
+import (
+	"context"
+	"database/sql"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+)
+
+type DeploymentIntentProgressStorage struct{ Intents, Cursor int }
+type DeploymentIntentMetadataStorage struct {
+	Status, BundleHash, Origin                   string
+	SourceKind, FeedID, Blocked, Claimant, Retry delivery.WorkloadNullableText
+}
+type DeploymentFeedStorage struct {
+	FeedID, Status                                  string
+	Cursor, Cardinality, Generation                 int64
+	Claimant, Lease, RetryAt, RetryFailure, Blocked delivery.WorkloadNullableText
+}
+type DeploymentIntentDiagnosticStorage struct {
+	Status              string
+	Cardinality, Cursor int
+}
+
+func ReadDeploymentIntentVersionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var version string
+	err := tx.QueryRowContext(ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&version)
+	return version, err
+}
+
+func ReadDeploymentIntentProgressStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentProgressStorage, error) {
+	var out DeploymentIntentProgressStorage
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Intents, &out.Cursor)
+	return out, err
+}
+
+func ReadDeploymentIntentMetadataStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentMetadataStorage, error) {
+	var out DeploymentIntentMetadataStorage
+	var source, feed, blocked, claimant, retry sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT status,bundle_hash,origin_kind,source_kind,deployment_feed_id,blocked_reason,claim_owner,retry_ready_at FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Status, &out.BundleHash, &out.Origin, &source, &feed, &blocked, &claimant, &retry)
+	out.SourceKind, out.FeedID = delivery.WorkloadNullableText(source), delivery.WorkloadNullableText(feed)
+	out.Blocked, out.Claimant, out.Retry = delivery.WorkloadNullableText(blocked), delivery.WorkloadNullableText(claimant), delivery.WorkloadNullableText(retry)
+	return out, err
+}
+
+func ReadDeploymentFeedStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentFeedStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT),status,cursor,cardinality,CAST(claim_owner AS TEXT),claim_generation,CAST(lease_expires_at AS TEXT),CAST(retry_ready_at AS TEXT),CAST(retry_failure AS TEXT),CAST(blocked_reason AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' ORDER BY deployment_feed_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentFeedStorage
+	for rows.Next() {
+		var row DeploymentFeedStorage
+		var claimant, lease, retryAt, retryFailure, blocked sql.NullString
+		if err := rows.Scan(&row.FeedID, &row.Status, &row.Cursor, &row.Cardinality, &claimant, &row.Generation, &lease, &retryAt, &retryFailure, &blocked); err != nil {
+			return nil, err
+		}
+		row.Claimant, row.Lease, row.RetryAt = delivery.WorkloadNullableText(claimant), delivery.WorkloadNullableText(lease), delivery.WorkloadNullableText(retryAt)
+		row.RetryFailure, row.Blocked = delivery.WorkloadNullableText(retryFailure), delivery.WorkloadNullableText(blocked)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeploymentIntentDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentIntentDiagnosticStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 ORDER BY deployment_feed_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentIntentDiagnosticStorage
+	for rows.Next() {
+		var row DeploymentIntentDiagnosticStorage
+		if err := rows.Scan(&row.Status, &row.Cardinality, &row.Cursor); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func CountDeploymentCommittedOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, runID).Scan(&out)
+	return out, err
+}
+
+func CountDeploymentPipelineReceiptsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'`, runID).Scan(&out)
+	return out, err
+}
+
+func CountRootReadySuccessfulPipelineReceiptsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND e.event_name='root.ready' AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, runID).Scan(&out)
+	return out, err
+}
+
+type DeploymentReceiptStorage struct {
+	EventID, SubscriberType, SubscriberID, Outcome string
+	Reason, Failure                                delivery.WorkloadNullableText
+}
+
+func ReadDeploymentReceiptStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentReceiptStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(r.event_id AS TEXT),r.subscriber_type,r.subscriber_id,r.outcome,CAST(r.reason_code AS TEXT),CAST(r.failure AS TEXT) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 ORDER BY e.insertion_sequence,r.subscriber_type,r.subscriber_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentReceiptStorage
+	for rows.Next() {
+		var row DeploymentReceiptStorage
+		var reason, failure sql.NullString
+		if err := rows.Scan(&row.EventID, &row.SubscriberType, &row.SubscriberID, &row.Outcome, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.Reason, row.Failure = delivery.WorkloadNullableText(reason), delivery.WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

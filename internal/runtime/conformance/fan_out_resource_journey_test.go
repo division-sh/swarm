@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
@@ -271,7 +271,7 @@ func assertDeploymentResourceRows(t *testing.T, f *deploymentResourceFixture, se
 	t.Helper()
 	defer func() {
 		if t.Failed() {
-			logDeploymentResourceFailure(t, f.db, runID)
+			logDeploymentResourceFailure(t, f.selected, runID)
 		}
 	}()
 	ctx := f.ctx
@@ -513,83 +513,56 @@ func startDeploymentProgressProbe(t *testing.T, f *deploymentResourceFixture, ru
 	}
 }
 
-func logDeploymentResourceFailure(t *testing.T, db *sql.DB, runID string) {
+func logDeploymentResourceFailure(t *testing.T, selected any, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 ORDER BY deployment_feed_id`, runID)
+	rows, err := storetest.ReadDeploymentIntentDiagnosticsStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic intents: %v", err)
 		return
 	}
 	var intents []string
-	for rows.Next() {
-		var status string
-		var cardinality, cursor int
-		if err := rows.Scan(&status, &cardinality, &cursor); err != nil {
-			rows.Close()
-			t.Logf("deployment diagnostic intent scan: %v", err)
-			return
-		}
+	for _, row := range rows {
+		status, cardinality, cursor := row.Status, row.Cardinality, row.Cursor
 		intents = append(intents, fmt.Sprintf("%s:%d/%d", status, cursor, cardinality))
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Logf("deployment diagnostic intent rows: %v", err)
-		return
-	}
-	rows.Close()
 	var outcomes, events, deliveries, receivers int
 	for _, check := range []struct {
-		query string
+		name  string
+		read  func() (int, error)
 		value *int
 	}{
-		{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, &outcomes},
-		{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &events},
-		{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, &deliveries},
-		{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, &receivers},
+		{"outcomes", func() (int, error) { return storetest.CountNestedRunFanOutOutcomes(ctx, selected, runID) }, &outcomes},
+		{"events", func() (int, error) { return storetest.CountPhysicalRunEvents(ctx, selected, runID) }, &events},
+		{"deliveries", func() (int, error) { return storetest.CountRunDeliveryStorage(ctx, selected, runID) }, &deliveries},
+		{"receiver_instances", func() (int, error) { return storetest.CountRunFlowInstanceStorage(ctx, selected, runID) }, &receivers},
 	} {
-		if err := db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
-			t.Logf("deployment diagnostic count %q: %v", check.query, err)
+		count, err := check.read()
+		if err != nil {
+			t.Logf("deployment diagnostic count %q: %v", check.name, err)
 			return
 		}
+		*check.value = count
 	}
-	statusRows, err := db.QueryContext(ctx, `SELECT status,COUNT(*) FROM event_deliveries WHERE run_id=$1 GROUP BY status ORDER BY status`, runID)
+	statusRows, err := storetest.ReadDeploymentDeliveryStatusStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic delivery statuses: %v", err)
 		return
 	}
 	var statuses []string
-	for statusRows.Next() {
-		var status string
-		var count int
-		if err := statusRows.Scan(&status, &count); err != nil {
-			statusRows.Close()
-			t.Logf("deployment diagnostic delivery status scan: %v", err)
-			return
-		}
+	for _, row := range statusRows {
+		status, count := row.Status, row.Count
 		statuses = append(statuses, fmt.Sprintf("%s=%d", status, count))
 	}
-	if err := statusRows.Err(); err != nil {
-		statusRows.Close()
-		t.Logf("deployment diagnostic delivery status rows: %v", err)
-		return
-	}
-	statusRows.Close()
 	t.Logf("deployment failure snapshot run=%s intents=%v outcomes=%d events=%d deliveries=%d delivery_statuses=%v receiver_instances=%d", runID, intents, outcomes, events, deliveries, statuses, receivers)
-	logRows, err := db.QueryContext(ctx, `SELECT event_name, payload FROM events WHERE run_id=$1 ORDER BY created_at LIMIT 12`, runID)
+	logRows, err := storetest.ReadDeploymentRecentEventStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic events: %v", err)
 		return
 	}
-	defer logRows.Close()
-	for logRows.Next() {
-		var name string
-		var payload []byte
-		if err := logRows.Scan(&name, &payload); err != nil {
-			t.Logf("deployment diagnostic event scan: %v", err)
-			return
-		}
+	for _, row := range logRows {
+		name, payload := row.Name, row.Payload
 		if name == "platform.runtime_log" {
 			t.Logf("deployment runtime diagnostic: %s", payload)
 		}
