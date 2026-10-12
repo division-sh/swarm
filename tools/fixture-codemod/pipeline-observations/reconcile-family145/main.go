@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "604a4fd256aded067a159816ba576465d436efcaaa5822da6ba17e563cdf8afe"
+const targetDigest = "4083edb63d2c90c4c2fc5c45b7ca4368a22596d6dacc5594e13e8783ade3a717"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -224,7 +224,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/prospective_publication_external_test.go":                        {"TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": true, "CommitWorkflowEngineMutation/*observedProspectivePersistence": true},
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go":                     {"TestReceiverCompositionActivationReuseAndConflictBothStores": true},
 	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go": {"TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores": true},
-	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":                         {"testA2BoundReplyJourney": true},
+	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":                         {"testA2BoundReplyJourney": true, "a2CorruptBoundReplyEntry": true},
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":                        {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_until_race_external_test.go":                             {"TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go":                         {"TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores": true},

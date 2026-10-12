@@ -4194,3 +4194,47 @@ pins and a hostile assertion still targeting the old spelling; those controls
 now use lexical cuts and the actual current condition, not relaxed semantics.
 No push/PR, tier, server2 or qualification-hold waiver. Signed-head complexity
 follows. Receipts ~/.cache/swarm-2542-family145/gate-counts-*.
+
+## Shared Gate/A2 Dependency: Retained Reply-Origin Mutation
+
+The entire a2CorruptBoundReplyEntry transaction chain now delegates to the
+existing reply-context domain owner through one named selected-store fault.
+The caller's EncodeOrigin, two exact field variants, JSON bytes, expected entry
+identity, shape-valid refusal and complete-record comparisons remain unchanged.
+No source/lease is invented and no claim, production reply admission or reader
+is replaced. No eventfixture RunMutation/Attempt/WithSQL/AddFact, raw pool or
+caller dialect survives in this helper; no other A2 caller uses that protocol.
+The public eventfixture capability elsewhere remains unclosed, not credited.
+
+Both dialect UPDATE statements retain their original exact context ID/run/open/
+unaccepted conjunctions and casts, exactly-one-row gate, and error wording.
+The reply-context owner adds the same FamilyReplyContexts fact ONLY after the
+row write. The bridge keeps original Story/Ordinary evidence, SQLite operation
+label and atomic finalization, now using owner.backend and the existing selected
+runLifecycleCandidates rather than reconstructed backend/candidate owners.
+The private writer inventory explicitly classifies this one named fault with
+its exact scope, fact/finalizer and proofs; no scanner or allowance is relaxed.
+
+| Proof | Executed receipt with Go1.26.8 |
+| --- | --- |
+| Original flow_scope and instance_id hostility, actual paired provider dispatch, source-aware refusal and unchanged retained record/later replay | TestA2BoundReplyCanonicalJoinOwnerRefusesCorruptedEntryOnBothStores, four cells under race, PASS17.427s |
+| Absent-row and cancellation rollback preserve complete data/history/Story snapshots on both stores | TestRetainedReplyOriginFaultRefusesAbsentRowWithoutPartialHistoryBothStores |
+| Exact SQLite writer queues and cancellation joins without another transaction; raw/nil/uninitialized/closed owners refuse | Two other retained-origin roots; native group under race PASS16.565s |
+| Whole helper, dialect SQL, bytes/identity/context, exact row/fact/Story/candidate bindings, lost-cut controls and complete current/historical corpus | All gate correspondence roots plus retained-origin and three global finite controls, PASS8.019s |
+| Six persistence boundaries and explicit writer inventory | Initial census correctly found the new private writer; exact classification added; complete corrected sweep PASS3.139s; U1000 clean |
+| Global decreasing ratchet | Downward refresh PASS130.491s:8426 ->8420 findings,6034 ->6029 raw sites; six findings/five raw sites removed, zero additions. Final guard-head ratchet PASS24.902s |
+
+Reviewer F1 from 8ec3f9640 is absorbed: the inherited scalar hostile control was
+still mutating obsolete Before text. Named root reproduced RED0.095s; the
+authorized one-line change derives mutations from After, preserving immutable
+Before and all assertions. The complete gate guard collection now passes, not
+only the new count guard. Original reply root's first compile failed on two
+obsolete imports; they are deleted, not retained or waived.
+
+Finite corpus1213/425, transition digest
+4083edb63d2c90c4c2fc5c45b7ca4368a22596d6dacc5594e13e8783ade3a717;
+all24 immutable mechanical inputs and combined digest unchanged. Supplied-pool
+calls61 and uncertainty67 remain. Carrier/openers, wider gate/A2 and parent
+closure and all previous S qualification holds remain open. No push/PR, tier,
+server2 or new gate. Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/gate-reply-fault-* and gate-counts-scalar-review-red.

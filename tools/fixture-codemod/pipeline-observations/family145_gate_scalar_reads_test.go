@@ -212,7 +212,7 @@ func TestFamily145GateScalarReadsKeepAllContextScopeDestinationsAndBusinessAsser
 				t.Fatalf("missing bound scalar read passed: %s", cut)
 			}
 		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
+		assertions, err := family145DescriptorBusinessAssertions(row.After)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -2,9 +2,7 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -26,10 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
@@ -532,31 +527,10 @@ func a2CorruptBoundReplyEntry(t *testing.T, ctx context.Context, selected gateRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialect := authoractivityfixture.DialectSQLite
-	query := `UPDATE reply_contexts SET origin_route=? WHERE reply_context_id=? AND run_id=? AND state='open' AND accepted_reply_event_id IS NULL`
-	if selected.postgres {
-		dialect = authoractivityfixture.DialectPostgres
-		query = `UPDATE reply_contexts SET origin_route=$1::jsonb WHERE reply_context_id=$2 AND run_id=$3::uuid AND state='open' AND accepted_reply_event_id IS NULL`
-	}
 	// Deliberate persisted hostility, not a replacement reader or claim closure.
 	// The selected-store fixture owner commits the single corrupt row and its
 	// existing reply-context revision fact through the native transaction protocol.
-	if err := eventfixture.RunMutation(ctx, selected.db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			result, err := tx.ExecContext(ctx, query, string(raw), original.ID, original.RunID)
-			if err != nil {
-				return err
-			}
-			rows, err := result.RowsAffected()
-			if err != nil || rows != 1 {
-				return fmt.Errorf("corrupt exact retained reply entry: rows=%d err=%v", rows, err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return attempt.AddFact(original.RunID, runforkrevisionfixture.FamilyReplyContexts, original.ID)
-	}).Err(); err != nil {
+	if err := storetest.CorruptOpenReplyOrigin(ctx, selected.events, original.RunID, original.ID, string(raw)); err != nil {
 		t.Fatalf("commit retained reply entry hostility: %v", err)
 	}
 	corrupted, err := selected.events.LoadReplyContext(ctx, original.ID)
