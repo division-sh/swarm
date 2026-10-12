@@ -287,6 +287,7 @@ func TestTransferredJoinOccurrenceEvidenceBindsPublicationAndOrdinaryFrame(t *te
 	changed = source
 	changed.Publication.SourceEventID = uuid.NewString()
 	changed.Publication.EventID = activityidentity.ForkLineageEventID(source.Command.RunID, changed.Publication.SourceEventID)
+	changed.Publication.CommittedCause.EventID = changed.Publication.SourceEventID
 	if after, err := changed.EvidenceDigest(); err != nil || after == before {
 		t.Fatal("evidence digest omitted immediate source publication")
 	}

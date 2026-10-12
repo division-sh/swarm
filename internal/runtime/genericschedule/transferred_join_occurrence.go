@@ -82,6 +82,7 @@ func (o TransferredJoinOccurrence) Project(child AdmissionCommand, authorityStam
 		EventID:     activityidentity.ForkLineageEventID(child.RunID, o.Publication.EventID),
 		SourceRunID: source.RunID, SourceEventID: o.Publication.EventID,
 		AuthorityStamp: authorityStamp, ExecutionMode: source.ExecutionMode,
+		CommittedCause: o.Publication.CommittedCause,
 	}}
 	if err := projected.Validate(); err != nil {
 		return TransferredJoinOccurrence{}, err

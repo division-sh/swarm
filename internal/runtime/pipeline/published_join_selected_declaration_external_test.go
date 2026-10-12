@@ -91,6 +91,7 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 	occurrence := genericschedule.TransferredJoinOccurrence{Command: command, Publication: joinruntime.TransferredPublication{
 		EventID: activityidentity.ForkLineageEventID(run, sourceEvent), SourceRunID: ancestor, SourceEventID: sourceEvent,
 		AuthorityStamp: runfork.RunForkSelectedContractExecutionOwner, ExecutionMode: executionmode.Live,
+		CommittedCause: joinruntime.CommittedPublicationCause{RunID: ancestor, EventID: sourceEvent},
 	}}
 	event, err := occurrence.Event()
 	if err != nil {

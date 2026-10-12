@@ -16,6 +16,7 @@ type PublishedJoinContinuation struct {
 	source   AdmissionCommand
 	original events.Event
 	child    AdmissionCommand
+	cause    joinruntime.CommittedPublicationCause
 }
 
 // ProjectPublishedJoinContinuation consumes the caller's canonical entity and
@@ -27,22 +28,22 @@ func ProjectPublishedJoinContinuation(source Activation, original events.Event, 
 	if source.ClockSuspension != nil {
 		return PublishedJoinContinuation{}, fmt.Errorf("published join continuation cannot carry clock authority")
 	}
-	return projectPublishedJoinContinuation(source.Command, original, child)
+	return projectPublishedJoinContinuation(source.Command, original, child, joinruntime.CommittedPublicationCause{RunID: original.RunID(), EventID: original.ID()})
 }
 
 func ProjectTransferredJoinContinuation(source TransferredJoinOccurrence, original events.Event, child AdmissionCommand) (PublishedJoinContinuation, error) {
 	if err := source.ValidateEvent(original); err != nil {
 		return PublishedJoinContinuation{}, err
 	}
-	return projectPublishedJoinContinuation(source.Command, original, child)
+	return projectPublishedJoinContinuation(source.Command, original, child, source.Publication.CommittedCause)
 }
 
-func projectPublishedJoinContinuation(source AdmissionCommand, original events.Event, child AdmissionCommand) (PublishedJoinContinuation, error) {
+func projectPublishedJoinContinuation(source AdmissionCommand, original events.Event, child AdmissionCommand, cause joinruntime.CommittedPublicationCause) (PublishedJoinContinuation, error) {
 	source, child = source.Canonical(), child.Canonical()
 	if err := validatePublishedJoinContinuationProjection(source, child); err != nil {
 		return PublishedJoinContinuation{}, err
 	}
-	return PublishedJoinContinuation{source: source, original: original.Clone(), child: child}, nil
+	return PublishedJoinContinuation{source: source, original: original.Clone(), child: child, cause: cause}, nil
 }
 
 func validatePublishedJoinContinuationProjection(source, child AdmissionCommand) error {
@@ -170,6 +171,7 @@ func (p PublishedJoinContinuation) RetainedPublication(authorityStamp string) (j
 		EventID:     activityidentity.ForkLineageEventID(p.child.RunID, p.original.ID()),
 		SourceRunID: p.original.RunID(), SourceEventID: p.original.ID(),
 		AuthorityStamp: authorityStamp, ExecutionMode: p.original.ExecutionMode(),
+		CommittedCause: p.cause,
 	}
 	if err := (TransferredJoinOccurrence{Command: p.child, Publication: publication}).Validate(); err != nil {
 		return joinruntime.TransferredPublication{}, err

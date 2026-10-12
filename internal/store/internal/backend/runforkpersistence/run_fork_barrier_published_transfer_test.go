@@ -104,8 +104,48 @@ func TestPublishedBarrierTransferRetainsReforkableExactEvidenceWithoutTimer(t *t
 					t.Fatal(err)
 				}
 				if publication.SourceRunID != snapshot.RunID || publication.SourceEventID != barrier.TransferredOccurrence.Publication.EventID ||
+					publication.CommittedCause != barrier.TransferredOccurrence.Publication.CommittedCause ||
 					continued.ChildCommand().ExecutionMode != mode || !continued.ChildCommand().Due.Absolute.Equal(barrier.TransferredOccurrence.DueAt) || len(snapshot.Timers) != 0 {
 					t.Fatal("refork invented a timer or replaced immediate source/retained due/mode")
+				}
+			})
+		}
+	}
+}
+
+func TestUnpublishedBarrierProjectionRetainsCommittedCause(t *testing.T) {
+	for _, root := range []bool{false, true} {
+		for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
+			t.Run(map[bool]string{false: "flow", true: "root"}[root]+"/"+string(mode), func(t *testing.T) {
+				snapshot, barrier := transferredBarrierHistoryFixture(t, root, mode)
+				snapshot.Events, snapshot.Deliveries = nil, nil
+				source, err := genericschedule.NewTransferredFanOutBarrierOccurrence(barrier)
+				if err != nil {
+					t.Fatal(err)
+				}
+				childRun := uuid.NewString()
+				registration, err := runfork.ProjectFanOutBarrierRegistration(barrier.Registration, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour))
+				if err != nil {
+					t.Fatal(err)
+				}
+				command, err := genericschedule.FanOutBarrierAdmission(registration, *barrier.Summary, barrier.TransferredOccurrence.DueAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				projected, err := source.Project(command, "exact-pending-obligation-owner")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if projected.Publication.SourceRunID != snapshot.RunID || projected.Publication.SourceEventID != source.Publication.EventID ||
+					projected.Publication.CommittedCause != source.Publication.CommittedCause ||
+					!projected.Command.Due.Absolute.Equal(source.Command.Due.Absolute) {
+					t.Fatal("pending barrier projection skipped the parent or replaced committed cause/due")
+				}
+				if event, found, err := runForkTransferredJoinEvent(snapshot, source); err != nil || found || event.ID() != "" {
+					t.Fatalf("cause-only projection fabricated parent publication: found=%t error=%v", found, err)
+				}
+				if _, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, barrier, childRun, barrier.Registration.PlanRef, nil, barrier.UpdatedAt.Add(time.Hour)); err == nil {
+					t.Fatal("pending evidence entered the physical-publication adapter")
 				}
 			})
 		}
