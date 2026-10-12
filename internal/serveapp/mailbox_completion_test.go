@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -191,29 +191,26 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var projected any
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		projected = p.deps.EventStore
+	})
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	var db *sql.DB
 	var selectedPG *store.PostgresStore
 	var selectedSQLite *store.SQLiteRuntimeStore
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p) })
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "gate-completion.sqlite"))
-		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p) })
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				return nil, err
-			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			db = storetest.DatabaseForTest(pg)
-			selectedPG = pg
-			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -222,6 +219,9 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	return opts, func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 		p := startServeRuntimeTestProcess(t, *opts)
 		p.waitForReadyLine()
+		if projected == nil || backend == "sqlite" && projected != selectedSQLite || backend != "sqlite" && projected != selectedPG {
+			t.Fatalf("gate completion fixture lost actual current owner: projected=%p postgres=%p sqlite=%p", projected, selectedPG, selectedSQLite)
+		}
 		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
 	}
 }

@@ -5449,3 +5449,50 @@ existing #2542/#2151 tracker/watchlist scope govern; no platform semantic change
 new issue or exemption. Parent and M01/Docker/drain/D3/M07/integration holds remain
 open/unwaived. Local only, no push/PR/tier/server2. Receipts
 ~/.cache/swarm-2542-family145/deployment-public-row-*.
+
+## Whole Gate Completion Actual Selected Construction
+
+Closed gateCompletionHarness across BOTH consumers, the insert-rollback/restart
+journey and both interrupted-response diagnostic cuts. The old PostgreSQL path
+constructed and bootstrapped an independent facade, then opened a different
+production selected owner and reported the first facade to the test. SQLite
+already captured the actual production projection. PostgreSQL now uses the
+existing opaque selected.OpenRuntime construction with the original context,
+backend selection, DSN and session TTL; BOTH backends capture the actual current
+projection before readiness. No new construction framework, generic capability
+or production-contract change. The original process cleanup remains registered
+before any readiness/identity failure; its joined teardown precedes sandbox close.
+
+Source, options, fault/barrier hooks, public response/replay, exact domain/hash,
+history/clock readbacks and start/restart behavior remain unchanged. The native
+constructor transformation has an exact whole-body inverse, including every
+cleanup and consumer binding. The actual EventStore identity is now asserted
+inside the existing harness on EVERY ready process, including successors. The
+old raw callback/getter still remains explicit parent debt; no new callers.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Duplicate PostgreSQL facade/admission and wrong observed coordinator | reproduced and fixed | Original two roots/all six backend-cut cells race before PASS64.375s, native construction PASS59.271s; actual old constructor restored with the new in-harness identity assertion gives RED15.439s on all three PostgreSQL cuts, naming distinct pointers |
+| SQLite and PostgreSQL rollback, interrupted completion and real restart/replay | execution-proven through the same corrected path | Both original journeys execute the complete new constructor and current-owner assertion; integrated race PASS54.492s, exact restored final receipt below; unchanged fault/barrier/response/readback assertions |
+| Source/options/context/selection/DSN/TTL, delivery reader, readiness and joined cleanup | reproduced and fixed | Complete constructor inverse and hostile mutations, original six backend-cut executions, four affected serve construction/join guards PASS0.592s and four selected ownership controls PASS0.092s |
+
+The first finite proof RED caught AST-expanded callback formatting, repaired by
+the exact multiline inverse. A standalone new identity root passed but the real
+ratchet correctly rejected its four new raw-bearing harness sites. That root is
+REMOVED: the same real identity assertion now runs through the original consumer
+paths, with no exemption, accounting transition or baseline increase. Its earlier
+old-constructor RED/restored GREEN corroborates the diagnosis; the FINAL proof
+is the in-harness counterexample and original two-root execution, not the removed
+root. Complete140-root cheap Family145/current/historical guard collection
+PASS14.182s; affected serve/script U1000 clean. No skips, retries or timeout rise.
+
+Corpus1282/506, digest
+b88c75b532800596797f371dbf4d6abce171a1c4a5d8765975cdb1b42d6aa893;
+all24 historical receipts and previous successors retained. Downward census
+PASS33.373s:7969 ->7965 findings,5641 ->5639 raw sites,4/2 removals,
+ZERO additions, uncertainty67; supplied-pool calls56 unchanged. Final unchanged
+ratchet, restored runtime receipt, six persistence boundaries and signed-head
+complexity precede the stacking report. Existing raw_sql_policy and #2542/#2151
+tracking/watchlist scope govern; parent and M01/Docker/drain/D3/M07/integration
+holds stay open/unwaived. Local only, no push/PR/tier/server2. Receipts
+~/.cache/swarm-2542-family145/gate-completion-native-construction-*.

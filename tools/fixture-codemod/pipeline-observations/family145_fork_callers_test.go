@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 505 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b87034188db215f831c0c270924397a8cf20ea0a332ff094190e784ff2459e98" {
+	if err != nil || len(rows) != 506 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b88c75b532800596797f371dbf4d6abce171a1c4a5d8765975cdb1b42d6aa893" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -85,6 +85,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.File == "internal/runtime/eventbus_receiver_authority_e2e_test.go" {
 			if err := family145ClosedReceiverProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "gateCompletionHarness" {
+			if err := family145GateCompletionConstructorProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
