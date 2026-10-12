@@ -4712,3 +4712,38 @@ pool calls61 unchanged; candidate gate-carrier inventory23 references/7files.
 All parent/openers/shared-carrier and M07/D3/Docker/M01/drain holds remain open.
 No push/PR/tier/server2; signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/pinned-map-source-*.
+
+## Shared Gate/A2 Dependency: Retained Fan-Out Metadata Fault Chain
+
+The retained projection/range root now consumes fixed capsule-wire and claim-
+metadata readers plus two named reversible faults through the existing native
+projection-fault coordinator. Exact run scope, raw capsule, strict NULL scans,
+cast generation/lease clocks, payload and exactly-one-existing-row semantics
+remain. Capsule and cardinality restoration is registered before the first
+hostile write. No generic selector, callback, raw connection or new coordinator
+is exposed; the writer census classifies these two exact functions. The distinct
+first compound history footprint remains live and is not counted as migrated.
+
+Original whole root both-store race PASS12.538s. New native compiled-map proof
+PASS12.195s uses a genuinely issued fan-out claim, pins all original claim/lease/
+clock fields, observes four writes and four separate reads on the original
+coordinator, rejects cancellation/foreign run, restores exact wire/cardinality
+before claim release, and compares complete application/history/clock snapshots.
+Raw/invalid/closed-owner controls both-store race PASS10.915s. All six persistence
+boundaries PASS3.580s; U1000 clean. The finite proof preserves every original
+business assertion, observation destination and pre-fault cleanup; fixed backend
+SQL and private original-coordinator bindings are pinned. Its first development
+collection found the obsolete transport-level assertion matcher still running
+after the new complete business/cut proof; dispatch now selects that proof once.
+Final relevant finite/current/historical collection PASS6.374s. No assertion,
+timeout, failure signature or historical receipt is weakened.
+
+Corpus1236/450, digest
+f9f39956313f2213b57495126a28e43d6d8db12cc0f9bbc0984aa74d3dfaaeca;
+immutable mechanical inputs unchanged. Downward census PASS131.866s; final
+unchanged PASS24.946s:8323 ->8314 findings,5937 ->5929 raw sites, nine removals/
+zero additions. Uncertainty67, supplied-pool calls61 and all named semantic/
+qualification holds remain unchanged. Gate-carrier tail18 references/7files;
+neither compound-footprint nor complete carrier/parent closure is claimed.
+Local only, no push/PR/tier/server2. Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/fan-out-metadata-*.

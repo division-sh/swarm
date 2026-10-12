@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 449 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "35337b9e2d6c070a726f14c3c31360edf528b9fdfcc662d88f89da9324458aa7" {
+	if err != nil || len(rows) != 450 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f9f39956313f2213b57495126a28e43d6d8db12cc0f9bbc0984aa74d3dfaaeca" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -125,6 +125,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			if row.Function == "readRaw" {
 				continue
 			}
+		}
+		if row.Function == "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores" {
+			if err := family145FanOutMetadataProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
 		if family145A2CreationFaultCuts[row.Function] != nil {
 			if err := family145A2CreationFaultProofError(family145GateScalarReadKey(row.File, row.Function), row.Before, row.After); err != nil {

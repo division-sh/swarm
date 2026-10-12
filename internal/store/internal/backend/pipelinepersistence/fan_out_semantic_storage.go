@@ -7,6 +7,30 @@ import (
 
 type FanOutRunProgressStorage struct{ Total, Cursor int }
 
+type FanOutRunClaimMetadataStorage struct {
+	Cursor, Cardinality                       int
+	Status, Owner, Generation, Lease, Capsule string
+}
+
+func ReadFanOutRunCapsuleWireTx(ctx context.Context, tx *sql.Tx, runID string) ([]byte, error) {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func ReadFanOutRunClaimMetadataStorageTx(ctx context.Context, tx *sql.Tx, runID string) (FanOutRunClaimMetadataStorage, error) {
+	var out FanOutRunClaimMetadataStorage
+	err := tx.QueryRowContext(ctx, `SELECT cursor,cardinality,status,claim_owner,
+		CAST(claim_generation AS TEXT),CAST(lease_expires_at AS TEXT),CAST(capsule AS TEXT)
+		FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Cursor, &out.Cardinality, &out.Status, &out.Owner, &out.Generation, &out.Lease, &out.Capsule)
+	if err != nil {
+		return FanOutRunClaimMetadataStorage{}, err
+	}
+	return out, nil
+}
+
 func ReadRunFanOutProgressStorageTx(ctx context.Context, tx *sql.Tx, runID string) (FanOutRunProgressStorage, error) {
 	var out FanOutRunProgressStorage
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),SUM(cursor) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Total, &out.Cursor)
