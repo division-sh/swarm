@@ -13,6 +13,14 @@ import (
 )
 
 func TestProviderSchemaWorkspaceTargetRefusal(t *testing.T) {
+	for _, caller := range []string{"activation_observation", "mock_startup"} {
+		t.Run(caller, func(t *testing.T) {
+			testProviderSchemaWorkspaceTargetRefusal(t, caller)
+		})
+	}
+}
+
+func testProviderSchemaWorkspaceTargetRefusal(t *testing.T, caller string) {
 	tool := ToolDefinition{Name: "write_file", Schema: map[string]any{"type": "unsupported-provider-type"}}
 	actor := models.AgentConfig{ID: "schema-target", Identity: testAgentIdentity("schema-target", "")}
 	tools, err := CompileManagedCapabilityAdmission(actor, MockProviderContract(), []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{Name: tool.Name, Visible: true, Callable: true}}))
@@ -34,7 +42,18 @@ func TestProviderSchemaWorkspaceTargetRefusal(t *testing.T) {
 	binding, turns := nativeCLIProbeFixture(t, []ToolDefinition{tool})
 	unregistered := 0
 	turns.unregister = func(string) { unregistered++ }
-	observed, err := ObserveWorkspaceGateway(ctx, &config.Config{}, turns, actor, []ToolDefinition{tool}, binding, mockHostRuntimeOptions(t).Workspaces)
+	var observed managedcapabilities.Surface
+	resolver := mockHostRuntimeOptions(t).Workspaces
+	if caller == "mock_startup" {
+		runtime := &MockRuntime{cfg: &config.Config{}, workspaces: resolver, mcpTurns: turns, toolGateway: binding}
+		response, probeErr := runtime.ProbeStartupVisibleToolSurface(ctx, actor, "", []ToolDefinition{tool})
+		err = probeErr
+		if response != nil {
+			t.Fatalf("refused startup published response/evidence: %+v", response)
+		}
+	} else {
+		observed, err = ObserveWorkspaceGateway(ctx, &config.Config{}, turns, actor, []ToolDefinition{tool}, binding, resolver)
+	}
 	failure, ok := failures.EnvelopeFromError(err)
 	if !ok || failure.Detail.Code != "managed_capability_mcp_definition_mismatch" || failure.Detail.Attributes["reason"] != "invalid_input_schema" || len(observed.Tools) != 0 || unregistered != 1 {
 		t.Fatalf("native host probe confirmed invalid matching schema or leaked registration: observed=%+v err=%v unregister=%d", observed, err, unregistered)
