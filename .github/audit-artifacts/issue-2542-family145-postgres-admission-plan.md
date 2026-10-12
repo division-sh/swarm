@@ -4938,3 +4938,52 @@ pool calls61 unchanged. Original shared carrier/openers and all M07/D3/Docker/
 M01/drain/integration obligations remain live; no family/parent completion waiver.
 Local only; no push/PR/tier/server2. Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/source-fact-diagnostic-*.
+
+## Shared Gate/A2 Dependency: Whole Compound-Footprint Read Chain
+
+All four remaining compound SQL witnesses and the cancellation nonterminal
+counter now consume fixed original-owner snapshots. Join hydration preserves
+its five int slots (mutations, revisions, timers, publications, outcomes);
+cancellation preserves publications, delivery-run rows, every linked attempt,
+mutations and revisions. Map history reuses the existing paired revision/fact
+counter with checked int conversion and remains a separate cut from claim
+metadata. Retained source reuses those owners plus physical MAX(revision),
+event-linked delivery count, outcomes and the exact existing fan-out header's
+cursor/cardinality/status/raw nullable diagnostic. Its subsequent instance and
+source-byte hash reads remain independent. Event-linked delivery scope is NOT
+delivery-run scope; neither is the pending/retry-only or handoff-aware count.
+The final cancellation count retains status NOT IN ('delivered','dead_letter').
+No selector, query, handle, callback or inferred executable authority is public.
+
+The original five whole roots pass both-store race69.007s, preserving corruption,
+claim, range, replay, cancellation, receipt and full no-mutation assertions.
+Native compiled construction and genuine publication/claim/settlement controls
+compare the exact original compound SQL against the fixed outputs at pending,
+in-progress, delivered and dead-letter cuts. They prove one native read commit
+per observation, slot equality, foreign-run zero/absent evidence, missing header
+refusal without earlier positive partial counts, cancelled/raw/invalid/closed
+refusal and complete application/history/ownership/clock equality. Final native
+controls PASS18.079s. Injected actual per-component successor transactions made
+both stores RED11.126s (nine commits versus four); restored GREEN. The unchanged
+PostgreSQL/SQLite committed-writer-between-read snapshot receipts from the
+multi-until group carry; no storage transaction policy changed. Six persistence
+boundaries PASS3.453s; final U1000 and signed-head complexity follow.
+
+Finite controls pin all slots, physical SQL memberships, MAX/strict metadata,
+selected context/run/owner, original assertions and independent hash/claim cuts.
+The full collection caught the older name-only footprint inventory's collision;
+it is now pinned to its original membership source file, preserving all five
+original consumers and their hostile controls. The SQL literal reader now handles
+SELECT followed by newline as well as space, so the existing paired reader is
+actually checked. Corpus1241/457, transition digest
+c84f28cb828b8fee8f6b7c54ee3f7f4fad610d2af44c7a23b6ef49e677c746cc.
+All immutable/current historical receipts remain; the older cancellation recipe
+gets its exact current Successor, not replacement historical expectations.
+Complete cheap Family145/current/historical121-root collection PASS12.810s.
+
+Downward census PASS151.704s:8295 ->8285 findings,5911 ->5901 raw sites,
+ten removals/zero additions; uncertainty67 and supplied-pool calls61 unchanged.
+Two error-only diagnostics and two PostgreSQL JSONB behavior conditions remain
+in the original carrier inventory. Shared carrier/openers stay live; all
+M07/D3/Docker/M01/drain/integration obligations remain unwaived. Local only,
+no push/PR/tier/server2. Receipts ~/.cache/swarm-2542-family145/compound-footprints-*.

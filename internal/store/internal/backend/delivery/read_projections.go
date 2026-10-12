@@ -143,6 +143,24 @@ func CountRunDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (i
 	return count, err
 }
 
+func CountRunDeliveryAttemptStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunEventLinkedDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1)`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunNonterminalDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status NOT IN ('delivered','dead_letter')`, runID).Scan(&count)
+	return count, err
+}
+
 func CountPostgresRunStatusActiveDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `

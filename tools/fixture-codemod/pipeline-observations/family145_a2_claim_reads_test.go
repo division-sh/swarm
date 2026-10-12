@@ -146,8 +146,9 @@ func family145A2ClaimLiteralQueries(t *testing.T, source string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.HasPrefix(value, "SELECT ") {
-			queries = append(queries, strings.Join(strings.Fields(value), " "))
+		normalized := strings.Join(strings.Fields(value), " ")
+		if strings.HasPrefix(normalized, "SELECT ") {
+			queries = append(queries, normalized)
 		}
 		return true
 	})

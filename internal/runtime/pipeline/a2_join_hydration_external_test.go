@@ -44,14 +44,8 @@ func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
 			}
 			footprint := func() [5]int {
 				t.Helper()
-				var counts [5]int
-				if err := p.selected.db.QueryRowContext(p.ctx, `SELECT
-					(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-					(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1),
-					(SELECT COUNT(*) FROM timers WHERE run_id=$1),
-					(SELECT COUNT(*) FROM events WHERE run_id=$1),
-					(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1)`, p.runID).Scan(
-					&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]); err != nil {
+				counts, err := storetest.ReadA2JoinHydrationFootprintStorage(p.ctx, p.selected.events, p.runID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				return counts

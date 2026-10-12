@@ -10,7 +10,8 @@ import (
 
 var family145FanOutMetadataCuts = []string{
 	"capsuleRaw, err := storetest.ReadFanOutRunCapsuleWire(p.ctx, p.selected.events, p.runID)",
-	"var mutations, facts, revisions int",
+	"history, err := storetest.ReadA2MapHistoryFootprintStorage(p.ctx, p.selected.events, p.runID)",
+	"mutations, facts, revisions := history.Mutations, history.Facts, history.Revisions",
 	"metadata, err := storetest.ReadFanOutRunClaimMetadataStorage(p.ctx, p.selected.events, p.runID)",
 	"cursor, cardinality := metadata.Cursor, metadata.Cardinality",
 	"status, owner, generation, lease, retained := metadata.Status, metadata.Owner, metadata.Generation, metadata.Lease, metadata.Capsule",

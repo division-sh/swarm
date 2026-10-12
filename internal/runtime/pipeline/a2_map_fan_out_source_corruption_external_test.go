@@ -112,21 +112,14 @@ type a2CorruptMapSourceFootprint struct {
 func (f *a2CorruptMapSource) footprint(t *testing.T) a2CorruptMapSourceFootprint {
 	t.Helper()
 	var result a2CorruptMapSourceFootprint
-	var diagnostic []byte
-	if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT
-		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1),
-		(SELECT COALESCE(MAX(revision),0) FROM run_fork_revisions WHERE run_id=$1),
-		(SELECT COUNT(*) FROM events WHERE run_id=$1),
-		(SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1)),
-		(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1),
-		cursor,cardinality,status,blocked_reason FROM fan_out_intents WHERE run_id=$1`, f.p.runID).Scan(
-		&result.Mutations, &result.Facts, &result.Revisions, &result.LatestRevision,
-		&result.Publications, &result.Deliveries, &result.Outcomes,
-		&result.Cursor, &result.Cardinality, &result.Status, &diagnostic); err != nil {
+	storage, err := storetest.ReadA2RetainedSourceFootprintStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	result.Mutations, result.Facts, result.Revisions, result.LatestRevision = storage.Mutations, storage.Facts, storage.Revisions, storage.LatestRevision
+	result.Publications, result.Deliveries, result.Outcomes = storage.Publications, storage.Deliveries, storage.Outcomes
+	result.Cursor, result.Cardinality, result.Status = storage.Cursor, storage.Cardinality, storage.Status
+	diagnostic := storage.Diagnostic
 	state, err := json.Marshal(f.p.instance(t))
 	if err != nil {
 		t.Fatal(err)

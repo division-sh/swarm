@@ -21,6 +21,10 @@ var family145GateCountFunctions = map[string]bool{
 	"footprint": true,
 }
 
+func family145GateCountRow(file, function string) bool {
+	return family145GateCountFunctions[function] && (function != "footprint" || file == "internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go")
+}
+
 var family145GateCountPorts = []struct{ table, port string }{
 	{"entity_state", "CountWorkflowRunFieldRows"},
 	{"flow_instances", "CountRunFlowInstanceStorage"},
@@ -161,7 +165,7 @@ func TestFamily145GateCountReadsPreserveOrderedIndependentCutsAndRejectDrift(t *
 	}
 	found := map[string]bool{}
 	for _, row := range rows {
-		if !family145GateCountFunctions[row.Function] {
+		if !family145GateCountRow(row.File, row.Function) {
 			continue
 		}
 		if found[row.Function] {

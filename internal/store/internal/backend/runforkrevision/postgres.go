@@ -115,6 +115,12 @@ func CountActivityJournalRevisionsForTest(ctx context.Context, tx *sql.Tx, runID
 	return count, nil
 }
 
+func ReadLatestRunRevisionStorageForTestTx(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&revision)
+	return revision, err
+}
+
 type FanOutObligationHistoryStorage struct {
 	Key  string
 	Fact []byte

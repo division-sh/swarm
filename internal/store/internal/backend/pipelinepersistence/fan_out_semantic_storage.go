@@ -17,6 +17,18 @@ type FanOutRunBlockedClaimStorage struct {
 	Released   bool
 }
 
+type FanOutSourceFootprintMetadataStorage struct {
+	Cursor, Cardinality int
+	Status              string
+	Diagnostic          []byte
+}
+
+func ReadFanOutSourceFootprintMetadataStorageTx(ctx context.Context, tx *sql.Tx, runID string) (FanOutSourceFootprintMetadataStorage, error) {
+	var out FanOutSourceFootprintMetadataStorage
+	err := tx.QueryRowContext(ctx, `SELECT cursor,cardinality,status,blocked_reason FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Cursor, &out.Cardinality, &out.Status, &out.Diagnostic)
+	return out, err
+}
+
 func ReadFanOutRunBlockedClaimStorageTx(ctx context.Context, tx *sql.Tx, runID string) (FanOutRunBlockedClaimStorage, error) {
 	var out FanOutRunBlockedClaimStorage
 	err := tx.QueryRowContext(ctx, `SELECT blocked_reason,

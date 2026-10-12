@@ -23,6 +23,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -45,6 +46,135 @@ func ReadLatestWorkflowTimerRuntimeLogTextForTest(ctx context.Context, selected 
 }
 
 type RunPublicationHistoryStorage struct{ Events, Revisions int }
+
+type A2MapHistoryFootprintStorage struct{ Mutations, Facts, Revisions int }
+
+type A2RetainedSourceFootprintStorage struct {
+	Mutations, Facts, Revisions, Publications, Deliveries, Outcomes int
+	Cursor, Cardinality                                             int
+	LatestRevision                                                  int64
+	Status                                                          string
+	Diagnostic                                                      []byte
+}
+
+func checkedFootprintCountForTest(count int64) (int, error) {
+	out := int(count)
+	if int64(out) != count {
+		return 0, fmt.Errorf("physical footprint count overflows int")
+	}
+	return out, nil
+}
+
+func countFootprintRevisionsForTest(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	count, err := runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)
+	if err != nil {
+		return 0, err
+	}
+	return checkedFootprintCountForTest(count)
+}
+
+func ReadA2MapHistoryFootprintStorageForTest(ctx context.Context, selected any, runID string) (A2MapHistoryFootprintStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (A2MapHistoryFootprintStorage, error) {
+		var out A2MapHistoryFootprintStorage
+		var err error
+		out.Mutations, err = mutationlog.CountRunMutationStorageTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		revisions, facts, err := runforkrevision.CountNotifyFanOutRevisionStorageForTest(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		out.Facts, err = checkedFootprintCountForTest(facts)
+		if err != nil {
+			return out, err
+		}
+		out.Revisions, err = checkedFootprintCountForTest(revisions)
+		return out, err
+	})
+}
+
+func ReadA2JoinHydrationFootprintStorageForTest(ctx context.Context, selected any, runID string) ([5]int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([5]int, error) {
+		var out [5]int
+		for i, count := range [...]func(context.Context, *sql.Tx, string) (int, error){
+			mutationlog.CountRunMutationStorageTx,
+			countFootprintRevisionsForTest,
+			genericschedule.CountTimerRowsForRun,
+			eventrecord.CountRunEventStorageTx,
+			pipelinepersistence.CountNestedRunFanOutOutcomesTx,
+		} {
+			var err error
+			out[i], err = count(ctx, tx, runID)
+			if err != nil {
+				return out, err
+			}
+		}
+		return out, nil
+	})
+}
+
+func ReadA2CancellationFootprintStorageForTest(ctx context.Context, selected any, runID string) ([5]int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([5]int, error) {
+		var out [5]int
+		for i, count := range [...]func(context.Context, *sql.Tx, string) (int, error){
+			eventrecord.CountRunEventStorageTx,
+			deliveryadapter.CountRunDeliveryStorageTx,
+			deliveryadapter.CountRunDeliveryAttemptStorageTx,
+			mutationlog.CountRunMutationStorageTx,
+			countFootprintRevisionsForTest,
+		} {
+			var err error
+			out[i], err = count(ctx, tx, runID)
+			if err != nil {
+				return out, err
+			}
+		}
+		return out, nil
+	})
+}
+
+func ReadA2RetainedSourceFootprintStorageForTest(ctx context.Context, selected any, runID string) (A2RetainedSourceFootprintStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (A2RetainedSourceFootprintStorage, error) {
+		var out A2RetainedSourceFootprintStorage
+		var err error
+		out.Mutations, err = mutationlog.CountRunMutationStorageTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		revisions, facts, err := runforkrevision.CountNotifyFanOutRevisionStorageForTest(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		out.Facts, err = checkedFootprintCountForTest(facts)
+		if err != nil {
+			return out, err
+		}
+		out.Revisions, err = checkedFootprintCountForTest(revisions)
+		if err != nil {
+			return out, err
+		}
+		out.LatestRevision, err = runforkrevision.ReadLatestRunRevisionStorageForTestTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		out.Publications, err = eventrecord.CountRunEventStorageTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		out.Deliveries, err = deliveryadapter.CountRunEventLinkedDeliveryStorageTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		out.Outcomes, err = pipelinepersistence.CountNestedRunFanOutOutcomesTx(ctx, tx, runID)
+		if err != nil {
+			return out, err
+		}
+		metadata, err := pipelinepersistence.ReadFanOutSourceFootprintMetadataStorageTx(ctx, tx, runID)
+		out.Cursor, out.Cardinality, out.Status, out.Diagnostic = metadata.Cursor, metadata.Cardinality, metadata.Status, metadata.Diagnostic
+		return out, err
+	})
+}
 
 func ReadRunPublicationHistoryStorageForTest(ctx context.Context, selected any, runID string) (RunPublicationHistoryStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (RunPublicationHistoryStorage, error) {

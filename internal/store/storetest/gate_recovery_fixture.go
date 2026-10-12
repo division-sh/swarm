@@ -31,6 +31,10 @@ func ReadGateNodeDeliveryStatus(ctx context.Context, selected any, event, node s
 	return private.ReadGateNodeDeliveryStatusForTest(ctx, selected, event, node)
 }
 
+func CountRunNonterminalDeliveryStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountRunNonterminalDeliveryStorageForTest(ctx, selected, runID)
+}
+
 type CanonicalAccumulatorClaimStorage = private.CanonicalAccumulatorClaimStorage
 type CanonicalAccumulatorRefusalStorage = private.CanonicalAccumulatorRefusalStorage
 type ReceiverAppearanceSettlementStorage = private.ReceiverAppearanceSettlementStorage

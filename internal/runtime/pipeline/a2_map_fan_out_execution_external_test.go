@@ -1174,13 +1174,11 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 			}
 			footprint := func(t *testing.T) string {
 				t.Helper()
-				var mutations, facts, revisions int
-				if err := p.selected.db.QueryRowContext(p.ctx, `SELECT
-					(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-					(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
-					(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1)`, p.runID).Scan(&mutations, &facts, &revisions); err != nil {
+				history, err := storetest.ReadA2MapHistoryFootprintStorage(p.ctx, p.selected.events, p.runID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				mutations, facts, revisions := history.Mutations, history.Facts, history.Revisions
 				metadata, err := storetest.ReadFanOutRunClaimMetadataStorage(p.ctx, p.selected.events, p.runID)
 				if err != nil {
 					t.Fatal(err)

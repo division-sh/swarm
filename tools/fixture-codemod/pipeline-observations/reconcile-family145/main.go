@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "ee364f820288df7bdf78fb777eeb91389bb0f5180af6b3baea54feba2bafd105"
+const targetDigest = "c84f28cb828b8fee8f6b7c54ee3f7f4fad610d2af44c7a23b6ef49e677c746cc"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -112,6 +112,7 @@ var files = []string{
 	"internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go",
 	"internal/runtime/pipeline/a2_join_hydration_external_test.go",
+	"internal/runtime/pipeline/a2_join_cancellation_external_test.go",
 	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go",
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go",
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go",
@@ -228,6 +229,7 @@ var renamedHelpers = map[string]map[string]string{
 
 var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_join_hydration_external_test.go":                              {"TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_cancellation_external_test.go":                           {"TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores": true, "a2CancellationFootprint": true},
 	"internal/runtime/pipeline/workflow_join_supported_surface_external_test.go":                {"assertExactJoinDeliveryStatus": true, "assertExactJoinDeliveryCount": true, "exactJoinOccurrenceEventID": true},
 	"internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go":               {"workflowTimerPersistedActivation": true, "workflowTimerPersistedOccurrence": true, "assertWorkflowTimerServedRows": true, "waitWorkflowTimerRowStatus": true, "workflowTimerPersistedEventID": true, "workflowTimerEventCount": true, "workflowTimerDeliveryTrace": true, "TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores": true},
 	"internal/serveapp/receiver_mixed_agent_test.go":                                            {"TestReceiverCompositionMixedAgentBothStores": true},
@@ -249,7 +251,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true, "runA2MapFanOutCompiledImmutableSource": true, "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores": true},
-	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true, "writeRaw/*a2CorruptMapSource": true, "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores": true},
+	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true, "writeRaw/*a2CorruptMapSource": true, "footprint/*a2CorruptMapSource": true, "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores": true},
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
 	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go":                         {"a2MultiUntilChildren": true, "TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},

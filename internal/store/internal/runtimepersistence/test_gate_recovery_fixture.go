@@ -21,6 +21,12 @@ func ReadGateNodeDeliveryStatusForTest(ctx context.Context, selected any, event,
 	})
 }
 
+func CountRunNonterminalDeliveryStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountRunNonterminalDeliveryStorageTx(ctx, tx, runID)
+	})
+}
+
 type A2EarlyRefusalStorage = delivery.A2EarlyRefusalStorage
 
 type CanonicalAccumulatorClaimStorage = delivery.CanonicalAccumulatorClaimStorage
