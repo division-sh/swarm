@@ -176,7 +176,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(history))
 	incomplete := false
 	for _, event := range history {
-		reply, err := capturedFrontierReplySettlement(plan, event.sourceEventID)
+		reply, err := plan.HistoricalReplyReturn(event.sourceEventID)
 		if err != nil {
 			return nil, false, err
 		}

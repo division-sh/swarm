@@ -12,6 +12,24 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
+func historicalReplyReturnPublications(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot) (map[string]replycontext.Record, error) {
+	if snapshot == nil {
+		return nil, fmt.Errorf("reply return correspondence lacks its fixed cut")
+	}
+	a := runForkSourceStateAdmission{snapshot: snapshot}
+	rows := make(map[string]replycontext.Record)
+	for _, event := range snapshot.Events {
+		row, err := a.capturedReplyReturn(ctx, tx, event.EventID, make(map[string]bool))
+		if err != nil {
+			return nil, err
+		}
+		if row != nil {
+			rows[event.EventID] = row.Normalized()
+		}
+	}
+	return rows, nil
+}
+
 // A consumed reply reference is no longer on the output event. Only the native
 // cut can associate that accepted occurrence with the context owning its return.
 func (a runForkSourceStateAdmission) capturedReplyReturn(ctx context.Context, tx *sql.Tx, eventID string, visiting map[string]bool) (*replycontext.Record, error) {

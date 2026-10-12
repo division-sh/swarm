@@ -96,7 +96,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 				source = event.RoutingSource()
 			}
 		}
-		reply, err := capturedFrontierReplySettlement(req.Plan, frontier[i].SourceEventID)
+		reply, err := req.Plan.HistoricalReplyReturn(frontier[i].SourceEventID)
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}

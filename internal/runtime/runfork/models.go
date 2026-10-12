@@ -296,6 +296,7 @@ type RunForkPlan struct {
 	historicalInputs          map[string]InputPublication
 	historicalJoins           map[string]PublishedJoinOccurrence
 	historicalRequests        map[string][]string
+	historicalReplyReturns    *historicalReplyReturns
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a

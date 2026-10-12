@@ -23,8 +23,13 @@ func TestIssue642CapturedReplySettlementRequiresExactAdmittedRow(t *testing.T) {
 		CreatedAt: born, UpdatedAt: settled, TerminalAt: &settled,
 	}
 	row.SourceRunID = row.RunID
-	plan := runfork.RunForkPlan{SourceRunID: row.RunID, ReplyContexts: []replycontext.Record{row}}
-	found, err := capturedFrontierReplySettlement(plan, row.AcceptedReplyEventID)
+	plan := (runfork.RunForkPlan{SourceRunID: row.RunID, ForkPoint: runfork.RunForkPoint{Revision: 1}, ReplyContexts: []replycontext.Record{row}}).
+		WithHistoricalEvents(1, []string{row.AcceptedReplyEventID})
+	plan, err := plan.WithHistoricalReplyReturns(1, map[string]replycontext.Record{row.AcceptedReplyEventID: row})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := plan.HistoricalReplyReturn(row.AcceptedReplyEventID)
 	if err != nil || found == nil || !reflect.DeepEqual(*found, row) {
 		t.Fatalf("exact captured terminal row not consumed: %+v %v", found, err)
 	}
@@ -33,7 +38,7 @@ func TestIssue642CapturedReplySettlementRequiresExactAdmittedRow(t *testing.T) {
 		t.Fatal("route evaluation borrowed mutable source lifecycle evidence")
 	}
 	for _, eventID := range []string{"", uuid.NewString(), row.RequestEventID} {
-		if found, err := capturedFrontierReplySettlement(plan, eventID); err != nil || found != nil {
+		if found, err := plan.HistoricalReplyReturn(eventID); err != nil || found != nil {
 			t.Fatalf("unknown/future request predicted a reply target: %+v %v", found, err)
 		}
 	}
@@ -53,7 +58,7 @@ func TestIssue642CapturedReplySettlementRequiresExactAdmittedRow(t *testing.T) {
 			case "no_terminal_time":
 				hostile.ReplyContexts[0].TerminalAt = nil
 			}
-			if found, err := capturedFrontierReplySettlement(hostile, row.AcceptedReplyEventID); err == nil || found != nil {
+			if found, err := hostile.HistoricalReplyReturn(row.AcceptedReplyEventID); err == nil || found != nil {
 				t.Fatalf("contradictory captured row supplied a destination: %+v %v", found, err)
 			}
 		})

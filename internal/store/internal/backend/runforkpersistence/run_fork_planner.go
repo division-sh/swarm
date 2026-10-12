@@ -210,6 +210,14 @@ func planRunForkSnapshot(
 	for _, reply := range snapshot.ReplyContexts {
 		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)
 	}
+	returns, err := historicalReplyReturnPublications(ctx, tx, snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan, err = plan.WithHistoricalReplyReturns(snapshot.Revision, returns)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	for _, timer := range snapshot.Timers {
 		if timer.TaskType != "workflow_timer" {
 			continue
