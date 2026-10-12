@@ -59,7 +59,7 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 		t.Fatal(err)
 	}
 	advanced := old
-	if _, err := advanced.Repeat("drafting", uuid.NewString(), time.Now().UTC()); err != nil {
+	if _, err := advanced.Repeat("review", uuid.NewString(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	intent.ExecutionFlowID = identity.FlowID(child.TemplateID)
