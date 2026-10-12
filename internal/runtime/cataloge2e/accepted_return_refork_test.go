@@ -188,8 +188,24 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	if err != nil || count != 1 {
 		t.Fatalf("settled provider was re-executed or return duplicated: count=%d error=%v", count, err)
 	}
+	// A physical receipt is not a joined executor. Drain this child's existing
+	// owner before the next hop takes its source-isolation baseline.
+	cleanup, retire := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
+	defer retire()
+	if err := owner.RetireSelectedContexts(cleanup); err != nil {
+		t.Fatalf("join return child before using it as a refork source: %v", err)
+	}
+	retained, err := selected.LoadReplyContext(cleanup, row.ID)
+	if err != nil || !reflect.DeepEqual(retained, row) {
+		t.Fatalf("joined retirement changed terminal return evidence: %+v error=%v", retained, err)
+	}
 	afterDomain, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
 	if err != nil || !reflect.DeepEqual(afterDomain, sourceDomain) {
+		for table, before := range sourceDomain {
+			if after := afterDomain[table]; !reflect.DeepEqual(before, after) {
+				t.Logf("immediate source %s at cut %s changed %s: before=%+v after=%+v", sourceRun, cut, table, before, after)
+			}
+		}
 		t.Fatalf("refork changed the immediate source domain: %v", err)
 	}
 	return staged.ForkRunID, inputID
