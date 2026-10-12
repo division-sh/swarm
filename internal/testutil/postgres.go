@@ -24,14 +24,15 @@ var postgresManagers = struct {
 // content-addressed platform template.
 func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
-	return startPostgresDatabase(t, true)
+	dsn, db, cleanup, _ = startPostgresDatabase(t, true)
+	return dsn, db, cleanup
 }
 
 // StartPostgresDSN provides a sandbox location for native store construction
 // without granting its pool to semantic fixture callers.
 func StartPostgresDSN(t *testing.T) string {
 	t.Helper()
-	dsn, _, _ := startPostgresDatabase(t, true)
+	dsn, _, _, _ := startPostgresDatabase(t, true)
 	return dsn
 }
 
@@ -39,13 +40,14 @@ func StartPostgresDSN(t *testing.T) string {
 // schema bootstrap.
 func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
-	return startPostgresDatabase(t, false)
+	dsn, db, cleanup, _ = startPostgresDatabase(t, false)
+	return dsn, db, cleanup
 }
 
 // StartEmptyPostgresDSN preserves empty-store admission without exporting its pool.
 func StartEmptyPostgresDSN(t *testing.T) string {
 	t.Helper()
-	dsn, _, _ := startPostgresDatabase(t, false)
+	dsn, _, _, _ := startPostgresDatabase(t, false)
 	return dsn
 }
 
@@ -53,12 +55,8 @@ func StartEmptyPostgresDSN(t *testing.T) string {
 // harness and exposes only connection data and the exact process-wait witness.
 func StartEmptyPostgresProcessLeaseProof(t *testing.T) (string, testpostgres.Parameters, func(context.Context) (bool, error)) {
 	t.Helper()
-	dsn, observer, _ := StartEmptyPostgres(t)
-	connection, err := testpostgres.ParseConnection(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return dsn, connection.Parameters(), func(ctx context.Context) (bool, error) {
+	dsn, observer, _, parameters := startPostgresDatabase(t, false)
+	return dsn, parameters, func(ctx context.Context) (bool, error) {
 		var waiting bool
 		err := observer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted
 			AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
@@ -68,7 +66,7 @@ func StartEmptyPostgresProcessLeaseProof(t *testing.T) (string, testpostgres.Par
 	}
 }
 
-func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
+func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func(), testpostgres.Parameters) {
 	t.Helper()
 	connection, err := testpostgres.ConnectionFromEnvironment()
 	if err != nil {
@@ -100,7 +98,7 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 		}
 	}
 	t.Cleanup(release)
-	return dsn, sandbox.DB, release
+	return dsn, sandbox.DB, release, sandbox.Connection.Parameters()
 }
 
 func postgresManagerForConnection(ctx context.Context, connection testpostgres.Connection) (*testpostgres.Manager, error) {
