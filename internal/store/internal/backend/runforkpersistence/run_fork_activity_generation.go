@@ -77,6 +77,7 @@ type runForkSourceStateAdmission struct {
 	snapshot  *runForkRevisionSnapshot
 	postgres  bool
 	firstTurn *runfork.InputPublication
+	point     runfork.RunForkPoint
 }
 
 func (a runForkSourceStateAdmission) projectReplyReference(replyID string) (string, error) {
@@ -120,7 +121,7 @@ func loadRunForkSourceStateAdmission(ctx context.Context, tx *sql.Tx, forkRunID 
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres, firstTurn: firstTurn}, nil
+	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres, firstTurn: firstTurn, point: binding.ForkPoint}, nil
 }
 
 // Presence comes only from the bound source snapshot. Neither a producer root
@@ -365,6 +366,10 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 
 func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
 	var err error
+	projected.ContinuedReplyRequests, err = a.projectRequestReplies(source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
 	projected.ContinuedRecipientRoutes, err = projectContinuedFanOutSourceRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
 	if err != nil {
 		return projected, err

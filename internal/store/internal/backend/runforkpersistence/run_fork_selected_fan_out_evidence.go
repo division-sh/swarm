@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -79,11 +80,14 @@ func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, wan
 	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres)
 }
 
-func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
+func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true); err != nil {
+			return err
+		}
 		if err := insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
 			return err
 		}
@@ -94,11 +98,14 @@ func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context
 	})
 }
 
-func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
+func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false); err != nil {
+			return err
+		}
 		if err := insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
 			return err
 		}

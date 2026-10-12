@@ -290,6 +290,42 @@ func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) 
 	return scanReplyContext(db.QueryRowContext(ctx, sqliteReplyContextSelect+` WHERE reply_context_id = ?`, strings.TrimSpace(id)))
 }
 
+// Request replay consumes the projected open row, not creation idempotence.
+// The lock remains held through publication so a concurrent reply cannot settle
+// the obligation between this check and its request delivery.
+func (s *ReplyPostgresOwner) RequireOpenWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("reply continuation requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadPostgresReplyContext(ctx, tx, expected.ID, true)
+		if err != nil {
+			return err
+		}
+		return requireOpenReplyContinuation(expected, actual)
+	})
+}
+
+func (s *ReplySQLiteOwner) RequireOpenWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("reply continuation requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadSQLiteReplyContext(ctx, tx, expected.ID)
+		if err != nil {
+			return err
+		}
+		return requireOpenReplyContinuation(expected, actual)
+	})
+}
+
+func requireOpenReplyContinuation(expected, actual runtimereplycontext.Record) error {
+	if expected.State != runtimereplycontext.StateOpen || actual.State != runtimereplycontext.StateOpen {
+		return fmt.Errorf("request continuation requires its existing open reply obligation")
+	}
+	return actual.ValidateContinuationFrom(expected, expected.CreatedAt)
+}
+
 func (s *ReplyPostgresOwner) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
 	type claimResult struct {
 		record  runtimereplycontext.Record

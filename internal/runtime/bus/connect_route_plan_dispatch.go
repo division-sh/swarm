@@ -101,6 +101,7 @@ type connectRoutePlanDispatch struct {
 	ReplyContextConsumed bool
 	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
 	ReplyCreations       []runtimereplycontext.Record
+	ReplyContinuations   []runtimepinrouting.ReplyRequestContinuation
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
@@ -363,12 +364,16 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		}
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
 			var creation *runtimereplycontext.Record
-			routes, creation, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
+			var continuation *runtimereplycontext.Record
+			routes, creation, continuation, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
 			if creation != nil {
 				out.ReplyCreations = append(out.ReplyCreations, *creation)
+			}
+			if continuation != nil {
+				out.ReplyContinuations = append(out.ReplyContinuations, runtimepinrouting.ReplyRequestContinuation{Record: *continuation, Plan: plan})
 			}
 		}
 		routes, err = stampConnectExecutionClaims(plan, routes)
@@ -438,9 +443,9 @@ func connectReceiverPinCollisionDetail(admission runtimepinrouting.ConnectReceiv
 	return collisions[0].ReceiverPinDiagnostics(), true
 }
 
-func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute, values map[string]string) ([]runtimepinrouting.ConnectDeliveryRoute, *runtimereplycontext.Record, error) {
+func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute, values map[string]string) ([]runtimepinrouting.ConnectDeliveryRoute, *runtimereplycontext.Record, *runtimereplycontext.Record, error) {
 	if plan.ReplyRole() != runtimepinrouting.ConnectReplyRoleRequest {
-		return routes, nil, nil
+		return routes, nil, nil, nil
 	}
 	origin := evt.SourceRoute().Normalized()
 	now := evt.CreatedAt()
@@ -449,28 +454,39 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 	}
 	record, err := plan.ReplyRequestRecord(evt, origin, runtimepinrouting.AdmitConnectRouteMatchValues(values), now)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if r.replyStore == nil {
-		return nil, nil, fmt.Errorf("ReplyContextStore is required for resolution mode reply")
+		return nil, nil, nil, fmt.Errorf("ReplyContextStore is required for resolution mode reply")
+	}
+	retained, continuing, err := selectedForkRequestReply(ctx, evt, record)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if continuing {
+		return bindReplyRequestRoutes(routes, retained.ID), nil, &retained, nil
 	}
 	if enclosingID := events.DeliveryContextFromContext(ctx).ReplyContextID(); enclosingID != "" {
 		enclosing, err := r.replyStore.LoadReplyContext(ctx, enclosingID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("load enclosing reply context: %w", err)
+			return nil, nil, nil, fmt.Errorf("load enclosing reply context: %w", err)
 		}
 		if enclosing.ID != enclosingID {
-			return nil, nil, fmt.Errorf("enclosing reply lookup returned a different obligation")
+			return nil, nil, nil, fmt.Errorf("enclosing reply lookup returned a different obligation")
 		}
 		if err := record.BindEnclosing(enclosing); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
+	return bindReplyRequestRoutes(routes, record.ID), &record, nil, nil
+}
+
+func bindReplyRequestRoutes(routes []runtimepinrouting.ConnectDeliveryRoute, contextID string) []runtimepinrouting.ConnectDeliveryRoute {
+	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: contextID}}
 	for i := range routes {
 		routes[i].Context = deliveryContext
 	}
-	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), &record, nil
+	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes)
 }
 
 func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, record runtimereplycontext.Record) ([]runtimepinrouting.ConnectDeliveryRoute, []Subscriber, *runtimereplycontext.ClaimCommand, runtimepinrouting.TargetFailure, map[string]any, error) {

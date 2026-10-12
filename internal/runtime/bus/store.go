@@ -14,6 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -495,11 +496,15 @@ type CommitPublishRequest struct {
 	Disposition         *runtimepipelineobligation.Disposition
 	DeadLetter          *runtimedeadletters.Record
 	ReplyCreations      []runtimereplycontext.Record
+	ReplyContinuations  []runtimepinrouting.ReplyRequestContinuation
 	ReplyClaims         []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	if err := r.validateReplyContinuations(); err != nil {
+		return err
+	}
 	for _, fence := range r.JoinAdmissionFences {
 		if err := fence.Validate(); err != nil {
 			return err
@@ -513,6 +518,34 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 		Settlement:     r.RouteSettlement,
 		DeliveryRoutes: r.DeliveryRoutes,
 	}).Validate()
+}
+
+func (r CommitPublishRequest) validateReplyContinuations() error {
+	if len(r.ReplyContinuations) == 0 {
+		return nil
+	}
+	if r.Event.Class() != events.EventAdmissionSelectedForkReplay || len(r.ReplyCreations) != 0 {
+		return fmt.Errorf("reply continuation requires selected publication without fresh reply creation")
+	}
+	seen := make(map[string]bool, len(r.ReplyContinuations))
+	for _, continuation := range r.ReplyContinuations {
+		if err := continuation.Validate(); err != nil {
+			return err
+		}
+		record := continuation.Record
+		if record.RunID != r.Event.Event().RunID() || record.State != runtimereplycontext.StateOpen || seen[record.ID] {
+			return fmt.Errorf("reply continuation requires distinct open child obligations")
+		}
+		seen[record.ID] = true
+		matched := false
+		for _, route := range r.DeliveryRoutes {
+			matched = matched || route.Context.ReplyContextID() == record.ID
+		}
+		if !matched {
+			return fmt.Errorf("reply continuation lacks its executable recipient")
+		}
+	}
+	return nil
 }
 
 type CommitSelectedForkEventRequest struct {

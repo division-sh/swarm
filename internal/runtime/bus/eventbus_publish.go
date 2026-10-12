@@ -1003,6 +1003,7 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplayScope:         runtimepipelineobligation.ScopeSubscribed,
 		PipelineClaim:       p.publicationClaim.Claim(),
 		ReplyCreations:      append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
+		ReplyContinuations:  append([]runtimepinrouting.ReplyRequestContinuation(nil), p.plan.ReplyContinuations...),
 		ReplyClaims:         append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 		JoinAdmissionFences: append([]runtimepipeline.WorkflowJoinAdmissionFence(nil), p.plan.JoinAdmissionFences...),
 	}

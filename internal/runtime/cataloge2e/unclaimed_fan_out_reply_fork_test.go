@@ -59,6 +59,93 @@ func TestIssue642TwoOpenRepliesUnclaimedFanOutInputBothStores(t *testing.T) {
 	}
 }
 
+// This isolates publication admission from the still-required full fan-out
+// return above. A delivered request is not credit for its deferred ordinal.
+func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			root := canonicalrouting.CopyNestedFanOutReply(t)
+			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			var selected unclaimedFanOutReplyStore = h.pg
+			if h.sqlite != nil {
+				selected = h.sqlite
+			}
+			cut, sourceRows := prepareUnclaimedFanOutReplySource(t, h, selected)
+			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
+			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
+			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
+			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
+			t.Cleanup(func() { logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID) })
+			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+			})
+			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
+				t.Fatalf("activate actual inherited request: result=%+v error=%v", executed.Activation, err)
+			}
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
+			defer cancel()
+			input := waitUnclaimedReplyRequestDelivery(t, ctx, selected, staged.ForkRunID, cut, inner.ID)
+			deliveryID, err := deliverylifecycle.DeliveryID(input.Event.ID(), input.DeliveryRoutes[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := selected.Snapshot(ctx, deliveryID)
+			if err != nil || delivery.Status != deliverylifecycle.StatusDelivered || delivery.ClaimVersion != 1 {
+				t.Fatalf("continued input did not settle once: delivery=%+v error=%v", delivery, err)
+			}
+			rows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
+			if err != nil || !reflect.DeepEqual(rows, childRows) {
+				t.Fatalf("request publication recreated or changed its inherited rows: %v", err)
+			}
+			original, err := storetest.ReadReplyContextRecords(ctx, selected, catalogRuntimeRunID)
+			if err != nil || !reflect.DeepEqual(original, sourceRows) {
+				t.Fatalf("request publication rewrote source replies: %v", err)
+			}
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
+			defer stop()
+			if err := owner.RetireSelectedContexts(cleanup); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func waitUnclaimedReplyRequestDelivery(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, child, cut, replyID string) bus.PreparedPublishEvent {
+	t.Helper()
+	inputID := activityidentity.ForkLineageEventID(child, cut)
+	for {
+		input, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
+		if err != nil {
+			t.Fatalf("read inherited request publication: %v", err)
+		}
+		if found {
+			if len(input.DeliveryRoutes) != 1 || input.DeliveryRoutes[0].Context.ReplyContextID() != replyID {
+				t.Fatalf("continued request changed complete own route: %+v", input.DeliveryRoutes)
+			}
+			id, err := deliverylifecycle.DeliveryID(inputID, input.DeliveryRoutes[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := selected.Snapshot(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delivery.Status == deliverylifecycle.StatusDelivered {
+				return input
+			}
+			if delivery.Terminal() {
+				t.Fatalf("continued request terminally refused: %+v", delivery)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("original request delivery bound: %v", ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 func prepareUnclaimedFanOutReplySource(t *testing.T, h *runtimeHarness, selected unclaimedFanOutReplyStore) (string, []replycontext.Record) {
 	t.Helper()
 	h.publishAndWait(catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "same-account", "request_id": "same-key", "items": []any{"same-key"}},
@@ -182,6 +269,28 @@ func logUnclaimedFanOutReplyFailure(t *testing.T, ctx context.Context, selected 
 	}
 	for _, log := range proof.Logs {
 		t.Logf("unclaimed-inner native diagnostic: %s", log.Payload)
+	}
+	inputID := ""
+	rows, rowsErr := storetest.ReadReplyContextRecords(read, selected, child)
+	t.Logf("unclaimed-inner child reply rows: %+v error=%v", rows, rowsErr)
+	for _, row := range rows {
+		if row.ProviderFlowID == "t" {
+			inputID = activityidentity.ForkLineageEventID(child, row.SourceRequestEventID)
+		}
+	}
+	intents, intentsErr := selected.ListFanOutIntents(read, fanoutobligation.ListQuery{RunID: child, Limit: 10})
+	t.Logf("unclaimed-inner child intents: %+v error=%v", intents, intentsErr)
+	if inputID != "" {
+		deliveries, deliveryErr := storetest.ReadEventDeliveryDiagnosticRows(read, selected, inputID)
+		receipt, receiptErr := storetest.ReadExactPipelineReceiptOutcomeReason(read, selected, inputID)
+		t.Logf("unclaimed-inner input deliveries=%+v receipt=%+v errors=%v/%v", deliveries, receipt, deliveryErr, receiptErr)
+	}
+	outcomes, outcomesErr := storetest.ReadFanOutPublishedOutcomeStorage(read, selected, child)
+	t.Logf("unclaimed-inner child outcomes: %+v error=%v", outcomes, outcomesErr)
+	for _, outcome := range outcomes {
+		deliveries, deliveryErr := storetest.ReadEventDeliveryDiagnosticRows(read, selected, outcome.EventID)
+		receipt, receiptErr := storetest.ReadExactPipelineReceiptOutcomeReason(read, selected, outcome.EventID)
+		t.Logf("unclaimed-inner outcome deliveries=%+v receipt=%+v errors=%v/%v", deliveries, receipt, deliveryErr, receiptErr)
 	}
 	t.Logf("unclaimed-inner selected owner cleanup/cause: %v", owner.RetireSelectedContexts(read))
 }

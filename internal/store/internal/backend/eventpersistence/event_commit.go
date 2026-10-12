@@ -33,6 +33,7 @@ type eventCommitTxStore interface {
 	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
 	createReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	requireReplyContextContinuationTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
 	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
 	PrepareDynamicFlowCreationOccurrenceCommitTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error)
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
@@ -147,6 +148,11 @@ func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context
 			return nil, fmt.Errorf("commit reply context creation: %w", err)
 		}
 	}
+	for _, continuation := range req.ReplyContinuations {
+		if err := c.store.requireReplyContextContinuationTx(ctx, c.attempt, continuation.Record); err != nil {
+			return nil, fmt.Errorf("commit reply context continuation: %w", err)
+		}
+	}
 	for _, claim := range req.ReplyClaims {
 		if err := c.store.claimReplyContextTx(ctx, c.attempt, claim); err != nil {
 			return nil, fmt.Errorf("commit reply context claim: %w", err)
@@ -241,7 +247,7 @@ func commitSelectedForkEvent(
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
-	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes); err != nil {
+	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes, req.Commit.ReplyContinuations); err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	return result, result.Validate()

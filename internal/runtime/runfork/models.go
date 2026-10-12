@@ -1438,6 +1438,7 @@ type RunForkSelectedContractSourceEvent struct {
 	PublishedJoin            genericschedule.PublishedJoinContinuation `json:"-"`
 	PublishedJoinRoute       events.DeliveryRoute                      `json:"-"`
 	ContinuedRecipientRoutes []events.DeliveryRoute                    `json:"-"`
+	ContinuedReplyRequests   []replycontext.Record                     `json:"-"`
 	SourceEventID            string                                    `json:"source_event_id"`
 	EventName                string                                    `json:"event_name"`
 	ExecutionMode            executionmode.Mode                        `json:"execution_mode"`

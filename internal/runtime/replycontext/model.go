@@ -167,6 +167,32 @@ func (r Record) ValidateContinuationFrom(previous Record, admittedAt time.Time) 
 	return nil
 }
 
+// A continued request keeps its row-owned logical occurrence, evidence and
+// return arm. Its new physical publication must match the same paired request.
+func (r Record) ValidateInheritedRequestPublication(draft Record) error {
+	r, draft = r.Normalized(), draft.Normalized()
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := draft.Validate(); err != nil {
+		return err
+	}
+	if r.State != StateOpen || draft.State != StateOpen ||
+		(draft.EnclosingReplyContextID != "" && draft.EnclosingReplyContextID != r.EnclosingReplyContextID) {
+		return fmt.Errorf("inherited request changed its open enclosing obligation")
+	}
+	draft.ID, draft.RequestEventID = r.ID, r.RequestEventID
+	draft.SourceRunID, draft.SourceRequestEventID = r.SourceRunID, r.SourceRequestEventID
+	draft.EnclosingReplyContextID, draft.ReturnJoins = r.EnclosingReplyContextID, r.ReturnJoins
+	if r.CorrelationKey == "" {
+		draft.RequestCorrelationID = r.RequestCorrelationID
+	}
+	if !r.SameIdentity(draft) {
+		return fmt.Errorf("inherited request publication changed its retained binding")
+	}
+	return nil
+}
+
 func sameReplyTerminalTime(left, right *time.Time) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil

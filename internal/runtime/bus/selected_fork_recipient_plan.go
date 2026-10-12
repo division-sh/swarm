@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
 // This is a narrowed resolution input, not execution authority. The selected
@@ -17,6 +18,7 @@ type selectedForkRecipientPlan struct {
 	lineage    events.SelectedForkLineage
 	recipients []forkrecipient.Evidence
 	contexts   map[events.DeliveryRouteIdentity]events.DeliveryContext
+	requests   []replycontext.Record
 }
 
 type selectedForkRecipientPlanKey struct{}
@@ -39,6 +41,55 @@ func selectedForkRecipientPlanFromContext(ctx context.Context, event events.Even
 	plan, ok := ctx.Value(selectedForkRecipientPlanKey{}).(selectedForkRecipientPlan)
 	lineage, selected := event.SelectedForkLineage()
 	return plan, ok && selected && event.ID() == plan.eventID && lineage == plan.lineage
+}
+
+func WithSelectedForkRequestReplies(ctx context.Context, event events.Event, records []replycontext.Record) (context.Context, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	plan, ok := selectedForkRecipientPlanFromContext(ctx, event)
+	if !ok || len(records) == 0 || plan.requests != nil {
+		return nil, fmt.Errorf("inherited request requires its exact unfinished publication scope")
+	}
+	seen := make(map[string]bool, len(records))
+	for _, record := range records {
+		if err := record.Validate(); err != nil {
+			return nil, err
+		}
+		if record.RunID != event.RunID() || record.State != replycontext.StateOpen || seen[record.ID] {
+			return nil, fmt.Errorf("inherited request has contradictory retained reply evidence")
+		}
+		seen[record.ID] = true
+		plan.requests = append(plan.requests, record.Normalized())
+	}
+	return context.WithValue(ctx, selectedForkRecipientPlanKey{}, plan), nil
+}
+
+func selectedForkRequestReply(ctx context.Context, event events.Event, draft replycontext.Record) (replycontext.Record, bool, error) {
+	plan, selected := selectedForkRecipientPlanFromContext(ctx, event)
+	if !selected || plan.requests == nil {
+		return replycontext.Record{}, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return replycontext.Record{}, false, err
+	}
+	var matched replycontext.Record
+	for _, record := range plan.requests {
+		if record.RequesterFlowID != draft.RequesterFlowID || record.RequestOutputPin != draft.RequestOutputPin || record.ProviderFlowID != draft.ProviderFlowID {
+			continue
+		}
+		if matched.ID != "" {
+			return replycontext.Record{}, false, fmt.Errorf("inherited request has ambiguous retained reply bindings")
+		}
+		if err := record.ValidateInheritedRequestPublication(draft); err != nil {
+			return replycontext.Record{}, false, err
+		}
+		matched = record.Normalized()
+	}
+	if matched.ID == "" {
+		return replycontext.Record{}, false, fmt.Errorf("inherited request lacks its retained paired binding")
+	}
+	return matched, true, nil
 }
 
 // Captured context is data, not recipient or execution authority. Resolution
