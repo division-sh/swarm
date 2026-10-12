@@ -3538,7 +3538,7 @@ Receipts: ~/.cache/swarm-2542-family145/live-session-frontier-* on vemew;
 Go1.25.0 ordinary tests while #2622 remains OPEN, U1000Go1.26.8. No push, PR,
 server2, tier/full, compatibility behavior or classifier/ratchet relaxation.
 
-Downward ratchet PASS187.783s:8732 ->8714 findings (18 removed, zero added),
+Downward ratchet PASS187.797s:8732 ->8714 findings (18 removed, zero added),
 confirmed raw-operation debt6287 ->6273 and uncertainty67 unchanged. Collector
 policy remains fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9.
 Broader54820/39100 includes legitimate owners and is not debt. Supplied-pool
