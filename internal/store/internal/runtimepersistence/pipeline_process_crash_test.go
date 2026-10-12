@@ -204,12 +204,35 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				// A live predecessor, not a stale row or local socket assumption,
 				// must prevent another process authority from being granted.
 				attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-				contender, err := fixture.store.(startupownership.Store).AcquireProcessCapability(attemptCtx, testStartupAcquireRequest("crash-contender"))
-				cancel()
-				if err == nil {
-					_ = contender.Release(ctx)
-					t.Fatal("live predecessor permitted another process capability")
+				type contenderResult struct {
+					admitted bool
+					err      error
 				}
+				contended := make(chan contenderResult, 1)
+				contenderDone := make(chan struct{})
+				go func() {
+					defer close(contenderDone)
+					contender, err := fixture.store.(startupownership.Store).AcquireProcessCapability(attemptCtx, testStartupAcquireRequest("crash-contender"))
+					if err == nil {
+						err = contender.Release(context.WithoutCancel(attemptCtx))
+						contended <- contenderResult{admitted: true, err: err}
+						return
+					}
+					contended <- contenderResult{err: err}
+				}()
+				t.Cleanup(func() {
+					cancel()
+					_ = child.Process.Kill()
+					select {
+					case <-contenderDone:
+					case <-time.After(10 * time.Second):
+						t.Error("contender cleanup did not join after process death")
+					}
+				})
+				<-attemptCtx.Done()
+				cancel()
+				// SQLite's real flock wait joins after physical release; a canceled
+				// caller cannot stop us from delivering the promised process death.
 				if err := child.Process.Kill(); err != nil {
 					t.Fatal(err)
 				}
@@ -225,6 +248,14 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 					}
 				case <-time.After(10 * time.Second):
 					t.Fatal("SIGKILL child did not exit")
+				}
+				select {
+				case result := <-contended:
+					if result.admitted || !errors.Is(result.err, context.DeadlineExceeded) {
+						t.Fatalf("live predecessor exclusion or canceled wait changed: admitted=%t err=%v", result.admitted, result.err)
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("canceled contender did not join after SIGKILL")
 				}
 				encoded, err := json.Marshal(old.Authority)
 				if err != nil {
