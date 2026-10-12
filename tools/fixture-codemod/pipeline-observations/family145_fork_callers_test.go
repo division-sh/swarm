@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 452 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b8c0594789187be1c785ccf3dec316ac3c9653defcb605f4d99e2bd175cf37ec" {
+	if err != nil || len(rows) != 453 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "6fba6eccf7b89865ba870c50af9d906d20a255a99d1a4def8591830baaef5847" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -140,6 +140,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if family145CanonicalClaimSettlementCuts[row.Function] != nil {
 			if err := family145CanonicalClaimSettlementProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores" {
+			if err := family145PublicationHistoryProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

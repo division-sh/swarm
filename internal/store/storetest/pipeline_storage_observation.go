@@ -45,6 +45,12 @@ func SetPinnedAuthoredMutationWire(ctx context.Context, selected any, source fan
 	return private.SetPinnedAuthoredMutationWireForTest(ctx, selected, source, raw)
 }
 
+type RunPublicationHistoryStorage = private.RunPublicationHistoryStorage
+
+func ReadRunPublicationHistoryStorage(ctx context.Context, selected any, runID string) (RunPublicationHistoryStorage, error) {
+	return private.ReadRunPublicationHistoryStorageForTest(ctx, selected, runID)
+}
+
 type FanOutPublishedOutcomeStorageEvidence = private.FanOutPublishedOutcomeStorageEvidence
 type FanOutRunProgressStorageEvidence = private.FanOutRunProgressStorageEvidence
 type FanOutTriggeredIntentStorageEvidence = private.FanOutTriggeredIntentStorageEvidence

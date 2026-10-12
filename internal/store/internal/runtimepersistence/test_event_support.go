@@ -44,6 +44,28 @@ func ReadLatestWorkflowTimerRuntimeLogTextForTest(ctx context.Context, selected 
 	})
 }
 
+type RunPublicationHistoryStorage struct{ Events, Revisions int }
+
+func ReadRunPublicationHistoryStorageForTest(ctx context.Context, selected any, runID string) (RunPublicationHistoryStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (RunPublicationHistoryStorage, error) {
+		var out RunPublicationHistoryStorage
+		var err error
+		out.Events, err = eventrecord.CountRunEventStorageTx(ctx, tx, runID)
+		if err != nil {
+			return RunPublicationHistoryStorage{}, err
+		}
+		revisions, err := runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)
+		if err != nil {
+			return RunPublicationHistoryStorage{}, err
+		}
+		out.Revisions = int(revisions)
+		if int64(out.Revisions) != revisions {
+			return RunPublicationHistoryStorage{}, fmt.Errorf("run history revision count overflows int")
+		}
+		return out, nil
+	})
+}
+
 // Connector reads retain physical event scope; no dispatch eligibility or clock is inferred.
 func ReadConnectorNormalizedProviderEventIDForTest(ctx context.Context, selected any, runID, entityID, eventName, providerEventID string) (string, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {

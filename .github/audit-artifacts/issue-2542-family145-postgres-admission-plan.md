@@ -4855,3 +4855,46 @@ Runtime/owner/corpus code is unchanged in this repair: reviewed race, census,
 boundaries and physical-clock receipts carry under the explicit ruling; no duplicate
 tier/race/census run or waiver is claimed. Baseline remains8305/5921, zero additions.
 Signed-head complexity follows. Local only; no push/PR/server2.
+
+## Shared Gate/A2 Dependency: Complete Multi-Until Publication/History Footprint
+
+Both before/after-replay observations now consume one fixed typed publication/
+history snapshot. Existing eventrecord whole-run event count and runforkrevision
+whole-run revision count remain their sole row-family owners. The private existing
+event-support owner composes them in one original native read transaction; no
+second transaction, SQL fragment, generic callback or duplicate physical reader
+is exposed. This changes SQL statement layout, not the atomic logical read cut:
+PostgreSQL's repeatable-read and SQLite's established read snapshot preserve both
+components. Original int destinations retain checked conversion. Before-replay
+and after-joined-replay are still two distinct transactions, not merged cuts.
+All four until receipts, later-arm state, business/history/no-republication and
+retained-route assertions remain. Whole multi-until caller file is now raw-free.
+
+Original whole root both-store race PASS23.389s. Native compiled construction/
+real publication fixture compares the exact original compound SQL with both
+fixed observations, proves one read commit per cut, genuine duplicate idempotency,
+foreign run zero counts, cancellation/no partial evidence, raw/invalid/closed
+refusal and complete application/history/clock equality. Its first development
+duplicate fixture lacked the targeted event envelope; canonical ResolveEnvelope
+now supplies the existing admitted target rather than bypassing replay admission.
+Final native controls PASS15.821s. Deliberately splitting the second component
+into another actual native read transaction failed both stores11.656s (two commits
+at the first cut); restored GREEN. Existing backend snapshot contracts pass under
+race: PostgreSQL7.448s, SQLite1.135s, including committed writes between reads and
+caller cancellation. This is named execution evidence, not merely shared-owner
+reasoning. The unchanged six boundary roots PASS3.581s; U1000 clean.
+
+Finite controls preserve every original assertion and exact replay-window order,
+context, selected run, int destinations and both independent observations. They
+pin one native transaction plus the two unchanged canonical physical predicates;
+lost replay/cut/assertion bindings reject. Complete inexpensive Family145/current/
+historical collection119 roots PASS15.374s. Corpus1238/453, digest
+6fba6eccf7b89865ba870c50af9d906d20a255a99d1a4def8591830baaef5847;
+all immutable/current historical receipts remain unchanged in this group.
+
+Downward census PASS97.642s; final unchanged24.088s:8305 ->8301 findings,
+5921 ->5917 raw sites, four removals/zero additions. Uncertainty67 and supplied-
+pool calls61 unchanged. Carrier tail12 references/6files; source facts/diagnostics
+and remaining compound footprints stay live. No parent/qualification hold is
+waived. Local only; no push/PR/tier/server2. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/multi-until-history-*.
