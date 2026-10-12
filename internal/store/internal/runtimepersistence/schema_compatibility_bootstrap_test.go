@@ -42,6 +42,8 @@ func TestRetiredPlatformTableRegistryIsExact(t *testing.T) {
 		"agent_external_effect_operations",
 		"agent_external_effect_attempts",
 		"schedules",
+		"runtime_startup_authority_facts",
+		"runtime_startup_authority_repairs",
 	}
 	if got := platformschema.RetiredPlatformTables(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("retired platform table registry = %v, want %v", got, want)
