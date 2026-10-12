@@ -59,6 +59,9 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"platform-spec.yaml":                                    50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
+		// Exact historical provider-request probe names, not the retired product.
+		".github/audit-artifacts/issue-2627-counterexamples.md":   1,
+		".github/audit-artifacts/issue-2627-preimplementation.md": 1,
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
 		"tools/fixture-codemod/pipeline-observations/recipes.json":                          8,
@@ -323,6 +326,9 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case (relative == ".github/audit-artifacts/issue-2627-counterexamples.md" ||
+		relative == ".github/audit-artifacts/issue-2627-preimplementation.md") && strings.Contains(line, "TestIssue2627AuditBuilderCounterexamples"):
+		return true
 	case (relative == "tools/fixture-codemod/pipeline-observations/recipes.json" ||
 		relative == "tools/fixture-codemod/pipeline-observations/family144-transitions.json") &&
 		isExplicitRunFixtureSnapshot(line):
