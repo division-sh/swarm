@@ -1015,6 +1015,40 @@ seam_families:
     notes: >
       The finite fan-out handoff checks typed RoutePlanLiveRecipient evidence
       against persisted delivery routes. It does not derive a new route.
+  - id: committed_agent_readiness_handoff_consumer
+    layer: route_plan_authority
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/committed_agent_handoff.go
+      - internal/runtime/bus/committed_agent_handoff_test.go
+    search_dimensions: [route_plan_source_reason]
+    invalid_authority:
+      - agent readiness transition as permission to infer recipients or targets
+      - unrelated or merely nonempty handoff evidence as route authority
+    notes: >
+      The existing EventBus committed-consequence owner consumes typed
+      RoutePlanLiveRecipient and durable route evidence to validate complete
+      exact event/recipient/generation coverage before the current continuation
+      coordinator accepts a positively owned readiness transition. RoutePlan
+      and deliverylifecycle remain the route and execution authority owners;
+      this consumer neither derives a route nor directly dispatches the held
+      actor. The component test supplies typed plan evidence only to exercise
+      transfer, independent failure, cancellation and hostile coverage checks;
+      its doubles are not native COMMIT or provider qualification.
+  - id: committed_agent_handoff_native_publication_proof
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/committed_agent_handoff_native_external_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      The both-store native proof invokes the existing PublishDirectRoutes
+      owner with an exact admitted agent route and source/run event. Real
+      native publication, pipeline settlement and coordinator handoff precede
+      the existing topology wake and one canonical claim/outcome. Retired and
+      wrong-generation coordinators preserve recovery refusal. The fixture
+      does not plan subscribed recipients, infer ownership from the readiness
+      marker or grant a new direct-delivery or replay capability.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner
