@@ -1,5 +1,9 @@
 # Issue #2630: Coding-Base Combination Control
 
+Historical RED checkpoint, superseded by approved amendment6122944537 and
+issue-2630-approved-amendment.md. Both defects are now in the bounded repair;
+the pending-disposition text below records the state before that ruling.
+
 2026-10-12, branch agent-g/2630-additional-value-assignability,
 base 5182245eda6305028e71dc8ad0a2500eb42e50a7. Production and spec unchanged.
 The relation and direct consumer files match the approved audit base770b99f93.

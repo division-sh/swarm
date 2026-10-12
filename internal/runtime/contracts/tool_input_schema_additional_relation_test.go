@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -104,17 +103,101 @@ func TestSchemaRelation2630MatchingUnionEqualityControl(t *testing.T) {
 	for _, constraint := range []string{"oneof_equality", "enum_oneof_equality"} {
 		t.Run(constraint, func(t *testing.T) {
 			schema := additionalRelationTarget(t, constraint)
+			copy := additionalRelationTarget(t, constraint)
 			if err := schema.Validate(map[string]any{"mode": "approved", "peer": "approved"}); err != nil {
 				t.Fatal(err)
 			}
 			property, _ := schema.Property("mode")
 			_, projectionErr := property.Project()
-			t.Logf("whole schema equal=%v; property equal=%v; standalone property projection=%v", schema.Equal(schema), property.Equal(property), projectionErr)
-			if err := schema.ValidateAssignableTo("matching", schema); err != nil {
-				t.Fatalf("identical admitted object refused: %v", err)
+			if projectionErr == nil || property.Equal(property) {
+				t.Fatal("public root projection/equality must retain standalone admission")
+			}
+			if !schema.Equal(copy) || schema.value == copy.value {
+				t.Fatal("control must use separately admitted identical schemas")
+			}
+			before := schema.Projection()
+			t.Run("same", func(t *testing.T) {
+				if err := schema.ValidateAssignableTo("matching", schema); err != nil {
+					t.Fatalf("identical admitted object refused: %v", err)
+				}
+			})
+			t.Run("separate_copy", func(t *testing.T) {
+				if err := schema.ValidateAssignableTo("matching", copy); err != nil {
+					t.Fatalf("separately admitted identical object refused: %v", err)
+				}
+			})
+			if !reflect.DeepEqual(before, schema.Projection()) || !schema.Equal(copy) {
+				t.Fatal("identity comparison changed admitted projections")
+			}
+			t.Run("nonidentical_parent", func(t *testing.T) {
+				source, err := schema.WithProperty("other", MustToolInputSchema(ToolSchemaString, ToolSchemaMinLength(2)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, err := copy.WithProperty("other", MustToolInputSchema(ToolSchemaString, ToolSchemaMinLength(1)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if source.Equal(target) {
+					t.Fatal("whole-object identity must not prove this case")
+				}
+				if err := source.ValidateAssignableTo("matching", target); err != nil {
+					t.Fatal(err)
+				}
+			})
+			t.Run("incompatible_peer", func(t *testing.T) {
+				target, err := copy.WithProperty("peer", MustToolInputSchema(ToolSchemaAny, ToolSchemaEnum("other")))
+				if err != nil {
+					t.Fatal(err)
+				}
+				value := map[string]any{"mode": "approved", "peer": "approved"}
+				if err := schema.Validate(value); err != nil {
+					t.Fatal(err)
+				}
+				if err := target.Validate(value); err == nil {
+					t.Fatal("target must refuse example at peer constraint")
+				}
+				want := "matching.peer target enum is narrower than an unbounded source"
+				if err := schema.ValidateAssignableTo("matching", target); err == nil || err.Error() != want {
+					t.Fatalf("peer proof error=%v, want %q", err, want)
+				}
+			})
+		})
+	}
+	for _, change := range []string{"enum", "equality", "union"} {
+		t.Run("changed_"+change, func(t *testing.T) {
+			mode := map[string]any{"type": "any", "oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer"}}, "x-swarm-equalTo": "peer"}
+			properties := map[string]any{"mode": mode, "peer": map[string]any{"type": "any"}}
+			source := additionalRelationTarget(t, "oneof_equality")
+			switch change {
+			case "enum":
+				source = additionalRelationTarget(t, "enum_oneof_equality")
+				mode["enum"] = []any{"other"}
+			case "equality":
+				mode["x-swarm-equalTo"] = "other"
+				properties["other"] = map[string]any{"type": "any"}
+			case "union":
+				mode["oneOf"] = []any{map[string]any{"type": "string"}, map[string]any{"type": "boolean"}}
+			}
+			target := mustAdmitToolSchemaMap(t, map[string]any{"type": "object", "properties": properties})
+			want := "different.mode oneOf schemas are not provably assignable unless identical"
+			if err := source.ValidateAssignableTo("different", target); err == nil || err.Error() != want {
+				t.Fatalf("nonidentical union error=%v, want %q", err, want)
 			}
 		})
 	}
+	t.Run("standalone", func(t *testing.T) {
+		if _, err := AdmitToolInputSchemaMap(map[string]any{"type": "any", "oneOf": []any{map[string]any{"type": "string"}}, "x-swarm-equalTo": "peer"}); err == nil {
+			t.Fatal("standalone equality root acquired definition admission")
+		}
+		property, _ := additionalRelationTarget(t, "oneof_equality").Property("mode")
+		if err := property.ValidateDefinition(); err == nil {
+			t.Fatal("standalone property unexpectedly validates as root")
+		}
+		if err := property.ValidateAssignableTo("standalone", property); err == nil {
+			t.Fatal("standalone root acquired object-property identity")
+		}
+	})
 }
 
 func TestSchemaRelation2630AdditionalControls(t *testing.T) {
@@ -190,13 +273,12 @@ func TestSchemaRelation2630AdditionalControls(t *testing.T) {
 
 func TestSchemaRelation2630AdditionalErrorOrder(t *testing.T) {
 	free := additionalRelationSource("omitted")
-	enumTarget := additionalRelationTarget(t, "enum")
 	for _, tc := range []struct {
 		name           string
 		source, target ToolInputSchema
 		want           string
 	}{
-		{"property_names", free, mustAdmitToolSchemaMap(t, map[string]any{"type": "object", "propertyNames": map[string]any{"type": "string", "enum": []any{"mode"}}, "properties": enumTarget.Projection()["properties"]}), "audit source admits unconstrained property names while target constrains them"},
+		{"property_names", free, mustAdmitToolSchemaMap(t, map[string]any{"type": "object", "propertyNames": map[string]any{"type": "string", "enum": []any{"mode"}}, "properties": map[string]any{"mode": map[string]any{"type": "any", "enum": []any{"approved"}}}}), "audit source admits unconstrained property names while target constrains them"},
 		{"required", free, MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{"mode": MustToolInputSchema(ToolSchemaAny, ToolSchemaEnum("approved"))}), ToolSchemaRequired("mode")), `audit target requires property "mode" that source does not require`},
 		{"declared", MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{"first": MustToolInputSchema(ToolSchemaInteger)})), MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{"first": MustToolInputSchema(ToolSchemaString), "mode": MustToolInputSchema(ToolSchemaAny, ToolSchemaEnum("approved"))})), "audit.first has incompatible types integer and string"},
 		{"non_any", free, MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{"mode": MustToolInputSchema(ToolSchemaString)})), `audit source admits unconstrained additional property "mode" while target constrains it`},
@@ -271,7 +353,7 @@ func TestSchemaRelation2630CompiledResultEntrances(t *testing.T) {
 					valid := map[string]any{"mode": "approved", "peer": "approved"}
 					result, err := compiled.Project(map[string]any{"payload": valid})
 					if err != nil || !reflect.DeepEqual(result, map[string]any{"projected": valid}) {
-						t.Fatal(fmt.Sprintf("valid projection=%v error=%v", result, err))
+						t.Fatalf("valid projection=%v error=%v", result, err)
 					}
 				})
 			}

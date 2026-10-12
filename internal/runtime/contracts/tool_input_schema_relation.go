@@ -14,16 +14,16 @@ func (source ToolInputSchema) ValidateAssignableTo(subject string, target ToolIn
 	if source.IsZero() || target.IsZero() {
 		return fmt.Errorf("%s has no source or target schema", subject)
 	}
-	return validateToolSchemaSubset(subject, source, target)
+	return validateToolSchemaSubset(subject, source, target, false)
 }
 
-func validateToolSchemaSubset(subject string, source, target ToolInputSchema) error {
+func validateToolSchemaSubset(subject string, source, target ToolInputSchema, declaredProperties bool) error {
 	_, sourceBranches := source.OneOfSchemas()
 	_, targetBranches := target.OneOfSchemas()
 	if sourceBranches || targetBranches {
 		// General exclusive-union implication is outside this finite proof owner.
 		_, targetEnum := target.EnumValues()
-		if source.Equal(target) || (target.Kind() == ToolSchemaAny && !targetBranches && !targetEnum && target.EqualTo() == "") {
+		if toolSchemaRelationEqual(source, target, declaredProperties) || (target.Kind() == ToolSchemaAny && !targetBranches && !targetEnum && target.EqualTo() == "") {
 			return nil
 		}
 		return fmt.Errorf("%s oneOf schemas are not provably assignable unless identical", subject)
@@ -68,7 +68,7 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 			if !sourceHasItems {
 				return fmt.Errorf("%s source array items are unconstrained while target items are constrained", subject)
 			}
-			if err := validateToolSchemaSubset(subject+"[]", sourceItems, targetItems); err != nil {
+			if err := validateToolSchemaSubset(subject+"[]", sourceItems, targetItems, false); err != nil {
 				return err
 			}
 		}
@@ -79,6 +79,24 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 		return fmt.Errorf("%s has unsupported schema type %q", subject, sourceType)
 	}
 	return nil
+}
+
+func toolSchemaRelationEqual(source, target ToolInputSchema, declaredProperties bool) bool {
+	if !declaredProperties {
+		return source.Equal(target)
+	}
+	// Sibling equality is valid on declared properties, not standalone roots.
+	for _, schema := range []ToolInputSchema{source, target} {
+		if err := validateAdmittedToolInputSchemaActive("$", schema, 0, true, map[*toolInputSchemaValue]struct{}{}); err != nil {
+			return false
+		}
+	}
+	left, err := canonicaljson.Hash(source.Projection())
+	if err != nil {
+		return false
+	}
+	right, err := canonicaljson.Hash(target.Projection())
+	return err == nil && left == right
 }
 
 func validateToolSchemaStringSubset(subject string, source, target ToolInputSchema) error {
@@ -178,7 +196,7 @@ func validateToolSchemaFloatBoundsSubset(subject string, sourceMin, sourceMax, t
 func validateToolSchemaObjectSubset(subject string, source, target ToolInputSchema) error {
 	if targetNames, constrained := target.PropertyNamesSchema(); constrained {
 		if sourceNames, sourceConstrained := source.PropertyNamesSchema(); sourceConstrained {
-			if err := validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames); err != nil {
+			if err := validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames, false); err != nil {
 				return err
 			}
 		} else {
@@ -205,7 +223,7 @@ func validateToolSchemaObjectSubset(subject string, source, target ToolInputSche
 	for _, name := range source.PropertyNames() {
 		sourceProperty, _ := source.Property(name)
 		if targetProperty, ok := target.Property(name); ok {
-			if err := validateToolSchemaSubset(subject+"."+name, sourceProperty, targetProperty); err != nil {
+			if err := validateToolSchemaSubset(subject+"."+name, sourceProperty, targetProperty, true); err != nil {
 				return err
 			}
 			continue
@@ -214,7 +232,7 @@ func validateToolSchemaObjectSubset(subject string, source, target ToolInputSche
 			return fmt.Errorf("%s source property %q is forbidden by target", subject, name)
 		}
 		if targetAdditional.schema != nil {
-			if err := validateToolSchemaSubset(subject+"."+name, sourceProperty, *targetAdditional.schema); err != nil {
+			if err := validateToolSchemaSubset(subject+"."+name, sourceProperty, *targetAdditional.schema, false); err != nil {
 				return err
 			}
 		}
@@ -226,13 +244,15 @@ func validateToolSchemaObjectSubset(subject string, source, target ToolInputSche
 				continue
 			}
 			targetProperty, _ := target.Property(name)
-			if sourceAdditional.schema == nil {
+			sourceProperty := sourceAdditional.schema
+			if sourceProperty == nil {
 				if targetProperty.Kind() != ToolSchemaAny {
 					return fmt.Errorf("%s source admits unconstrained additional property %q while target constrains it", subject, name)
 				}
-				continue
+				unrestricted := MustToolInputSchema(ToolSchemaAny)
+				sourceProperty = &unrestricted
 			}
-			if err := validateToolSchemaSubset(subject+"."+name, *sourceAdditional.schema, targetProperty); err != nil {
+			if err := validateToolSchemaSubset(subject+"."+name, *sourceProperty, targetProperty, false); err != nil {
 				return err
 			}
 		}
@@ -249,7 +269,7 @@ func validateToolSchemaObjectSubset(subject string, source, target ToolInputSche
 	if sourceAdditional.schema == nil {
 		return fmt.Errorf("%s source admits unconstrained additional properties while target constrains them", subject)
 	}
-	return validateToolSchemaSubset(subject+".*", *sourceAdditional.schema, *targetAdditional.schema)
+	return validateToolSchemaSubset(subject+".*", *sourceAdditional.schema, *targetAdditional.schema, false)
 }
 
 type admittedToolSchemaAdditionalPropertyConstraint struct {
