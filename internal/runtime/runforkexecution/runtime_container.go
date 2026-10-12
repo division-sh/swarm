@@ -335,15 +335,9 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	if err != nil {
 		return err
 	}
-	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
-		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
-	)
+	receiverExecution, err := c.prepareReceiverExecution(controller, sourceEvents)
 	if err != nil {
-		return fmt.Errorf("construct selected-contract receiver execution: %w", err)
-	}
-	receiverExecution, err = receiverExecution.WithSelectedActivityPublications(selectedActivityPublications(sourceEvents))
-	if err != nil {
-		return fmt.Errorf("retain selected activity accounting in receiver execution: %w", err)
+		return err
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, workflowProjection, c.proof.ExecutionOwner)
@@ -461,6 +455,20 @@ func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx conte
 	}
 	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, req, bus, pipeline, c.diagnostics)
 	return bound, runtime, admission, err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) prepareReceiverExecution(controller *runtimeeffects.Controller, sources []runfork.RunForkSelectedContractSourceEvent) (eventreceiver.ExecutionVariant, error) {
+	receiver, err := eventreceiver.SelectedContractForkExecution(
+		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
+	)
+	if err != nil {
+		return eventreceiver.ExecutionVariant{}, fmt.Errorf("construct selected-contract receiver execution: %w", err)
+	}
+	receiver, err = receiver.WithSelectedActivityPublications(selectedActivityPublications(sources))
+	if err != nil {
+		return eventreceiver.ExecutionVariant{}, fmt.Errorf("retain selected activity accounting in receiver execution: %w", err)
+	}
+	return receiver, nil
 }
 
 func selectedActivityPublications(sources []runfork.RunForkSelectedContractSourceEvent) []activityresult.PublishedContinuation {
