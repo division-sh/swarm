@@ -184,16 +184,6 @@ func (p JoinContinuation) SourceEventID() string {
 	return p.original.ID()
 }
 
-func (p JoinContinuation) SourcePayload() ([]byte, error) {
-	if !p.Present() {
-		return nil, fmt.Errorf("join continuation is absent")
-	}
-	if p.Published() {
-		return p.original.Payload(), nil
-	}
-	return occurrencePublicationPayload(p.source)
-}
-
 func (p JoinContinuation) SourceEvent() events.Event {
 	if !p.Published() {
 		return events.Event{}

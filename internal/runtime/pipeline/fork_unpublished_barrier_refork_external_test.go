@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -43,7 +44,6 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			probe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
 			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, probe)
-			baseline := rt.Options.ProcessWorkOwner.ActiveCount()
 			var release sync.Once
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -201,8 +201,22 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			if err := family.RetireSelectedContexts(cleanup); err != nil {
 				t.Fatal(err)
 			}
-			if rt.Options.ProcessWorkOwner.ActiveCount() != baseline {
-				t.Fatalf("pending barrier retained process work: got%d want%d", rt.Options.ProcessWorkOwner.ActiveCount(), baseline)
+			deadline, _ := cleanup.Deadline()
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				t.Fatal("selected retirement exhausted the original cleanup bound")
+			}
+			if err := rt.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: remaining}); err != nil {
+				t.Fatal(err)
+			}
+			process := rt.Options.ProcessWorkOwner
+			process.Retire()
+			joined, err := process.Join(cleanup)
+			if err != nil {
+				t.Fatalf("pending barrier process retirement did not join: %v", err)
+			}
+			if err := process.ValidateJoinReceipt(joined); err != nil || process.ActiveCount() != 0 {
+				t.Fatalf("pending barrier retained process work after exact joined retirement: got%d error=%v", process.ActiveCount(), err)
 			}
 		})
 	}
