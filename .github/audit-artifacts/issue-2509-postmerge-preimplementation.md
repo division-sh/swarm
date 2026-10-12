@@ -154,7 +154,7 @@ Every row has one disposition; no same-class bypass is asserted away.
 | runtime/registration/provider_http.go, tools/executor_http.go/executor.go | Already consumes S/execution tool contracts; input/output validation before success retained. | Executor_HTTPToolRejectsProviderOutputOutsideAdmittedSchema and ActivityHTTPRejectsProviderOutputOutsideAdmittedSchemaWithoutCompiledResult; Q03. |
 | contracts/tool_input_schema_relation.go and packs/channel_relation.go | Different concept, with proof: directional schema containment/cardinality, not instance acceptance. | PropertyNamesAdmissionProjectionAndValidation relation arms, ToolSchemaRelationHandlesAnyAndEqualityWithoutDrift, recursive directional/cardinality channel gaps. |
 | runtime/eventschema/{registry,validate,inhabit}.go; tools/{validator,emit}.go; llm/mock_runtime.go; scenarioderivation/plan.go | Different projected acceptance/inhabitation concept, with proof: consumes admitted projections, preserves structured violation and per-context ordering. | exact enum/pattern/additional-schema acceptance, role-scoped RuntimeRejectsExtras, Q03 valid/invalid call and mapped output. |
-| llm/provider_tool_schema.go; compatible/Responses request builders, mock_runtime/fork_chat_transport, tools/emit_runtime.go | Different delivered-representation concept, with proof: JSON-map provider subset/syntax, not another typed immutable constructor. | four ValidateProviderToolSchema roots, mock/runtime catalog controls and Q03 delivered generated schema. No removal or shared validator rewrite. |
+| llm/provider_tool_schema.go; compatible/Responses request assembly, mock_runtime/fork_chat_transport, tools/emit_runtime.go | Different delivered-representation concept, with proof: JSON-map provider subset/syntax, not another typed immutable constructor. | four ValidateProviderToolSchema roots, mock/runtime catalog controls and Q03 delivered generated schema. No removal or shared validator rewrite. |
 | tools/generated_schema_closure.go; role_scoped_entity_tools.go; bootverify/runtime_tool_surface_checks.go | Different generated closed-schema law, with proof: additionalProperties and required/branch preservation at boot and runtime. | GeneratedToolSchemaClosureRejectsUndeclaredRequiredAndInvalidEnums, MapsGeneratedToolSchemaClosureToBootCheck, LoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType, RuntimeRejectsExtras, Q03. |
 
 S lifecycle: definition entry installs active-map membership then defers its
@@ -493,3 +493,41 @@ binding; any final selection change requires a delta rule.
 
 Watchlist2682f94 records the stop; link6116517210 at the next refinement. Parents
 2447/2407/2250 remain OPEN. Stop again for any further semantic gap.
+
+## Implementation Checkpoint
+
+Characterization commitsfcec5fd9e/4b1cda892 precede extraction. D01 repair49abcf245
+retains typed subjects, inventory and findings together, carries original
+configuration/environment diagnostics once, and propagates inventory/admission
+errors through the existing platform_pack_load_failed blocker. Compiled D01
+JSON/text/hostile/invalid/prerequisite/schema controls and Q02/CA both stores
+PASS on49; deleting final readback in a disposable49 candidate makes both
+public D01 tree controls FAIL. The original red3/3 is retained.
+
+Private extraction3fa38fe28 follows corrected-source SD/SV/SP/CS/TS race3 PASS.
+Existing tests are unchanged. All schema graph membership/deletion stays in
+validateAdmittedToolInputSchemaActive across every recursive/enum/error phase.
+Map traversal is not sorted. oneOf/enum/type and key/value/equality ordering,
+error strings/wrapping, cloning, status contradictions, exact alias/flow
+authority and frozen credential inputs remain with the original owners.
+
+Targets cyclo76/62/50/69 become19/11/9/10; cognitive107/121/74/103 becomes
+23/7/6/9. Independent basecc369e5eb5->3fa ratchet PASS: cyclo>=30 259->255,
+>=50 59->55; cognitive>=30 557->553,>=50 196->192.29 added private callables,
+all changed/new production functions below25 (maximum22). No policy change.
+Production gross currently863 lines including D01, below3000; measure final.
+
+Public fixture/oracle correction777c2a3b0 removes test-owned implementation
+imports from release proof without weakening the public-process guard. Its
+agent-free fixture materializes the same standing declarations as the original
+canonical source. doctor-installed.golden is captured through compiled public
+doctor at pre-extraction49abcf245, not constructed by an in-process validator
+or renderer. Final public proof compares exact subject JSON, pack provenance
+and text findings against that frozen oracle. Boundary guard PASS; public
+compiled matrix PASS39.505s before the final frozen rerun.
+
+Retain the intermediate failed boundary/retirement wording receipts. The one
+retirement-text hit described provider request assembly, not the retired
+product transport; this audit now names it accurately. No scanner exception,
+code rename or hiding of a live path is used. Final owner census, planned-root
+uniqueness, focused/public receipts and hosted lifecycle still govern readiness.
