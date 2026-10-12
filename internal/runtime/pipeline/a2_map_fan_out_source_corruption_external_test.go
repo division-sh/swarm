@@ -91,13 +91,10 @@ func (f *a2CorruptMapSource) writeRaw(raw []byte) error {
 	// Only hostile setup/restoration changes this real, handler-written revision.
 	// Intent identity, capsule, cardinality, outcomes and live entity state stay untouched.
 	source := f.intent.Source
-	result, err := f.p.selected.db.ExecContext(f.p.ctx, `UPDATE entity_mutations SET new_value=$1
-		WHERE mutation_id=$2 AND run_id=$3 AND entity_id=$4 AND domain='authored_field' AND path=$5`,
-		string(raw), source.MutationID, source.RunID, source.EntityID, source.Field)
+	count, err := storetest.SetPinnedAuthoredMutationWire(f.p.ctx, f.p.selected.events, source, raw)
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
 	if err != nil || count != 1 {
 		return fmt.Errorf("retained business-source setup affected %d rows: %v", count, err)
 	}

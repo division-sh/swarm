@@ -8180,6 +8180,13 @@
   },
   {
     "Family": "native-postgres-admission-family145",
+    "File": "internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go",
+    "Function": "writeRaw",
+    "Before": "func (f *a2CorruptMapSource) writeRaw(raw []byte) error {\n\tsource := f.intent.Source\n\tresult, err := f.p.selected.db.ExecContext(f.p.ctx, `UPDATE entity_mutations SET new_value=$1\n\t\tWHERE mutation_id=$2 AND run_id=$3 AND entity_id=$4 AND domain='authored_field' AND path=$5`, string(raw), source.MutationID, source.RunID, source.EntityID, source.Field)\n\tif err != nil {\n\t\treturn err\n\t}\n\tcount, err := result.RowsAffected()\n\tif err != nil || count != 1 {\n\t\treturn fmt.Errorf(\"retained business-source setup affected %d rows: %v\", count, err)\n\t}\n\treturn nil\n}",
+    "After": "func (f *a2CorruptMapSource) writeRaw(raw []byte) error {\n\tsource := f.intent.Source\n\tcount, err := storetest.SetPinnedAuthoredMutationWire(f.p.ctx, f.p.selected.events, source, raw)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif err != nil || count != 1 {\n\t\treturn fmt.Errorf(\"retained business-source setup affected %d rows: %v\", count, err)\n\t}\n\treturn nil\n}"
+  },
+  {
+    "Family": "native-postgres-admission-family145",
     "File": "internal/runtime/pipeline/a2_multi_until_binding_external_test.go",
     "Function": "a2MultiUntilChildren",
     "Before": "func a2MultiUntilChildren(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, parentID, name string, want int) []events.Event {\n\tt.Helper()\n\trows, err := selected.db.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events\n\t\tWHERE source_event_id=$1 AND (event_name=$2 OR event_name LIKE $3) ORDER BY event_id`, parentID, name, \"%/\"+name)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer rows.Close()\n\tvar ids []string\n\tfor rows.Next() {\n\t\tvar id string\n\t\tif err := rows.Scan(\u0026id); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\tids = append(ids, id)\n\t}\n\tif err := rows.Err(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif err := rows.Close(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif len(ids) != want {\n\t\tt.Fatalf(\"real parent %s produced %d %s children, want %d\", parentID, len(ids), name, want)\n\t}\n\tvar children []events.Event\n\tfor _, id := range ids {\n\t\tprepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, id)\n\t\tif err != nil || !found || prepared.Event.Event().ParentEventID() != parentID {\n\t\t\tt.Fatalf(\"real child publication %s: found=%v err=%v\", id, found, err)\n\t\t}\n\t\tchildren = append(children, prepared.Event.Event())\n\t}\n\treturn children\n}",

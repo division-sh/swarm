@@ -41,6 +41,10 @@ func ReadPinnedAuthoredMutationStorage(ctx context.Context, selected any, source
 	return private.ReadPinnedAuthoredMutationStorageForTest(ctx, selected, source)
 }
 
+func SetPinnedAuthoredMutationWire(ctx context.Context, selected any, source fanoutobligation.SourceRef, raw []byte) (int64, error) {
+	return private.SetPinnedAuthoredMutationWireForTest(ctx, selected, source, raw)
+}
+
 type FanOutPublishedOutcomeStorageEvidence = private.FanOutPublishedOutcomeStorageEvidence
 type FanOutRunProgressStorageEvidence = private.FanOutRunProgressStorageEvidence
 type FanOutTriggeredIntentStorageEvidence = private.FanOutTriggeredIntentStorageEvidence

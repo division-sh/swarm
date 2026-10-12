@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "ad80f49755c03fd87708f2b6209c3aeb26f6659104b8c99b41b73f77e29dcd18"
+const targetDigest = "b8c0594789187be1c785ccf3dec316ac3c9653defcb605f4d99e2bd175cf37ec"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -249,7 +249,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true, "runA2MapFanOutCompiledImmutableSource": true, "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores": true},
-	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true},
+	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true, "writeRaw/*a2CorruptMapSource": true},
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
 	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go":                         {"a2MultiUntilChildren": true},
 	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},

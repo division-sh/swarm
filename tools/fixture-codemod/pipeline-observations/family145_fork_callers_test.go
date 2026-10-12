@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 451 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ad80f49755c03fd87708f2b6209c3aeb26f6659104b8c99b41b73f77e29dcd18" {
+	if err != nil || len(rows) != 452 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b8c0594789187be1c785ccf3dec316ac3c9653defcb605f4d99e2bd175cf37ec" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -129,6 +129,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if row.Function == "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores" {
 			if err := family145FanOutMetadataProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go" && row.Function == "writeRaw" {
+			if problem := family145PinnedWireFaultProofError(row.After); problem != "" {
+				t.Fatal(problem)
 			}
 			continue
 		}

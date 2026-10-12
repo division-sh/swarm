@@ -4793,3 +4793,43 @@ Compound footprints and source faults remain live; no whole carrier/parent
 closure or existing qualification-hold waiver is claimed. Local only; no push,
 PR, tier or server2. Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/canonical-claim-*.
+
+## Shared Gate/A2 Dependency: Entire Retained Authored-Source Wire Fault Helper
+
+The shared a2CorruptMapSource.writeRaw helper and all indirect reader/pump/
+restoration consumers now use one named pinned authored-field wire fault. The
+existing SourceRef semantic validation and exact canonical UUID checks are shared
+unchanged with the physical reader. The mutation-log owner preserves the original
+UPDATE, mutation/run/entity/domain/path predicate, raw text payload and exactly-
+one-existing-row check. The original selected projection-fault coordinator owns
+admission, commit and rollback; no new source producer, revision, inferred claim,
+generic table/query/callback or detached coordinator is introduced. Fixed writer
+census names this precise operation. Shared fixture restoration remains registered
+before consumers receive the genuine compiled intent/source; source/metadata/
+footprint readers are distinct live dependencies, not claimed closed here.
+
+Original full reader/pump roots plus new actual compiled-source fault proof PASS
+both stores under race40.627s. This preserves malformed, null, shape/type, duplicate
+and escaped-key cases, actual typed pump refusal, exact fact/history progression,
+no application progress and restoration. PostgreSQL JSONB still rejects malformed
+bytes at storage and erases duplicate raw evidence; these paths get no reader-
+refusal credit. Native proof has immediate deferred restoration before exact claim
+release, two native writes and two separate reads, byte-identical restoration,
+foreign run/entity/mutation/field and cancellation refusal with no receipt, and
+complete source/state/intent/history/lease/clock snapshot equality. Private raw/
+invalid/closed controls plus all unchanged physical-reader/NULL/unavailable-source
+cases PASS19.295s under race. All six boundaries PASS3.395s; U1000 clean.
+
+Finite proof pins the sole helper's captured source, exact original context and
+payload, error/cardinality return and historical UPDATE/argument order. Hostile
+lost bindings reject. Existing reader guard now pins the extracted unchanged
+shared validator and native read cut; relevant finite/current/historical collection
+PASS6.981s. Corpus1238/452, digest
+b8c0594789187be1c785ccf3dec316ac3c9653defcb605f4d99e2bd175cf37ec;
+all immutable and current historical receipts remain unchanged in this group.
+
+Downward census PASS147.430s:8308 ->8305 findings,5923 ->5921 raw sites,
+three removals/zero additions; uncertainty67 and supplied-pool calls61 unchanged.
+Existing parent/carrier and M07/D3/Docker/M01/drain obligations remain live and
+unwaived. Local only, no push/PR/tier/server2. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/pinned-wire-*.

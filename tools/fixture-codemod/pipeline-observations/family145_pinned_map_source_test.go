@@ -85,13 +85,19 @@ func TestFamily145PinnedMapSourceReadersReuseExactOwnerAndRetainEveryAssertion(t
 	if queries := family145A2ClaimLiteralQueries(t, owner); len(queries) != 1 || queries[0] != "SELECT CAST(new_value AS TEXT) FROM entity_mutations WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4" {
 		t.Fatalf("existing source owner changed exact original physical row membership: %v", queries)
 	}
-	for _, cut := range []string{"source.Validate(true)", "source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&value)", "owner.backend.RunReadTransaction(ctx, read)"} {
+	for _, cut := range []string{"validatePinnedAuthoredMutationSourceForTest(source)", "source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&value)", "owner.backend.RunReadTransaction(ctx, read)"} {
 		want := 1
 		if cut == "owner.backend.RunReadTransaction(ctx, read)" {
 			want = 2
 		}
 		if strings.Count(owner, cut) != want {
 			t.Fatalf("existing pinned-source owner lost validation, native byte destination or original coordinator: %s", cut)
+		}
+	}
+	validation := family145ConversationForkOwnerSource(t, "internal/runtimepersistence/test_pinned_mutation_observation.go", "validatePinnedAuthoredMutationSourceForTest")
+	for _, cut := range []string{"source.Kind != fanoutobligation.SourceEntityField", "source.Validate(true)", "source.RunID, source.EntityID, source.MutationID", "uuid.Parse(raw)", "id == uuid.Nil || id.String() != raw"} {
+		if strings.Count(validation, cut) != 1 {
+			t.Fatalf("shared pinned-source validation lost original source/canonical identity rule: %s", cut)
 		}
 	}
 }
