@@ -24092,9 +24092,10 @@ test_specification:
         Original PR proof stays in place until a complete healthy master-nightly and the strict merge-time nightly marker are live.
         Master nightly proof qualifies the existing ci.yml scheduled or deliberately manually dispatched full owner on master and its same-run tier/summary;
         establishing this nightly marker does not create a second dispatcher or remove original PR proof obligations.
-        Strict nightly admission uses the newest completed ci.yml run on master from schedule or workflow_dispatch and requires its same-run
+        Strict nightly admission uses the newest completed non-cancelled ci.yml run on master from schedule or workflow_dispatch and requires its same-run
         Master nightly proof job and complete underlying full receipts to succeed, strictly less than 30 hours from creation.
-        A newer pending run may coexist with a fresh completed green; a newer completed red, cancelled or partial run blocks immediately.
+        A newer pending run may coexist with a fresh completed green; whole cancelled runs are excluded from selection.
+        A newer completed non-cancelled red or partial run blocks immediately; cancelled partner jobs cannot qualify the selected run.
         Missing, foreign, incomplete, stale, future or API-error evidence refuses. A manual recovery clears red only with complete full master-nightly proof.
         Local --tier/--full requires unchanged HEAD and clean tracked/untracked non-ignored source before planning and after execution, retaining actual HEAD and plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution permits dirty developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
@@ -24109,7 +24110,7 @@ test_specification:
         Missing, unknown, cancelled, failed or unexpected results refuse qualification. Darwin retains its
         authorized30-minute envelope, Linux19 and union15; native commands, variants and current-attempt artifacts
         are unchanged. Failed cadence prevents a successful Master nightly proof; branch dispatch never grants
-        that master-only marker. The existing strict newest-completed master-nightly merge contract remains;
+        that master-only marker. The existing strict newest-completed non-cancelled master-nightly merge contract remains;
         deployed gate/refusal attestation is required under #2535 before #2640's cutover, not inferred from YAML.
         Orchestrator/CI-health triage routes U1000 to a small code-owner cleanup PR and analysis/runner failures to
         #2535/#2353, retaining failed evidence. No other job family moves without a maintainer ruling.
