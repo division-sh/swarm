@@ -12008,6 +12008,7 @@ tool_model:
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
       - prove identity of independently admitted identical schemas in their admitted context, including declared oneOf properties with sibling equality; continue proving other enclosing members recursively and reject standalone equality-bearing roots
+      - reject detached equality-bearing target fields when their enclosing sibling relation is not carried and proved; matching x-swarm-equalTo markers alone do not prove a mapped output peer, even for non-union any or primitive properties
       - prove unrestricted omitted or true additional source values against the complete target property schema; kind any does not remove admitted enum, oneOf or sibling-equality constraints
       - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
       - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported

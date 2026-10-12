@@ -30,8 +30,8 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 	}
 	sourceType := string(source.Kind())
 	targetType := string(target.Kind())
-	if target.EqualTo() != "" && source.EqualTo() != target.EqualTo() {
-		return fmt.Errorf("%s source equality target %q is not provably assignable to target equality %q", subject, source.EqualTo(), target.EqualTo())
+	if err := validateToolSchemaEqualitySubset(subject, source, target, declaredProperties); err != nil {
+		return err
 	}
 
 	finite, err := validateFiniteToolSchemaSourceEnum(subject, source, target)
@@ -77,6 +77,19 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 	case "boolean", "null":
 	default:
 		return fmt.Errorf("%s has unsupported schema type %q", subject, sourceType)
+	}
+	return nil
+}
+
+func validateToolSchemaEqualitySubset(subject string, source, target ToolInputSchema, declaredProperties bool) error {
+	if target.EqualTo() == "" {
+		return nil
+	}
+	if source.EqualTo() != target.EqualTo() {
+		return fmt.Errorf("%s source equality target %q is not provably assignable to target equality %q", subject, source.EqualTo(), target.EqualTo())
+	}
+	if !declaredProperties {
+		return fmt.Errorf("%s target equality %q requires its enclosing object relation", subject, target.EqualTo())
 	}
 	return nil
 }
