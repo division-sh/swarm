@@ -82,6 +82,19 @@ func TestServingProbeStaysAliveWithoutExecutionBeforeAdmission(t *testing.T) {
 	if err := refused.Install(ctx, live.Handler); !errors.Is(err, context.Canceled) || refused.handler.live.Load() != nil {
 		t.Fatal("cancellation published a late runtime handler")
 	}
+	addr := probe.listener.Addr().String()
+	shutdown, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := probe.Close(shutdown); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := cliapp.ListenServeHTTPListener("api", addr)
+	if err != nil {
+		t.Fatalf("joined probe retained its API socket: %v", err)
+	}
+	if err := reclaimed.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
@@ -113,7 +126,15 @@ func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
 			defer cancel()
 			bound := make(chan net.Addr, 1)
 			var output bytes.Buffer
-			opts := cliapp.ServeOptions{APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: time.Second,
+			reservation, err := cliapp.ListenServeHTTPListener("api", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			apiAddr := reservation.Addr().String()
+			if err := reservation.Close(); err != nil {
+				t.Fatal(err)
+			}
+			opts := cliapp.ServeOptions{APIListenAddr: apiAddr, MCPListenAddr: "127.0.0.1:0", ShutdownGrace: time.Second,
 				Output: &output, TestAPIListenerBound: func(addr net.Addr) { bound <- addr }}
 			presenter := newServeLifecyclePresenter(opts)
 			defer presenter.finish()
@@ -128,6 +149,13 @@ func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
 			case addr = <-bound:
 			case <-time.After(3 * time.Second):
 				t.Fatal("serving lease wait prevented early probe publication")
+			}
+			if addr.String() != apiAddr {
+				t.Fatalf("standby changed its fixed binding: %s, want %s", addr, apiAddr)
+			}
+			if other, err := cliapp.ListenServeHTTPListener("api", apiAddr); err == nil {
+				_ = other.Close()
+				t.Fatal("standby released its fixed API socket while waiting for possession")
 			}
 			client := &http.Client{Timeout: time.Second}
 			for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable, "/v1/rpc": http.StatusServiceUnavailable} {
@@ -159,6 +187,13 @@ func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
 			}
 			if projections.Load() != 0 {
 				t.Fatal("cancellation published a late executable projection")
+			}
+			reclaimed, err := cliapp.ListenServeHTTPListener("api", addr.String())
+			if err != nil {
+				t.Fatalf("cancelled standby returned before closing its probe: %v", err)
+			}
+			if err := reclaimed.Close(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
