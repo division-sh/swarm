@@ -232,7 +232,8 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 	held := &nestedReplyWorkerProbe{nodeID: node.Key(), started: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{})}
 	defer held.resume()
 	h.rt.Pipeline.SetTestLifecycleProbe(held)
-	defer h.rt.Pipeline.SetTestLifecycleProbe(nil)
+	// Keep the probe immutable for the runtime lifetime, including failed waits.
+	// Releasing it does not race with an in-flight handler's completion callback.
 	published := make(chan error, 1)
 	go func() { published <- h.publishRuntimeEventResultForStep(step, 20*time.Second, false) }()
 	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
