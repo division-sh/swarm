@@ -8,6 +8,20 @@ NOT stop conditions. Exact behavior/shared helpers/tests/owner proof,
 characterization-before-extraction, all changed/new callables<25 and the
 independent complexity ratchet remain binding. No vendoring is authorized.
 Source: merged master `ab1f10dac2db203eae9d77382a8962f540081c8c`, Go1.26.8.
+Integration amendment: reviewer cycle1 requires rebasing onto #2624's merged
+master `0bfc09a2fad8a19d8da24103ac0cb3e3fcd4cd2c`. The original source and
+characterization below are historical, not integrated-head qualification.
+#2624 changes process-generation admission/lifetime, not the authored event
+grammar or its direct source-artifact entrance. Its seven runtime-purpose
+process-generation proof IDs and retired maintenance-purpose removal remain
+intact alongside both event-catalog proof IDs. No consumer, selected-store,
+process-lifetime or shared-helper implementation is changed by this integration.
+The source-file sweep finds no additional product event parser. Public Q02/Q03
+and native Q04 must execute afresh against the integrated process owners;
+refresh the parity/planner census, complete structural unit, touched-package
+guards/debt ratchet and independent complexity before pushing. No local whole
+tier is authorized. Current clause paths remain binding; declaration identity
+and compiled projection now appear at L14146/L14156, respectively.
 Read IMPLEMENTER_GUIDELINES.md and SEMANTIC_DRIFT.md; re-read the issue's
 current/historical scope and binding first-slice conditions. No production,
 test, spec, plan, registry, baseline or workflow change in this checkpoint.
@@ -290,7 +304,7 @@ full-unit alias with hosted placement. Reviewer owns the actual tier decision.
 
 ## Overlap, Watchlist And Closure Feasibility
 
-Open PR file census on2026-10-12: #2624 at9ba0631f2, #2617 at0f039defa,
+Historical pre-coding open PR file census on2026-10-12: #2624 at9ba0631f2, #2617 at0f039defa,
 #2616 at7933779be, #2614 at5cd44ae0e, #2607, #2372 and #2325. NONE edits
 event_catalog_admission.go, event_catalog_admission_test.go, the planned new
 event-factoring files, platform_event_value.go or schema_registry.go. No target
@@ -300,6 +314,11 @@ are integration proof risks, NOT authority to edit those files. Shared spec/plan
 may move on master; no spec/plan change is intended here. Recheck all actual
 merged deltas before qualification and amend if a chosen-class interpreter or
 behavior changes. Do not polish runtime/fork/rebuild-zone hotspots here.
+Cycle1 refresh: #2624 has MERGED at0bfc09a2f and is consumed, including all its
+process-generation proof catalog changes. #2616 at7933779be and #2617 at0f039defa
+remain open with shared parity metadata, no production/new-test overlap. #2637
+at7624a5622 has no target overlap. The two event proof entries remain distinct
+from constructor/process ownership, and both are referenced by runtime purpose.
 
 Watchlist-backed promotion: boundary_owned_decomposition already tracks broad
 oversized-owner maintenance, plus invariant_suite_coverage for mechanical proof.

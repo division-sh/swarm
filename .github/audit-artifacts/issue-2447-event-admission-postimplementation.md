@@ -225,13 +225,20 @@ These are separate authorities or already canonical shared helpers, not another
 live authored parser. Remaining parent tail: schema projection, tool-entry,
 catalog/type admission and provider continuations/Responses SSE; grouping
 confidence medium, effort/PR-count low. This extraction introduces no new tail.
-Open #2614/#2616/#2617/#2624 have not landed into this base; final source/consumer
-file census must be rechecked before push/integration. No target overlap found.
-Pre-push refresh: no PRODUCTION owner/new-test overlap, including newly open
-#2637. The added qualification catalog shares a file with #2624/#2616/#2617;
-our two event-catalog IDs and runtime-purpose references are a separate metadata
-contribution, not constructor/route ownership. Coordination is posted to those
-PRs; integrate any landed catalog rows without replacing their evidence.
+Cycle1 integration refresh: #2624 has MERGED at0bfc09a2f and is consumed by
+the single signed rebase. The only text conflict was the runtime-purpose proof
+ID list: preserve all seven process-generation IDs plus both event-catalog IDs.
+All #2624 catalog entries, startup capability evidence/table changes and retired
+authority-maintenance removal match master; no proof is replaced or resurrected.
+Authored admission, characterization, native retained and public proof file bytes
+match reviewed8aa9592e0 exactly. The production source entrance still calls
+loadOptionalEventCatalogFromSource once. Process-generation publication/join is
+a distinct surrounding authority; public Q02/Q03 and native Q04 require fresh
+integrated execution rather than receipt carry. #2614/#2616/#2617 remain open;
+#2616 at7933779be and #2617 at0f039defa share only parity metadata. Refreshed
+#2637 at7624a5622 has no production/new-test overlap. Prior source coordinates
+and receipt table above remain historical; integrated receipts are added below
+only after actual execution. No whole local tier or hosted pass is inferred.
 
 Model feedback: mutable admission intermediates are distinct from retained
 compiled acceptance authority; opaque construction remains open #2349. Tracking
