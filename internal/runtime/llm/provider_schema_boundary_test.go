@@ -177,11 +177,23 @@ func TestProviderSchemaWorkspaceObservation(t *testing.T) {
 		t.Run(providerSchemaJSON(t, schema), func(t *testing.T) {
 			tool := ToolDefinition{Name: "bad", Schema: schema}
 			raw, _ := json.Marshal(schema)
-			err := compareWorkspaceMCPDefinitions(map[string]string{tool.Name: ToolDefinitionIdentity(tool)}, []toolgateway.ListedDefinition{{Name: tool.Name, InputSchema: raw}})
-			failure, ok := failures.EnvelopeFromError(err)
-			cause := errors.Unwrap(err)
-			if !ok || failure.Detail.Code != "managed_capability_mcp_definition_mismatch" || failure.Detail.Attributes["reason"] != "invalid_input_schema" || cause == nil || cause.Error() != ValidateProviderToolSchema(tool.Name, schema).Error() {
-				t.Fatalf("matching invalid schema confirmed or lost cause: %v", err)
+			definitions := []toolgateway.ListedDefinition{{Name: tool.Name, InputSchema: raw}}
+			_, surface := testManagedCLISurfaceContext(t, runtimeactors.AgentConfig{ID: "schema-callers"}, []ToolDefinition{tool})
+			for _, caller := range []struct {
+				name string
+				err  error
+			}{
+				{"comparison", compareWorkspaceMCPDefinitions(map[string]string{tool.Name: ToolDefinitionIdentity(tool)}, definitions)},
+				{"managed_startup_activation_turn", validatePlannedWorkspaceMCPDefinitions(surface, definitions)},
+				{"fork_chat", validateWorkspaceMCPDefinitions([]ToolDefinition{tool}, definitions)},
+			} {
+				t.Run(caller.name, func(t *testing.T) {
+					failure, ok := failures.EnvelopeFromError(caller.err)
+					cause := errors.Unwrap(caller.err)
+					if !ok || failure.Detail.Code != "managed_capability_mcp_definition_mismatch" || failure.Detail.Attributes["reason"] != "invalid_input_schema" || cause == nil || cause.Error() != ValidateProviderToolSchema(tool.Name, schema).Error() {
+						t.Fatalf("matching invalid schema confirmed or lost cause: %v", caller.err)
+					}
+				})
 			}
 		})
 	}

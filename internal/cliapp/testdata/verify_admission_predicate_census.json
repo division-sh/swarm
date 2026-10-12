@@ -1041,7 +1041,7 @@
     "owner": "internal/runtime/llm/workspace_mcp_admission.go::compareWorkspaceMCPDefinitions",
     "audit_rows": "A11,A18,A25",
     "proof_families": "P09,P15,P21",
-    "body_sha256": "3911b7f4fc86d1b56019c7a47b753b78de24a7cae9d1aabb2950f24687972535"
+    "body_sha256": "599d7c38df67ca518c31b88d56c165da09a1dbc465ee31a702b0baa987897e8e"
   },
   {
     "owner": "internal/runtime/llm/workspace_mcp_admission.go::probeWorkspaceMCP",

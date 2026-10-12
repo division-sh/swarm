@@ -9,6 +9,41 @@ provider call outside local simulators, external message or vendor change.
 
 ## Binding Context And Class
 
+### Cycle-1 Binding Amendment: Recognized Wire Syntax
+
+[Independent amendment6119665740](https://github.com/division-sh/swarm/issues/2627#issuecomment-6119665740)
+supersedes the assumption that wiring the previous canonical helper is sufficient.
+Before the owner repair, the accepted class is widened to truthful admission of
+the existing recognized wire subset at all named boundaries, including Anthropic's
+object-root projection. The previous A05 padded-type/null examples were invalid,
+not valid-byte preservation. The 32 original rows remain; add these five distinct
+rows and correct A05 before claiming closure:
+
+| Row | Added manifestation | Planned exact execution proof |
+| --- | --- | --- |
+| W01 | Padded type tokens, top-level/nested/union members | Canonical owner and all five boundary projections reject exact raw token; no trim-and-send discrepancy. Genuine valid token bytes remain unchanged. |
+| W02 | Typed-nil/null root and recognized nested schema/property containers | Canonical owner refuses declared null/typed-nil maps and nested schema nodes; request/list/evidence return nothing, observation cannot confirm. Truly absent schema retains only its existing explicit boundary default. |
+| W03 | Nested/duplicate/malformed type arrays | Canonical owner requires a flat unique array of supported exact strings, including typed forms; every boundary negative and valid unique-array control. No alternate walker/dialect. |
+| W04 | Duplicate required and null recognized array containers | Unique exact required names; nil recognized arrays refuse rather than serialize null. Empty legitimate arrays and enum null values retain their distinct meaning. Canonical and five-boundary controls. |
+| W05 | Anthropic non-object tool input roots | Existing Anthropic selected/defaulted projection requires explicit object-root input_schema; absent untyped schema defaults as before, typed-nil/non-object refuse before HTTP. Both-store no-attempt/simulator proof and exact valid object bytes. |
+
+Owner remains ValidateProviderToolSchema/Definitions; bounded amendment now
+authorizes edits to that owner and obsolete2628 characterization expectations,
+not a second validator. Anthropic adds its provider-specific root check after
+shared subset validation, not a generic dialect implementation. Preserve earlier
+gates, selected-only checking, lease cleanup and five call-removal negatives.
+No compatibility, source normalization, migration, retry or vendor dependency.
+#2349 remains wider type-model architecture; no new semantic parent or issue.
+
+Refresh the exact tool_schema spec, issue/body, existing watchlist and PR proof
+audit. A11/A18/A25 (P09/P15/P21) are #2286's inherited startup rows, not these W
+rows: record the canonical observer's two direct wrappers and all startup,
+activation, continued/fork callers; verify remains read-only with process-owned
+handshake explicitly unperformed. Execute profile-selection, binding/authority,
+real host observation, prepared-fork and census-negative controls, then regenerate
+only the changed body via the existing census generator and qualify without its
+update environment. Hosted lifecycle/no extras and focused local remain binding.
+
 Implementation addendum,2026-10-12: independent gate6118463764 approves the
 whole widened five-consumer/four-family enforcement class. Coding is now OPEN
 under its five binding conditions. Actual implementation base568dd9ab0 integrates
