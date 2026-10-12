@@ -855,6 +855,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/delivery_planner_test.go
+      - internal/runtime/bus/route_preparation_native_test.go
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/active_target_descriptor_dedup_test.go
@@ -897,6 +898,11 @@ seam_families:
       nested, arbitrary, undeclared, unindexed, config, and instance
       business-field descriptor/index authority remains split to #1466 or
       later gated children.
+      The #2612 route-preparation proof reads descriptors through the native
+      selected-store owner and composes the canonical attempt-owned installer;
+      it observes preparation/install ordering, not a second recipient or
+      construction authority. Reset, source and retirement refusals stay bound
+      to the existing EventBus/RouteTable owners.
   - id: event_delivery_plan_compatibility_adapter
     layer: invalid_old_authority
     classification: invalid_old_authority_path
