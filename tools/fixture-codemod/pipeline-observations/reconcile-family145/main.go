@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "c4a208130d02d72b9f2b905d6eeb19bee4fd47257476ed990b18ecb2159548da"
+const targetDigest = "cff641d27e3281d75283eb8ad1fe9afe7101fc43b1d73edd258a486f9e43d123"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -112,6 +112,8 @@ var files = []string{
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go",
 	"internal/runtime/pipeline/pause_eligibility_test.go",
 	"internal/runtime/pipeline/prospective_publication_external_test.go",
+	"internal/runtime/pipeline/receiver_future_appearance_external_test.go",
+	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go",
 	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go",
 	"internal/runtime/pipeline/selection_retry_cas_external_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
@@ -211,16 +213,18 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
-	"internal/runtime/pipeline/prospective_publication_external_test.go":           {"TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": true, "CommitWorkflowEngineMutation/*observedProspectivePersistence": true},
-	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":            {"testA2BoundReplyJourney": true},
-	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":           {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
-	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":        {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
-	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go": {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
-	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":        {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true},
-	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":   {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
-	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":          {"assertProgress/*a2MapFanOutExecution": true},
-	"internal/runtime/pipeline/a2_publication_binding_external_test.go":            {"testA2StageEntryPublicationBinding": true},
-	"internal/runtime/pipeline/pause_eligibility_test.go":                          {"TestPausedHandedNodeParksUntilContinueBothStores": true},
+	"internal/runtime/pipeline/prospective_publication_external_test.go":                        {"TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": true, "CommitWorkflowEngineMutation/*observedProspectivePersistence": true},
+	"internal/runtime/pipeline/receiver_future_appearance_external_test.go":                     {"TestReceiverCompositionActivationReuseAndConflictBothStores": true},
+	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go": {"TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores": true},
+	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":                         {"testA2BoundReplyJourney": true},
+	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":                        {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
+	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
+	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true},
+	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
+	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true},
+	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
+	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},
 	"internal/runtime/conformance/persisted_surfaces_test.go": {
 		"TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField":                        true,
 		"TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader":             true,

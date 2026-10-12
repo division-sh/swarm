@@ -21,6 +21,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -165,7 +166,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						materialize(instances[1])
 					}
 					if keyRelation == "conflict" {
-						if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, exactEntityID); err != nil {
+						if _, err := storetest.SetWorkflowProjectionConflictingEntityType(ctx, selected.events, runID, exactEntityID); err != nil {
 							t.Fatal(err)
 						}
 					}

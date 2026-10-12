@@ -13,6 +13,29 @@ type WorkflowControlProjectionStorage struct {
 	Fields                      json.RawMessage
 }
 
+type WorkflowRunFieldsRevisionStorage struct {
+	Fields   string
+	Revision int64
+}
+
+func ReadWorkflowRunFieldsRevisionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (WorkflowRunFieldsRevisionStorage, error) {
+	var out WorkflowRunFieldsRevisionStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&out.Fields, &out.Revision)
+	return out, err
+}
+
+func ReadWorkflowRunHeaderRevisionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&revision)
+	return revision, err
+}
+
+func ReadWorkflowRunFieldsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var fields string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1`, runID).Scan(&fields)
+	return fields, err
+}
+
 type ActivityForkEntityStorage struct {
 	Flow, EntityType, Stage string
 	Fields, Accumulator     []byte

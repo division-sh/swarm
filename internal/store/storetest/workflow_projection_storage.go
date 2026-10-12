@@ -12,6 +12,24 @@ type WorkflowControlProjectionStorage = private.WorkflowControlProjectionStorage
 type WorkflowDuplicateProjectionStorage = private.WorkflowDuplicateProjectionStorage
 type WorkflowStateObservationRow = private.WorkflowStateObservationRow
 
+type WorkflowRunFieldsRevisionStorage = private.WorkflowRunFieldsRevisionStorage
+
+func ReadWorkflowRunFieldsRevisionStorage(ctx context.Context, selected any, runID string) (WorkflowRunFieldsRevisionStorage, error) {
+	return private.ReadWorkflowRunFieldsRevisionStorageForTest(ctx, selected, runID)
+}
+
+func ReadWorkflowRunHeaderRevisionStorage(ctx context.Context, selected any, runID string) (int64, error) {
+	return private.ReadWorkflowRunHeaderRevisionStorageForTest(ctx, selected, runID)
+}
+
+func ReadWorkflowRunFieldsStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadWorkflowRunFieldsStorageForTest(ctx, selected, runID)
+}
+
+func CountWorkflowRunFieldRows(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountWorkflowRunFieldRowsForTest(ctx, selected, runID)
+}
+
 func CountWorkflowHeadersCreatedSince(ctx context.Context, selected any, since time.Time) (int, error) {
 	return private.CountWorkflowHeadersCreatedSinceForTest(ctx, selected, since)
 }

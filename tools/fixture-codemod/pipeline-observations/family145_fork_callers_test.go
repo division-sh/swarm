@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 414 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c4a208130d02d72b9f2b905d6eeb19bee4fd47257476ed990b18ecb2159548da" {
+	if err != nil || len(rows) != 416 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "cff641d27e3281d75283eb8ad1fe9afe7101fc43b1d73edd258a486f9e43d123" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -61,6 +61,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if owner := family145CompetingRevisionPairOwner(row.File, row.Function); owner != "" {
 			if err := family145CompetingRevisionPairProofError(owner, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145GateEntityConflictKeys[row.Function] != "" {
+			if err := family145GateEntityConflictProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

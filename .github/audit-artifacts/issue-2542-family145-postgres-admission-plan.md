@@ -3971,3 +3971,52 @@ source/collector unchanged; cold fixed-view compilation made this census248.762s
 not a runtime timing qualification. Supplied-pool calls remain61. Gate/A2 carrier
 and parent closure remain open. Signed-head complexity follows; no push/PR/tier.
 Receipts ~/.cache/swarm-2542-family145/gate-pair-*.
+
+## Shared Gate/A2 Dependency: Projection Readback And Two Live Conflicts
+
+Six prospective-publication reads now consume fixed physical projection ports.
+The initial/retained field text and revision, header revision, final field text,
+field-row count and header count keep their original run-only predicates and
+independent cuts. Plain QueryRow retains context.Background, SQL casts and
+sql.ErrNoRows. The existing field-row SQL and header-count owner are reused;
+three missing fixed read shapes live in the existing pipelinepersistence owner.
+No caller-selected column/table/predicate, production reader or generic callback
+is added. The publication-failure trigger remains live debt until its own exact
+named-fault migration; no carrier is prematurely deleted.
+
+The two identical incidental entity-type corruptions now reuse the existing
+SetWorkflowProjectionConflictingEntityType on the exact selected native store.
+The original wrong_entity_type value, run/entity coordinates, post-publication
+cut, subsequent reconstruction/dispatch and every original consumer byte remain.
+There is no new fault port, write allowance or authority inference.
+
+| Manifestation | Exact proof run on Go1.26.8 |
+| --- | --- |
+| Initial/retained/retry projection evidence, terminal/writer refusals and publication rollback | TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores, all12 backend/scenario cells under race, PASS30.798s |
+| Four fixed physical readers preserve actual values, independent native transactions, absence, cancellation and all-table immutability | TestWorkflowRunPhysicalProjectionReadersRetainOriginalScopesBothStores, race PASS12.116s |
+| Raw/uninitialized/nil/closed owner rejection | TestWorkflowRunPhysicalProjectionReadersRefuseRawAndClosedOwners, both stores/race PASS2.87s |
+| A published receiver reuses admitted identity and rejects a real conflicting entity type | TestReceiverCompositionActivationReuseAndConflictBothStores, four backend/scenario cells/race PASS7.42s |
+| Both acquisition modes validate fixed target key without re-election after publication | TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores, all16 backend/scenario cells/race; two-root aggregate PASS44.293s |
+| Exact caller state machine, SQL and all original assertions; hostile missing read/fault/scope/assertion controls | Six affected/global finite roots PASS6.656s |
+| Six persistence boundaries and writer/accessor inventories | PASS7.275s; U1000 clean |
+
+The new empty-scope proof originally assumed universal sql.ErrNoRows. PostgreSQL
+correctly preserves its original empty-UUID SQL error. Repaired the new proof to
+compare each original physical SQL contract exactly on both stores, including
+SQLite's zero count; no production behavior or old assertion changed. Finite
+metadata initially guessed two new recipes, but both conflict roots already had
+historical recipes. Corrected the count to1210; only those two current Successors
+changed. All24 immutable Before/After/Mechanical records compare byte-identically
+excluding current Successor (recorded empty diff), not merely by count. Exact
+combined historical/current digest now
+eadf6a625092602cefe1d83951841cf732cc3540127d139818153ee50a2218c9.
+Corpus1210/416, transition digest
+cff641d27e3281d75283eb8ad1fe9afe7101fc43b1d73edd258a486f9e43d123.
+
+Real downward census8478 ->8464 findings,6086 ->6072 raw sites:14 removed/zero
+added, uncertainty67 unchanged, PASS147.628s including fixed-view compilation.
+Supplied-pool calls remain61; source/collector and parent qualification holds
+unchanged. This is still an internal dependency component, not whole gate/A2
+closure or a stacking request. Signed-head complexity follows. No push/PR/tier
+or server2. Receipts ~/.cache/swarm-2542-family145/gate-prospective-reads-* and
+gate-projection-closure-* / gate-entity-conflicts-*.

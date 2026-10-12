@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -174,7 +175,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					t.Fatalf("composition activation missing: %#v %t %v", initial, found, err)
 				}
 				if conflict {
-					if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, entityID); err != nil {
+					if _, err := storetest.SetWorkflowProjectionConflictingEntityType(ctx, selected.events, runID, entityID); err != nil {
 						t.Fatal(err)
 					}
 				}

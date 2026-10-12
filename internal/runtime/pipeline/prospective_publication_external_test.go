@@ -116,19 +116,20 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
 				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
-				var initialFields string
-				var initialRevision int64
-				if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields, &initialRevision); err != nil {
+				initialStorage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				initialFields, initialRevision := initialStorage.Fields, initialStorage.Revision
 				assertUnchangedConstruction := func() {
 					t.Helper()
-					var fields string
-					var fieldRevision, headerRevision int64
-					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&fields, &fieldRevision); err != nil {
+					storage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := selected.db.QueryRow(`SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&headerRevision); err != nil {
+					fields, fieldRevision := storage.Fields, storage.Revision
+					headerRevision, err := storetest.ReadWorkflowRunHeaderRevisionStorage(context.Background(), selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if fields != initialFields || fieldRevision != initialRevision || headerRevision != initialRevision {
@@ -200,8 +201,8 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				if observed.calls != wantPlans {
 					t.Fatalf("actual prepared mutation reached planner %d times", observed.calls)
 				}
-				var states int
-				if err := selected.db.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&states); err != nil {
+				states, err := storetest.CountWorkflowRunFieldRows(context.Background(), selected.events, runID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				published, err := storetest.CountRunEventNameStorage(context.Background(), selected.events, runID, "work.ready")
@@ -224,8 +225,8 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					if !persistence.raced || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || persistence.err != nil || observed.err != nil || len(observed.plans) != 1 || persistence.calls != 2 || len(persistence.revisions) != 2 || persistence.revisions[1] != persistence.revisions[0]+1 {
 						t.Fatalf("wrong revision fence: raced=%t commits=%d commit=%v planning=%v execution=%+v dispatch=%v", persistence.raced, persistence.calls, persistence.err, observed.err, execution, dispatchErr)
 					}
-					var fields string
-					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1`, runID).Scan(&fields); err != nil {
+					fields, err := storetest.ReadWorkflowRunFieldsStorage(context.Background(), selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					var value map[string]any
@@ -245,8 +246,8 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					if !strings.Contains(persistence.err.Error(), want) {
 						t.Fatalf("wrong commit fault: %v", persistence.err)
 					}
-					var companions int
-					if err := selected.db.QueryRow(`SELECT count(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&companions); err != nil {
+					companions, err := storetest.CountRunFlowInstanceStorage(context.Background(), selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if states != 1 || published != 0 || companions != 1 {

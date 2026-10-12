@@ -10,7 +10,15 @@ import (
 
 var family145GateScalarReadCuts = map[string][]string{
 	"prospective_publication_external_test.go|TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": {
+		"initialStorage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)",
+		"initialFields, initialRevision := initialStorage.Fields, initialStorage.Revision",
+		"storage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)",
+		"fields, fieldRevision := storage.Fields, storage.Revision",
+		"headerRevision, err := storetest.ReadWorkflowRunHeaderRevisionStorage(context.Background(), selected.events, runID)",
+		"states, err := storetest.CountWorkflowRunFieldRows(context.Background(), selected.events, runID)",
 		"published, err := storetest.CountRunEventNameStorage(context.Background(), selected.events, runID, \"work.ready\")",
+		"fields, err := storetest.ReadWorkflowRunFieldsStorage(context.Background(), selected.events, runID)",
+		"companions, err := storetest.CountRunFlowInstanceStorage(context.Background(), selected.events, runID)",
 	},
 	"a2_bound_reply_binding_external_test.go|testA2BoundReplyJourney": {
 		"replies, err := storetest.CountGateSourceNamedEvents(ctx, selected.events, source.ResolveFlowEventReference(\"provider\", \"provider.replied\"), requestID)",
@@ -51,6 +59,38 @@ var family145GateScalarReadCuts = map[string][]string{
 		"after, err := storetest.CountRunEventNameStorage(context.Background(), s.events, runID, \"selected\")",
 		"after, err = storetest.CountRunEventNameStorage(context.Background(), s.events, runID, \"selected\")",
 	},
+}
+
+func TestFamily145ProspectiveProjectionSQLCorrespondsToAllOriginalCuts(t *testing.T) {
+	var rows []struct{ File, Function, Before, After string }
+	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var original []string
+	for _, row := range rows {
+		if row.Function == "TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores" {
+			original = family145ConnectorSQL(t, "package proof\n"+row.Before)
+		}
+	}
+	if len(original) != 7 {
+		t.Fatalf("prospective original read inventory=%d, want 7", len(original))
+	}
+	for _, function := range []string{"ReadWorkflowRunFieldsRevisionStorageTx", "ReadWorkflowRunHeaderRevisionStorageTx", "ReadWorkflowRunFieldsStorageTx", "CountWorkflowFieldRowsForRun"} {
+		source := family145ConversationForkOwnerSource(t, "internal/backend/pipelinepersistence/workflow_projection_observation.go", function)
+		queries := family145ConnectorSQL(t, "package proof\n"+source)
+		if len(queries) != 1 {
+			t.Fatalf("physical %s read inventory=%d", function, len(queries))
+		}
+		found := false
+		for _, query := range original {
+			if strings.EqualFold(query, queries[0]) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s changed original predicate, columns, casts or multiplicity: %s", function, queries[0])
+		}
+	}
 }
 
 func family145GateScalarReadKey(file, function string) string {
