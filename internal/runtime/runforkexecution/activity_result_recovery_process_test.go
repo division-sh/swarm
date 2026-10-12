@@ -292,6 +292,9 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if advanced && (!checkpoint.Activity.ConsumedGeneration.Valid() || checkpoint.Activity.ConsumedGeneration.Attempt != 2) {
 				t.Fatalf("cut lacks exact consumed-result loop advancement: %+v", checkpoint.Activity)
 			}
+			if advanced {
+				requireSelectedActivityConsumedState(t, read, selected, checkpoint, resultID)
+			}
 			wantAttempts, wantCalls := 1, int64(0)
 			if readOnly {
 				wantAttempts, wantCalls = 0, 1
@@ -378,6 +381,9 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if actual := storetest.LoadCanonicalEventRecord(t, wait, selected, resultID); !reflect.DeepEqual(result, actual) {
 				t.Fatal("successor changed the acknowledged physical result")
 			}
+			if advanced {
+				requireSelectedActivityConsumedState(t, wait, selected, checkpoint, resultID)
+			}
 			var current effects.Authority
 			select {
 			case current = <-claims:
@@ -417,6 +423,9 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if actual := storetest.LoadCanonicalEventRecord(t, wait, selected, resultID); !reflect.DeepEqual(result, actual) {
 				t.Fatal("durable successor settlement changed the acknowledged physical output")
 			}
+			if advanced {
+				requireSelectedActivityConsumedState(t, wait, selected, checkpoint, resultID)
+			}
 			if !readOnly {
 				retained, found, err := selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(wait, journal.RequestEventID)
 				if err != nil || !found || !reflect.DeepEqual(journal, retained) {
@@ -428,5 +437,31 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			t.Logf("ISSUE642_ACTIVITY_SIGKILL_REACTIVATED backend=%s input=%s result=%s old_generation=%d new_generation=%d settlement=%s leases=%d", backend,
 				inputID, resultID, checkpoint.Activity.Selection.Generation, current.SelectedFork.Generation, receipt.Outcome, process.ActiveCount())
 		})
+	}
+}
+
+func requireSelectedActivityConsumedState(t *testing.T, ctx context.Context, selected any, checkpoint selectedForkCrashCheckpoint, resultID string) {
+	t.Helper()
+	header, found, err := selected.(pipeline.WorkflowPersistenceOwner).LoadWorkflowInstance(ctx,
+		flowidentity.RunScopedFlowInstance{RunID: checkpoint.ForkRun, Route: flowidentity.StoredRoute("flow_a", "flow_a", "flow_a")})
+	if err != nil || !found {
+		t.Fatalf("native consumed-result receiver absent: found=%t error=%v", found, err)
+	}
+	raw, err := json.Marshal(header.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buckets map[string]map[string]any
+	if err := json.Unmarshal(raw, &buckets); err != nil {
+		t.Fatal(err)
+	}
+	loops, err := loopruntime.List(buckets)
+	if err != nil || len(loops) != 1 || loops[0].Generation() != checkpoint.Activity.ConsumedGeneration || header.CurrentState != "review" {
+		t.Fatalf("consumed loop state reset or replayed: loops=%+v expected=%+v stage=%s error=%v", loops, checkpoint.Activity.ConsumedGeneration, header.CurrentState, err)
+	}
+	rows, err := storetest.ReadEventDeliveryDiagnosticRows(ctx, selected, resultID)
+	if err != nil || len(rows) != 1 || rows[0].SubscriberType != "node" || rows[0].SubscriberID != mustRunForkNode("flow_a", "test-node").Key() ||
+		rows[0].Status != "delivered" || rows[0].FlowInstance != "flow_a" || rows[0].EntityID != header.EntityID {
+		t.Fatalf("exact consumed-result delivery is not terminal: rows=%+v error=%v", rows, err)
 	}
 }
