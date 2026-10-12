@@ -14,7 +14,7 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtProcessLeaseCollectorTo = "ec0a03f7bfaebc887f20101c4ee5a81f87aed8929a89144feb1032bac1e51d9a"
+const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -115,46 +115,52 @@ func TestPersistenceAuthorityDebtProcessLeaseRelocationsAreOneWay(t *testing.T) 
 }
 
 func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *testing.T) {
-	before, after := debtControlSet(), debtControlSet()
-	for _, pair := range debtProcessLeaseRelocations() {
-		before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
-	}
-	inherited := debtControlSite("call:QueryRow", 2)
-	before[inherited.identity()], after[inherited.identity()] = inherited, inherited
-	trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtFixtureRoleCollectorTo, Sites: before}
-	head := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: after}
-	for _, mutation := range []string{"exact", "downward", "landed-successor", "reverse", "foreign-base", "foreign-destination", "unrotated", "rebootstrap", "missing-donor", "addition", "increase"} {
-		t.Run(mutation, func(t *testing.T) {
-			base, candidate := trusted, head
-			base.Sites, candidate.Sites = maps.Clone(trusted.Sites), maps.Clone(head.Sites)
-			current := debtProcessLeaseCollectorTo
-			switch mutation {
-			case "downward":
-				delete(candidate.Sites, inherited.identity())
-			case "landed-successor":
-				base = candidate
-			case "reverse":
-				base, candidate, current = candidate, base, base.Collector
-			case "foreign-base":
-				base.Collector = strings.Repeat("a", 64)
-			case "foreign-destination":
-				candidate.Collector, current = strings.Repeat("b", 64), strings.Repeat("b", 64)
-			case "unrotated":
-				candidate.Collector = base.Collector
-			case "rebootstrap":
-				candidate.BootstrapSource = strings.Repeat("c", 40)
-			case "missing-donor":
-				delete(base.Sites, debtProcessLeaseRelocations()[0][0].identity())
-			case "addition":
-				added := debtControlSite("call:Exec", 1)
-				candidate.Sites[added.identity()] = added
-			case "increase":
-				inherited.Multiplicity++
-				candidate.Sites[inherited.identity()] = inherited
+	for _, donor := range []string{debtForkProofCollectorTo} {
+		t.Run(donor[:8], func(t *testing.T) {
+			before, after := debtControlSet(), debtControlSet()
+			for _, pair := range debtProcessLeaseRelocations() {
+				before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
 			}
-			accept := mutation == "exact" || mutation == "downward" || mutation == "landed-successor"
-			if err := debtValidateCollectorIdentity(base.Collector, current, base, candidate, ""); (err == nil) != accept {
-				t.Fatalf("accept=%v error=%v", accept, err)
+			inherited := debtControlSite("call:QueryRow", 2)
+			before[inherited.identity()], after[inherited.identity()] = inherited, inherited
+			trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: donor, Sites: before}
+			head := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: after}
+			for _, mutation := range []string{"exact", "downward", "landed-successor", "reverse", "unlanded-role-predecessor", "foreign-base", "foreign-destination", "unrotated", "rebootstrap", "missing-donor", "addition", "increase"} {
+				t.Run(mutation, func(t *testing.T) {
+					base, candidate := trusted, head
+					base.Sites, candidate.Sites = maps.Clone(trusted.Sites), maps.Clone(head.Sites)
+					current := debtProcessLeaseCollectorTo
+					switch mutation {
+					case "downward":
+						delete(candidate.Sites, inherited.identity())
+					case "landed-successor":
+						base = candidate
+					case "reverse":
+						base, candidate, current = candidate, base, base.Collector
+					case "unlanded-role-predecessor":
+						base.Collector = debtFixtureRoleCollectorTo
+					case "foreign-base":
+						base.Collector = strings.Repeat("a", 64)
+					case "foreign-destination":
+						candidate.Collector, current = strings.Repeat("b", 64), strings.Repeat("b", 64)
+					case "unrotated":
+						candidate.Collector = base.Collector
+					case "rebootstrap":
+						candidate.BootstrapSource = strings.Repeat("c", 40)
+					case "missing-donor":
+						delete(base.Sites, debtProcessLeaseRelocations()[0][0].identity())
+					case "addition":
+						added := debtControlSite("call:Exec", 1)
+						candidate.Sites[added.identity()] = added
+					case "increase":
+						inherited.Multiplicity++
+						candidate.Sites[inherited.identity()] = inherited
+					}
+					accept := mutation == "exact" || mutation == "downward" || mutation == "landed-successor"
+					if err := debtValidateCollectorIdentity(base.Collector, current, base, candidate, ""); (err == nil) != accept {
+						t.Fatalf("accept=%v error=%v", accept, err)
+					}
+				})
 			}
 		})
 	}
