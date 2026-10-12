@@ -163,6 +163,23 @@ func projectContinuedRequestSourceRoutes(snapshot *runForkRevisionSnapshot, even
 	return routes, nil
 }
 
+func projectContinuedSourceRecipientRoutes(snapshot *runForkRevisionSnapshot, eventID, child string, requests []replycontext.Record) ([]events.DeliveryRoute, error) {
+	fanOut, err := projectContinuedFanOutSourceRoutes(snapshot, eventID, child)
+	if err != nil || len(requests) != 0 {
+		return fanOut, err
+	}
+	routes, err := projectContinuedRequestSourceRoutes(snapshot, eventID, child)
+	if err != nil || len(routes) == 0 {
+		return fanOut, err
+	}
+	if len(fanOut) != 0 {
+		if err := requireExactRunForkRequestRoutes(routes, fanOut); err != nil {
+			return nil, err
+		}
+	}
+	return routes, nil
+}
+
 func (a runForkSourceStateAdmission) projectRequestReplies(eventID string) ([]replycontext.Record, error) {
 	if a.firstTurn != nil {
 		original, present := a.firstTurn.Event()
