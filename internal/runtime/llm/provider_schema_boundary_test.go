@@ -77,13 +77,13 @@ func TestProviderSchemaBoundaryAdmission(t *testing.T) {
 
 func testProviderSchemaAnthropicBytes(t *testing.T) {
 	session := &Session{SystemPrompt: "system", Tools: []ToolDefinition{
-		{Name: " inspect ", Description: " description ", Schema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}},
+		{Name: "inspect", Description: " description ", Schema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}},
 		{Name: "empty"}, {Name: "object", Schema: map[string]any{"type": "object"}},
 	}}
 	before := providerSchemaJSON(t, session.Tools)
 	request, err := (&AnthropicAPIRuntime{}).buildRequest(session, Message{Role: "user", Content: "hello"}, " model ")
 	requireProviderSchemaError(t, err, "")
-	want := `{"model":"model","max_tokens":1024,"system":"system","messages":[{"role":"user","content":"hello"}],"tools":[{"name":" inspect ","description":"description","input_schema":{"properties":{"q":{"type":"string"}},"type":"object"}},{"name":"empty","input_schema":{"properties":{},"type":"object"}},{"name":"object","input_schema":{"type":"object"}}]}`
+	want := `{"model":"model","max_tokens":1024,"system":"system","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"inspect","description":"description","input_schema":{"properties":{"q":{"type":"string"}},"type":"object"}},{"name":"empty","input_schema":{"properties":{},"type":"object"}},{"name":"object","input_schema":{"type":"object"}}]}`
 	if got := providerSchemaJSON(t, request); got != want {
 		t.Fatalf("request bytes=%s, want %s", got, want)
 	}

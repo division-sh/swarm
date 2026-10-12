@@ -146,7 +146,7 @@ retained; a passing sibling is not used to erase them.
 | A02 | Nested properties/items/propertyNames | reproduced and fixed | BoundaryAdmission/anthropic/{properties,items,propertyNames}; canonical lexical/indexed error and no partial tools. R1. |
 | A03 | oneOf/union/required/enum shapes | reproduced and fixed | BoundaryAdmission/anthropic/{oneOf,union,required,enum,additionalProperties}; exact existing owner error. R1. |
 | A04 | First-error and earlier/later gates | execution-proven through the same corrected path | Each Anthropic case has bad first/later definitions, message-first refusal, bad schema before missing-model; valid case still requires model. R1. |
-| A05 | Genuinely valid/default object bytes | execution-proven through the same corrected path | Corrected BoundaryAdmission/anthropic/valid exact full JSON uses exact object/string tokens, absent-schema object default and explicit object root, without mutation. Prior padded/null wire assertions were invalid and are superseded, not preservation credit; refusals are W01/W02/W05. Fresh cycle-1 receipts required. |
+| A05 | Genuinely valid/default object bytes | execution-proven through the same corrected path | Corrected BoundaryAdmission/anthropic/valid exact full JSON uses a valid tool name and exact object/string tokens, absent-schema object default and explicit object root, without mutation. Prior padded/null wire assertions were invalid and superseded; W01/W02/W05 refuse them. R10/R17. |
 | A06 | Normal/continued/selected/fork request authority | execution-proven through the same corrected path | Q01/Q03 real normal and continued requests; selected-fork issuance/current-generation/recovery no-redispatch and exact fork-source mode/bundle controls; malformed fork constructor refuses upstream. R2/R5/R8. No direct selected Anthropic invalid-source exploit claimed. |
 | M01 | Initial Mock request | reproduced and fixed | BoundaryAdmission/mock malformed cases return empty input; existing StartSession consumer refuses malformed schema. R1. |
 | M02 | Continued mutable session projection | reproduced and fixed | BoundaryAdmission/mock/continued: valid actual StartSession, mutate projection, per-request exact canonical refusal. R1. |
@@ -160,7 +160,7 @@ retained; a passing sibling is not used to erase them.
 | G06 | Order/leases/atomic refusal | execution-proven through the same corrected path | Managed/actor refusal has nil list/evidence and acquire/release1/1; selection success+failure total2/2; exact ordered bytes/defaults. R1/R5/R8. |
 | O01 | Matching invalid observation | reproduced and fixed | WorkspaceObservation matching unsupported/nested/oneOf hashes refuse with typed invalid_input_schema and exact unwrapped canonical cause. R1. |
 | O02 | Hostile protocol/identity observations | execution-proven through the same corrected path | WorkspaceObservation/{missing,null,array,noncanonical,duplicate,changed,foreign}; original reason precedence retained. R1. |
-| O03 | Valid empty/translated/numeric observation | execution-proven through the same corrected path | WorkspaceObservation valid description/number/schema hash and empty catalog pass; absent-definition defaults and explicit non-null MCP object schemas retain exact bytes. Typed-nil wire success is retracted, W02 refuses. Fresh cycle-1 receipts required. |
+| O03 | Valid empty/translated/numeric observation | execution-proven through the same corrected path | WorkspaceObservation valid description/number/schema hash and empty catalog pass; absent-definition defaults and explicit non-null MCP object schemas retain exact bytes. Typed-nil wire success is retracted, W02 refuses. R10. |
 | O04 | Target-local pre-model refusal | reproduced and fixed | WorkspaceTargetRefusal actual host observation worker+HTTP refuses malformed matching hash, empty confirmation and unregister1; ClaudeEveryLaunchRechecksGatewayBeforeModelInvocation keeps first/resumed/tool-result zero-model-launch controls. R4. Observation is not a model worker. |
 | S01 | Authored immutable schemas | execution-proven through the same corrected path | SourceAdmission/authored and upstream-refusal actual yamlsource/immutable admission; compiled StructuralSurfaces verify/describe malformed source refuses earlier. R1/R9. |
 | S02 | Imported/pack/connector/channel projections | execution-proven through the same corrected path | SourceAdmission/imported actual admitted ToolSchemaEntry projections, nonmutation; NewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated; compiled source tools. R1/R5/R9. Does not claim new live channel onboarding proof. |
@@ -173,12 +173,12 @@ retained; a passing sibling is not used to erase them.
 | Q02 | Compiled supported host/MCP | execution-proven through the same corrected path | WorkspaceMCPCompiledHostConformance compiled public host/private SQLite HTTP MCP read/emit/settlement; StructuralSurfaces verify/describe. Direct malformed target/handler controls separately scoped. R3/R4/R9. |
 | Q03 | Reconstruction/restart/fork | execution-proven through the same corrected path | ReconstructionBothStores two distinct durable events/claims and fresh runtimes, identical immutable-source identity, count2 settlements/consumed/attempts; GoldenAgentWorkloadRestartAndForcedKillOnBothBackends compiled H/mock; selected/fork controls and frozen TCP list. R2/R3/R5/R8. |
 | Q04 | Generic discriminating counterexamples | reproduced and fixed | Five separately compiled call-removal mutants fail intended admission assertion; no compile/no-test false credit, exact restored diff. X1-X5. |
-| Q05 | Qualification/coverage | execution-proven through the same corrected path | Complete structural guard unit, census/inventory/registry, independent complexity, race3 and supported receipts pass locally; lifecycle final plan selects all nine new roots exactly once. R1-R9 and final-head addendum. Hosted lifecycle remains a required pending merge gate, not credited as passed. |
-| W01 | Padded raw type tokens | reproduced and fixed | WireShapeAdmission padded root/nested/union members; both MCP wire projections and both observed comparison wrappers; actual host activation/Mock startup and both-store no-send refusal. New cycle-1 receipt ledger follows. |
-| W02 | Null/typed-nil roots and recognized schema/property containers | reproduced and fixed | WireShapeAdmission nil root/properties/property/items/propertyNames/oneOf/additional nodes; MCP returns nil list/evidence, observed decoded null containers refuse. Root null observation remains earlier protocol refusal. Actual host startup/activation and both-store zero attempts. |
-| W03 | Non-flat/duplicate/empty/nil type arrays | reproduced and fixed | WireShapeAdmission typed and untyped arrays plus corrected canonical characterization; both MCP arms and matching target wire refuse nested/duplicate/null unions without mutation. |
-| W04 | Duplicate required and null recognized arrays | reproduced and fixed | WireShapeAdmission required duplicates/nil typed forms and enum nil; MCP/observed comparison and selected-store no-send controls. Characterization retains valid distinct exact property names, empty permitted arrays and enum null values. |
-| W05 | Anthropic non-object/missing root type | reproduced and fixed | WireShapeAdmission/anthropic_root uses generically valid string/array/union/empty schemas to reach the provider-specific refusal; both-store string-root refusal then one valid object settlement. No new generic provider root law. |
+| Q05 | Qualification/coverage | execution-proven through the same corrected path | Complete structural guard unit, census/inventory/registry, independent complexity, race3 and supported receipts pass locally; lifecycle selects all ten added roots exactly once. R10-R17 and final-head addendum. Hosted lifecycle remains a required pending merge gate, not credited as passed. |
+| W01 | Padded raw type tokens | reproduced and fixed | WireShapeAdmission padded root/nested/union members; both MCP wire projections and both observed comparison wrappers; actual host activation/Mock startup and both-store no-send refusal. R10/R11. |
+| W02 | Null/typed-nil roots and recognized schema/property containers | reproduced and fixed | WireShapeAdmission nil root/properties/property/items/propertyNames/oneOf/additional nodes; MCP returns nil list/evidence, observed decoded null containers refuse. Root null observation remains earlier protocol refusal. Actual host startup/activation and both-store zero attempts. R10/R11. |
+| W03 | Non-flat/duplicate/empty/nil type arrays | reproduced and fixed | WireShapeAdmission typed and untyped arrays plus corrected canonical characterization; both MCP arms and matching target wire refuse nested/duplicate/null unions without mutation. R10/R11. |
+| W04 | Duplicate required and null recognized arrays | reproduced and fixed | WireShapeAdmission required duplicates/nil typed forms and enum nil; MCP/observed comparison and selected-store no-send controls. Characterization retains valid distinct exact property names, empty permitted arrays and enum null values. R10/R11. |
+| W05 | Anthropic non-object/missing root type | reproduced and fixed | WireShapeAdmission/anthropic_root uses generically valid string/array/union/empty schemas to reach the provider-specific refusal; both-store string-root refusal then one valid object settlement. No new generic provider root law. R10/R11/R17. |
 
 Total37 rows A6/M4/G6/O4/S7/Q5/W5. No known manifestation is left behind a
 "shared owner" or "same seam" assertion. No semantic split emerged beyond the
@@ -252,3 +252,43 @@ hostile ratchets qualify with update mode absent. No registry-only or checksum-o
 closure. The before-owner WireShapeAdmission counterexample has27 failing leaves
 plus its parent; fresh canonical/all-consumer, real both-store and compiled-host
 controls provide the corrected evidence. Receipt addendum will bind the final head.
+
+### Fresh Cycle-1 Receipt Ledger
+
+Production repair is signed969c12511. Only the final valid-name fixture refinement
+and this receipt documentation follow; that fixture has its own passing race3
+receipt. All listed execution has zero failure/skip. A11/A18/A25 witnesses run
+with census update mode absent. Exact current plan and complexity are re-bound
+to the pushed head in the PR addendum. No duplicate Local tier/server2/full.
+
+| Alias | Receipt / result | SHA256 |
+| --- | --- | --- |
+| R10 | issue2627-wire-components-969c-race3.jsonl; corrected owner/characterization, all request/MCP/observation/source/frozen/generated controls, race3 | 584cd2afe466ad0d7792db87320b9abb31ad4ca5149c23383fd6f1369ca076cd |
+| R11 | issue2627-wire-store-race3.jsonl; both stores seven malformed cuts each, zero attempts/effects/HTTP, one valid same-session settlement; reconstructed two distinct turns, race3/31.969s | 66511ca69a0c44f3d11aaaef3c0424557b85f4106f35c8cd73142305fd00fe33 |
+| R12 | issue2627-admission-rows-969c-race3.jsonl; inherited A11/A18/A25 profile/retained/prepared/read-only verify/census/hostile ratchets race3 | 380e07552b92420636808efd0d8a27c1fdcde1126dff1529fb81e42deab1a432 |
+| R13 | issue2627-compiled-host-969c.jsonl; real compiled public host/private SQLite HTTP MCP and compiled verify/describe/source refusal/28.117s | ebafc906bc485582c2ec98687567c11d724bc1f93ca9836ffc9404bd20642027 |
+| R14 | issue2627-structural-969c.jsonl; whole unchanged four-package structural guard unit | b61080a0fc0feada4fee2d3186e8aee3be8f7d316f8ccb7ccb4ef34a653a47d5 |
+| R15 | issue2627-census-969c.jsonl; CLI startup census plus planner/catalog/codemod census/inventory/registry controls | 26be98a80d5ac8b48e193a8121ffdb4371557311b9a0dac37f9dd399a1fe6cd2 |
+| R16 | issue2627-restart-969c.jsonl; distinct compiled H/mock SQLite/PostgreSQL restart/forced kill/34.177s | 2f71a6a9d4c8ca3d2e2e006242b344f207963e3a6e286379791c654e46aac288 |
+| R17 | issue2627-valid-anthropic-final.jsonl; corrected exact full object-schema request bytes, race3 | 4a707680953d4e52ca756de6ab76512fe091a6b96a3b5f5c212709151daaa81b |
+
+Fresh call-removal mutants compile, fail the intended wire assertion, restore
+exactly and their disposable worktree is removed. Anthropic uses a proper object
+root with invalid nested type, so its root guard cannot mask a removed shared
+validator. Managed omission publishes bad evidence; actor omission returns bad
+tools; observed omission wrongly confirms through both wrappers.
+
+| Consumer | Fresh counterfactual receipt | SHA256 |
+| --- | --- | --- |
+| Anthropic | issue2627-wire-mutant-anthropic.log | 0ebcc62e1cfc33e42c4cde5293bd8e48338d720e2a8ffc8e8e9b07846c3136cf |
+| Mock | issue2627-wire-mutant-mock.log | 47d854525b6b5db0a70cd6ca06bf9ab323a158f6926acf25537d702f6e703bf8 |
+| Managed MCP | issue2627-wire-mutant-managed.log | fd8dd4cfef31ad725dec87c16e39daed6f653efbfd2db67371e100836fcb4975 |
+| Actor MCP | issue2627-wire-mutant-actor.log | 507722e188c0a5433f2ceaa38dd61910b6a6ae118a6f209e80ffbb6cfa64b616 |
+| Observed MCP | issue2627-wire-mutant-observed.log | 1ca2b9150dcd5b4aaa2ca62cb56cbb460a30db5c04add8e065e5d5a3658993fa |
+
+Recognized-array shape references: [JSON Schema validation6.1.1/6.5.3](https://json-schema.org/draft/2020-12/json-schema-validation),
+[validation meta-schema](https://json-schema.org/draft/2020-12/meta/validation);
+provider root: [Anthropic input schema](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
+These support the bounded approved recognized laws, not a new vocabulary or
+blanket promise of complete vendor acceptance. Parent and architecture estimates
+remain unchanged; no newly discovered sixth consumer or new semantic owner.
