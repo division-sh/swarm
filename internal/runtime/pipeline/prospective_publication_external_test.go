@@ -137,14 +137,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					}
 				}
 				if name == "publication_failure" {
-					fault := `CREATE TRIGGER prospective_publication_failure BEFORE INSERT ON events WHEN NEW.event_name='work.ready' BEGIN SELECT RAISE(ABORT,'prospective_publication_fault_cut'); END`
-					if selected.postgres {
-						if _, err := selected.db.Exec(`CREATE FUNCTION prospective_publication_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_name='work.ready' THEN RAISE EXCEPTION 'prospective_publication_fault_cut'; END IF; RETURN NEW; END $$`); err != nil {
-							t.Fatal(err)
-						}
-						fault = `CREATE TRIGGER prospective_publication_failure BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION prospective_publication_fail()`
-					}
-					if _, err := selected.db.Exec(fault); err != nil {
+					if err := storetest.InstallProspectivePublicationCreationFailure(context.Background(), selected.events); err != nil {
 						t.Fatal(err)
 					}
 				}

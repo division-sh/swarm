@@ -1019,6 +1019,26 @@ func CommitSemanticForkFrontierForTest(ctx context.Context, selected any, admitt
 }
 
 // Event-only history must not gain a pipeline publication scope or delivery plan.
+func InstallProspectivePublicationCreationFailureForTest(ctx context.Context, selected any) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.InstallProspectivePublicationCreationFailureTx(ctx, tx, postgres)
+	})
+}
+
+func RemoveProspectivePublicationCreationFailureForTest(ctx context.Context, selected any) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.RemoveProspectivePublicationCreationFailureTx(ctx, tx, postgres)
+	})
+}
+
 func InsertNativeExistingRunRootEventForTest(ctx context.Context, selected any, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, at time.Time) (events.Event, error) {
 	var empty events.Event
 	dialect, err := eventFixtureDialectForTest(selected)

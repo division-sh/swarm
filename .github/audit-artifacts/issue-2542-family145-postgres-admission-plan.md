@@ -4020,3 +4020,42 @@ unchanged. This is still an internal dependency component, not whole gate/A2
 closure or a stacking request. Signed-head complexity follows. No push/PR/tier
 or server2. Receipts ~/.cache/swarm-2542-family145/gate-prospective-reads-* and
 gate-projection-closure-* / gate-entity-conflicts-*.
+
+## Shared Gate/A2 Dependency: Prospective Publication Fault
+
+The prospective-publication consumer and competing-writer method now have no raw
+SQL/dialect/carrier use. Its final two Exec sites move unchanged behind the
+existing admitted event persistence boundary: eventrecord owns the exact three
+DDL statements; test_event_support retains the existing native-owner validation
+and unrevisioned event fixture coordinator; storetest exposes only the fixed
+named install. Plain Exec retains context.Background. Fault installation stays
+after lawful construction and before the same publication, and stays installed
+through the original fixture's joined lifetime. Production behavior, execution
+admission, source identity and all original assertions are unchanged.
+
+The named install is atomic on the original selected coordinator, not a borrowed
+pool or synthetic transaction protocol. Private fixed removal exists for native
+fault proof cleanup; no public SQL, selector, callback or compatibility escape.
+The native proof registers cleanup before install, confirms cancellation, one
+original write and no data/history/clock changes, then hits the exact real event
+insert failure. Complete physical storage remains identical after the failed
+event/revision attempt; an unrelated admitted native event is unaffected, and
+exact named removal restores the same original event ID insertion. This is
+physical fault correspondence, NOT a substitute for normal execution admission;
+the unchanged real pipeline journey proves that separately on both stores.
+
+| Manifestation | Exact executed proof, Go1.26.8 |
+| --- | --- |
+| Publication rollback, terminal/writer refusals and competing retry retain real lifecycle behavior | TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores, all12 backend/scenario cells/race PASS31.485s |
+| Exact event match, real SQL failure, whole-attempt rollback, unrelated event success and fixed cleanup | TestProspectivePublicationFaultKeepsExactEventAndAtomicRollbackBothStores, both stores/race PASS |
+| Raw/uninitialized/nil/closed owners refuse install/cleanup | TestProspectivePublicationFaultRefusesRawAndClosedOwners, both stores/race PASS2.97s; native aggregate15.800s |
+| DDL table/action/WHEN/event/error/function/trigger/order and selected bridge remain exact | TestFamily145ProspectivePublicationFaultPreservesDDLPhaseAndClosedOwner; all three original DDL literals matched byte-for-byte, no raw caller may survive |
+| All original business assertions and finite source snapshots remain; lost call/scope/phase controls reject | Four affected/global finite roots PASS7.716s; corpus1210/416, digest e865803226f889772d2fadfdb26fa82f284410631afe8c9e05c14ffaff3cba4c |
+| Six persistence boundaries and accessor/writer inventories | PASS4.350s; U1000 clean; unchanged24 historical receipt/current digest retained |
+
+Downward census8464 ->8462 findings and6072 ->6070 raw sites:2 removed/zero
+added; uncertainty67 unchanged, PASS147.614s including fixed-view compilation.
+Supplied-pool calls remain61. This closes one consumer's raw authority inside
+the shared gate/A2 family, NOT the family's live carrier/openers or parent.
+Signed-head complexity follows. No push/PR/tier/server2 or new gate. Receipts
+~/.cache/swarm-2542-family145/gate-prospective-fault-*.

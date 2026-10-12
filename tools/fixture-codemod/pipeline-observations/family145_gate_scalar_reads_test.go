@@ -15,6 +15,7 @@ var family145GateScalarReadCuts = map[string][]string{
 		"storage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)",
 		"fields, fieldRevision := storage.Fields, storage.Revision",
 		"headerRevision, err := storetest.ReadWorkflowRunHeaderRevisionStorage(context.Background(), selected.events, runID)",
+		"if name == \"publication_failure\" {\n\t\t\t\t\tif err := storetest.InstallProspectivePublicationCreationFailure(context.Background(), selected.events); err != nil {",
 		"states, err := storetest.CountWorkflowRunFieldRows(context.Background(), selected.events, runID)",
 		"published, err := storetest.CountRunEventNameStorage(context.Background(), selected.events, runID, \"work.ready\")",
 		"fields, err := storetest.ReadWorkflowRunFieldsStorage(context.Background(), selected.events, runID)",
@@ -89,6 +90,37 @@ func TestFamily145ProspectiveProjectionSQLCorrespondsToAllOriginalCuts(t *testin
 		}
 		if !found {
 			t.Fatalf("%s changed original predicate, columns, casts or multiplicity: %s", function, queries[0])
+		}
+	}
+}
+
+func TestFamily145ProspectivePublicationFaultPreservesDDLPhaseAndClosedOwner(t *testing.T) {
+	var rows []struct{ File, Function, Before, After string }
+	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var original string
+	for _, row := range rows {
+		if row.Function == "TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores" {
+			original = row.Before
+		}
+	}
+	before := family145GateRecoveryStatements(t, "package proof\n"+original, "CREATE")
+	physical := family145ConversationForkOwnerSource(t, "internal/backend/eventrecord/prospective_publication_fixture.go", "InstallProspectivePublicationCreationFailureTx")
+	after := family145GateRecoveryStatements(t, "package proof\n"+physical, "CREATE")
+	if len(before) != 3 || !reflect.DeepEqual(before, after) {
+		t.Fatalf("prospective publication fault changed event/table/action/when/error/trigger or installation order: %v/%v", before, after)
+	}
+	bridge := family145ConversationForkOwnerSource(t, "internal/runtimepersistence/test_event_support.go", "InstallProspectivePublicationCreationFailureForTest")
+	for _, cut := range []string{"validateChannelObservationOwner(selected)", "_, postgres := selected.(*PostgresStore)", "return runUnrevisionedEventFixtureTransactionForTest(ctx, selected,", "return eventrecord.InstallProspectivePublicationCreationFailureTx(ctx, tx, postgres)"} {
+		if strings.Count(bridge, cut) != 1 {
+			t.Fatalf("publication fault escaped original selected event owner: %s", cut)
+		}
+	}
+	consumer := family145ConversationForkOwnerSource(t, "../runtime/pipeline/prospective_publication_external_test.go", "TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores")
+	for _, escaped := range []string{"selected.db", "selected.postgres", "BeginTx", "CREATE TRIGGER", "CREATE FUNCTION"} {
+		if strings.Contains(consumer, escaped) {
+			t.Fatalf("prospective publication retained raw authority or dialect interpretation: %s", escaped)
 		}
 	}
 }

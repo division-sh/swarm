@@ -35,6 +35,10 @@ func InstallGateProposedEffectCreationFailure(ctx context.Context, selected any)
 	return private.InstallGateProposedEffectCreationFailureForTest(ctx, selected)
 }
 
+func InstallProspectivePublicationCreationFailure(ctx context.Context, selected any) error {
+	return private.InstallProspectivePublicationCreationFailureForTest(ctx, selected)
+}
+
 func SetGateDecisionRouteAttemptFault(ctx context.Context, selected any, event string, attempt int, due time.Time) error {
 	return private.SetGateDecisionRouteAttemptFaultForTest(ctx, selected, event, attempt, due)
 }
