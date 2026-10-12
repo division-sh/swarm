@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "f1352a5e2858485961e9ea95ecb4f87bde3dd9ad381d98e355c781bf58a819ba"
+const targetDigest = "f744a97047492b00836bc1f0cd46208db33cf9fcfe808f50fd010f6ee81b009d"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -33,6 +33,8 @@ type transition struct {
 }
 
 var files = []string{
+	"internal/runtime/budget_recovery_parity_test.go",
+	"internal/serveapp/budget_stage_recovery_test.go",
 	"internal/apiv1/conversation_fork_atomic_creation_test.go",
 	"internal/apiv1/conversation_fork_commit_omission_probe_test.go",
 	"internal/apiv1/runtime_nuke_durable_replay_test.go",
@@ -284,6 +286,8 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/budget_recovery_parity_test.go":                 {"TestCompletionBudgetRecoveryProjectionParity": true},
+	"internal/serveapp/budget_stage_recovery_test.go":                 {"TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores": true},
 	"internal/serveapp/standing_ingress_supported_surface_test.go":    {"TestStandingRestartMixedHealthyAndTerminalProcessParity": true},
 	"internal/serveapp/agent_mock_supported_surface_test.go":          {"runMockAgentSupportedSurface": true},
 	"internal/serveapp/agent_memory_supported_surface_test.go":        {"runStandingTelegramMemorySupportedSurface": true},

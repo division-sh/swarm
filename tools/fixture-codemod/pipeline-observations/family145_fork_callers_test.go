@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 541 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f1352a5e2858485961e9ea95ecb4f87bde3dd9ad381d98e355c781bf58a819ba" {
+	if err != nil || len(rows) != 543 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f744a97047492b00836bc1f0cd46208db33cf9fcfe808f50fd010f6ee81b009d" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -109,6 +109,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "TestStandingRestartMixedHealthyAndTerminalProcessParity" {
 			if err := family145StandingMixedConstructionProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "TestCompletionBudgetRecoveryProjectionParity" || row.Function == "TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores" {
+			if err := family145BudgetConstructionProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

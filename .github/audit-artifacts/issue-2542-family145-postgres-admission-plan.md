@@ -5840,3 +5840,40 @@ no whole-parent closure or new production/spec semantics claimed. Existing
 tracker/watchlist suffice; all qualification holds survive. Local only, no
 push/PR/tier/server2. Rebase still waits for #2617. Receipts:
 ~/.cache/swarm-2542-family145/fork-producer-*.
+
+## Retained-budget native construction cohort (2026-10-12)
+
+Both retained-budget PostgreSQL construction entry points now use EXISTING
+StartPostgresRuntimeStoreWithReopen(t, dsn), not AdmitPostgresRuntimeStore over
+the supplied pool. The original sandbox DSN, independently held setup/readback
+pool, service cleanup, SQLite branch, sources, entities, stage topology, spend
+records, strict source loading, corruption/missing failures, terminal/cross-run
+selection, global/stage caps, query counters and every assertion are unchanged.
+The existing native fixture registers its joined owner cleanup before later
+consumers; this cohort adds no coordinator, lifecycle adapter or callback field.
+Unused reopen results do not claim restart qualification. Other raw setup and
+readback operations remain explicit debt and receive no deletion credit.
+
+One finite two-function inverse restores ONLY the original DSN discard and
+supplied-pool construction assignments; both complete function bodies are
+source-pinned. Native-location/service-cleanup/run-source/assertion hostile
+controls fail. Initial structural RED was an AST-format indentation mismatch in
+the inverse (the backend slice formats its closure at two tabs, not four); the
+exact inverse now reflects that occurrence without changing business code.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Exact retained stage topology/stateless posture and strict missing/corrupt source rejection | reproduced and fixed | Original TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores BOTH stores under race; original PASS15.795s, native PASS14.562s, all four negative source cases preserved |
+| Scoped/global spend, terminal/cross-source exclusion and recovery projection | reproduced and fixed | Original TestCompletionBudgetRecoveryProjectionParity BOTH stores under race; original PASS11.672s, native PASS12.201s, all source/run/entity/spend/counter assertions preserved |
+
+Complete cheap collection, six boundaries and affected runtime/serveapp/tool
+U1000 pass; no performance gain claimed from unpaired timings. Immutable
+Before/24 receipts/prior Successor survive:1299/543, digest
+f744a97047492b00836bc1f0cd46208db33cf9fcfe808f50fd010f6ee81b009d.
+Downward census PASS34.484s:7847 ->7843 findings,5546 ->5544 raw sites,
+4/2 removed, ZERO added; supplied-pool56 ->54, uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Existing tracker/watchlist/spec suffice; no production contract changes, new
+framework, fallback or legacy behavior. All parent qualification holds remain.
+Local only; no push/PR/tier/server2. Rebase still waits for #2617's signal.
+Receipts:~/.cache/swarm-2542-family145/budget-native-construction-*.
