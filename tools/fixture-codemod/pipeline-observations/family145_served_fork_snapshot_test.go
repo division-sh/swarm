@@ -125,6 +125,13 @@ var family145ServedSnapshotCallers = map[string]int{
 }
 
 func family145ServedSnapshotCallerProofError(function, before, after string) error {
+	if family145ForkProducerCallers[function] != 0 {
+		var err error
+		after, err = family145ForkProducerCallerInverse(function, after)
+		if err != nil {
+			return err
+		}
+	}
 	if family145ForkReceiverJoinedCallers[function] != 0 {
 		var err error
 		after, err = family145ForkReceiverJoinedCallerInverse(function, after)

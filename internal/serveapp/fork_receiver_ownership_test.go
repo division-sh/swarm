@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -46,23 +47,13 @@ type forkReceiverProducerEvidence struct {
 	Name, Mode string
 }
 
-func readForkReceiverProducerEvidence(t *testing.T, rt servedControlProofRuntime, runID, eventID string) forkReceiverProducerEvidence {
+func readForkReceiverProducerEvidence(t *testing.T, owner runtimebus.EventStore, runID, eventID string) forkReceiverProducerEvidence {
 	t.Helper()
-	var evidence forkReceiverProducerEvidence
-	var kind, authority, routeJSON string
-	if err := rt.DB.QueryRow(`SELECT routing_source_kind,COALESCE(routing_source_authority,''),CAST(source_route AS TEXT),event_name,execution_mode FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&kind, &authority, &routeJSON, &evidence.Name, &evidence.Mode); err != nil {
-		t.Fatal(err)
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, eventID)
+	if event.RunID() != runID {
+		t.Fatalf("producer event %s belongs to run %s, not requested run %s", eventID, event.RunID(), runID)
 	}
-	var route events.RouteIdentity
-	if err := json.Unmarshal([]byte(routeJSON), &route); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	evidence.Source, err = events.RestoreRoutingSource(kind, route, authority)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return evidence
+	return forkReceiverProducerEvidence{Source: event.RoutingSource(), Name: string(event.Type()), Mode: string(event.ExecutionMode())}
 }
 
 func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
@@ -410,7 +401,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			}
 		}
 	}
-	producerEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+	producerEvidence := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, frontier)
 	producer, producerExists := sourceRows[prefix+"producer"]
 	if producerExists == entitylessProducer || (producerExists && (producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
 		t.Fatalf("source producer prerequisite: %+v", sourceRows)
@@ -459,7 +450,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatal(err)
 		}
 		for _, occurrence := range frontiers {
-			if got := readForkReceiverProducerEvidence(t, rt, seed.RunID, occurrence); got != producerEvidence {
+			if got := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, occurrence); got != producerEvidence {
 				t.Fatalf("same-owner occurrence lost producer or execution mode: first=%+v got=%+v", producerEvidence, got)
 			}
 			for _, receiver := range receivers {
@@ -583,7 +574,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 	// This persisted child event has passed backend source-event loading and
 	// container preparation/publication. Compare their composition, not helpers.
-	childProducer := readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent)
+	childProducer := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent)
 	if childProducer != producerEvidence {
 		t.Fatalf("backend/container composition changed immutable non-root producer: source=%+v child=%+v", producerEvidence, childProducer)
 	}
@@ -982,7 +973,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if exists == entityless || (exists && (producer.ID == consumer.ID || producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
 					t.Fatalf("source producer ownership: %+v", sourceRows)
 				}
-				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+				sourceEvidence := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, frontier)
 				var producerHeaderID string
 				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='producer' AND flow_template='producer'`, seed.RunID).Scan(&producerHeaderID); err != nil {
 					t.Fatal(err)
@@ -1006,7 +997,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
-				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")
 				}
 				childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)

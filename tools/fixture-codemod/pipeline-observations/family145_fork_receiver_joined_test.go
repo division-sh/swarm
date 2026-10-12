@@ -37,6 +37,9 @@ func family145ForkReceiverJoinedCallerInverse(function, after string) (string, e
 }
 
 func family145ForkReceiverJoinedCallerProofError(function, before, after string) error {
+	if family145ForkProducerCallers[function] != 0 {
+		return family145ForkProducerCallerProofError(function, before, after)
+	}
 	normalized, err := family145ForkReceiverJoinedCallerInverse(function, after)
 	if err != nil {
 		return err
@@ -198,6 +201,12 @@ func family145ForkReceiverJoinedFunctionCalls(t *testing.T, function *ast.FuncDe
 		name := family145NodeString(call.Fun)
 		if name == "readForkReceiverRows" {
 			t.Fatal("retired raw receiver caller returned")
+		}
+		if name == "readForkReceiverProducerEvidence" {
+			if family145ForkProducerCallers[function.Name.Name] == 0 || len(call.Args) != 4 || family145NodeString(call.Args[1]) != "rt.Runtime.Bus.Store()" {
+				t.Fatal("producer call escaped its finite live selected bus owner")
+			}
+			counts["producer/"+function.Name.Name]++
 		}
 		if family145ForkReceiverJoinedCallers[function.Name.Name] != 0 && name == "readWorkspaceProofReceiverRows" {
 			if len(call.Args) != 3 || family145NodeString(call.Args[1]) != "rt.Runtime.Bus.Store()" {

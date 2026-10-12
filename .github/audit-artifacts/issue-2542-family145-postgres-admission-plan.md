@@ -5802,3 +5802,41 @@ parent debt, not this chosen-chain closure. Existing tracker/watchlist/spec
 suffice; all qualification holds remain. Local only; no push/PR/tier/server2.
 Rebase still waits for #2617's merge signal. Receipts:
 ~/.cache/swarm-2542-family145/fork-receiver-joined-*.
+
+## Whole fork producer evidence interpreter chain (2026-10-12)
+
+readForkReceiverProducerEvidence no longer queries/decodes routing kind,
+authority, route JSON, event name or execution mode independently. Its narrowed
+EventStore input now consumes EXISTING LoadCanonicalEventRecord/eventrecord
+decoding, checks exact requested RunID (preserving the old run/event predicate),
+then projects unchanged Source/Name/Mode. All8 callers across4 declarations
+and3 files pass the actual runtime Bus.Store(). No new canonical decoder,
+fallback, selector or storage port. The complete canonical record must be valid;
+malformed persistence fails closed rather than becoming plausible partial
+evidence. All original source/fork/replay/identity assertions are unchanged.
+
+Exact reader source and whole-body caller inverses compose the preceding joined
+inventory/application snapshot migrations. Owned-source inventory requires all8
+original bus-owner arguments; context/event/run/refusal/source/name/mode and
+foreign-owner hostile controls fail. The first hostile-control RED exposed a
+mutation targeting an earlier joined-row call, not the producer call; the
+control now mutates the exact producer invocation. No guard rule was relaxed.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Source and fork immutable producer source/name/mode, distinct repeated occurrences and acquisition evidence | reproduced and fixed | Original supplemental acquisition, independent business and selected materializing_mixed/same_owner_two_events_and_duplicate cells on BOTH stores under race, PASS108.771s |
+| Root loop frontier and fork-local revision event retain root provenance | reproduced and fixed | Original TestServedCompiledRootLoopForkProjectsRevisionOnBothStores BOTH stores under race PASS21.582s, payload/revision/identity assertions unchanged |
+| Complete canonical decoding through original selected read owner; raw/cancelled/closed/invalid ownership refusal | execution-proven through the same corrected path | BOTH existing canonical event observation owner roots under race PASS17.668s, with full record equality and exact coordinator counters |
+| Requested run remains authoritative even when the event ID exists elsewhere | reproduced and fixed | Actual caller injection supplies foreign-run for a healthy producer event: BOTH stores fail at the explicit run refusal; actual-source guard RED. Exact restoration PASS29.740s, assertions unchanged |
+
+Complete cheap collection PASS17.374s; six boundaries and affected U1000 pass.
+Immutable Before/24 receipts/prior Successor preserved:1298/541, digest
+f1352a5e2858485961e9ea95ecb4f87bde3dd9ad381d98e355c781bf58a819ba.
+Downward census PASS40.779s:7858 ->7847 findings,5556 ->5546 raw sites,
+11/10 removed, ZERO added; supplied-pool56 and uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Other companion/source-domain/delivery/fault readers remain named parent debt;
+no whole-parent closure or new production/spec semantics claimed. Existing
+tracker/watchlist suffice; all qualification holds survive. Local only, no
+push/PR/tier/server2. Rebase still waits for #2617. Receipts:
+~/.cache/swarm-2542-family145/fork-producer-*.

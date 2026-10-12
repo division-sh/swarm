@@ -234,7 +234,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 		t.Fatalf("root-declared revision did not project: source=%#v child=%#v", sourcePayload, childPayload)
 	}
 	for run, event := range map[string]string{parentRun: frontierID, runID: childEvent} {
-		source := readForkReceiverProducerEvidence(t, rt, run, event).Source
+		source := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), run, event).Source
 		if source.Kind() != events.RoutingSourceRoot {
 			t.Fatalf("root input source changed: %#v", source)
 		}

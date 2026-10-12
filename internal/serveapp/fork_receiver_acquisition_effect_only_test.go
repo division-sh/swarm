@@ -151,7 +151,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if len(sourceRows) != 3 || producer.ID != flowidentity.EntityID("producer") || producer.Type != "work" || producer.Fields["marker"] != "producer-owned" || producer.ID == flowidentity.EntityID("consumer") {
 					t.Fatalf("independent source producer/receiver ownership: %+v", sourceRows)
 				}
-				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+				sourceEvidence := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, frontier)
 				if sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producer.ID}) {
 					t.Fatalf("immutable source producer: %+v", sourceEvidence)
 				}
@@ -170,7 +170,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 				childRoute := requireSupplementalForkAcquisitionSettlement(t, rt, fork.ForkRunID, childEvent, tc.policy)
-				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("acquisition fork changed compiled handler or immutable producer")
 				}
 				childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)

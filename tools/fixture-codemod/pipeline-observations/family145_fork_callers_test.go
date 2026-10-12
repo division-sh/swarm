@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 539 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "1da8d1f7eededb46874616a0eda0f9a407f887bf1bc5fa7be2e3df115f6b0dbe" {
+	if err != nil || len(rows) != 541 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f1352a5e2858485961e9ea95ecb4f87bde3dd9ad381d98e355c781bf58a819ba" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -144,9 +144,20 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			continue
 		}
 		if family145ForkReceiverJoinedCallers[row.Function] != 0 {
-			normalized, err := family145ForkReceiverJoinedCallerInverse(row.Function, row.After)
-			if err != nil || normalized != row.Before {
-				t.Fatalf("receiver joined caller changed original workload/identity/assertions: %s/%v", row.Function, err)
+			if err := family145ForkReceiverJoinedCallerProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "readForkReceiverProducerEvidence" {
+			if err := family145ForkProducerReaderProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145ForkProducerCallers[row.Function] != 0 {
+			if err := family145ForkProducerCallerProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
 			}
 			continue
 		}
