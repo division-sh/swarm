@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 506 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b88c75b532800596797f371dbf4d6abce171a1c4a5d8765975cdb1b42d6aa893" {
+	if err != nil || len(rows) != 510 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "e72e5bbcfd8fbed3814dafdf1b51960f639d0be052eaa0e93ebac9bae59e6422" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -91,6 +91,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "gateCompletionHarness" {
 			if err := family145GateCompletionConstructorProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, known := family145ServedRestartConstructors[row.Function]; known {
+			if err := family145ServedRestartConstructionProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

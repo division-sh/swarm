@@ -5496,3 +5496,63 @@ complexity precede the stacking report. Existing raw_sql_policy and #2542/#2151
 tracking/watchlist scope govern; parent and M01/Docker/drain/D3/M07/integration
 holds stay open/unwaived. Local only, no push/PR/tier/server2. Receipts
 ~/.cache/swarm-2542-family145/gate-completion-native-construction-*.
+
+## Whole DB-Bound Serve Restart Callback Cohort
+
+Closed all FOUR repeated in-callback PostgreSQL facade/bootstrap/getter paths
+that passed the separately opened facade's db to openSelectedPostgresOwner:
+lifecycleRestartHarness, TestReceiverCompositionRestartBothStores,
+TestServedMailboxCursorRetainedRestartParity and
+TestAudit2277StoppedRunReadinessRestart. Construction now directly consumes the
+existing opaque selected.OpenRuntime owner with the real context, exact backend
+selection, original DSN and original session TTL. Existing sandbox/override
+cleanup remains unchanged; the served process owns joining and closing its
+actual selected store. No new construction helper or production semantics.
+
+The shared lifecycle harness already captured the actual projection on both
+backends; its redundant independent facade is removed. Receiver and stopped-
+readiness journeys now capture db from their actual projection on BOTH stores.
+Mailbox cursor needs NO database observation: its unused raw variable/capture
+are deleted, while every public cursor/readback assertion stays exact. Its
+initial build RED identified that unnecessary variable; the repair removes the
+capability rather than adding a dummy use. All original source/options, handler
+barriers, child claims, complete construction receipts, route identity, graceful
+drain, source-removal/replacement, response replay and restart cuts remain.
+
+The finite codemod has an EXACT whole-body inverse for all four functions, plus
+complete business-assertion equality and hostile assertion/context/DSN/selection/
+TTL/readiness/cleanup controls. A separate exhaustive source-pinned inventory
+retains ALL27 shared-harness callers, including their exact source expressions
+and the optional3-minute readiness argument. Missing, extra and changed calls
+are rejected. The first guard REDs caught a tuple-versus-source assertion
+representation and source-order-versus-sorted inventory, both repaired by exact
+comparison of the unchanged assertions/call set. No dropped row or relaxation.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Shared lifecycle callback's duplicate facade and frozen-source/gate/cap/escape restart consumers | reproduced and fixed | Original frozen-gate and compiled-transition roots on BOTH stores, before-cap-handler and before-escape-consumer cuts; five-root cohort race before PASS132.623s and native PASS115.656s,12 backend-cut cells total; complete helper inverse |
+| Child receiver construction and route/claim receipts across real restart | reproduced and fixed | Original receiver-composition restart root on BOTH stores in the same execution receipt; exact source deletion, recorded child claim, two construction receipts, route and public readback assertions preserved |
+| Public retained mailbox cursor, with no incidental raw authority | reproduced and fixed | Original SQLite/PostgreSQL cursor restart journey above, unchanged stable row identities, pre-restart continuation and every subsequent page assertion; raw handle/capture absent by hostile control |
+| Stopped-run readiness preserves history under source replacement | reproduced and fixed | Original SQLite/PostgreSQL stopped-readiness restart journey above, original lifecycle probe, readiness rows, stopped-run snapshot and changed-source coordinate assertions unchanged |
+| All27 other direct/indirect lifecycle-harness caller bindings | execution-proven through the same corrected path | Exact complete27-call inventory retains original source/readiness arguments; whole shared-harness inverse plus real two-backend frozen/compiled restart executions above. No claim of fresh execution of every unaffected workload or full restart qualification |
+
+Complete142-root cheap Family145/current/historical collection PASS14.455s;
+four serve construction/join guards PASS0.576s, four selected ownership controls
+PASS0.092s and six persistence boundaries PASS3.503s; affected U1000 clean.
+Corpus1282/510, digest
+e72e5bbcfd8fbed3814dafdf1b51960f639d0be052eaa0e93ebac9bae59e6422;
+all24 historical receipts and previous successors retained. Downward census
+PASS32.384s:7965 ->7945 findings,5639 ->5630 raw sites,20/9 removals,
+ZERO additions, uncertainty67, supplied-pool calls56 unchanged. Final unchanged
+ratchet PASS20.859s; signed-head complexity precedes the stacking report.
+
+Closure is the complete repeated DB-bound in-callback cohort, NOT every served
+constructor or parent closure. Pre-open/prepareRestart standing/mock/memory
+variants, the standing callback's separate raw observation map and direct paused/
+dynamic-topology selected fixtures remain EXPLICIT same-parent debt in #2542.
+They require their own capture/lifetime/caller propagation; none is silently
+classified as a different concept or waived. Existing raw_sql_policy and
+#2542/#2151 tracker/watchlist scope remain binding; no spec architecture change,
+new issue or exemption. M01/Docker/drain/D3/M07/integration holds stay unwaived.
+Local only, no push/PR/tier/server2; receipts
+~/.cache/swarm-2542-family145/served-restart-duplicate-construction-*.
