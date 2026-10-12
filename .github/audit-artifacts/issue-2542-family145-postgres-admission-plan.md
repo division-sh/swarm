@@ -4498,3 +4498,44 @@ Largest ready tail: timer supported-surface helpers18 references; map execution
 Shared carrier/openers and broader gate/A2/parent closure plus existing semantic/
 qualification holds remain open. No push/PR, tier, server2 or waiver. Signed-head
 complexity follows. Receipts ~/.cache/swarm-2542-family145/a2-event-delivery-tail-*.
+
+## Shared Gate Dependency: Whole Physical Workflow-Timer Read Family
+
+Four shared helpers (activation, occurrence, status assertion and status wait)
+now consume three fixed genericschedule physical readers. The duplicate status
+SQL/dialect interpretation is removed from both callers. Every original SQLite/
+PostgreSQL literal, run/entity/task_type/status predicate and scan destination
+is retained. Occurrence returns the same raw driver time value: the existing
+timestamp parser, activation-ID parser, UTC conversion, five-second deadline,
+ten-millisecond polling and caller error/cardinality assertions remain unchanged.
+This closes the timers-table helper family, not the file's distinct event,
+delivery and diagnostic readers or any normal scheduler semantics.
+
+Six affected original whole roots passed both stores under race35.174s,
+including one-shot/recurring restart, actual connect execution, synchronous
+cancellation and rollback/retry. The seventh receipt-recovery root does not
+consume these helpers; its unchanged evidence carries, not a new pass claim.
+Native proof uses existing source-aware flow preparation and actual atomic flow
+activation to persist one compiled timer. Original-query task/time/status bytes
+and driver types match exactly, three separately admitted native read commits
+are observed, and foreign run/entity, status mismatch, cancellation and raw/
+closed refusal preserve empty error evidence. Complete application/history/lease/
+clock snapshots are unchanged by reads. Genuinely issued dynamic activation
+authority then cancels through the existing timer reconciliation owner; cancelled
+history retains exact task/due time and remains readable (no active-only filter).
+Attempt retirement is immediately registered and joined through existing fixture
+cleanup. Native both-store race PASS15.411s; no fabricated hashes, leases or DDL.
+
+Finite controls keep all four helpers' original assertions, exact native bindings,
+raw-time/parser/wait behavior and all original dialect literals, rejecting lost
+cuts/clock/cardinality. Relevant finite/current/historical collection PASS10.480s;
+six persistence boundaries PASS4.367s; U1000 clean. Corpus1224/438, digest
+312285b24d96aa79333a677aae8c8370b773253b51c900a3849abb0422321dcd;
+immutable mechanical inputs unchanged. Downward census PASS149.510s:
+8366 ->8358 findings,5977 ->5969 raw sites, eight removals/zero additions;
+uncertainty67 and supplied-pool calls61 unchanged. Carrier/openers, distinct
+timer event/delivery/diagnostic tail, broader gate/A2/parent completion and all
+existing M07/D3/Docker/M01/drain qualification holds remain open; these focused
+passes do not waive or attribute those holds. No push/PR, tier or server2.
+Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/workflow-timer-physical-*.

@@ -10,6 +10,30 @@ import (
 	"github.com/google/uuid"
 )
 
+type WorkflowTimerActivationStorage = genericschedule.WorkflowTimerActivationStorage
+type WorkflowTimerOccurrenceStorage = genericschedule.WorkflowTimerOccurrenceStorage
+
+func ReadWorkflowTimerActivationStorageForTest(ctx context.Context, selected any, runID, entityID string) (WorkflowTimerActivationStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, entityID}, func(ctx context.Context, tx *sql.Tx) (WorkflowTimerActivationStorage, error) {
+		return genericschedule.ReadWorkflowTimerActivationStorageTx(ctx, tx, postgres, runID, entityID)
+	})
+}
+
+func ReadWorkflowTimerOccurrenceStorageForTest(ctx context.Context, selected any, runID, entityID string) (WorkflowTimerOccurrenceStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, entityID}, func(ctx context.Context, tx *sql.Tx) (WorkflowTimerOccurrenceStorage, error) {
+		return genericschedule.ReadWorkflowTimerOccurrenceStorageTx(ctx, tx, postgres, runID, entityID)
+	})
+}
+
+func CountWorkflowTimerStatusRowsForTest(ctx context.Context, selected any, runID, entityID, status string) (int, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, entityID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return genericschedule.CountWorkflowTimerStatusRowsTx(ctx, tx, postgres, runID, entityID, status)
+	})
+}
+
 func CountRunTimerStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return genericschedule.CountTimerRowsForRun(ctx, tx, runID)

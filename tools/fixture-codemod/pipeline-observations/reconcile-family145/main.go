@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "89b69d96d52ca8388570aca61525c05131e0e06b17881d3c7c7ca31d31bbde9d"
+const targetDigest = "312285b24d96aa79333a677aae8c8370b773253b51c900a3849abb0422321dcd"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -103,6 +103,7 @@ var files = []string{
 	"internal/runtime/operator_channel_inbound_supported_surface_test.go",
 	"internal/runtime/bus/eventbus_publish_test.go",
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+	"internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go",
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go",
 	"internal/runtime/pipeline/a2_join_until_race_external_test.go",
 	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go",
@@ -223,6 +224,7 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go":               {"workflowTimerPersistedActivation": true, "workflowTimerPersistedOccurrence": true, "assertWorkflowTimerServedRows": true, "waitWorkflowTimerRowStatus": true},
 	"internal/serveapp/receiver_mixed_agent_test.go":                                            {"TestReceiverCompositionMixedAgentBothStores": true},
 	"internal/runtime/pipeline/prospective_publication_external_test.go":                        {"TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": true, "CommitWorkflowEngineMutation/*observedProspectivePersistence": true},
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go":                     {"TestReceiverCompositionActivationReuseAndConflictBothStores": true},
