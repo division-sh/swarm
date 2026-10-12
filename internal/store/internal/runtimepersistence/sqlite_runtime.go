@@ -119,15 +119,14 @@ func (s *SQLiteRuntimeStore) Close() error {
 	if s == nil {
 		return nil
 	}
+	var closeErr error
 	if s.schema != nil {
-		if err := s.schema.Close(); err != nil {
-			return err
-		}
+		closeErr = s.schema.Close()
 	}
 	if s.startupSQLiteOwner != nil {
-		return s.startupSQLiteOwner.ReleaseConstructionPossession()
+		return errors.Join(closeErr, s.startupSQLiteOwner.ReleaseConstructionPossession())
 	}
-	return nil
+	return closeErr
 }
 
 func (s *SQLiteRuntimeStore) Ping(ctx context.Context) error {
