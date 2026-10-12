@@ -367,7 +367,38 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 			return err
 		}
 	}
+	if err := validateToolSchemaConstraintKinds(path, value, allowEqualTo); err != nil {
+		return err
+	}
+	if err := validateToolSchemaNumericBounds(path, value); err != nil {
+		return err
+	}
+	if err := validateAdmittedBounds(path, "Length", value.minLength, value.hasMinLength, value.maxLength, value.hasMaxLength); err != nil {
+		return err
+	}
+	if err := validateAdmittedBounds(path, "Items", value.minItems, value.hasMinItems, value.maxItems, value.hasMaxItems); err != nil {
+		return err
+	}
+	if err := validateToolSchemaPattern(path, value.pattern); err != nil {
+		return err
+	}
+	switch value.kind {
+	case ToolSchemaArray:
+		if !value.hasItems {
+			return fmt.Errorf("%s array requires items", path)
+		}
+		if err := validateAdmittedToolInputSchemaActive(path+".items", value.items, depth+1, false, active); err != nil {
+			return err
+		}
+	case ToolSchemaObject:
+		if err := validateToolSchemaObjectDefinition(path, value, depth, active); err != nil {
+			return err
+		}
+	}
+	return validateToolSchemaEnumDefinition(path, schema)
+}
 
+func validateToolSchemaConstraintKinds(path string, value *toolInputSchemaValue, allowEqualTo bool) error {
 	if value.kind != ToolSchemaObject && (len(value.properties) > 0 || len(value.required) > 0 || value.hasPropertyNames || value.additionalAllowedDeclared || value.hasAdditionalSchema) {
 		return fmt.Errorf("%s type %s cannot declare object constraints", path, value.kind)
 	}
@@ -383,7 +414,10 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 	if value.kind != ToolSchemaInteger && value.kind != ToolSchemaNumber && (value.hasMinimum || value.hasMaximum) {
 		return fmt.Errorf("%s type %s cannot declare numeric constraints", path, value.kind)
 	}
+	return nil
+}
 
+func validateToolSchemaNumericBounds(path string, value *toolInputSchemaValue) error {
 	if value.hasMinimum {
 		if !isFiniteSchemaNumber(value.minimum) || isNegativeZero(value.minimum) {
 			return fmt.Errorf("%s minimum must be a finite non-negative-zero JSON number", path)
@@ -403,75 +437,89 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 	if value.hasMinimum && value.hasMaximum && value.minimum > value.maximum {
 		return fmt.Errorf("%s minimum must be <= maximum", path)
 	}
-	if err := validateAdmittedBounds(path, "Length", value.minLength, value.hasMinLength, value.maxLength, value.hasMaxLength); err != nil {
-		return err
-	}
-	if err := validateAdmittedBounds(path, "Items", value.minItems, value.hasMinItems, value.maxItems, value.hasMaxItems); err != nil {
-		return err
-	}
-	if value.pattern != "" {
-		if !utf8.ValidString(value.pattern) {
+	return nil
+}
+
+func validateToolSchemaPattern(path, pattern string) error {
+	if pattern != "" {
+		if !utf8.ValidString(pattern) {
 			return fmt.Errorf("%s pattern is not valid UTF-8", path)
 		}
-		if _, err := regexp.Compile(value.pattern); err != nil {
+		if _, err := regexp.Compile(pattern); err != nil {
 			return fmt.Errorf("%s pattern is invalid: %w", path, err)
 		}
 	}
+	return nil
+}
 
-	if value.kind == ToolSchemaArray {
-		if !value.hasItems {
-			return fmt.Errorf("%s array requires items", path)
-		}
-		if err := validateAdmittedToolInputSchemaActive(path+".items", value.items, depth+1, false, active); err != nil {
+func validateToolSchemaObjectDefinition(path string, value *toolInputSchemaValue, depth int, active map[*toolInputSchemaValue]struct{}) error {
+	if value.hasPropertyNames {
+		if err := validateAdmittedToolInputSchemaActive(path+".propertyNames", value.propertyNames, depth+1, false, active); err != nil {
 			return err
 		}
 	}
-	if value.kind == ToolSchemaObject {
-		if value.hasPropertyNames {
-			if err := validateAdmittedToolInputSchemaActive(path+".propertyNames", value.propertyNames, depth+1, false, active); err != nil {
-				return err
-			}
+	if value.additionalAllowedDeclared && value.hasAdditionalSchema {
+		return fmt.Errorf("%s additionalProperties must declare a boolean or schema, not both", path)
+	}
+	if err := validateToolSchemaProperties(path, value.properties, depth, active); err != nil {
+		return err
+	}
+	if err := validateToolSchemaEqualityTargets(path, value.properties); err != nil {
+		return err
+	}
+	if err := validateToolSchemaRequiredProperties(path, value.properties, value.required); err != nil {
+		return err
+	}
+	if value.hasAdditionalSchema {
+		return validateAdmittedToolInputSchemaActive(path+".additionalProperties", value.additionalSchema, depth+1, false, active)
+	}
+	return nil
+}
+
+func validateToolSchemaProperties(path string, properties map[string]ToolInputSchema, depth int, active map[*toolInputSchemaValue]struct{}) error {
+	for name, property := range properties {
+		if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
+			return fmt.Errorf("%s property name %q is not canonical", path, name)
 		}
-		if value.additionalAllowedDeclared && value.hasAdditionalSchema {
-			return fmt.Errorf("%s additionalProperties must declare a boolean or schema, not both", path)
-		}
-		for name, property := range value.properties {
-			if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
-				return fmt.Errorf("%s property name %q is not canonical", path, name)
-			}
-			if err := validateAdmittedToolInputSchemaActive(path+".properties["+name+"]", property, depth+1, true, active); err != nil {
-				return err
-			}
-		}
-		for name, property := range value.properties {
-			target := property.value.equalTo
-			if target == "" {
-				continue
-			}
-			if _, exists := value.properties[target]; !exists {
-				return fmt.Errorf("%s property %q x-swarm-equalTo target %q is not declared", path, name, target)
-			}
-		}
-		seenRequired := map[string]struct{}{}
-		for _, name := range value.required {
-			if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
-				return fmt.Errorf("%s required property name %q is not canonical", path, name)
-			}
-			if _, duplicate := seenRequired[name]; duplicate {
-				return fmt.Errorf("%s required property %q is duplicated", path, name)
-			}
-			seenRequired[name] = struct{}{}
-			if _, exists := value.properties[name]; !exists {
-				return fmt.Errorf("%s required property %q is not declared", path, name)
-			}
-		}
-		if value.hasAdditionalSchema {
-			if err := validateAdmittedToolInputSchemaActive(path+".additionalProperties", value.additionalSchema, depth+1, false, active); err != nil {
-				return err
-			}
+		if err := validateAdmittedToolInputSchemaActive(path+".properties["+name+"]", property, depth+1, true, active); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+func validateToolSchemaEqualityTargets(path string, properties map[string]ToolInputSchema) error {
+	for name, property := range properties {
+		target := property.value.equalTo
+		if target == "" {
+			continue
+		}
+		if _, exists := properties[target]; !exists {
+			return fmt.Errorf("%s property %q x-swarm-equalTo target %q is not declared", path, name, target)
+		}
+	}
+	return nil
+}
+
+func validateToolSchemaRequiredProperties(path string, properties map[string]ToolInputSchema, required []string) error {
+	seenRequired := map[string]struct{}{}
+	for _, name := range required {
+		if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
+			return fmt.Errorf("%s required property name %q is not canonical", path, name)
+		}
+		if _, duplicate := seenRequired[name]; duplicate {
+			return fmt.Errorf("%s required property %q is duplicated", path, name)
+		}
+		seenRequired[name] = struct{}{}
+		if _, exists := properties[name]; !exists {
+			return fmt.Errorf("%s required property %q is not declared", path, name)
+		}
+	}
+	return nil
+}
+
+func validateToolSchemaEnumDefinition(path string, schema ToolInputSchema) error {
+	value := schema.value
 	if value.enumDeclared && len(value.enum) == 0 {
 		return fmt.Errorf("%s enum must contain at least one value", path)
 	}
