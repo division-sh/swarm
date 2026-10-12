@@ -250,15 +250,11 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			}
 			requireRefusal := func() {
 				t.Helper()
-				var status string
-				var attempts, settled, open int
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT d.status,
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.open_marker=TRUE)
- FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, refused.event.ID()).Scan(&status, &attempts, &settled, &open); err != nil {
+				storage, err := storetest.ReadCanonicalAccumulatorRefusalStorage(proof.ctx, proof.selected.events, refused.event.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
+				status, attempts, settled, open := storage.Status, storage.Attempts, storage.Settled, storage.Open
 				if status != "dead_letter" || attempts != 1 || settled != 1 || open != 0 {
 					t.Fatalf("corruption refusal did not settle its exact claim: status=%s attempts=%d settled=%d open=%d", status, attempts, settled, open)
 				}
@@ -408,14 +404,12 @@ func a2CanonicalAccumulatorEvidence(t *testing.T, proof *a2AccumulatorPersistenc
 
 func requireA2CanonicalAccumulatorClaim(t *testing.T, proof *a2AccumulatorPersistenceProof, publication a2AccumulatorPublication) string {
 	t.Helper()
-	var deliveryID, status string
-	var attempts, settled int
-	if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT d.delivery_id, d.status,
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE)
- FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, publication.event.ID()).Scan(&deliveryID, &status, &attempts, &settled); err != nil {
+	storage, err := storetest.ReadCanonicalAccumulatorClaimStorage(proof.ctx, proof.selected.events, publication.event.ID())
+	if err != nil {
 		t.Fatal(err)
 	}
+	deliveryID, status := storage.DeliveryID, storage.Status
+	attempts, settled := storage.Attempts, storage.Settled
 	if status != "delivered" || attempts != 1 || settled != 1 {
 		t.Fatalf("publication did not acquire and settle one real persisted claim: delivery=%s status=%s attempts=%d settled=%d", deliveryID, status, attempts, settled)
 	}

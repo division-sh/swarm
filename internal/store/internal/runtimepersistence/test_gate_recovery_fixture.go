@@ -23,6 +23,28 @@ func ReadGateNodeDeliveryStatusForTest(ctx context.Context, selected any, event,
 
 type A2EarlyRefusalStorage = delivery.A2EarlyRefusalStorage
 
+type CanonicalAccumulatorClaimStorage = delivery.CanonicalAccumulatorClaimStorage
+type CanonicalAccumulatorRefusalStorage = delivery.CanonicalAccumulatorRefusalStorage
+type ReceiverAppearanceSettlementStorage = delivery.ReceiverAppearanceSettlementStorage
+
+func ReadCanonicalAccumulatorClaimStorageForTest(ctx context.Context, selected any, eventID string) (CanonicalAccumulatorClaimStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (CanonicalAccumulatorClaimStorage, error) {
+		return delivery.ReadCanonicalAccumulatorClaimStorageTx(ctx, tx, eventID)
+	})
+}
+
+func ReadCanonicalAccumulatorRefusalStorageForTest(ctx context.Context, selected any, eventID string) (CanonicalAccumulatorRefusalStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (CanonicalAccumulatorRefusalStorage, error) {
+		return delivery.ReadCanonicalAccumulatorRefusalStorageTx(ctx, tx, eventID)
+	})
+}
+
+func ReadReceiverAppearanceSettlementStorageForTest(ctx context.Context, selected any, eventID string) (ReceiverAppearanceSettlementStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (ReceiverAppearanceSettlementStorage, error) {
+		return delivery.ReadReceiverAppearanceSettlementStorageTx(ctx, tx, eventID)
+	})
+}
+
 func ReadA2EarlyRefusalForTest(ctx context.Context, selected any, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
 	_, postgres := selected.(*PostgresStore)
 	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (A2EarlyRefusalStorage, error) {

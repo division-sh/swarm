@@ -371,6 +371,46 @@ type A2EarlyRefusalStorage struct {
 	SettledAttempts          int
 }
 
+type CanonicalAccumulatorClaimStorage struct {
+	DeliveryID, Status string
+	Attempts, Settled  int
+}
+
+type CanonicalAccumulatorRefusalStorage struct {
+	Status                  string
+	Attempts, Settled, Open int
+}
+
+type ReceiverAppearanceSettlementStorage struct {
+	Status   string
+	Outcomes int
+}
+
+func ReadCanonicalAccumulatorClaimStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (CanonicalAccumulatorClaimStorage, error) {
+	var out CanonicalAccumulatorClaimStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.delivery_id, d.status,
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE)
+ FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, eventID).Scan(&out.DeliveryID, &out.Status, &out.Attempts, &out.Settled)
+	return out, err
+}
+
+func ReadCanonicalAccumulatorRefusalStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (CanonicalAccumulatorRefusalStorage, error) {
+	var out CanonicalAccumulatorRefusalStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status,
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.open_marker=TRUE)
+ FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, eventID).Scan(&out.Status, &out.Attempts, &out.Settled, &out.Open)
+	return out, err
+}
+
+func ReadReceiverAppearanceSettlementStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (ReceiverAppearanceSettlementStorage, error) {
+	var out ReceiverAppearanceSettlementStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status, (SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1`, eventID).Scan(&out.Status, &out.Outcomes)
+	return out, err
+}
+
 func ReadA2EarlyRefusalTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
 	query := `SELECT d.status, CAST(COALESCE(d.failure, '{}') AS TEXT), COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
 		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'

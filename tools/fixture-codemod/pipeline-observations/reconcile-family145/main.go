@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "f9f39956313f2213b57495126a28e43d6d8db12cc0f9bbc0984aa74d3dfaaeca"
+const targetDigest = "ad80f49755c03fd87708f2b6209c3aeb26f6659104b8c99b41b73f77e29dcd18"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -245,7 +245,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go":                           {"TestA2JoinResultTypesRealExecutionAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true, "footprint/*a2MembershipAdmission": true, "TestA2MembershipSnapshotValidationOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
-	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true, "TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores": true},
+	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true, "TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores": true, "requireA2CanonicalAccumulatorClaim": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true, "runA2MapFanOutCompiledImmutableSource": true, "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores": true},

@@ -4747,3 +4747,49 @@ qualification holds remain unchanged. Gate-carrier tail18 references/7files;
 neither compound-footprint nor complete carrier/parent closure is claimed.
 Local only, no push/PR/tier/server2. Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/fan-out-metadata-*.
+
+## Shared Gate/A2 Dependency: Whole Canonical Claim/Settlement Read Chain
+
+The remaining canonical accumulator claim/refusal helper and receiver appearance
+settlement reads now consume three exact fixed projections in the existing closed
+delivery owner. They are not substitutes for the node-key-filtered early-refusal
+reader: the two accumulator reads select event plus node recipient type, counting
+nonnull claim tokens, settled closed attempts and (for refusal) open attempts.
+Appearance retains its broader event-only scope and closure_kind-only settled
+count. Every original single-statement cut, scan destination and assertion remains;
+the original context-free appearance read explicitly uses context.Background.
+Complete appearance caller file is raw-SQL/dialect-free; the other accumulator
+mutation-diagnostic tail remains live. No generic query or new owner is exposed.
+
+All three original roots passed both stores under race41.253s, including numeric
+kind/key evidence, duplicate source rejection then lawful execution, exact receiver
+reuse/conflict and unrelated sibling exclusion. Native controls cover pending,
+real claimed, delivered and dead-letter phases plus genuine agent deliveries.
+Node-only readers refuse agents while appearance observes them. Each phase uses
+three original coordinator transactions: successful nodes commit three reads;
+agent node-exclusion correctly rolls back two no-row reads and commits appearance.
+Complete physical snapshots remain identical. Raw/invalid/closed/cancelled/foreign
+controls remain fail closed. Development controls initially named the claimed
+status incorrectly and assumed no-row reads commit; both were corrected to actual
+native in_progress/rollback evidence, without changing production or assertions.
+Final native two-root collection PASS18.452s. Deliberately removing the claim
+reader's node predicate failed on both stores10.953s (actual agent borrowed);
+restoration is included in the final GREEN above.
+
+Finite controls retain every original business/refusal/restoration assertion,
+context/identity/read order, exact correlated SQL and scan destinations. The lawful
+restoration cut is pinned separately from the earlier cleanup registration, and
+both before/after-lawful refusal checks are required. Relevant complete/current/
+historical collection PASS6.520s; boundaries PASS3.508s; U1000 clean. Corpus1237/451,
+digest ad80f49755c03fd87708f2b6209c3aeb26f6659104b8c99b41b73f77e29dcd18.
+The 24 immutable Before/After/Mechanical receipts are byte-for-byte unchanged;
+only the receiver appearance current Successor changes. Its exact aggregate
+current/historical digest is now
+1574d0e845b717b7f1697ae94d29f64596c6e7fb9b439ee62d6e4bb57e600be5.
+
+Downward census PASS138.132s:8314 ->8308 findings,5929 ->5923 raw sites,
+six removals/zero additions. Uncertainty67 and supplied-pool calls61 unchanged.
+Compound footprints and source faults remain live; no whole carrier/parent
+closure or existing qualification-hold waiver is claimed. Local only; no push,
+PR, tier or server2. Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/canonical-claim-*.

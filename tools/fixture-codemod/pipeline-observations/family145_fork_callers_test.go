@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 450 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f9f39956313f2213b57495126a28e43d6d8db12cc0f9bbc0984aa74d3dfaaeca" {
+	if err != nil || len(rows) != 451 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ad80f49755c03fd87708f2b6209c3aeb26f6659104b8c99b41b73f77e29dcd18" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -128,6 +128,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores" {
 			if err := family145FanOutMetadataProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145CanonicalClaimSettlementCuts[row.Function] != nil {
+			if err := family145CanonicalClaimSettlementProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

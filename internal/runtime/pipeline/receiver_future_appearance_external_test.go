@@ -213,11 +213,11 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if err != nil || !found || unrelated.Revision != 1 || unrelated.Fields["account_id"] != "unrelated-key" {
 					t.Fatalf("appearance mutated unrelated owner: %#v %t %v", unrelated, found, err)
 				}
-				var status string
-				var outcomes int
-				if err := selected.db.QueryRow(`SELECT d.status, (SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1`, evt.ID()).Scan(&status, &outcomes); err != nil {
+				storage, err := storetest.ReadReceiverAppearanceSettlementStorage(context.Background(), selected.events, evt.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
+				status, outcomes := storage.Status, storage.Outcomes
 				wantStatus := "delivered"
 				if conflict {
 					wantStatus = "dead_letter"

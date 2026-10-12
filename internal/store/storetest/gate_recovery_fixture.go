@@ -31,6 +31,22 @@ func ReadGateNodeDeliveryStatus(ctx context.Context, selected any, event, node s
 	return private.ReadGateNodeDeliveryStatusForTest(ctx, selected, event, node)
 }
 
+type CanonicalAccumulatorClaimStorage = private.CanonicalAccumulatorClaimStorage
+type CanonicalAccumulatorRefusalStorage = private.CanonicalAccumulatorRefusalStorage
+type ReceiverAppearanceSettlementStorage = private.ReceiverAppearanceSettlementStorage
+
+func ReadCanonicalAccumulatorClaimStorage(ctx context.Context, selected any, eventID string) (CanonicalAccumulatorClaimStorage, error) {
+	return private.ReadCanonicalAccumulatorClaimStorageForTest(ctx, selected, eventID)
+}
+
+func ReadCanonicalAccumulatorRefusalStorage(ctx context.Context, selected any, eventID string) (CanonicalAccumulatorRefusalStorage, error) {
+	return private.ReadCanonicalAccumulatorRefusalStorageForTest(ctx, selected, eventID)
+}
+
+func ReadReceiverAppearanceSettlementStorage(ctx context.Context, selected any, eventID string) (ReceiverAppearanceSettlementStorage, error) {
+	return private.ReadReceiverAppearanceSettlementStorageForTest(ctx, selected, eventID)
+}
+
 func ReadGateEventFailure(ctx context.Context, selected any, eventID string) (string, error) {
 	return private.ReadGateEventFailureForTest(ctx, selected, eventID)
 }
