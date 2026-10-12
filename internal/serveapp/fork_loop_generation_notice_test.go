@@ -52,7 +52,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("ordinary source loop: %+v", source)
 			}
 			sourceRoute := requireForkLoopStateEffect(t, rt, started.RunID, frontier, source.RevisionID)
-			sourceDomain := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+			sourceDomain := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, started.RunID)
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "loop-notice-fork"}
 			var fork apiv1.RunForkExecutionResult
@@ -74,14 +74,14 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			if !reflect.DeepEqual(sourceRoute, childRoute) {
 				t.Fatalf("loop fork changed exact recipient/target/connect identity: source=%+v child=%+v", sourceRoute, childRoute)
 			}
-			beforeRepeat := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
+			beforeRepeat := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 			noticesBeforeRepeat := readForkReceiverNoticeDomain(t, rt, fork.ForkRunID)
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(beforeRepeat, readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(noticesBeforeRepeat, readForkReceiverNoticeDomain(t, rt, fork.ForkRunID)) {
+			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(beforeRepeat, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(noticesBeforeRepeat, readForkReceiverNoticeDomain(t, rt, fork.ForkRunID)) {
 				t.Fatal("replayed fork changed child state or repeated the business write")
 			}
-			if !reflect.DeepEqual(sourceDomain, readServedForkRecipientSourceDomain(t, rt, started.RunID)) || !reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, started.RunID)) {
+			if !reflect.DeepEqual(sourceDomain, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)) || !reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, started.RunID)) {
 				t.Fatal("fork changed source loop or business history")
 			}
 		})

@@ -40,6 +40,11 @@ func family145ForkReceiverJoinedCallerProofError(function, before, after string)
 	if family145ForkProducerCallers[function] != 0 {
 		return family145ForkProducerCallerProofError(function, before, after)
 	}
+	var err error
+	after, err = family145ForkSourceDomainCallerInverse(function, after)
+	if err != nil {
+		return err
+	}
 	normalized, err := family145ForkReceiverJoinedCallerInverse(function, after)
 	if err != nil {
 		return err
@@ -199,6 +204,18 @@ func family145ForkReceiverJoinedFunctionCalls(t *testing.T, function *ast.FuncDe
 			return true
 		}
 		name := family145NodeString(call.Fun)
+		if name == "readServedForkRecipientSourceDomain" {
+			if family145ForkSourceDomainCallers[function.Name.Name] == 0 || len(call.Args) != 3 || family145NodeString(call.Args[1]) != "rt.Runtime.Bus.Store()" {
+				t.Fatal("source-domain call escaped its finite live selected bus owner")
+			}
+			counts["source-domain/"+function.Name.Name]++
+		}
+		if name == "requireReceiverSourceDomainSnapshot" {
+			if function.Name.Name != "requireTypedReceiverInitializationCases" || len(call.Args) != 3 || family145NodeString(call.Args[1]) != "rt.ReceiverStateReader" {
+				t.Fatal("release source-domain caller escaped its exact existing inspection owner")
+			}
+			counts["source-domain/"+function.Name.Name]++
+		}
 		if name == "readForkReceiverRows" {
 			t.Fatal("retired raw receiver caller returned")
 		}

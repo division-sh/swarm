@@ -140,7 +140,7 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='numeric.completed'`, run).Scan(&frontier); err != nil {
 					t.Fatal(err)
 				}
-				before := readServedForkRecipientSourceDomain(t, rt, run)
+				before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), run)
 				targetRoot := t.TempDir()
 				copyReleaseFixtureTree(t, root, targetRoot)
 				targetTool := strings.ReplaceAll(tool, "enum: [7]", "enum: [11]")
@@ -190,7 +190,7 @@ collector:
 				rt = restart()
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 				requireNumericMockForkOutput(t, rt, child.ForkRunID)
-				if !reflect.DeepEqual(child, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, run)) {
+				if !reflect.DeepEqual(child, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), run)) {
 					t.Fatal("fork replay changed result or source")
 				}
 			}

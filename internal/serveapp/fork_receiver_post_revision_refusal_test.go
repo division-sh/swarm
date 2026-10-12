@@ -79,7 +79,7 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='committed_replay_scopes' AND fact_key=$2 AND present`, sourceRunID, laterScopeEventID).Scan(&scopeRevision); err != nil || scopeRevision <= frontierEventIDRevision {
 		t.Fatalf("fixture lacks exact later committed receiver scope: frontierEventID=%d scope=%d err=%v", frontierEventIDRevision, scopeRevision, err)
 	}
-	sourceBefore := readServedForkRecipientSourceDomain(t, rt, sourceRunID)
+	sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sourceRunID)
 	var sourceStatus string
 	if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, sourceRunID).Scan(&sourceStatus); err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 		}
 	}
 
-	if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, sourceRunID)) {
+	if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sourceRunID)) {
 		t.Fatal("refusal or cleanup mutated completed source domain")
 	}
 	var afterStatus string

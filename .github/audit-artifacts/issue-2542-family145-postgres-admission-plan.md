@@ -5920,3 +5920,66 @@ setup/fault callbacks is existing exact named owners, tracked only in #2542's
 existing debt/watchlist, not a new abstraction or issue. All qualification holds
 survive. Local only; no push/PR/tier/server2. Rebase waits for #2617's signal.
 Receipts:~/.cache/swarm-2542-family145/durable-data-native-construction-*.
+
+## Whole seven-table source-domain witness chain (2026-10-12)
+
+The existing ReadSelectedForkSourceDomain/ReadSourceDeliveryStorageTables
+owners replace the shared raw-query/row-decoding escape across ALL42 calls,
+13 enclosing declarations and10 files. The exact seven table names, SELECT *,
+run/event/delivery predicates and intentional lifecycle/fork-lineage exclusions
+are unchanged. The existing physical snapshot retains every column, NULL,
+byte/text distinction and exact numeric/time value rather than the old lossy
+byte-to-text serialization. No new SQL owner, selector or mutation authority.
+
+There are two transport roles:40 calls use the original runtime event-store
+owner; the2 shared receiver-initialization calls use the EXISTING receiver
+inspection scope, also used by the independently opened release-process reader.
+Both roles consume the SAME canonical source-domain owner. The initial naive
+runtime-only propagation failed the receiver proof with a nil runtime; the
+bounded role correction is execution-proven below, not hidden behind a fallback.
+The inspection adapter exposes no SQL handle, native opener or writer.
+
+The no-fork observation retains the original delivery-only wait followed by
+exact pipeline completion. Its typed snapshot uses physical column metadata,
+requires the handoff column, preserves row cardinality and existing handoffs,
+requires settled handoffs, compares ALL remaining cells, retains every earlier
+receipt and the original pipeline-only receipt query, permits only the original
+two changed tables and checks the final stable cut. Extra column/cardinality
+checks strengthen rather than replace the old assertions. No wait, timeout,
+source, workload, fault, lifecycle or cleanup changes.
+
+The committed finite reconciler/output maps the complete dependency, composes
+the previous application/joined/producer inverses and preserves all original
+Before/24 receipts/prior Successor obligations:1305 recipes/554 transitions,
+digest803dff30bbdd52806769fab57d213cd33d7615a846871bff4f11071c3679615c.
+Owned-source enumeration verifies all42 direct calls and their exact transport
+roles. Altered predicate/projection preimages are rejected by the actual finite
+transform; owner/scope/error and every no-fork temporal cut are hostile controls.
+The first inventory attempt attributed the initialization calls to its root,
+not the shared assertion helper; the exhaustive inventory caught and corrected
+that classification. Unknown inputs are not migrated or credited.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Source/sibling/replay isolation, absent-root ingress, loop-generation/accumulator retention and receiver acquisition/business/refusal cuts | reproduced and fixed | Original9 roots BOTH stores under race PASS in source-domain-native-semantic-variants-race.jsonl; every assertion/body source-pinned; the aggregate's later receiver-role RED is separately repaired |
+| No-fork handoff-only advancement, receipt conservation and final stable source domain | reproduced and fixed | Original BOTH-store race baseline PASS17.035s; migrated PASS16.268s; exact temporal inverse and hostile cuts |
+| Typed receiver duplication through in-process and independently built release-process HTTP | reproduced and fixed | BOTH original receiver roots under race PASS19.81s and61.18s, including real release process; no runtime-pointer assumption |
+| Selected numeric/mock source/result and restart replay immutability | reproduced and fixed | Original TestMockActivitySelectedForkSemanticResultExecutionParity BOTH stores under race PASS28.68s |
+| Non-owner/uninitialized/cancelled/closed read refusal without partial evidence | execution-proven through the same corrected path | Existing workspace-execution observer source-domain cells on BOTH stores under race,12 exact refusal cells |
+| Complete physical bytes/NULL/numeric/time/columns and malformed-row rejection | execution-proven through the same corrected path | Existing5 physical snapshot codec roots plus fault-snapshot consumer; all exact-key/type/refusal assertions retained |
+
+Complete cheap family/historical/idempotence collection and six persistence
+boundaries pass. Affected U1000 passes. Candidate-overlay typing covers every
+rewritten package/test variant; excluded-source accounting remains67. Fresh
+downward census PASS37.304s:7841 ->7787 findings,5543 ->5492 raw sites,
+54/51 removed, ZERO added. Supplied-pool debt remains53. Unchanged ratchet and
+signed-head complexity precede the report; no parent-completion claim.
+
+The broader observation wave is governed by reviewer-b's6134544118 rule-level
+gate: mailbox-effects/lifecycle snapshots next, then entity-state/debug variants,
+then compatible exact-query shapes. Cross-process visibility, waits, LEFT JOIN
+NULL validity, diagnostic error/section behavior and source selection remain
+semantic preconditions, not automatically mechanical. Existing #2542/#2151
+tracking/watchlist suffice. No production/spec semantics change in this chain;
+all qualification holds survive. Local only, no push/PR/tier/server2. Rebase
+waits for #2617's signal. Receipts:source-domain-native-* in the existing cache.

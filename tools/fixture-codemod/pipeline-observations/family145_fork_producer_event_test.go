@@ -40,6 +40,11 @@ func family145ForkProducerReaderProofError(before, after string) error {
 }
 
 func family145ForkProducerCallerProofError(function, before, after string) error {
+	var err error
+	after, err = family145ForkSourceDomainCallerInverse(function, after)
+	if err != nil {
+		return err
+	}
 	normalized, err := family145ForkProducerCallerInverse(function, after)
 	if err != nil {
 		return err

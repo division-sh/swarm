@@ -76,7 +76,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='review/review.requested' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {
 					t.Fatal(err)
 				}
-				before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+				before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)
 				family, ok := selected.RunFork()
 				if !ok {
 					t.Fatal("missing selected fork owner")
@@ -149,7 +149,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt, fork.ForkRunID).RevisionID)
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)) {
 					t.Fatal("repeated fork changed child accumulators or source history")
 				}
 			})

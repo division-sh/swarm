@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "4d9005e8dec7d8583516fb1f89f49e7f78400d55dffce1fc052c3da608d05e5e"
+const targetDigest = "803dff30bbdd52806769fab57d213cd33d7615a846871bff4f11071c3679615c"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -188,6 +188,12 @@ var files = []string{
 	"internal/serveapp/lifecycle_transition_fork_test.go",
 	"internal/serveapp/lifecycle_transition_template_test.go",
 	"internal/serveapp/fork_historical_context_test.go",
+	"internal/serveapp/fork_recipient_authority_test.go",
+	"internal/serveapp/receiver_initialization_test.go",
+	"internal/serveapp/fork_loop_generation_notice_test.go",
+	"internal/serveapp/fork_absent_source_test.go",
+	"internal/serveapp/fork_loop_accumulator_test.go",
+	"internal/serveapp/semantic_numeric_activity_test.go",
 	"internal/serveapp/selected_fork_mailbox_controls_test.go",
 	"internal/serveapp/selected_fork_pending_input_evidence_test.go",
 	"internal/serveapp/mailbox_completion_fixture_test.go",
@@ -294,15 +300,21 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/serveapp/agent_mock_supported_surface_test.go":          {"runMockAgentSupportedSurface": true},
 	"internal/serveapp/agent_memory_supported_surface_test.go":        {"runStandingTelegramMemorySupportedSurface": true},
 	"internal/serveapp/mailbox_completion_fixture_test.go":            {"newRetainedMailboxCompletionRuntimeConfigured": true},
-	"internal/serveapp/fork_receiver_ownership_test.go":               {"readForkReceiverProducerEvidence": true, "readForkReceiverRows": true, "requireForkReceiverDelivery": true, "TestSelectedForkIndependentReceiverBusinessMutationBothStores": true, "snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true},
+	"internal/serveapp/fork_receiver_ownership_test.go":               {"readForkReceiverProducerEvidence": true, "readForkReceiverRows": true, "requireForkReceiverDelivery": true, "TestSelectedForkIndependentReceiverBusinessMutationBothStores": true, "snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true, "TestServedForkSourceCompletionWithoutForkBothStores": true},
 	"internal/serveapp/fork_receiver_execution_effect_test.go":        {"requireForkReceiverExecution": true},
 	"internal/serveapp/fork_receiver_acquisition_effect_only_test.go": {"requireSupplementalForkAcquisitionSettlement": true, "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores": true},
-	"internal/serveapp/fork_receiver_post_revision_refusal_test.go":   {"TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores": true},
+	"internal/serveapp/fork_receiver_post_revision_refusal_test.go":   {"TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores": true, "requireForkReceiverPostRevisionPolicyRefusal": true},
 	"internal/serveapp/selected_fork_pending_input_test.go":           {"TestSelectedForkPendingInputBothStores": true, "TestExplicitTargetRestrictsConnectedSiblingsBothStores": true},
 	"internal/serveapp/selected_fork_notice_controls_test.go":         {"TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores": true},
 	"internal/serveapp/lifecycle_transition_fork_test.go":             {"requireLifecycleRootLoopForkRevision": true, "requireLifecycleFrozenGateControlRefusal": true},
 	"internal/serveapp/lifecycle_transition_template_test.go":         {"TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores": true},
 	"internal/serveapp/fork_historical_context_test.go":               {"TestRunForkHistoricalIdentityPublicExecutionBothStores": true},
+	"internal/serveapp/fork_recipient_authority_test.go":              {"readServedForkRecipientSourceDomain": true, "requireServedForkConsumerAuthority": true, "TestServedForkConnectedRecipientAuthorityOnBothStores": true},
+	"internal/serveapp/receiver_initialization_test.go":               {"requireTypedReceiverInitializationCases": true},
+	"internal/serveapp/fork_loop_generation_notice_test.go":           {"TestServedForkLoopGenerationStateEffectBothStores": true},
+	"internal/serveapp/fork_absent_source_test.go":                    {"TestServedForkRootSourceIngressBothStores": true},
+	"internal/serveapp/fork_loop_accumulator_test.go":                 {"TestServedForkAccumulatorRetainedGenerationBothStores": true},
+	"internal/serveapp/semantic_numeric_activity_test.go":             {"proveActivitySemanticResultExecutionParity": true},
 	"internal/serveapp/selected_fork_mailbox_controls_test.go":        {"TestSelectedForkMailboxControlRefusalsBothStores": true},
 	"internal/serveapp/selected_fork_pending_input_evidence_test.go":  {"TestSelectedForkPendingInputEvidenceBothStores": true},
 	"internal/serveapp/typed_receiver_fork_refusal_test.go":           {"forkReceiverChangedTables": true},

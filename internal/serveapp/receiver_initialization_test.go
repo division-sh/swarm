@@ -82,10 +82,10 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			t.Run("inspection_cleanup_boundary", func(t *testing.T) {
 				requireReceiverInspectionCleanupFailures(t, rt.ReceiverStateReader, seed.RunID, "account", path, entityID)
 			})
-			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			before := requireReceiverSourceDomainSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
+			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, requireReceiverSourceDomainSnapshot(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
 			// Initialization is creation-only: missing and conflicting values

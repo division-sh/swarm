@@ -202,8 +202,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			// restoration precede the healthy baseline. Source freeze/lineage and
 			// the successful API response are lawful writes, not business effects.
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			sourceBefore := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
-			siblingBefore := readServedForkRecipientSourceDomain(t, rt, sibling.RunID)
+			sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
+			siblingBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)
 			sourceCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
 			siblingCompanions := readForkReceiverCompanions(t, rt, sibling.RunID)
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
@@ -220,7 +220,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")
 			}
-			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt, sibling.RunID)) ||
+			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)) ||
 				!reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt, sibling.RunID)) ||
 				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")

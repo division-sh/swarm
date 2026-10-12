@@ -18,6 +18,20 @@ type receiverProofStateReader interface {
 	InspectSnapshot(context.Context, func(context.Context) error) error
 }
 
+func requireReceiverSourceDomainSnapshot(t testing.TB, reader receiverProofStateReader, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		snapshot, err = storetest.ReadSelectedForkSourceDomain(ctx, reader, runID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
 func requireReceiverApplicationSnapshot(t testing.TB, reader receiverProofStateReader) map[string][]string {
 	t.Helper()
 	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
