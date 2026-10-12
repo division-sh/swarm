@@ -27,7 +27,7 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 	}{
 		{"nil-schema", []providerSchemaCase{
 			{"nil", nil, ""},
-			{"typed-map", map[string]any(nil), ""},
+			{"typed-map", map[string]any(nil), " must be a JSON object schema, got map[string]interface {}"},
 			{"typed-slice", []any(nil), " must be a JSON object schema, got []interface {}"},
 			{"typed-pointer", (*string)(nil), " must be a JSON object schema, got *string"},
 		}},
@@ -39,42 +39,44 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 		{"unsupported-type", []providerSchemaCase{
 			{"unknown", map[string]any{"type": "unsupported"}, ".type has unsupported JSON Schema type \"unsupported\""},
 			{"precision", map[string]any{"type": "numeric(5,2)"}, ".type has unsupported JSON Schema type \"numeric(5,2)\""},
-			{"blank", map[string]any{"type": " \t"}, ".type has unsupported JSON Schema type \"\""},
+			{"blank", map[string]any{"type": " \t"}, ".type has unsupported JSON Schema type \" \\t\""},
 			{"wrong-case", map[string]any{"type": "String"}, ".type has unsupported JSON Schema type \"String\""},
 			{"null", map[string]any{"type": nil}, ".type must be a string or string array, got <nil>"},
 		}},
 		{"type-any-array", []providerSchemaCase{
-			{"nested", map[string]any{"type": []any{"string", []any{"null", []string{"number"}}}}, ""},
-			{"empty", map[string]any{"type": []any{}}, ""},
-			{"typed-nil", map[string]any{"type": []any(nil)}, ""},
-			{"nested-error", map[string]any{"type": []any{"string", []any{"null", "bad"}, "later"}}, ".type[1][1] has unsupported JSON Schema type \"bad\""},
-			{"bad-element", map[string]any{"type": []any{"string", 7}}, ".type[1] must be a string or string array, got int"},
+			{"nested", map[string]any{"type": []any{"string", []any{"null", []string{"number"}}}}, ".type[1] must be a string, got []interface {}"},
+			{"empty", map[string]any{"type": []any{}}, ".type must be a non-empty string array"},
+			{"typed-nil", map[string]any{"type": []any(nil)}, ".type must be a non-empty string array"},
+			{"nested-error", map[string]any{"type": []any{"string", []any{"null", "bad"}, "later"}}, ".type[1] must be a string, got []interface {}"},
+			{"bad-element", map[string]any{"type": []any{"string", 7}}, ".type[1] must be a string, got int"},
 		}},
 		{"type-string-array", []providerSchemaCase{
-			{"valid", map[string]any{"type": []string{"string", " null "}}, ""},
-			{"empty", map[string]any{"type": []string{}}, ""},
-			{"typed-nil", map[string]any{"type": []string(nil)}, ""},
+			{"valid", map[string]any{"type": []string{"string", "null"}}, ""},
+			{"padded", map[string]any{"type": []string{"string", " null "}}, ".type[1] has unsupported JSON Schema type \" null \""},
+			{"duplicate", map[string]any{"type": []string{"string", "string"}}, ".type[1] repeats JSON Schema type \"string\""},
+			{"empty", map[string]any{"type": []string{}}, ".type must be a non-empty string array"},
+			{"typed-nil", map[string]any{"type": []string(nil)}, ".type must be a non-empty string array"},
 			{"first-error", map[string]any{"type": []string{"string", "bad", "later"}}, ".type[1] has unsupported JSON Schema type \"bad\""},
 		}},
 		{"properties-container", []providerSchemaCase{
-			{"typed-nil", map[string]any{"properties": map[string]any(nil)}, ""},
+			{"typed-nil", map[string]any{"properties": map[string]any(nil)}, ".properties must be an object, got map[string]interface {}"},
 			{"nil", map[string]any{"properties": nil}, ".properties must be an object, got <nil>"},
 			{"array", map[string]any{"properties": []any{}}, ".properties must be an object, got []interface {}"},
 		}},
 		{"property-order", []providerSchemaCase{
 			{"lexical", map[string]any{"properties": map[string]any{"z": map[string]any{"type": "last"}, "a": map[string]any{"type": "first"}}}, ".properties.a.type has unsupported JSON Schema type \"first\""},
-			{"nil-children", map[string]any{"properties": map[string]any{"a": nil, "b": map[string]any(nil)}}, ""},
+			{"nil-children", map[string]any{"properties": map[string]any{"a": nil, "b": map[string]any(nil)}}, ".properties.a must be a JSON object schema, got <nil>"},
 			{"nested-lexical", map[string]any{"properties": map[string]any{"a": map[string]any{"properties": map[string]any{"z": false, "b": 1}}}}, ".properties.a.properties.b must be a JSON object schema, got int"},
 		}},
 		{"items", []providerSchemaCase{
-			{"nil", map[string]any{"items": nil}, ""},
-			{"typed-nil", map[string]any{"items": map[string]any(nil)}, ""},
+			{"nil", map[string]any{"items": nil}, ".items must be a JSON object schema, got <nil>"},
+			{"typed-nil", map[string]any{"items": map[string]any(nil)}, ".items must be a JSON object schema, got map[string]interface {}"},
 			{"not-object", map[string]any{"items": []any{}}, ".items must be a JSON object schema, got []interface {}"},
 			{"nested-type", map[string]any{"items": map[string]any{"type": "bad"}}, ".items.type has unsupported JSON Schema type \"bad\""},
 		}},
 		{"property-names", []providerSchemaCase{
 			{"nil", map[string]any{"propertyNames": nil}, ".propertyNames must be a JSON object schema"},
-			{"typed-nil", map[string]any{"propertyNames": map[string]any(nil)}, ""},
+			{"typed-nil", map[string]any{"propertyNames": map[string]any(nil)}, ".propertyNames must be a JSON object schema, got map[string]interface {}"},
 			{"not-object", map[string]any{"propertyNames": true}, ".propertyNames must be a JSON object schema, got bool"},
 			{"nested-type", map[string]any{"propertyNames": map[string]any{"type": "bad"}}, ".propertyNames.type has unsupported JSON Schema type \"bad\""},
 		}},
@@ -86,7 +88,7 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 		}},
 		{"oneof-branches", []providerSchemaCase{
 			{"nil-child", map[string]any{"oneOf": []any{map[string]any{}, nil}}, ".oneOf[1] must be a JSON object schema"},
-			{"typed-nil-child", map[string]any{"oneOf": []any{map[string]any(nil)}}, ""},
+			{"typed-nil-child", map[string]any{"oneOf": []any{map[string]any(nil)}}, ".oneOf[0] must be a JSON object schema, got map[string]interface {}"},
 			{"not-object", map[string]any{"oneOf": []any{false}}, ".oneOf[0] must be a JSON object schema, got bool"},
 			{"first-error", map[string]any{"oneOf": []any{map[string]any{"type": "first"}, map[string]any{"type": "later"}}}, ".oneOf[0].type has unsupported JSON Schema type \"first\""},
 			{"nested-error", map[string]any{"oneOf": []any{map[string]any{}, map[string]any{"items": map[string]any{"type": "bad"}}}}, ".oneOf[1].items.type has unsupported JSON Schema type \"bad\""},
@@ -96,7 +98,7 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 			{"false", map[string]any{"additionalProperties": false}, ""},
 		}},
 		{"additional-schema", []providerSchemaCase{
-			{"typed-nil", map[string]any{"additionalProperties": map[string]any(nil)}, ""},
+			{"typed-nil", map[string]any{"additionalProperties": map[string]any(nil)}, ".additionalProperties must be a JSON object schema, got map[string]interface {}"},
 			{"nested-type", map[string]any{"additionalProperties": map[string]any{"type": "bad"}}, ".additionalProperties.type has unsupported JSON Schema type \"bad\""},
 			{"nested-required", map[string]any{"additionalProperties": map[string]any{"required": []any{1}}}, ".additionalProperties.required[0] must be a string, got int"},
 		}},
@@ -106,11 +108,12 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 			{"other-map", map[string]any{"additionalProperties": map[string]string{}}, ".additionalProperties must be boolean or object schema, got map[string]string"},
 		}},
 		{"required-arrays", []providerSchemaCase{
-			{"strings", map[string]any{"required": []string{"", " x ", "x", "x"}}, ""},
-			{"any-strings", map[string]any{"required": []any{"", " x ", "x", "x"}}, ""},
+			{"strings", map[string]any{"required": []string{"", " x ", "x"}}, ""},
+			{"any-strings", map[string]any{"required": []any{"", " x ", "x"}}, ""},
+			{"duplicate", map[string]any{"required": []any{"x", "x"}}, ".required[1] repeats required property \"x\""},
 			{"empty", map[string]any{"required": []any{}}, ""},
-			{"nil-strings", map[string]any{"required": []string(nil)}, ""},
-			{"nil-any", map[string]any{"required": []any(nil)}, ""},
+			{"nil-strings", map[string]any{"required": []string(nil)}, ".required must be a non-null array"},
+			{"nil-any", map[string]any{"required": []any(nil)}, ".required must be a non-null array"},
 		}},
 		{"required-error", []providerSchemaCase{
 			{"first-error", map[string]any{"required": []any{"a", 1, false}}, ".required[1] must be a string, got int"},
@@ -121,7 +124,7 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 		{"enum-shape", []providerSchemaCase{
 			{"values", map[string]any{"enum": []any{nil, "", 1, map[string]any{}}}, ""},
 			{"empty", map[string]any{"enum": []any{}}, ""},
-			{"typed-nil", map[string]any{"enum": []any(nil)}, ""},
+			{"typed-nil", map[string]any{"enum": []any(nil)}, ".enum must be a non-null array"},
 			{"nil", map[string]any{"enum": nil}, ".enum must be an array, got <nil>"},
 			{"strings", map[string]any{"enum": []string{"a"}}, ".enum must be an array, got []string"},
 			{"scalar", map[string]any{"enum": "a"}, ".enum must be an array, got string"},
@@ -150,7 +153,7 @@ func TestProviderSchemaFactoringCharacterization(t *testing.T) {
 	}
 	t.Run("supported-types", func(t *testing.T) {
 		for _, name := range []string{"array", "boolean", "integer", "null", "number", "object", "string"} {
-			schema := map[string]any{"type": " \t" + name + " \n"}
+			schema := map[string]any{"type": name}
 			before := providerSchemaJSON(t, schema)
 			requireProviderSchemaError(t, ValidateProviderToolSchema("probe", schema), "")
 			if after := providerSchemaJSON(t, schema); after != before {
@@ -185,7 +188,7 @@ func testProviderSchemaConstraintOrder(t *testing.T) {
 }
 
 func testProviderSchemaInputUnchanged(t *testing.T) {
-	child := map[string]any{"type": []any{" string ", []string{" null "}}, "enum": []any{nil, "x"}}
+	child := map[string]any{"type": []any{"string", "null"}, "enum": []any{nil, "x"}}
 	schema := map[string]any{
 		"properties": map[string]any{"a": child, "b": child}, "items": child,
 		"propertyNames": child, "oneOf": []any{child}, "additionalProperties": child,

@@ -14,14 +14,23 @@ import (
 
 func TestProviderSchemaWorkspaceTargetRefusal(t *testing.T) {
 	for _, caller := range []string{"activation_observation", "mock_startup"} {
-		t.Run(caller, func(t *testing.T) {
-			testProviderSchemaWorkspaceTargetRefusal(t, caller)
-		})
+		for _, tc := range []struct {
+			name   string
+			schema any
+		}{
+			{"unsupported", map[string]any{"type": "unsupported-provider-type"}},
+			{"padded", map[string]any{"type": " object "}},
+			{"null_container", map[string]any{"properties": map[string]any(nil)}},
+		} {
+			t.Run(caller+"/"+tc.name, func(t *testing.T) {
+				testProviderSchemaWorkspaceTargetRefusal(t, caller, tc.schema)
+			})
+		}
 	}
 }
 
-func testProviderSchemaWorkspaceTargetRefusal(t *testing.T, caller string) {
-	tool := ToolDefinition{Name: "write_file", Schema: map[string]any{"type": "unsupported-provider-type"}}
+func testProviderSchemaWorkspaceTargetRefusal(t *testing.T, caller string, schema any) {
+	tool := ToolDefinition{Name: "write_file", Schema: schema}
 	actor := models.AgentConfig{ID: "schema-target", Identity: testAgentIdentity("schema-target", "")}
 	tools, err := CompileManagedCapabilityAdmission(actor, MockProviderContract(), []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{Name: tool.Name, Visible: true, Callable: true}}))
 	if err != nil {

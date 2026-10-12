@@ -3,15 +3,16 @@
 Issue #2627, gate [6118463764](https://github.com/division-sh/swarm/issues/2627#issuecomment-6118463764).
 Integrated source base `568dd9ab0`, effective `go1.26.8`; production repair
 `860db22de`, subsequent exact guard classification and proof-only refinements.
-All production schema-validator/characterization files from merged #2628 remain
-unchanged. This artifact records local proof, not an already-green hosted run.
+Cycle-1 amendment6119665740 now authorizes the bounded shared-owner and obsolete
+characterization corrections below. This artifact records local proof, not an already-green hosted run.
 Hosted lifecycle qualification and independent final approval are outstanding.
 
 ## Class, Contract And Closure
 
 Category: high-risk semantic-drift/validation-parity. Exact concept changed:
-**enforcement of the existing provider JSON-subset admission on selected/defaulted
-request and MCP presentation projections, and target-observed schema confirmation**.
+**truthful recognized provider wire-syntax admission and its enforcement on
+selected/defaulted request and MCP presentation projections, and target-observed
+schema confirmation**, plus Anthropic's provider-specific object-root law.
 Chosen working class: all five currently known missing consumers in four boundary
 families, not just the Anthropic symptom. The original issue was symptom-shaped;
 the repaired pre-audit and gate widened it before coding. Commitment: eliminate
@@ -55,10 +56,17 @@ was silently folded into this repair.
 
 ## Canonical Owners And Exhaustive Consumption
 
-Syntax owner: unchanged `llm.ValidateProviderToolSchema` and its ordered list
+Syntax owner: existing `llm.ValidateProviderToolSchema` and its ordered list
 wrapper `ValidateProviderToolDefinitions`. This is the real provider-subset owner,
 not a local Anthropic helper. All relevant production sibling seams found by
 request/catalog/observation construction and validation searches are listed below.
+Cycle1 corrects its recognized wire syntax rather than introducing another
+validator. Truly absent optional definitions retain their presentation default;
+declared typed-nil maps, nested null schema nodes and recognized null containers
+refuse. Exact type tokens and flat/unique arrays replace trim-only checks;
+required members are unique. Legitimate empty required/enum arrays and enum null
+values remain allowed; unknown-keyword behavior is not reinterpreted. Anthropic
+requires an explicit object root after its existing absent-schema default.
 
 | Consumer / surrounding owner | Status after change | Systematic-consumption proof |
 | --- | --- | --- |
@@ -138,7 +146,7 @@ retained; a passing sibling is not used to erase them.
 | A02 | Nested properties/items/propertyNames | reproduced and fixed | BoundaryAdmission/anthropic/{properties,items,propertyNames}; canonical lexical/indexed error and no partial tools. R1. |
 | A03 | oneOf/union/required/enum shapes | reproduced and fixed | BoundaryAdmission/anthropic/{oneOf,union,required,enum,additionalProperties}; exact existing owner error. R1. |
 | A04 | First-error and earlier/later gates | execution-proven through the same corrected path | Each Anthropic case has bad first/later definitions, message-first refusal, bad schema before missing-model; valid case still requires model. R1. |
-| A05 | Nil/default/typed-nil valid bytes | execution-proven through the same corrected path | BoundaryAdmission/anthropic/valid exact full request JSON, raw name/default/null/nonmutation. R1. |
+| A05 | Genuinely valid/default object bytes | execution-proven through the same corrected path | Corrected BoundaryAdmission/anthropic/valid exact full JSON uses exact object/string tokens, absent-schema object default and explicit object root, without mutation. Prior padded/null wire assertions were invalid and are superseded, not preservation credit; refusals are W01/W02/W05. Fresh cycle-1 receipts required. |
 | A06 | Normal/continued/selected/fork request authority | execution-proven through the same corrected path | Q01/Q03 real normal and continued requests; selected-fork issuance/current-generation/recovery no-redispatch and exact fork-source mode/bundle controls; malformed fork constructor refuses upstream. R2/R5/R8. No direct selected Anthropic invalid-source exploit claimed. |
 | M01 | Initial Mock request | reproduced and fixed | BoundaryAdmission/mock malformed cases return empty input; existing StartSession consumer refuses malformed schema. R1. |
 | M02 | Continued mutable session projection | reproduced and fixed | BoundaryAdmission/mock/continued: valid actual StartSession, mutate projection, per-request exact canonical refusal. R1. |
@@ -152,7 +160,7 @@ retained; a passing sibling is not used to erase them.
 | G06 | Order/leases/atomic refusal | execution-proven through the same corrected path | Managed/actor refusal has nil list/evidence and acquire/release1/1; selection success+failure total2/2; exact ordered bytes/defaults. R1/R5/R8. |
 | O01 | Matching invalid observation | reproduced and fixed | WorkspaceObservation matching unsupported/nested/oneOf hashes refuse with typed invalid_input_schema and exact unwrapped canonical cause. R1. |
 | O02 | Hostile protocol/identity observations | execution-proven through the same corrected path | WorkspaceObservation/{missing,null,array,noncanonical,duplicate,changed,foreign}; original reason precedence retained. R1. |
-| O03 | Valid empty/translated/numeric observation | execution-proven through the same corrected path | WorkspaceObservation exact valid description/number/schema hash and empty catalog pass; Anthropic/default and MCP/typed-nil projections retain their distinct existing policy. R1/R8. |
+| O03 | Valid empty/translated/numeric observation | execution-proven through the same corrected path | WorkspaceObservation valid description/number/schema hash and empty catalog pass; absent-definition defaults and explicit non-null MCP object schemas retain exact bytes. Typed-nil wire success is retracted, W02 refuses. Fresh cycle-1 receipts required. |
 | O04 | Target-local pre-model refusal | reproduced and fixed | WorkspaceTargetRefusal actual host observation worker+HTTP refuses malformed matching hash, empty confirmation and unregister1; ClaudeEveryLaunchRechecksGatewayBeforeModelInvocation keeps first/resumed/tool-result zero-model-launch controls. R4. Observation is not a model worker. |
 | S01 | Authored immutable schemas | execution-proven through the same corrected path | SourceAdmission/authored and upstream-refusal actual yamlsource/immutable admission; compiled StructuralSurfaces verify/describe malformed source refuses earlier. R1/R9. |
 | S02 | Imported/pack/connector/channel projections | execution-proven through the same corrected path | SourceAdmission/imported actual admitted ToolSchemaEntry projections, nonmutation; NewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated; compiled source tools. R1/R5/R9. Does not claim new live channel onboarding proof. |
@@ -166,8 +174,13 @@ retained; a passing sibling is not used to erase them.
 | Q03 | Reconstruction/restart/fork | execution-proven through the same corrected path | ReconstructionBothStores two distinct durable events/claims and fresh runtimes, identical immutable-source identity, count2 settlements/consumed/attempts; GoldenAgentWorkloadRestartAndForcedKillOnBothBackends compiled H/mock; selected/fork controls and frozen TCP list. R2/R3/R5/R8. |
 | Q04 | Generic discriminating counterexamples | reproduced and fixed | Five separately compiled call-removal mutants fail intended admission assertion; no compile/no-test false credit, exact restored diff. X1-X5. |
 | Q05 | Qualification/coverage | execution-proven through the same corrected path | Complete structural guard unit, census/inventory/registry, independent complexity, race3 and supported receipts pass locally; lifecycle final plan selects all nine new roots exactly once. R1-R9 and final-head addendum. Hosted lifecycle remains a required pending merge gate, not credited as passed. |
+| W01 | Padded raw type tokens | reproduced and fixed | WireShapeAdmission padded root/nested/union members; both MCP wire projections and both observed comparison wrappers; actual host activation/Mock startup and both-store no-send refusal. New cycle-1 receipt ledger follows. |
+| W02 | Null/typed-nil roots and recognized schema/property containers | reproduced and fixed | WireShapeAdmission nil root/properties/property/items/propertyNames/oneOf/additional nodes; MCP returns nil list/evidence, observed decoded null containers refuse. Root null observation remains earlier protocol refusal. Actual host startup/activation and both-store zero attempts. |
+| W03 | Non-flat/duplicate/empty/nil type arrays | reproduced and fixed | WireShapeAdmission typed and untyped arrays plus corrected canonical characterization; both MCP arms and matching target wire refuse nested/duplicate/null unions without mutation. |
+| W04 | Duplicate required and null recognized arrays | reproduced and fixed | WireShapeAdmission required duplicates/nil typed forms and enum nil; MCP/observed comparison and selected-store no-send controls. Characterization retains valid distinct exact property names, empty permitted arrays and enum null values. |
+| W05 | Anthropic non-object/missing root type | reproduced and fixed | WireShapeAdmission/anthropic_root uses generically valid string/array/union/empty schemas to reach the provider-specific refusal; both-store string-root refusal then one valid object settlement. No new generic provider root law. |
 
-Total32 rows A6/M4/G6/O4/S7/Q5. No known manifestation is left behind a
+Total37 rows A6/M4/G6/O4/S7/Q5/W5. No known manifestation is left behind a
 "shared owner" or "same seam" assertion. No semantic split emerged beyond the
 already-defined adjacent laws. Baseline and mutation failures provide exact
 counterfactual proof, not merely cleaner architecture.
@@ -203,13 +216,14 @@ runtime defect credit. The original structural red from historical Markdown
 probe names remains recorded; two exact unrelated audit references are explicitly
 counted by the existing text-classification guard, no broad exception or rename.
 
-Independent complexity at repair `860db22de` passes against base568dd9ab0;
+Independent complexity at original repair `860db22de` passes against base568dd9ab0;
 all five consumers remain below the hotspot threshold, canonical validator
-unchanged. Later changes are test/spec/audit only. Final-head complexity/coverage
-and guard receipts are appended before review. No baseline or guard weakening.
+was unchanged before the independently gated cycle-1 correction. Fresh exact-head
+complexity, guards and coverage are required for that correction and appended
+before review. No baseline or guard weakening.
 
-The lifecycle plan already places all nine new roots exactly once:
-MCP2 in broad-03, tools1 in broad-05, LLM4 in api-llm-bus-full, store2 in
+The lifecycle plan places all ten new roots exactly once after cycle1:
+MCP2 in broad-03, tools1 in broad-05, LLM5 in api-llm-bus-full, store2 in
 store-runtime-full-04. No CI-Units or proof-plan membership change required.
 Final plan must bind the pushed source; a green hosted merge-ref receipt must
 also retain actual execution source/GOVERSION, not infer identity from PR label.
@@ -219,3 +233,22 @@ reconnect error was independently reproduced on old Go1.25 last-green source
 and current master. Its exact cause and the passing-run40P01 sibling remain
 unclassified under #2353; no ungated repair or waiver is included in this PR.
 That diagnostic is not #2627 qualification credit.
+
+## Cycle-1 Correction And Retained Red
+
+Original d0ea hosted lifecycle38215894501 is RED at
+TestVerifyBootStartupPredicateCensus; timing/summary are consequences of
+cancelled proof, not a measured overrun. The error is this PR's omitted observer
+census refresh, not inherited. The original accepted padded/null characterization
+is invalid evidence; it is explicitly replaced rather than grandfathered.
+Signed880d31e99 records amended pre-audit and red counterexamples before production
+owner edits; watchlist amendment `swarm-docs@4f6b7e0` precedes those edits.
+
+`internal/cliapp/testdata/issue_2627_admission_predicate_accounting.md` refreshes
+A11/A18/A25 owner, both direct wrappers and every startup/activation/continued/fork
+consumer, with actual P09/P15/P21 witnesses and read-only verify limits. Existing
+generator changes only the measured observer body; normal census and all three
+hostile ratchets qualify with update mode absent. No registry-only or checksum-only
+closure. The before-owner WireShapeAdmission counterexample has27 failing leaves
+plus its parent; fresh canonical/all-consumer, real both-store and compiled-host
+controls provide the corrected evidence. Receipt addendum will bind the final head.
