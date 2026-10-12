@@ -905,6 +905,57 @@ type sqliteForcedDeathEvidence struct {
 	Grant         runtimestartupownership.GrantEvidence  `json:"grant"`
 	Revision      string                                 `json:"revision"`
 	SelectedGrant *runtimestartupownership.GrantEvidence `json:"selected_grant,omitempty"`
+	Obligations   *abandonedProcessObligations           `json:"obligations,omitempty"`
+}
+
+type abandonedProcessObligations struct {
+	OperationID string `json:"operation_id"`
+	AttemptID   string `json:"attempt_id"`
+	EventID     string `json:"event_id"`
+}
+
+func admitPredecessorObligations(t *testing.T, ctx context.Context, selected startupAuthorityParityStore, grant runtimestartupownership.GrantEvidence) *abandonedProcessObligations {
+	t.Helper()
+	registration := mustEffectRegistration(t, "provider_registration")
+	attempt, err := selected.AuthorizeExternalAttempt(ctx, testServeRegistrationAuthority(grant), runtimeeffects.AuthorizeRequest{
+		OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind,
+		Class: registration.Class, Adapter: registration.Adapter, Transport: registration.Transport,
+	})
+	if err != nil || !attempt.AuthorizationAcknowledged {
+		t.Fatalf("live predecessor obligation authorization: acknowledged=%t err=%v", attempt.AuthorizationAcknowledged, err)
+	}
+	outcome, found, err := selected.(runtimeeffects.OutcomeStore).GetExternalEffectOutcome(ctx, attempt.OperationID)
+	if err != nil || !found || outcome.State != runtimeeffects.StateAuthorized || outcome.AttemptState != runtimeeffects.StateAuthorized {
+		t.Fatalf("live predecessor obligation outcome: %+v found=%t err=%v", outcome, found, err)
+	}
+	eventID := uuid.NewString()
+	event := eventtest.RunCreatingRootIngress(
+		eventID, events.EventType("test.predecessor_obligation"), "takeover-proof", "",
+		json.RawMessage(`{"proof":"preserve"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("takeover-proof-node")}); err != nil {
+		t.Fatalf("live predecessor delivery continuation: %v", err)
+	}
+	return &abandonedProcessObligations{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, EventID: eventID}
+}
+
+func assertAbandonedProcessRefusesFreshAuthorization(t *testing.T, ctx context.Context, selected startupAuthorityParityStore, grant runtimestartupownership.GrantEvidence) {
+	t.Helper()
+	before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := mustEffectRegistration(t, "provider_registration")
+	if _, err := selected.AuthorizeExternalAttempt(ctx, testServeRegistrationAuthority(grant), runtimeeffects.AuthorizeRequest{
+		OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind,
+		Class: registration.Class, Adapter: registration.Adapter, Transport: registration.Transport,
+	}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
+		t.Errorf("abandoned process admitted new work or returned the wrong refusal: %v", err)
+	}
+	after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("abandoned process refusal changed storage: %v", err)
+	}
 }
 
 func runSQLiteForcedDeathChild(t *testing.T) bool {
@@ -949,6 +1000,9 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		if os.Getenv("SWARM_TEST_FORCED_DEATH_SELECTED_GRANT") == "1" {
 			evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, selected, selected.backend.ConstructionHandle(), true, capability)
 		}
+		if os.Getenv("SWARM_TEST_FORCED_DEATH_OBLIGATIONS") == "1" {
+			evidence.Obligations = admitPredecessorObligations(t, ctx, selected, grantEvidence)
+		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
 			t.Fatal(err)
@@ -965,7 +1019,7 @@ func spawnSQLiteForcedDeathPredecessor(t *testing.T, path string) sqliteForcedDe
 	return spawnSQLiteForcedDeathPredecessorWithSelection(t, path, false)
 }
 
-func spawnSQLiteForcedDeathPredecessorWithSelection(t *testing.T, path string, selectedGrant bool) sqliteForcedDeathEvidence {
+func spawnSQLiteForcedDeathPredecessorWithSelection(t *testing.T, path string, selectedGrant bool, obligations ...bool) sqliteForcedDeathEvidence {
 	t.Helper()
 	evidencePath := path + ".crash-evidence.json"
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSQLiteProcessCapabilityForcedDeathTakeover$")
@@ -976,6 +1030,12 @@ func spawnSQLiteForcedDeathPredecessorWithSelection(t *testing.T, path string, s
 	)
 	if selectedGrant {
 		cmd.Env = append(cmd.Env, "SWARM_TEST_FORCED_DEATH_SELECTED_GRANT=1")
+	}
+	if len(obligations) > 1 {
+		t.Fatal("forced-death fixture accepts one obligation option")
+	}
+	if len(obligations) == 1 && obligations[0] {
+		cmd.Env = append(cmd.Env, "SWARM_TEST_FORCED_DEATH_OBLIGATIONS=1")
 	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("forced-death child: %v\n%s", err, output)
@@ -1362,32 +1422,17 @@ func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGr
 func TestProcessCapabilityTakeoverPreservesDurableObligationsParity(t *testing.T) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, abandoned := abandonedProcessCapabilityFixture(t, backend)
+			selected, _, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, false, true)
 			ctx := testAuthorActivityContext()
-
-			registration, ok := runtimeeffects.RegistrationFor("provider_registration")
-			if !ok {
-				t.Fatal("provider_registration effect is not registered")
+			if abandoned.Obligations == nil {
+				t.Fatal("live predecessor omitted accepted obligations")
 			}
-			attempt, err := selected.AuthorizeExternalAttempt(ctx, testServeRegistrationAuthority(abandoned.Grant), runtimeeffects.AuthorizeRequest{
-				OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind,
-				Class: registration.Class, Adapter: registration.Adapter, Transport: registration.Transport,
-			})
-			if err != nil {
-				t.Fatalf("authorize preserved provider drain: %v", err)
+			attemptID, eventID := abandoned.Obligations.AttemptID, abandoned.Obligations.EventID
+			attemptState := selectedStoreAttemptState(t, ctx, db, attemptID)
+			if attemptState != string(runtimeeffects.StateAuthorized) {
+				t.Fatalf("abandoned accepted attempt state=%s, want authorized", attemptState)
 			}
-			attemptState := selectedStoreAttemptState(t, ctx, db, attempt.AttemptID)
-
-			runID := uuid.NewString()
-			eventID := uuid.NewString()
-			event := eventtest.RunCreatingRootIngress(
-				eventID, events.EventType("test.takeover_obligation"), "takeover-proof", "",
-				json.RawMessage(`{"proof":"preserve"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
-			route := testEntitylessNodeDeliveryRoute("takeover-proof-node")
-			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
-				t.Fatalf("commit preserved delivery continuation: %v", err)
-			}
+			assertAbandonedProcessRefusesFreshAuthorization(t, ctx, selected, abandoned.Grant)
 			beforeDelivery := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID)
 
 			successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("obligation-preservation-successor"))
@@ -1397,7 +1442,7 @@ func TestProcessCapabilityTakeoverPreservesDurableObligationsParity(t *testing.T
 			t.Cleanup(func() { _ = successor.Release(context.Background()) })
 			assertProcessLeaseSuccessor(t, successor, abandoned.Authority)
 
-			if after := selectedStoreAttemptState(t, ctx, db, attempt.AttemptID); after != attemptState {
+			if after := selectedStoreAttemptState(t, ctx, db, attemptID); after != attemptState {
 				t.Fatalf("provider drain state changed across takeover: before=%q after=%q", attemptState, after)
 			}
 			if after := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID); after != beforeDelivery {
@@ -1433,13 +1478,16 @@ func abandonedProcessCapabilityFixture(t *testing.T, backend string) (startupAut
 	return selected, db, evidence
 }
 
-func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string, selectedGrant bool) (startupAuthorityParityStore, selectedFanOutOwner, *sql.DB, sqliteForcedDeathEvidence) {
+func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string, selectedGrant bool, obligations ...bool) (startupAuthorityParityStore, selectedFanOutOwner, *sql.DB, sqliteForcedDeathEvidence) {
 	t.Helper()
+	if len(obligations) > 1 {
+		t.Fatal("abandoned-process fixture accepts one obligation option")
+	}
 	first, mutationStore, db, _ := newFanOutOwnerPairForTest(t, backend)
 	selected := first.(startupAuthorityParityStore)
 	if backend == "sqlite" {
 		path := first.(interface{ Path() string }).Path()
-		return selected, mutationStore, db, spawnSQLiteForcedDeathPredecessorWithSelection(t, path, selectedGrant)
+		return selected, mutationStore, db, spawnSQLiteForcedDeathPredecessorWithSelection(t, path, selectedGrant, obligations...)
 	}
 	ctx := testAuthorActivityContext()
 	capability, _, grant := admitRegistrationTestGeneration(t, ctx, selected, "abandoned-postgres-owner")
@@ -1450,6 +1498,9 @@ func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string
 	evidence := sqliteForcedDeathEvidence{Authority: authority, Grant: grant, Revision: grant.SourceSetRevision}
 	if selectedGrant {
 		evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, first.(selectedCompletionAuthorityStore), db, false, capability)
+	}
+	if len(obligations) == 1 && obligations[0] {
+		evidence.Obligations = admitPredecessorObligations(t, ctx, selected, grant)
 	}
 	terminatePostgresRetainedProcessSession(t, ctx, db)
 	select {
@@ -1580,7 +1631,7 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant, true)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
@@ -1591,24 +1642,15 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 				t.Fatal("provider_registration effect is not registered")
 			}
 			staleRegistration := testServeRegistrationAuthority(abandoned.Grant)
-			preservedAttempt, err := selected.AuthorizeExternalAttempt(ctx, staleRegistration, runtimeeffects.AuthorizeRequest{
-				OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind,
-				Class: registration.Class, Adapter: registration.Adapter, Transport: registration.Transport,
-			})
-			if err != nil {
-				t.Fatalf("authorize predecessor provider attempt: %v", err)
+			if abandoned.Obligations == nil {
+				t.Fatal("live predecessor omitted accepted obligations")
 			}
-			attemptState := selectedStoreAttemptState(t, ctx, db, preservedAttempt.AttemptID)
-
-			runID := uuid.NewString()
-			eventID := uuid.NewString()
-			event := eventtest.RunCreatingRootIngress(
-				eventID, events.EventType("test.repair_obligation"), "repair-proof", "",
-				json.RawMessage(`{"proof":"preserve"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
-			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("repair-proof-node")}); err != nil {
-				t.Fatalf("commit publication-preserved delivery continuation: %v", err)
+			attemptID, eventID := abandoned.Obligations.AttemptID, abandoned.Obligations.EventID
+			attemptState := selectedStoreAttemptState(t, ctx, db, attemptID)
+			if attemptState != string(runtimeeffects.StateAuthorized) {
+				t.Fatalf("abandoned accepted attempt state=%s, want authorized", attemptState)
 			}
+			assertAbandonedProcessRefusesFreshAuthorization(t, ctx, selected, abandoned.Grant)
 			deliveryBefore := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID)
 
 			successorRequest := testStartupAcquireRequest("atomic-process-publication")
@@ -1642,7 +1684,7 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 				t.Fatalf("published successor did not retire old grant: state=%s err=%v", grantState, err)
 			}
 			assertAbandonedSelectedGrantHead(t, db, abandoned, true)
-			if after := selectedStoreAttemptState(t, ctx, db, preservedAttempt.AttemptID); after != attemptState {
+			if after := selectedStoreAttemptState(t, ctx, db, attemptID); after != attemptState {
 				t.Fatalf("provider attempt changed across publication: before=%q after=%q", attemptState, after)
 			}
 			if after := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID); after != deliveryBefore {
