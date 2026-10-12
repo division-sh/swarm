@@ -2,23 +2,17 @@ package releasee2e
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type factoringDoctorReport struct {
-	OK                 bool            `json:"ok"`
-	CapabilitySubjects []packs.Subject `json:"capability_subjects"`
+	OK                 bool              `json:"ok"`
+	CapabilitySubjects []json.RawMessage `json:"capability_subjects"`
 	PackInventory      struct {
 		BaseMode        string `json:"base_mode"`
 		BaseDigest      string `json:"base_digest"`
@@ -35,33 +29,18 @@ type factoringDoctorReport struct {
 func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
-	version, err := platform.PlatformVersion()
+	// Captured through compiled public doctor at pre-extraction49abcf245.
+	// This oracle imports no in-process admission or renderer implementation.
+	raw, err := os.ReadFile(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/doctor-installed.golden"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory(version)
-	if err != nil {
+	var want factoringDoctorReport
+	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := yamlsource.LoadFile(filepath.Join(releaseE2ERepoRoot(t), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec, err := contracts.AdmitPlatformSpecValue(snapshot.Document("platform-spec.yaml").Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	projection, err := packadmission.Admit(inventory, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
+	if len(want.CapabilitySubjects) != 8 || len(want.PackInventory.Packs) != 14 || len(want.Findings) != 8 {
+		t.Fatal("incomplete pinned installed inventory oracle")
 	}
 	for _, hostile := range []bool{false, true} {
 		t.Run(map[bool]string{false: "valid-tree", true: "hostile-tree"}[hostile], func(t *testing.T) {
@@ -78,33 +57,33 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 			if err := json.Unmarshal([]byte(result.output), &report); result.err != nil || err != nil {
 				t.Fatalf("compiled doctor JSON: %v %v\n%s", result.err, err, result.output)
 			}
-			assertFactoringDoctorInstalledReadback(t, report, want, inventory)
+			assertFactoringDoctorInstalledReadback(t, report, want)
 			text := runReleaseCommand(t, goldenStartupTimeout, cwd, env, "", binary, args...)
 			if text.err != nil {
 				t.Fatalf("compiled doctor text: %v\n%s", text.err, text.output)
 			}
-			for _, subject := range want {
-				if strings.Count(text.output, packs.RenderSubject(subject, false)) != 1 {
-					t.Fatalf("missing/duplicate typed subject text %s\n%s", subject.ID, text.output)
+			for _, finding := range want.Findings {
+				if strings.Count(text.output, finding.Message) != 1 {
+					t.Fatalf("missing/duplicate typed subject text %s\n%s", finding.Code, text.output)
 				}
 			}
-			for _, entry := range inventory.Entries() {
-				if !strings.Contains(text.output, entry.ID()+" type="+string(entry.Type())) || !strings.Contains(text.output, "source="+entry.Source()+" manifest="+entry.ManifestHash()) {
-					t.Fatalf("missing pack provenance %s\n%s", entry.ID(), text.output)
+			for _, entry := range want.PackInventory.Packs {
+				if !strings.Contains(text.output, entry.ID+" type="+entry.Type) || !strings.Contains(text.output, "source="+entry.Source+" manifest="+entry.ManifestHash) {
+					t.Fatalf("missing pack provenance %s\n%s", entry.ID, text.output)
 				}
 			}
 			if !strings.Contains(text.output, "schema inventory:") {
 				t.Fatal("schema inventory option lost")
 			}
 			t.Run("dropped-readback-negative", func(t *testing.T) {
-				if reflect.DeepEqual(want, []packs.Subject(nil)) {
+				if len(want.CapabilitySubjects) == 0 {
 					t.Fatal("negative control has no inventory obligation")
 				}
 				// Exercise the same oracle without changing production: dropping
 				// final readback must not be mistaken for an empty valid inventory.
 				lost := report
 				lost.CapabilitySubjects = nil
-				if factoringDoctorInstalledReadbackMatches(lost, want, inventory) {
+				if factoringDoctorInstalledReadbackMatches(lost, want) {
 					t.Fatal("oracle admitted dropped final inventory")
 				}
 			})
@@ -142,25 +121,19 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	})
 }
 
-func factoringDoctorInstalledReadbackMatches(report factoringDoctorReport, want []packs.Subject, inventory *packartifact.EffectivePackInventory) bool {
-	wantBody, err := json.Marshal(want)
+func factoringDoctorInstalledReadbackMatches(report, want factoringDoctorReport) bool {
+	wantBody, err := json.Marshal(want.CapabilitySubjects)
 	if err != nil {
 		return false
 	}
 	gotBody, err := json.Marshal(report.CapabilitySubjects)
-	return err == nil && report.OK && string(gotBody) == string(wantBody) && len(report.PackInventory.Packs) == len(inventory.Entries()) && len(report.SchemaInventory) > 0 && report.PackInventory.BaseDigest == inventory.BaseDigest() && report.PackInventory.EffectiveDigest == inventory.Digest()
+	return err == nil && report.OK && string(gotBody) == string(wantBody) && reflect.DeepEqual(report.PackInventory, want.PackInventory) && len(report.SchemaInventory) > 0
 }
 
-func assertFactoringDoctorInstalledReadback(t *testing.T, report factoringDoctorReport, want []packs.Subject, inventory *packartifact.EffectivePackInventory) {
+func assertFactoringDoctorInstalledReadback(t *testing.T, report, want factoringDoctorReport) {
 	t.Helper()
-	if !factoringDoctorInstalledReadbackMatches(report, want, inventory) {
-		t.Fatalf("installed doctor readback does not match admitted inventory: subjects=%d want=%d packs=%d", len(report.CapabilitySubjects), len(want), len(report.PackInventory.Packs))
-	}
-	for index, entry := range inventory.Entries() {
-		got := report.PackInventory.Packs[index]
-		if got.ID != entry.ID() || got.Source != entry.Source() || got.ManifestHash != entry.ManifestHash() {
-			t.Fatalf("pack identity/provenance changed: %#v", got)
-		}
+	if !factoringDoctorInstalledReadbackMatches(report, want) {
+		t.Fatalf("installed doctor readback does not match admitted inventory: subjects=%d want=%d packs=%d", len(report.CapabilitySubjects), len(want.CapabilitySubjects), len(report.PackInventory.Packs))
 	}
 	seen := map[string]bool{}
 	for _, finding := range report.Findings {
@@ -172,8 +145,15 @@ func assertFactoringDoctorInstalledReadback(t *testing.T, report factoringDoctor
 			t.Fatalf("doctor loaded invocation source: %#v", finding)
 		}
 	}
-	for _, subject := range report.CapabilitySubjects {
-		if subject.Applicability != "installed" || subject.Status != packs.StatusAvailable || subject.TriggerAdmission != nil {
+	for _, raw := range report.CapabilitySubjects {
+		var subject struct {
+			Applicability, Status string
+			TriggerAdmission      json.RawMessage `json:"trigger_admission"`
+		}
+		if err := json.Unmarshal(raw, &subject); err != nil {
+			t.Fatal(err)
+		}
+		if subject.Applicability != "installed" || subject.Status != "AVAILABLE" || len(subject.TriggerAdmission) != 0 {
 			t.Fatalf("doctor acquired effective authority: %#v", subject)
 		}
 	}

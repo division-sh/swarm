@@ -1,0 +1,1237 @@
+{
+  "capability_subjects": [
+    {
+      "id": "provider.github",
+      "kind": "provider_trigger",
+      "provider": "github",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/github",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.github.issue_comment_created"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.github.issue_opened"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.github.raw.{event_type}"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/github"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.github"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.github",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.github.issue_comment_created",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "body",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "comment_author_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "installation_id",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "issue_number",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "repository_name",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "repository_owner",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "sender_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        },
+        {
+          "event": "inbound.github.issue_opened",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "installation_id",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "issue_number",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "repository_name",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "repository_owner",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "title",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        },
+        {
+          "event": "inbound.github.raw.{event_type}",
+          "kind": "raw"
+        }
+      ]
+    },
+    {
+      "id": "provider.intercom",
+      "kind": "provider_trigger",
+      "provider": "intercom",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/intercom",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.intercom"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/intercom"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.intercom"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.intercom",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.intercom",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider.shopify",
+      "kind": "provider_trigger",
+      "provider": "shopify",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/shopify",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.shopify"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/shopify"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.shopify"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.shopify",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.shopify",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider.slack",
+      "kind": "provider_trigger",
+      "provider": "slack",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/slack",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.slack.{event_type}"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/slack"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.slack"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.slack",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.slack.{event_type}",
+          "kind": "raw"
+        }
+      ]
+    },
+    {
+      "id": "provider.stripe",
+      "kind": "provider_trigger",
+      "provider": "stripe",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/stripe",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.stripe"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/stripe"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.stripe"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.stripe",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.stripe",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider.telegram",
+      "kind": "provider_trigger",
+      "provider": "telegram",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/telegram",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.telegram"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.telegram.callback_action"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.telegram.text_message"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/telegram"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.telegram"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.telegram",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.telegram",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        },
+        {
+          "event": "inbound.telegram.callback_action",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "conversation_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "conversation_scope",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "external_account_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "interaction_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_message_reference",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "token",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        },
+        {
+          "event": "inbound.telegram.text_message",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "command_invocation",
+              "type": "object",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "conversation_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "conversation_scope",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "external_account_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_message_reference",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "reply_to_message_reference",
+              "type": "integer",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "text",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider.twilio",
+      "kind": "provider_trigger",
+      "provider": "twilio",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/twilio",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.twilio"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/twilio"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.twilio"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.twilio",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.twilio",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider.typeform",
+      "kind": "provider_trigger",
+      "provider": "typeform",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/typeform",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.typeform"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_https_route",
+          "target": "/webhooks/{alias}/typeform"
+        },
+        {
+          "code": "verify_secret",
+          "target": "webhook_signing.typeform"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "secret",
+          "name": "webhook_signing.typeform",
+          "scope": "target"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.typeform",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pack_inventory": {
+    "base_mode": "embedded",
+    "base_digest": "sha256:5335874874366213046c3477f8862e05b1146ed3e7281a587d7d25df3be39d31",
+    "effective_digest": "sha256:23fa537745f0149a73c14b587f6947307e2df9d712a76887f7f6d9ce26f81f65",
+    "packs": [
+      {
+        "id": "provider.github",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:3df85cfd90cbd7fd349cbde2e1f3cbec8a974c4866a0af128d5df70ca9658f01",
+        "source": "embedded",
+        "directory": "provider-triggers/github",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.github.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:95cf8119c6f2efdb6916298dc9162d117f60a4333120b5f4c7edbb951c512118",
+        "source": "embedded",
+        "directory": "provider-connectors/github",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.intercom",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:6d27868fe02eff5a7fbf99c34462d3d9151e468c9592a0015ae94e05ac256243",
+        "source": "embedded",
+        "directory": "provider-triggers/intercom",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.microsoft_graph.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:0dda8e5ec0926f6c02c7ecd59d1f1472cf925f533bb1cf7c0e36adea88ab237f",
+        "source": "embedded",
+        "directory": "provider-connectors/microsoft_graph",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.notion.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:328de3f664f038520499ef2296c0d80d694a597c16af03996b5e42e4bd5b6bab",
+        "source": "embedded",
+        "directory": "provider-connectors/notion",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.shopify",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:d15336c6b895adfb2382259210261298f17f4e879b90eee4cf36d516e895ebaa",
+        "source": "embedded",
+        "directory": "provider-triggers/shopify",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.slack",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:5d82afeccc5c511cffcaf09620a387caac8e8b61ddccb00c444175a10ce8d34e",
+        "source": "embedded",
+        "directory": "provider-triggers/slack",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.slack.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:bf1865beb33355f78867b3506fb80b79d393c9e8c46d22449bb1764488dc3650",
+        "source": "embedded",
+        "directory": "provider-connectors/slack",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.stripe",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:68e1cb2377ce261877a215a4ad5139b69637e475282ba941fd51c99387a5cbd9",
+        "source": "embedded",
+        "directory": "provider-triggers/stripe",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.telegram",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:9922560bbde72f886573a76d0e41f6dfbbaf5ab99864661195e36b6ddcd9a115",
+        "source": "embedded",
+        "directory": "provider-triggers/telegram",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.telegram.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:c33fa6494ffaffc74e69885d26b97c90d5c13d7df0e8f1159ad4f8fbbd06d221",
+        "source": "embedded",
+        "directory": "provider-connectors/telegram",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.telegram.hitl_channel",
+        "type": "channel",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:4f727e40af6100491344d6cead12e1dc1d9a1ca7c7799d9ffafa7b7effc071b6",
+        "source": "embedded",
+        "directory": "channels/telegram",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.twilio",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:84e0477d474fb5470012e1cb4cf533dc455e60ceaa42a6c74fc2a78740f0b18f",
+        "source": "embedded",
+        "directory": "provider-triggers/twilio",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.typeform",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:1f857421b6d2081bd29ce3ad6f77f7f6674d152baf39994a4035b995a931dc8f",
+        "source": "embedded",
+        "directory": "provider-triggers/typeform",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      }
+    ]
+  },
+  "findings": [
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_github",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.github AVAILABLE; provenance=platform; source_path=provider-triggers/github; requires webhook_signing.github (target-scoped); CAN emit named event inbound.github.issue_comment_created; CAN emit named event inbound.github.issue_opened; CAN emit named event inbound.github.raw.{event_type}; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/github; CAN verify named secret webhook_signing.github; event_descriptor=inbound.github.issue_comment_created kind=normalized fields=body:text:required:carry-eligible,comment_author_type:text:required:carry-eligible,installation_id:integer:required:carry-eligible,issue_number:integer:required:carry-eligible,repository_name:text:required:carry-eligible,repository_owner:text:required:carry-eligible,sender_type:text:required:carry-eligible; event_descriptor=inbound.github.issue_opened kind=normalized fields=installation_id:integer:required:carry-eligible,issue_number:integer:required:carry-eligible,repository_name:text:required:carry-eligible,repository_owner:text:required:carry-eligible,title:text:required:carry-eligible; event_descriptor=inbound.github.raw.{event_type} kind=raw; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_intercom",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.intercom AVAILABLE; provenance=platform; source_path=provider-triggers/intercom; requires webhook_signing.intercom (target-scoped); CAN emit named event inbound.intercom; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/intercom; CAN verify named secret webhook_signing.intercom; event_descriptor=inbound.intercom kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_shopify",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.shopify AVAILABLE; provenance=platform; source_path=provider-triggers/shopify; requires webhook_signing.shopify (target-scoped); CAN emit named event inbound.shopify; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/shopify; CAN verify named secret webhook_signing.shopify; event_descriptor=inbound.shopify kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_slack",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.slack AVAILABLE; provenance=platform; source_path=provider-triggers/slack; requires webhook_signing.slack (target-scoped); CAN emit named event inbound.slack.{event_type}; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/slack; CAN verify named secret webhook_signing.slack; event_descriptor=inbound.slack.{event_type} kind=raw; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_stripe",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.stripe AVAILABLE; provenance=platform; source_path=provider-triggers/stripe; requires webhook_signing.stripe (target-scoped); CAN emit named event inbound.stripe; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/stripe; CAN verify named secret webhook_signing.stripe; event_descriptor=inbound.stripe kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_telegram",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.telegram AVAILABLE; provenance=platform; source_path=provider-triggers/telegram; requires webhook_signing.telegram (target-scoped); CAN emit named event inbound.telegram; CAN emit named event inbound.telegram.callback_action; CAN emit named event inbound.telegram.text_message; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/telegram; CAN verify named secret webhook_signing.telegram; event_descriptor=inbound.telegram kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.telegram.callback_action kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account_reference:text:required:carry-eligible,interaction_reference:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,token:text:required:carry-eligible; event_descriptor=inbound.telegram.text_message kind=normalized fields=command_invocation:object:optional:not-carry-eligible,conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,reply_to_message_reference:integer:optional:not-carry-eligible,text:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_twilio",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.twilio AVAILABLE; provenance=platform; source_path=provider-triggers/twilio; requires webhook_signing.twilio (target-scoped); CAN emit named event inbound.twilio; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/twilio; CAN verify named secret webhook_signing.twilio; event_descriptor=inbound.twilio kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_typeform",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.typeform AVAILABLE; provenance=platform; source_path=provider-triggers/typeform; requires webhook_signing.typeform (target-scoped); CAN emit named event inbound.typeform; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/typeform; CAN verify named secret webhook_signing.typeform; event_descriptor=inbound.typeform kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    }
+  ]
+}
