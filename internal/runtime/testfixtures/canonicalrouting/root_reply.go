@@ -95,6 +95,28 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	return root
 }
 
+// CopyMixedReplyRequest keeps the request's provider and a same-flow ordinary
+// observer in one real publication. The observer does not own a reply binding.
+func CopyMixedReplyRequest(t testing.TB) string {
+	t.Helper()
+	root := CopyRootReplyBoundary(t, true, true)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  outputs: [request.finished]\n", "  outputs: [request.finished, request.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"request.finished:\n", "request.observed:\n  request_id: text\nrequest.finished:\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `request-observer:
+  execution_type: system_node
+  subscribes_to: [provider.requested]
+  event_handlers:
+    provider.requested:
+      emit:
+        event: request.observed
+        fields: {request_id: payload.request_id}
+result-observer:
+`)
+	return root
+}
+
 type RootReplyNegativeMutation uint8
 
 const (
