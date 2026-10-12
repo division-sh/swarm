@@ -37,11 +37,29 @@ func (s *PipelineSQLiteOwner) BindReceiverConstructionHistory(owner ReceiverCons
 }
 
 func (s *PipelinePostgresOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
-	return receiverCreatingEventTx(ctx, tx, runID, route)
+	run, err := s.LoadSnapshotTx(ctx, tx, runID, false)
+	if err != nil {
+		return "", err
+	}
+	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.receiverHistory, false)
 }
 
 func (s *PipelineSQLiteOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
-	return receiverCreatingEventTx(ctx, tx, runID, route)
+	run, err := s.LoadSnapshotTx(ctx, tx, runID)
+	if err != nil {
+		return "", err
+	}
+	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.receiverHistory, true)
+}
+
+func ordinaryReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+	if err := run.Validate(); err != nil {
+		return "", err
+	}
+	if run.Origin.Kind() != runlifecycle.OriginForkMaterialization {
+		return receiverCreatingEventTx(ctx, tx, run.RunID, route)
+	}
+	return historicalReceiverCreatingEventTx(ctx, tx, run, route, history, sqlite)
 }
 
 func (s *PipelinePostgresOwner) SelectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute) (string, error) {
@@ -72,7 +90,17 @@ func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority 
 	if history == nil || run.RunID != authority.ForkRunID() || run.Validate() != nil {
 		return "", fmt.Errorf("selected creating-turn observation requires its bound run and fixed-snapshot owner")
 	}
-	header, err := selectedCreatingReceiverHeader(ctx, tx, run.RunID, route.Target.Route(), sqlite)
+	return historicalReceiverCreatingEventTx(ctx, tx, run, route, history, sqlite)
+}
+
+func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+	if tx == nil || history == nil || route.Target.Empty() || run.Validate() != nil {
+		return "", fmt.Errorf("creating-turn history requires its bound run, exact receiver and original transaction")
+	}
+	if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
+		return "", err
+	}
+	header, err := constructedCreatingReceiverHeader(ctx, tx, run.RunID, route.Target.Route(), sqlite)
 	if err != nil {
 		return "", err
 	}
@@ -91,20 +119,20 @@ func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority 
 	if historical {
 		return "", nil
 	}
-	return receiverCreatingEventTx(ctx, tx, authority.ForkRunID(), route)
+	return receiverCreatingEventTx(ctx, tx, run.RunID, route)
 }
 
-func selectedCreatingReceiverHeader(ctx context.Context, tx *sql.Tx, runID string, target events.RouteIdentity, sqlite bool) (pipeline.WorkflowInstance, error) {
+func constructedCreatingReceiverHeader(ctx context.Context, tx *sql.Tx, runID string, target events.RouteIdentity, sqlite bool) (pipeline.WorkflowInstance, error) {
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(target.FlowID, flowidentity.LogicalInstanceID(target.FlowInstance), target.FlowInstance))
 	if err != nil {
 		return pipeline.WorkflowInstance{}, err
 	}
 	var entityID string
 	if err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, runID, target.FlowInstance, target.FlowID).Scan(&entityID); err != nil {
-		return pipeline.WorkflowInstance{}, fmt.Errorf("read selected constructed receiver: %w", err)
+		return pipeline.WorkflowInstance{}, fmt.Errorf("read constructed receiver: %w", err)
 	}
 	if target.EntityID != "" && target.EntityID != entityID {
-		return pipeline.WorkflowInstance{}, fmt.Errorf("selected creating-turn target contradicts constructed receiver identity")
+		return pipeline.WorkflowInstance{}, fmt.Errorf("creating-turn target contradicts constructed receiver identity")
 	}
 	paired, err := loadWorkflowTargetPersistence(ctx, tx, owner, identity.NormalizeEntityID(entityID), sqlite)
 	if err != nil {
