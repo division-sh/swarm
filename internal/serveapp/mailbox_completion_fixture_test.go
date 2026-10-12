@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -68,13 +69,8 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				return nil, err
-			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")

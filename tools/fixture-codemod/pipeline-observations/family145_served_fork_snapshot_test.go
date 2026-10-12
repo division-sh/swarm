@@ -41,6 +41,12 @@ func family145ServedProjectionProofError(function, before, after string) error {
 	if err != nil {
 		return err
 	}
+	if function == "newRetainedMailboxCompletionRuntimeConfigured" {
+		normalized, err = family145ServedRestartConstructionInverse(before, normalized)
+		if err != nil {
+			return err
+		}
+	}
 	if normalized != before {
 		return fmt.Errorf("served source/options/handlers/context/workspace/cleanup/readers changed: %s", function)
 	}

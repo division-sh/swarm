@@ -5641,3 +5641,42 @@ context, tracker and watchlist suffice; fixture wiring changes no authoritative
 runtime semantics. M01/Docker/drain/D3/M07/integration holds stay unwaived.
 Local only, no push/PR/tier/server2. Receipts:
 ~/.cache/swarm-2542-family145/served-fork-native-snapshot-*.
+
+## Retained mailbox construction owner (2026-10-12)
+
+The whole newRetainedMailboxCompletionRuntimeConfigured construction family now
+uses EXISTING selected.OpenRuntime with original DSN, actual context, actual
+selection and runtimeSessionLockTTL(cfg). Its independent unclosed PostgreSQL
+adapter, bootstrap and generic getter are deleted. The production serve owner
+alone owns joining and closing that exact selected adapter. Four unchanged
+wrapper entry points and18 unchanged construction calls retain their original
+source, config suffix and optional credential arguments; no caller rewrite,
+new adapter or production semantic change was needed. Other mailbox raw reads
+and fault sites remain explicit #2542 debt, not this construction-class closure.
+
+Exact whole-body inverse composes the already-reviewed selected snapshot capture
+with this ONE constructor replacement. Tokens/default token, explicit transport
+auth, MockOnly posture, config suffix, source identity, readiness, process stop,
+retained-root removal, restart callback, DB/role projections and cleanup restore
+all remain. Context/selection/DSN/TTL/token/config/restart/cleanup hostile controls
+fail. Restoring the ACTUAL old factory in the source fails the source-pinned
+guard; exact restoration is GREEN. No exception or classifier relaxation.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Retained-mailbox ordinary native startup, actual selected roles and restart replay | reproduced and fixed | Original TestMailboxNoticeAtomicCompletionBothStores race baseline PASS48.59s; native PASS45.17s, all original committed-response/identity/reopen/replay assertions retained |
+| Custom human budget configuration, cross-credential draft ownership and real retained restart | execution-proven through the same corrected path | Original TestMailboxHumanBudgetAndCrossCredentialDraftBothStores BOTH backends under race, PASS124.90s; config suffix, second token, commit fault/rollback, exact retained replay and continuation assertions unchanged |
+| Other unchanged shared construction callers | execution-proven through the same corrected path | One closed constructor, exact whole-body inverse and unchanged call/source/options bindings; the actual both-backend notice and configured-budget restart executions above. No fresh execution of every unrelated workload claimed |
+
+Native two-root cohort PASS171.155s. The initial baseline also ran the disjoint
+gateCompletionHarness rollback/restart root (PASS22.16s); that is unchanged
+evidence, NOT claimed as this helper's proof. Complete cheap collection
+PASS16.293s, six boundaries PASS4.159s, affected U1000 clean. The previous corpus
+Before,24 receipts and snapshot Successor survive:1288/529, digest
+7e6b7fd0a26bb8fcd5ccf528b6b760b47f3f963d303c847496279bd431c04f0a.
+Downward census PASS32.490s:7895 ->7892 findings,5584 ->5582 raw sites,
+3/2 removed, ZERO added; supplied-pool56 and uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Existing tracker/watchlist/contract suffice; M01/Docker/drain/D3/M07/integration
+holds remain. Local only, no push/PR/tier/server2. Receipts:
+~/.cache/swarm-2542-family145/retained-mailbox-native-construction-*.
