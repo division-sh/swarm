@@ -177,7 +177,7 @@
     "owner": "internal/cliapp/local_preflight.go::RunServeLocalClaudeCLIPreflight",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "6c3ef2a61090b3156b021bb1f8e2b0ef93977f4ce99a1e3e8191c3aa6b76362f"
+    "body_sha256": "d5a091ea711fb713b96eb6555c5cc3b943017537bc60d6f7491be6c76a812b40"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::WriteLocalPreflightText",
@@ -261,7 +261,7 @@
     "owner": "internal/cliapp/local_preflight.go::runLocalClaudeCLIPreflight",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "b6d59c14deee0e044a14c240aa66801299d41c3e7c6be900cc17a2f651bd3413"
+    "body_sha256": "348050e8d8608c56cb2866de5514a4188fb7eb9ebd7f4476215e8d7e86794d30"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::serveLocalPreflightMode",
@@ -2853,7 +2853,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8bcc10d41bc58b56f5bf765122d6925f1b5757b66e0c8d6e1acf49dfe93dc2c0"
+    "body_sha256": "8c462f5b3386160df2a9fb561e362c4ea1fc2ae17d0b15ffde643ba333aaed17"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
