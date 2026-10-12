@@ -257,6 +257,16 @@ units:
     packages: [github.com/division-sh/swarm/internal/runtime/pipeline]
     run: '^(Test|Fuzz|Example)'
     skip: '^Test(A2|CompiledTransition|Guard|PipelineCompiled|WorkflowCurrentTransition|JoinCapturedLoop|WorkflowTimer|WorkflowJoin|AcceptedWorkflowTimer|MutationFreeAcceptedEventTimer|Issue2564M09).*$'
+    required_children:
+      TestCommittedAgentReadinessPartialAttachmentBothStores:
+      - sqlite/missing_source/shutdown_false
+      - sqlite/missing_sibling/shutdown_false
+      - sqlite/missing_source/shutdown_true
+      - sqlite/missing_sibling/shutdown_true
+      - postgres/missing_source/shutdown_false
+      - postgres/missing_sibling/shutdown_false
+      - postgres/missing_source/shutdown_true
+      - postgres/missing_sibling/shutdown_true
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

@@ -43,6 +43,14 @@ func validatePipelineEnvelopes(policy Policy) error {
 	for _, expected := range pipelinePartitionUnits() {
 		want := UnitPolicy{Packages: []string{pipelineProofPackage}, Run: expected.Run, Skip: expected.Skip,
 			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "broad"}
+		if expected.ID == "pipeline-rest" {
+			want.RequiredChildren = map[string][]string{"TestCommittedAgentReadinessPartialAttachmentBothStores": {
+				"sqlite/missing_source/shutdown_false", "sqlite/missing_sibling/shutdown_false",
+				"sqlite/missing_source/shutdown_true", "sqlite/missing_sibling/shutdown_true",
+				"postgres/missing_source/shutdown_false", "postgres/missing_sibling/shutdown_false",
+				"postgres/missing_source/shutdown_true", "postgres/missing_sibling/shutdown_true",
+			}}
+		}
 		if !reflect.DeepEqual(policy.Units[expected.ID], want) {
 			return fmt.Errorf("%s changed whole-root execution envelope", expected.ID)
 		}

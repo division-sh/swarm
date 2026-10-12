@@ -19057,7 +19057,15 @@ platform_tables:
         owner reconciles and verifies its complete installed resource set. Partial construction,
         incomplete resource installation, terminal/ineligible lifecycle, retired generation or a
         stale attempt cannot advance. Same-attempt acknowledged progress is idempotent. An exact
-        attempt's timer acquisition is synchronous: scheduler admission or projection failure
+        live accepted attachment still installing under its current generation may temporarily
+        lack a process agent cell named in its exact hashed census. Committed agent delivery
+        defers that exact absence through the existing agent-route-lifecycle wake only while
+        the owning attachment executor is live and agents_registered has not committed.
+        Planned-only rows, unrelated actors, missing or contradictory evidence, completed
+        installation, retirement, abort, supersession and fenced generations cannot lend that
+        wake or authorize independent materialization. Topology progress rechecks the exact
+        delivery through its existing continuation owner.
+        Each exact attempt's timer acquisition is synchronous: scheduler admission or projection failure
         propagates to that attempt's exact cleanup owner. Acquisition panic releases the scheduler
         admission lock before exact retirement joins every previously acquired wakeup; it cannot
         strand partial resources or record forward progress. Background timer recovery cannot stand

@@ -74,6 +74,14 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 		switch state {
 		case committedRouteReady:
 			continue
+		case committedRouteAbsent:
+			installing, err := am.committedAgentAttachmentInstalling(ctx, identity)
+			if err != nil {
+				return fmt.Errorf("inspect committed agent %s attachment: %w", identity.Description(), err)
+			}
+			if installing {
+				return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
+			}
 		case committedRouteLaunching, committedRouteRetiring:
 			return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
 		case committedRouteUnavailable:
