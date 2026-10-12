@@ -663,14 +663,16 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 	}
 }
 
-func TestDeploymentSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
+func TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
 	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointDeploymentRevision)
 }
 
-func TestEventSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
+func TestEventSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
 	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointEvent)
 }
 
+// The historical helper name is retained for declaration-keyed debt evidence.
+// This proves replay after a decoded response, not a dropped wire response.
 func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runfork.RunForkPointKind) {
 	for _, route := range []string{"root", "singleton"} {
 		t.Run(route, func(t *testing.T) {
@@ -748,7 +750,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					assertForkRows()
 					operationBefore := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)
 
-					// Reconstruct the public handler after the successful response is lost.
+					// The first response was decoded; rebuild the public handler for replay.
 					replayServer := deploymentForkServerAt(t, f, owner, func() time.Time { return time.Now().Add(48 * time.Hour) })
 					replay, rpcErr := deploymentForkRPC(t, f.ctx, replayServer, params)
 					if len(rpcErr) != 0 || !reflect.DeepEqual(replay, result) {
@@ -780,7 +782,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatal(err)
 					}
 					if childCount != 1 || intentCount != 1 {
-						t.Fatalf("lost-response retry duplicated child/feed: children=%d intents=%d", childCount, intentCount)
+						t.Fatalf("reconstructed-handler replay duplicated child/feed: children=%d intents=%d", childCount, intentCount)
 					}
 					conflict := map[string]any{}
 					for name, value := range params {

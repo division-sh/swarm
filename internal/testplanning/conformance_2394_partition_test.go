@@ -191,7 +191,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	deploymentFeedRoots := []string{
 		"TestDeploymentResourceRunStartEmptyVersionDoesNotInventReceiverBothStores",
 		"TestDeploymentResourceRunStartPinDocumentRowsBothStores",
-		"TestDeploymentSourceChangedPinPublicForkAndLostResponse",
+		"TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction",
 		"TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation",
 		"TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable",
 		"TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores",
@@ -322,7 +322,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 			t.Fatalf("general conformance partition omitted reviewed #2281 root %s", name)
 		}
 	}
-	const eventBranchProof = "TestEventSourceChangedPinPublicForkAndLostResponse"
+	const eventBranchProof = "TestEventSourceChangedPinPublicForkReplayAfterReconstruction"
 	if i := sort.SearchStrings(groups[0], eventBranchProof); i == len(groups[0]) || groups[0][i] != eventBranchProof {
 		t.Fatalf("general conformance partition omitted typed event-branch proof %s", eventBranchProof)
 	}
