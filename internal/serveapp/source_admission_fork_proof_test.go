@@ -6,15 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -48,9 +52,9 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			// Publication must consume source that is already durably available.
 			var durableBeforeConstruction bool
-			opts.TestAPIListenerBound = func(_ net.Addr) {
+			observe2376RuntimeConstruction(t, func() {
 				if selected == nil {
-					t.Error("selected store absent at listener construction")
+					t.Error("selected store absent at runtime construction")
 					return
 				}
 				record, err := selected.SourceArtifactStore().GetSourceArtifact(context.Background(), verified.Hash)
@@ -59,12 +63,12 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 					return
 				}
 				artifact, err := record.Decode()
-				if err != nil || !reflect.DeepEqual(artifact.MemberTable(), verified.Members) {
+				if err != nil || artifact.BundleHash() != verified.Hash || !reflect.DeepEqual(artifact.MemberTable(), verified.Members) {
 					t.Errorf("source not durably available before runtime construction: %v", err)
 					return
 				}
 				durableBeforeConstruction = true
-			}
+			})
 			process, rt := start()
 			defer process.stop()
 			admitted, err := sourceartifact.AdmitDirectory(root)
@@ -122,11 +126,42 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 					t.Fatalf("verify rejection=%d %s / %s", code, &verifyOut, &verifyErr)
 				}
 				var serveOut lockedBuffer
-				published := false
+				constructed, published := false, false
+				observe2376RuntimeConstruction(t, func() { constructed = true })
+				previousPublication := buildSelectedAPICapabilities
+				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+					published = true
+					return previousPublication(owner, req)
+				}
+				t.Cleanup(func() { buildSelectedAPICapabilities = previousPublication })
+				var bound net.Addr
 				opts.Output = &serveOut
-				opts.TestAPIListenerBound = func(net.Addr) { published = true }
-				if code := runFrom(context.Background(), repoRootForTest(), *opts); code == 0 || published || !admissionEvidence(serveOut.String()) {
-					t.Fatalf("serve rejection=%d published=%t\n%s", code, published, serveOut.String())
+				opts.TestAPIListenerBound = func(addr net.Addr) {
+					bound = addr
+					client := &http.Client{Timeout: time.Second}
+					for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable, "/v1/rpc": http.StatusServiceUnavailable} {
+						response, err := client.Get("http://" + addr.String() + path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						_ = response.Body.Close()
+						if response.StatusCode != want {
+							t.Fatalf("unadmitted probe %s=%d, want %d", path, response.StatusCode, want)
+						}
+					}
+				}
+				if code := runFrom(context.Background(), repoRootForTest(), *opts); code == 0 || constructed || published || !admissionEvidence(serveOut.String()) {
+					t.Fatalf("serve rejection=%d constructed=%t published=%t\n%s", code, constructed, published, serveOut.String())
+				}
+				if bound == nil {
+					t.Fatal("rejected source never exposed its alive/not-ready standby probe")
+				}
+				reclaimed, err := cliapp.ListenServeHTTPListener("api", bound.String())
+				if err != nil {
+					t.Fatalf("source rejection returned before joining its probe: %v", err)
+				}
+				if err := reclaimed.Close(); err != nil {
+					t.Fatal(err)
 				}
 				// The stopped connection is gone; read the same selected database afresh.
 				var after map[string]int
@@ -164,6 +199,18 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Workspace construction follows acknowledged source preparation and precedes
+// runtime.NewRuntime. Observing socket binding or readiness is not this boundary.
+func observe2376RuntimeConstruction(t *testing.T, before func()) {
+	t.Helper()
+	previous := cliapp.ConfiguredWorkspaceLifecycleForServe
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mounts cliapp.WorkspaceMountSources, backend cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		before()
+		return previous(cfg, projection, source, mounts, backend)
+	}
+	t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
 }
 
 func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
