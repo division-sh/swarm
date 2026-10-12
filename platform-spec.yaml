@@ -21004,7 +21004,10 @@ run_model:
       is dropped, and no event-name/payload deduplication or provider replay substitutes for the exact linkage.
       A physical selected result may precede its inherited request publication in that child. A later fork still
       recognizes the result through its exact committed selected lineage and immediate-source fixed-cut binding,
-      recursively validating the original activity publication. Only the current cut's unfinished recipients continue;
+      recursively validating the original activity publication. Each hop must preserve the immediate source's complete
+      result content and projected producer routing. Only the exact request generation admitted by the existing loop
+      correspondence may project its declared revision field; business and activity fields are not rewritten. The
+      child's selected schema remains separately admitted and is not inferred from its ancestor. Only the current cut's unfinished recipients continue;
       neither a later request nor a fabricated local journal is required to supply that publication's identity.
       The current selected receiver execution owner retains the immutable publication inventory and binds it on every
       fresh receiver context, including initial dispatch and successor recovery. Publication-context values alone are

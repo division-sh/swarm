@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -90,7 +91,8 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	if err != nil {
 		return events.Event{}, false, err
 	}
-	previous, present, err := (runForkSourceStateAdmission{snapshot: parent, postgres: a.postgres}).activityPublicationAtCut(ctx, tx, selected.SourceEventID(), visiting)
+	parentAdmission := runForkSourceStateAdmission{snapshot: parent, forkRunID: binding.ForkRunID, postgres: a.postgres}
+	previous, present, err := parentAdmission.activityPublicationAtCut(ctx, tx, selected.SourceEventID(), visiting)
 	if err != nil || !present {
 		return events.Event{}, false, err
 	}
@@ -102,7 +104,22 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	if err != nil {
 		return events.Event{}, false, err
 	}
-	if err := requireActivityPublicationCutLineage(ctx, tx, binding, physical, previous); err != nil {
+	parentCut, err := newRunForkReplayCut(parent)
+	if err != nil {
+		return events.Event{}, false, err
+	}
+	generation, matched, err := parentAdmission.publishedActivityGenerationAtCut(ctx, tx, parentCut, previous, make(map[string]bool))
+	if err != nil {
+		return events.Event{}, false, err
+	}
+	if !matched {
+		return events.Event{}, false, fmt.Errorf("inherited activity publication lacks exact original result")
+	}
+	reference, err := parentAdmission.activityPublicationGenerationProjection(previous, generation)
+	if err != nil {
+		return events.Event{}, false, err
+	}
+	if err := requireActivityPublicationCutLineage(ctx, tx, binding, physical, previous, reference); err != nil {
 		return events.Event{}, false, err
 	}
 	if err := pipeline.ValidateSelectedActivityResultPayload(request, physical); err != nil {
@@ -111,7 +128,7 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	return physical, true, nil
 }
 
-func requireActivityPublicationCutLineage(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, physical, parent events.Event) error {
+func requireActivityPublicationCutLineage(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, physical, parent events.Event, reference *loopruntime.ForkChildReference) error {
 	lineage, selected := physical.SelectedForkLineage()
 	if !selected || lineage.SourceRunID() != binding.SourceRunID || lineage.SourceEventID() != parent.ID() ||
 		physical.RunID() != binding.ForkRunID || parent.RunID() != binding.SourceRunID || physical.Type() != parent.Type() || physical.ExecutionMode() != parent.ExecutionMode() {
@@ -125,5 +142,26 @@ func requireActivityPublicationCutLineage(ctx context.Context, tx *sql.Tx, bindi
 	if err := validateSelectedForkPublishedInputIdentity(binding, stored, physical, source); err != nil {
 		return err
 	}
-	return validateSelectedForkPublishedInputFrame(binding, stored, physical, source)
+	if err := validateSelectedForkPublishedInputFrame(binding, stored, physical, source); err != nil {
+		return err
+	}
+	projected, err := runfork.ProjectSelectedContractSourceEvent(binding.SourceRunID, binding.ForkRunID,
+		runfork.RunForkSelectedContractSourceEvent{SourceEventID: parent.ID(), EventName: string(parent.Type()), ExecutionMode: parent.ExecutionMode(),
+			RoutingSource: parent.RoutingSource(), Payload: parent.Payload()})
+	if err != nil {
+		return err
+	}
+	if reference != nil {
+		if err := reference.RequireDestination(binding.ForkRunID, projected.RoutingSource.Route().EntityID); err != nil {
+			return err
+		}
+	}
+	projected.Payload, err = projectForkRevisionPayload(projected.Payload, reference)
+	if err != nil {
+		return err
+	}
+	if physical.RoutingSource() != projected.RoutingSource || !workflowCommitJSONEqual(physical.Payload(), projected.Payload) {
+		return fmt.Errorf("inherited activity publication changed its immediate-source payload or routing projection")
+	}
+	return nil
 }
