@@ -336,8 +336,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			if err != nil {
 				t.Fatal(err)
 			}
-			var replyID string
-			if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2", requestID, source.ResolveFlowEventReference("provider", "provider.replied")).Scan(&replyID); err != nil {
+			replyID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.replied"), requestID)
+			if err != nil {
 				t.Fatalf("provider response absent: %v logs=%s", err, logger.String())
 			}
 			reply, found, err := selected.events.LoadPreparedPublishEvent(ctx, replyID)
@@ -415,9 +415,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 						t.Fatalf("publish real provider ordinary trigger: %v", err)
 					}
 					a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, ordinaryTrigger, provider.Key(), "completed", "delivered", logger)
-					var ordinaryID string
-					if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2",
-						ordinaryTrigger.ID(), source.ResolveFlowEventReference("provider", "provider.notified")).Scan(&ordinaryID); err != nil {
+					ordinaryID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.notified"), ordinaryTrigger.ID())
+					if err != nil {
 						t.Fatalf("real provider ordinary output absent: %v logs=%s", err, logger.String())
 					}
 					ordinary, found, err := selected.events.LoadPreparedPublishEvent(ctx, ordinaryID)

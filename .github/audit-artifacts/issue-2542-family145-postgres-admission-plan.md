@@ -4059,3 +4059,38 @@ Supplied-pool calls remain61. This closes one consumer's raw authority inside
 the shared gate/A2 family, NOT the family's live carrier/openers or parent.
 Signed-head complexity follows. No push/PR/tier/server2 or new gate. Receipts
 ~/.cache/swarm-2542-family145/gate-prospective-fault-*.
+
+## Shared Gate/A2 Dependency: Source-Named Event Identities
+
+Three query/Scan pairs across the two shared bound-reply/publication helpers now
+reuse ReadTemplateSourceNamedEventIdentity. No new port or interpreter is added.
+The existing owner projects the stored UUID/text event identity as text, which
+is the same string formerly scanned from event_id; the two original name/source
+conjunctions commute, without any added run predicate, sort, limit or synthetic
+no-row value. Calls reverse their arguments to match the existing name-first
+owner exactly. Context, provider references, trigger/source IDs, destinations,
+quiescent reads and all original downstream route/identity/revision/assertion
+cuts stay. The finite map pins every call and preserves all business assertions;
+an additional source-pinned control checks both original selectors and the exact
+existing physical owner projection and argument binding.
+
+| Manifestation | Actual both-store/race proof, Go1.26.8 |
+| --- | --- |
+| E1 return identity cannot mutate later E2; retained authority settles and replays exactly | TestA2StageEntryBoundReturnIsolationOnBothStores PASS11.15s |
+| Exact return cannot acquire a later independently subscribed sibling | TestA2BoundReplyDoesNotLendAdmissionToLaterSiblingOnBothStores PASS5.48s |
+| Ordinary provider edge remains separate from retained reply authority | TestA2BoundReplyDoesNotExpandToLaterOrdinaryConnectObserverOnBothStores PASS6.36s, including real ordinary output ID lookup |
+| Payload-directed and multiple-recipient publication preserve actual output/routes/state evidence | TestA2StageEntryPayloadDirectedOutputOnBothStores PASS22.57s; TestA2StageEntryMultiRecipientBindingOnBothStores PASS6.76s |
+| First-publication transition/close races preserve retry and late refusal | TestA2StageEntryFirstPublicationRacesTransitionAndRetriesOnBothStores PASS5.70s; TestA2StageEntryFirstPublicationRacesCloseAndRetainsLateRefusalOnBothStores PASS5.60s |
+| All helper snapshots, exact selected/context/name/source/destination cuts and hostile controls | Four affected/global finite roots PASS6.810s; U1000 clean |
+
+Seven affected roots completed PASS64.674s. Corrupted-entry and missing-key
+early-return receipts carry: their execution never reaches the changed lookups.
+No persistence owner changed, so the preceding complete six-boundary receipt
+carries. Corpus1210/416, digest
+79cfd73b6f27f268806e7aa7766ea64adaf73f4fcdd21abbd7c5a9504ba30cfe;
+historical/current digest and all24 immutable mechanical inputs unchanged.
+Downward census8462 ->8456 findings,6070 ->6064 raw sites:6 removed/zero added,
+uncertainty67 unchanged, PASS26.005s. Supplied-pool calls remain61. The shared
+gate/A2 carrier and whole-family checkpoint remain open; no per-reader stacking
+review request, push, PR, tier or server2. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/gate-source-identities-*.

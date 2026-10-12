@@ -23,6 +23,8 @@ var family145GateScalarReadCuts = map[string][]string{
 	},
 	"a2_bound_reply_binding_external_test.go|testA2BoundReplyJourney": {
 		"replies, err := storetest.CountGateSourceNamedEvents(ctx, selected.events, source.ResolveFlowEventReference(\"provider\", \"provider.replied\"), requestID)",
+		"replyID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference(\"provider\", \"provider.replied\"), requestID)",
+		"ordinaryID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference(\"provider\", \"provider.notified\"), ordinaryTrigger.ID())",
 	},
 	"a2_count_join_execution_external_test.go|TestA2CountJoinRealExecutionAndRestartOnBothStores": {
 		"eventsBefore, err := storetest.CountPhysicalRunEvents(ctx, selected.events, runID)",
@@ -54,6 +56,7 @@ var family145GateScalarReadCuts = map[string][]string{
 	},
 	"a2_publication_binding_external_test.go|testA2StageEntryPublicationBinding": {
 		"routes, err := storetest.CountTemplateEventDeliveries(ctx, selected.events, outputID)",
+		"outputID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, \"item.completed\", triggerID)",
 	},
 	"pause_eligibility_test.go|TestPausedHandedNodeParksUntilContinueBothStores": {
 		"before, err := storetest.CountRunEventNameStorage(context.Background(), s.events, runID, \"selected\")",
@@ -122,6 +125,39 @@ func TestFamily145ProspectivePublicationFaultPreservesDDLPhaseAndClosedOwner(t *
 		if strings.Contains(consumer, escaped) {
 			t.Fatalf("prospective publication retained raw authority or dialect interpretation: %s", escaped)
 		}
+	}
+}
+
+func TestFamily145GateSourceIdentitiesReuseOnlyOriginalNameAndSourcePredicates(t *testing.T) {
+	physical := family145ConversationForkOwnerSource(t, "internal/backend/eventrecord/template_storage_observation.go", "ReadTemplateSourceNamedEventIdentityTx")
+	if strings.Count(physical, "tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name=$1 AND source_event_id=$2`, name, source).Scan(&out)") != 1 {
+		t.Fatal("source identity changed its original physical projection, predicates or name/source argument order")
+	}
+	var rows []struct{ File, Function, Before, After string }
+	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, row := range rows {
+		if row.Function != "testA2BoundReplyJourney" && row.Function != "testA2StageEntryPublicationBinding" {
+			continue
+		}
+		// Stored event UUID/text identity scanned into string is preserved by
+		// the existing text projection; the two conjunctions commute, not widen.
+		want := 1
+		if row.Function == "testA2BoundReplyJourney" {
+			want = 2
+		}
+		if strings.Count(row.Before, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2") != want {
+			t.Fatalf("original source identity inventory changed: %s", row.Function)
+		}
+		if err := family145GateScalarReadProofError(family145GateScalarReadKey(row.File, row.Function), row.Before, row.After); err != nil {
+			t.Fatal(err)
+		}
+		seen++
+	}
+	if seen != 2 {
+		t.Fatalf("source identity consumer inventory=%d, want 2", seen)
 	}
 }
 

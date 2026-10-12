@@ -437,8 +437,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					readErr := selected.db.QueryRowContext(ctx, "SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", triggerID, worker.Key()).Scan(&failure)
 					t.Fatalf("real worker output: status=%s err=%v settlement=%v quiet=%v read=%v failure=%s logs=%s", completed.Status, err, settleErr, quietErr, readErr, failure, logger.String())
 				}
-				var outputID string
-				if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2", triggerID, "item.completed").Scan(&outputID); err != nil {
+				outputID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, "item.completed", triggerID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, outputID)
