@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -139,9 +140,31 @@ func TestServePostgresRemotePossessionOutlivesLocalLoss(t *testing.T) {
 		t.Fatalf("test lost remote hold: pid=%d want=%d err=%v", retained, predecessor, err)
 	}
 	dsn = server.dsn
-	refused := startServeRuntimeTestProcess(t, opts)
-	if code, done := refused.waitForExit(10 * time.Second); !done || code == 0 || serveOutputIsReady(refused.outputString()) {
-		t.Fatalf("successor bypassed remote ownership: done=%t code=%d\n%s", done, code, refused.outputString())
+	bound := make(chan net.Addr, 1)
+	successorOpts := opts
+	successorOpts.TestAPIListenerBound = func(addr net.Addr) { bound <- addr }
+	next := startServeRuntimeTestProcess(t, successorOpts)
+	// Release the remote holder before joining a contender after a failed assertion.
+	t.Cleanup(release)
+	var standby net.Addr
+	select {
+	case standby = <-bound:
+	case <-time.After(10 * time.Second):
+		t.Fatal("successor did not expose its standby probe")
+	}
+	client := &http.Client{Timeout: time.Second}
+	for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable, "/v1/rpc": http.StatusServiceUnavailable} {
+		response, err := client.Get("http://" + standby.String() + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("remote-held standby %s=%d, want %d", path, response.StatusCode, want)
+		}
+	}
+	if code, done := next.waitForExit(10 * time.Second); done || serveOutputIsReady(next.outputString()) {
+		t.Fatalf("successor failed or published while remote ownership was held: done=%t code=%d\n%s", done, code, next.outputString())
 	}
 	release()
 	deadline := time.Now().Add(5 * time.Second)
@@ -158,8 +181,10 @@ func TestServePostgresRemotePossessionOutlivesLocalLoss(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	next := startServeRuntimeTestProcess(t, opts)
 	next.waitForReadyLine()
+	if actual := serveRuntimeAPIListenerFromOutput(t, next.outputString()); actual != standby.String() {
+		t.Fatalf("successor changed its standby socket: %s, want %s", actual, standby)
+	}
 	var successor int
 	if err := observer.QueryRow(ownershipSQL, "swarm:runtime:shared-store-owner").Scan(&successor); err != nil || successor == predecessor {
 		t.Fatalf("no exact new backend possession: %d %v", successor, err)
@@ -167,5 +192,5 @@ func TestServePostgresRemotePossessionOutlivesLocalLoss(t *testing.T) {
 	if code := next.stop(); code != 0 {
 		t.Fatalf("healthy new owner exit=%d\n%s", code, next.outputString())
 	}
-	t.Logf("remote PID %d held authority after local failure; supported successor refused until remote release, then acquired PID %d", predecessor, successor)
+	t.Logf("remote PID %d held authority after local failure; same successor waited until remote release, then acquired PID %d", predecessor, successor)
 }
