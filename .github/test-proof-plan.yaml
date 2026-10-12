@@ -1262,6 +1262,7 @@ units:
     # top-level tests accounted for 84.85s of the 198.41s package test time.
     run: ^TestR[^u].*$
     required_children:
+      TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores: [sqlite, postgres]
       TestRootTurnTerminationUsesConstructedRunOwnerBothStores: [prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
       TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores: [retry_queued/sqlite, retry_queued/postgres, unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout-recovery/sqlite, timeout-recovery/postgres]
       TestRootTurnTimeoutRecoveryKeepsExactReactionBothStores: [sqlite, postgres]
