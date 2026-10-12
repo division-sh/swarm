@@ -14,6 +14,10 @@ type WorkflowStateObservationRow = private.WorkflowStateObservationRow
 
 type WorkflowRunFieldsRevisionStorage = private.WorkflowRunFieldsRevisionStorage
 
+func ReadBoundReplySourceStorage(ctx context.Context, selected any, runID, path string) (map[string][][]any, error) {
+	return private.ReadBoundReplySourceStorageForTest(ctx, selected, runID, path)
+}
+
 func ReadWorkflowRunFieldsRevisionStorage(ctx context.Context, selected any, runID string) (WorkflowRunFieldsRevisionStorage, error) {
 	return private.ReadWorkflowRunFieldsRevisionStorageForTest(ctx, selected, runID)
 }

@@ -459,43 +459,9 @@ func a2BoundReplySourceSnapshot(t *testing.T, ctx context.Context, selected gate
 	if concretePath == "" {
 		t.Fatal("source snapshot requires the actual delivery's concrete path")
 	}
-	// A fieldless source may have a header without state. Measure both persisted
-	// halves without inventing an entity ID or deriving a semantic owner from path.
-	snapshot := make(map[string][][]any)
-	for _, table := range []struct{ name, path, order string }{{"flow_instances", "instance_path", "instance_path"}, {"entity_state", "flow_instance", "entity_id"}} {
-		rows, err := selected.db.QueryContext(ctx, "SELECT * FROM "+table.name+" WHERE run_id=$1 AND "+table.path+"=$2 ORDER BY "+table.order, runID, concretePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		snapshot[table.name] = nil
-		for rows.Next() {
-			values, destinations := make([]any, len(columns)), make([]any, len(columns))
-			for index := range values {
-				destinations[index] = &values[index]
-			}
-			if err := rows.Scan(destinations...); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			for index, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[index] = string(raw)
-				}
-			}
-			snapshot[table.name] = append(snapshot[table.name], values)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
-		}
+	snapshot, err := storetest.ReadBoundReplySourceStorage(ctx, selected.events, runID, concretePath)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return snapshot
 }

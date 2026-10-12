@@ -18,6 +18,47 @@ type WorkflowRunFieldsRevisionStorage struct {
 	Revision int64
 }
 
+func ReadBoundReplyFlowHeadersStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) ([][]any, error) {
+	return readBoundReplyPhysicalRows(ctx, tx, `SELECT * FROM flow_instances WHERE run_id=$1 AND instance_path=$2 ORDER BY instance_path`, runID, path)
+}
+
+func ReadBoundReplyEntityStatesStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) ([][]any, error) {
+	return readBoundReplyPhysicalRows(ctx, tx, `SELECT * FROM entity_state WHERE run_id=$1 AND flow_instance=$2 ORDER BY entity_id`, runID, path)
+}
+
+func readBoundReplyPhysicalRows(ctx context.Context, tx *sql.Tx, query, runID, path string) (out [][]any, err error) {
+	rows, err := tx.QueryContext(ctx, query, runID, path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		values, destinations := make([]any, len(columns)), make([]any, len(columns))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return nil, err
+		}
+		for index, value := range values {
+			if raw, ok := value.([]byte); ok {
+				values[index] = string(raw)
+			}
+		}
+		out = append(out, values)
+	}
+	return out, rows.Err()
+}
+
 func ReadWorkflowRunFieldsRevisionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (WorkflowRunFieldsRevisionStorage, error) {
 	var out WorkflowRunFieldsRevisionStorage
 	err := tx.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&out.Fields, &out.Revision)

@@ -4314,3 +4314,41 @@ immutable mechanical inputs/combined digest unchanged. Carrier/openers and
 broader gate/A2/parent closure remain open, supplied-pool calls61 unchanged.
 No push/PR, tier, server2 or qualification waiver. Signed-head complexity
 follows. Receipts ~/.cache/swarm-2542-family145/gate-causal-counts-*.
+
+## Shared Gate/A2 Dependency: Complete Bound-Source Snapshot Protocol
+
+The entire a2BoundReplySourceSnapshot row protocol now consumes fixed physical
+flow-header and entity-state readers behind the original selected read owner.
+The two independent reads retain their original order, run/path conjunctions,
+SELECT-star columns, physical row order, driver types, NULLs, byte-to-string
+conversion, and nil-row representation. No public table/query selector or raw
+row/callback API is introduced. Empty concrete paths still refuse. Failed
+second reads return no provisional header evidence; closure errors also fail.
+
+The original corrupted-bound-return journey retains all source, identity,
+header/state and refusal assertions: four both-store race cells PASS17.09s.
+Native exact old-query comparison proves every column, clock, driver value and
+NULL, exactly two native read commits, foreign run/path emptiness, cancellation,
+raw/nil/uninitialized/closed refusal and complete unchanged data/history.
+Physical missing-companion evidence retains the original header without
+inventing an entity; this is not a lawful fieldless-source construction claim.
+A named private table-unavailability fault through the exact selected
+coordinator makes the second read fail and restores the table in an immediately
+registered defer. Final native group PASS19.972s on both stores under race.
+Deliberately widening the companion path predicate fails the foreign-path
+control on both stores (RED16.250s); exact restoration passes GREEN26.398s.
+
+The finite transformation preserves the original empty-path refusal and full
+SQL/row protocol, rejects lost source bindings/destinations and validates two
+separate native cuts. Its first hostile control matched the helper signature
+instead of the owner call; the control is corrected to mutate the actual call,
+not waived. Final finite collection PASS7.838s, six persistence boundaries
+PASS3.426s; U1000 clean. Downward census
+PASS151.927s:8407 ->8397 findings,6016 ->6007 raw sites, ten removed/zero added;
+uncertainty67 unchanged. Corpus1217/429, transition digest
+34399ec5b1f61d84c7abb4c183b9423bf561a7942f02b951b420b3ea5dbbc1a0;
+all immutable mechanical inputs remain unchanged. Other delivery observation,
+carrier/openers and broader gate/A2/parent closure remain open; supplied-pool
+calls61 unchanged. No push/PR, tier, server2 or qualification waiver. Final
+finite and signed-head complexity receipts accompany the checkpoint.
+Receipts ~/.cache/swarm-2542-family145/bound-source-snapshot-*.

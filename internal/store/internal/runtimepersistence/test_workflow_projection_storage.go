@@ -11,6 +11,25 @@ import (
 	"github.com/google/uuid"
 )
 
+func ReadBoundReplySourceStorageForTest(ctx context.Context, selected any, runID, path string) (map[string][][]any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("source snapshot requires the actual delivery's concrete path")
+	}
+	headers, err := readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([][]any, error) {
+		return pipelinepersistence.ReadBoundReplyFlowHeadersStorageTx(ctx, tx, runID, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	fields, err := readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([][]any, error) {
+		return pipelinepersistence.ReadBoundReplyEntityStatesStorageTx(ctx, tx, runID, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string][][]any{"flow_instances": headers, "entity_state": fields}, nil
+}
+
 type WorkflowControlProjectionStorage = pipelinepersistence.WorkflowControlProjectionStorage
 type WorkflowDuplicateProjectionStorage = pipelinepersistence.WorkflowDuplicateProjectionStorage
 type WorkflowEnginePhysicalCounts = pipelinepersistence.WorkflowEnginePhysicalCounts
