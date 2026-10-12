@@ -2,7 +2,8 @@ package llm
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -58,17 +59,16 @@ func validateProviderSchemaNode(schema any, path string) error {
 		if !ok {
 			return fmt.Errorf("%s.properties must be an object, got %T", path, rawProperties)
 		}
-		names := make([]string, 0, len(props))
-		for name := range props {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
+		for _, name := range slices.Sorted(maps.Keys(props)) {
 			if err := validateProviderSchemaNode(props[name], path+".properties."+name); err != nil {
 				return err
 			}
 		}
 	}
+	return validateProviderSchemaConstraints(obj, path)
+}
+
+func validateProviderSchemaConstraints(obj map[string]any, path string) error {
 	if rawItems, ok := obj["items"]; ok {
 		if err := validateProviderSchemaNode(rawItems, path+".items"); err != nil {
 			return err
