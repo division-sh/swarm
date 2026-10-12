@@ -51,7 +51,7 @@ func orderingScopeConstructors(file *ast.File) []string {
 func TestOrderingScopeConstructorInventoryIsClosed(t *testing.T) {
 	want := map[string]string{
 		"backend/postgres/transaction.go":       "runTransactionOutcome",
-		"backend/postgres/session_authority.go": "runAuthorityTransaction",
+		"backend/postgres/session_authority.go": "runAuthorityTransactionWithProof",
 		"backend/sqlite/transaction.go":         "runTransactionOnceOutcome",
 	}
 	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, err error) error {

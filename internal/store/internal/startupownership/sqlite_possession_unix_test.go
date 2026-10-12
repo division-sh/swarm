@@ -365,7 +365,7 @@ func TestSQLitePossessionSubprocessContentionAndSIGKILLReclaim(t *testing.T) {
 	}
 	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelProbe()
-	if free, err := probeSQLitePossession(probeCtx, path, identity); free || !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+	if free, err := probeSQLitePossession(probeCtx, path, identity); free || err != nil {
 		t.Fatalf("external holder looked free to inspection: %t %v", free, err)
 	}
 

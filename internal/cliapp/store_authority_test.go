@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,21 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct PostgreSQL authority: %v", err)
 	}
+	before, err := selectedtest.InspectProcessLeaseSnapshot(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
+	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is held (last admitted generation 1, owner durable-postgres-status-owner).\n" {
+		t.Fatalf("held PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
+	}
+	after, err := selectedtest.InspectProcessLeaseSnapshot(ctx, selected)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("status changed held process snapshot: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if err := capability.ProveCurrent(ctx); err != nil {
+		t.Fatalf("status released the actual PostgreSQL lease: %v", err)
+	}
 	if err := capability.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -296,6 +312,21 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	}
 	if err := capability.ProveCurrent(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	before, err := selectedtest.InspectProcessLeaseSnapshot(context.Background(), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "status")
+	if code != 0 || stderr != "" || stdout != fmt.Sprintf("Project owner: selected-store lease is held (last admitted generation 1, owner %s).\n", ownerID) {
+		t.Fatalf("held SQLite store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
+	}
+	after, err := selectedtest.InspectProcessLeaseSnapshot(context.Background(), selected)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("status changed held process snapshot: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if err := capability.ProveCurrent(context.Background()); err != nil {
+		t.Fatalf("status released the actual SQLite lease: %v", err)
 	}
 	if err := capability.Release(context.Background()); err != nil {
 		t.Fatal(err)
