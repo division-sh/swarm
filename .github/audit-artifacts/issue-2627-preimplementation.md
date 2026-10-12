@@ -228,6 +228,12 @@ to G. #2349 remains the type-model umbrella; #2447/2628 is maintenance only and
 closed stream reopened. All required repair is completed with this audit/gate
 request, not deferred until implementation.
 
+Recorded repair:2627's title/body now name the widened request/MCP/evidence
+class and its source-reachability limits; G is assigned. Existing semantic and
+maintenance mappings are published at `swarm-docs@d47865b`, with YAML parsing,
+unique node/issue IDs and explicit2627/node-reference checks passing. No code is
+authorized by these tracker repairs; the independent gate is still requested.
+
 Watchlist-backed promotion check: mapped
 `pack_interface_structural_satisfaction_and_channel_adapter_ownership` already
 tracks schema projection, immutability, provider/capability consumers and2627.
