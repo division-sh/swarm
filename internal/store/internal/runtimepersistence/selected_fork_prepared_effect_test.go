@@ -164,15 +164,27 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			if err := capability.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
+			inspection, err := store.InspectAuthority(ctx)
+			if err != nil || inspection.Authority == nil || *inspection.Authority != process {
+				t.Errorf("release changed last-admitted process evidence: %+v %v", inspection, err)
+			}
 			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
-				t.Fatalf("released process remains current: %v %v", current, err)
+				t.Errorf("released process remains current: %v %v", current, err)
 			}
 			if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
-				t.Fatal("released process launched prepared probe")
+				t.Error("released process launched prepared probe")
+			}
+			outcomes := fixture.store.(effects.OutcomeStore)
+			outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, attempt.OperationID)
+			if err != nil || !found || outcome.State != effects.StateAuthorized || outcome.AttemptState != effects.StateAuthorized {
+				t.Errorf("refused launch changed authorized attempt: %+v found=%v err=%v", outcome, found, err)
 			}
 			request.OperationID, request.AttemptID = uuid.NewString(), uuid.NewString()
 			if _, err := controller.Authorize(effects.WithAuthority(ctx, authority), request); err == nil {
-				t.Fatal("released process admitted another probe")
+				t.Error("released process admitted another probe")
+			}
+			if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, request.OperationID); err != nil || found {
+				t.Errorf("refused authorization persisted an operation: %+v found=%v err=%v", outcome, found, err)
 			}
 		})
 	}
