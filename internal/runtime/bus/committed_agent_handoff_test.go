@@ -66,7 +66,7 @@ func TestCommittedAgentTransitionTransfersExactHandoff(t *testing.T) {
 }
 
 func TestCommittedAgentTransitionPreservesPrerequisiteRefusals(t *testing.T) {
-	for _, name := range []string{"no_handoff", "unrelated_handoff", "unacknowledged", "duplicate", "mixed_error", "cancellation", "joined_cancellation", "no_coordinator", "selected_authority", "ephemeral_recipient", "event_wide", "target_failure", "queued", "internal_failure", "activation_failure", "refused_transfer", "invalid_commit"} {
+	for _, name := range []string{"no_handoff", "unrelated_handoff", "unrelated_same_count", "wrong_event", "wrong_authority", "duplicate_handoff", "unacknowledged", "duplicate", "mixed_error", "cancellation", "joined_cancellation", "no_coordinator", "selected_authority", "ephemeral_recipient", "event_wide", "target_failure", "queued", "internal_failure", "activation_failure", "refused_transfer", "invalid_commit"} {
 		t.Run(name, func(t *testing.T) {
 			bus, prepared, committed, owner, coordinator := preparedAgentTransition(t)
 			ctx := context.Background()
@@ -75,6 +75,27 @@ func TestCommittedAgentTransitionPreservesPrerequisiteRefusals(t *testing.T) {
 				committed.DeliveryHandoffs = nil
 			case "unrelated_handoff":
 				committed.DeliveryHandoffs = committed.DeliveryHandoffs[:1]
+			case "unrelated_same_count", "wrong_event", "wrong_authority":
+				proof := committed.DeliveryHandoffs[1]
+				id, eventID, authority := proof.DeliveryID(), proof.EventID(), proof.Authority()
+				var err error
+				switch name {
+				case "unrelated_same_count":
+					id = uuid.NewString()
+				case "wrong_event":
+					eventID = uuid.NewString()
+				case "wrong_authority":
+					authority, err = deliverylifecycle.NewNormalExecutionAuthority(bus.sourceArtifactFact, uuid.NewString(), 2)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed.DeliveryHandoffs[1], err = deliverylifecycle.AdmitDurableHandoffProof(id, eventID, "foreign-route", authority)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "duplicate_handoff":
+				committed.DeliveryHandoffs[1] = committed.DeliveryHandoffs[0]
 			case "unacknowledged":
 				committed.Acknowledged = false
 			case "duplicate":
@@ -133,6 +154,18 @@ type refusingAgentHandoff struct{ *issue2564HandoffContinuation }
 
 func (refusingAgentHandoff) AcceptCommitted([]deliverylifecycle.DurableHandoffProof) error {
 	return errors.New("coordinator retired or generation differs")
+}
+
+func TestCommittedAgentTransitionRevalidatesDispatchCoverage(t *testing.T) {
+	bus, prepared, committed, owner, _ := preparedAgentTransition(t)
+	prepared, ready, err := bus.applyCommittedPublication(context.Background(), prepared, committed)
+	if err != nil || !ready {
+		t.Fatal(err)
+	}
+	prepared = prepared.WithCommittedDeliveryHandoffs(nil)
+	if err := bus.DispatchPreparedPublish(context.Background(), prepared); err == nil || owner.settlements != 0 {
+		t.Fatalf("altered evidence consumed handoff settlement: err=%v settlements=%d", err, owner.settlements)
+	}
 }
 
 func agentTransitionActivation(t *testing.T, bus *EventBus, runID string) CommittedFlowInstanceActivation {
