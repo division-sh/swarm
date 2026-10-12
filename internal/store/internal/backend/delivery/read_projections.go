@@ -2427,3 +2427,20 @@ ORDER BY d.created_at,d.delivery_id LIMIT 33`, runID)
 	}
 	return out, nil
 }
+
+type PostgresAgentOneDeliverySessionStorage struct {
+	Status          string
+	ActiveSessionID string
+}
+
+func ReadPostgresAgentOneDeliverySessionStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (PostgresAgentOneDeliverySessionStorage, error) {
+	var out PostgresAgentOneDeliverySessionStorage
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
+FROM event_deliveries d JOIN event_delivery_attempts a
+ON a.delivery_id = d.delivery_id AND a.claim_version = d.current_attempt_version AND a.open_marker = TRUE
+WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-1'`, eventID).Scan(&out.Status, &out.ActiveSessionID)
+	if err != nil {
+		return PostgresAgentOneDeliverySessionStorage{}, err
+	}
+	return out, nil
+}

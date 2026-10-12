@@ -282,9 +282,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 
 func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -396,56 +394,30 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("RunManaged(second): %v", err)
 	}
 
-	var (
-		deliveryStatus   string
-		activeSessionID  string
-		sessionStatus    string
-		sessionFlow      string
-		liveSessionCount int
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
-		FROM event_deliveries d
-		JOIN event_delivery_attempts a
-		  ON a.delivery_id = d.delivery_id
-		 AND a.claim_version = d.current_attempt_version
-		 AND a.open_marker = TRUE
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = 'agent-1'
-	`, event2.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	delivery, err := storetest.ReadPostgresAgentOneDeliverySessionStorage(ctx, pg, event2.ID())
+	if err != nil {
 		t.Fatalf("load second delivery: %v", err)
 	}
+	deliveryStatus, activeSessionID := delivery.Status, delivery.ActiveSessionID
 	if deliveryStatus != "in_progress" {
 		t.Fatalf("second delivery status = %q, want in_progress", deliveryStatus)
 	}
 	if activeSessionID != session.ID {
 		t.Fatalf("second delivery active_session_id = %q, want %q", activeSessionID, session.ID)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(status, ''),
-			COALESCE(flow_instance, '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, session.ID).Scan(&sessionStatus, &sessionFlow); err != nil {
+	liveSession, err := storetest.ReadPostgresSessionFlowStorage(ctx, pg, session.ID)
+	if err != nil {
 		t.Fatalf("load live session row: %v", err)
 	}
+	sessionStatus, sessionFlow := liveSession.Status, liveSession.FlowInstance
 	if sessionStatus != "active" {
 		t.Fatalf("session status = %q, want active", sessionStatus)
 	}
 	if sessionFlow != "support/inst-1" {
 		t.Fatalf("session flow_instance = %q, want support/inst-1", sessionFlow)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM agent_sessions
-		WHERE run_id = $1::uuid
-		  AND agent_id = 'agent-1'
-		  AND flow_instance = 'support/inst-1'
-		  AND memory_enabled = TRUE
-		  AND status = 'active'
-	`, runID).Scan(&liveSessionCount); err != nil {
+	liveSessionCount, err := storetest.CountPostgresAgentOneSupportLiveSessions(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("count live session lineage: %v", err)
 	}
 	if liveSessionCount != 1 {
@@ -467,9 +439,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -597,31 +567,19 @@ printf '{"result":"ok"}'
 		t.Fatalf("session ID rotated from stderr prose: got %q, want %q", session.ID, originalSessionID)
 	}
 
-	var (
-		deliveryStatus  string
-		activeSessionID string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
-		FROM event_deliveries d
-		JOIN event_delivery_attempts a
-		  ON a.delivery_id = d.delivery_id
-		 AND a.claim_version = d.current_attempt_version
-		 AND a.open_marker = TRUE
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = 'agent-1'
-	`, evt.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	delivery, err := storetest.ReadPostgresAgentOneDeliverySessionStorage(ctx, pg, evt.ID())
+	if err != nil {
 		t.Fatalf("load delivery: %v", err)
 	}
+	deliveryStatus, activeSessionID := delivery.Status, delivery.ActiveSessionID
 	if deliveryStatus != "in_progress" {
 		t.Fatalf("delivery status = %q, want in_progress", deliveryStatus)
 	}
 	if activeSessionID != originalSessionID {
 		t.Fatalf("delivery active_session_id = %q, want original %q", activeSessionID, originalSessionID)
 	}
-	var sessionCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'agent-1'`).Scan(&sessionCount); err != nil {
+	sessionCount, err := storetest.CountPostgresAgentOneSessions(ctx, pg)
+	if err != nil {
 		t.Fatalf("count sessions: %v", err)
 	}
 	if sessionCount != 1 {

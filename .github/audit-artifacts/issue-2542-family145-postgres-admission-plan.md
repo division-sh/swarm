@@ -3483,3 +3483,67 @@ Signed-head complexity is recorded with the checkpoint. Timing is disclosed as
 actual native execution8.904s, three bounded owner packages11.412/6.337/6.352s,
 shared finite controls15.423s, boundaries7.520s, retirement10.392s and the cold
 whole-source census282.827s; no repeat full matrix or tier was run.
+
+### Complete Managed Live-Session Frontier And Uncertain CLI Failure Group
+
+Both original PostgreSQL roots in persisted_surfaces_test.go now consume native
+construction and the same closed delivery/session observation chain. Their five
+raw reads are replaced by four fixed ports, sharing the identical original
+current-attempt join rather than interpreting it twice. No borrowed pool, SQL,
+transaction callback or reconstructed coordinator remains in either root.
+Neither source/event setup nor the actual managed LLM/provider execution was
+changed: original event inputs/clocks, issued lifecycle/claim authority, actor
+memory context, completion controller, provider data and field/identity/failure
+assertions are preserved exactly, not substituted with simulated outcomes.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native construction/lifetime | The reused-session and CLI-failure roots open the same original selected PG owner through StartPostgresRuntimeStore. Original catalog and column preflights, genuine running-agent lifecycle token, runtime occurrence/process, bus, 30s session TTL, credential resolver and managed conversation remain. The native close ledger replaces both independent borrowed cleanup paths. |
+| Closed delivery read projection | Both consumers share the same fixed agent-1 physical join by exact event ID. It retains current_attempt_version=claim_version and open_marker=TRUE, subscriber_type=agent, coalesced status and native active_session_id::text. No status/lease/source eligibility, extra join, ordering or limit is added. A failed/missing read yields no provisional tuple. |
+| llmpersistence session owner | Reuse reads the original coalesced status/flow tuple by exact issued session, then separately counts exact run/agent-1/support/inst-1/memory_enabled TRUE/active lineage. CLI failure separately counts ALL agent-1 rows globally, including history and other runs/flows; it is not replaced with the scoped active count. |
+| Selected native reader/public bridges | Four bounded PG-only ports retain each original context, variadic identity binding, field mapping and independent read cut, returning detached tuples/counts through the original selected coordinator. No public pool, arbitrary selector/query/callback or cached authority is exposed. Typed-nil/raw/foreign/SQLite/cancelled/closed owners and invalid event/session/run identities refuse with zero evidence. |
+| Existing managed-session execution | Reuse still executes first turn, settles its genuine claim, executes the second turn, then observes its live frontier and public lifecycle state. CLI still starts an actual managed session and launches the original failing provider command; nonretryable uncertain outcome, original session identity, in-progress delivery and absence of prose-triggered successor remain the assertions. No retry or result classification changes. |
+| Finite source/caller owner | Two complete transitions preserve every original business condition/order. All original event-constructor arguments/clocks, publication routes, lifecycle/memory/actor handoffs, managed turns and settlement calls are compared by AST. Hostile controls reject changed input, lost owner/provider/claim/field, weakened condition and moved/duplicated independent observations. All five physical statements retain exact SQL and runtime argument/scan bindings; the existing projection fixture calls are unchanged inputs, not newly introduced replay reconstruction. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Reused managed session retains the same canonical session on the second in-progress delivery and active lifecycle frontier | reproduced and fixed: TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession under race, original PG scope, 6.58s |
+| Launched CLI failure retains the exact session/claim and nonretryable uncertain failure, without a prose-triggered successor | reproduced and fixed: TestCLISessionFailureDoesNotRotateFromStderrProse under race, 0.96s; both original roots PASS8.579s |
+| Empty counts versus exact absent tuple, native read commits, invalid/raw/foreign/typed-nil/SQLite/cancelled/closed ownership | execution-proven through the same corrected path: TestPostgresLiveSessionStorageRefusesForeignCancelledAndClosedOwners under race, PASS9.783s; two successful independent empty-count read commits, no writes/active lease |
+| Exact event/subscriber/current-version/open-marker join; native UUID text and both NULL defaults; stale/closed/foreign attempts cannot substitute for absence | execution-proven through the same corrected path: TestPostgresLiveSessionDeliveryReadKeepsExactEventOpenVersionAndAgent under race, PASS6.069s; isolated unadmitted query-only schema, not fabricated claim/session or runtime authority |
+| Exact session/NULL flow tuple, run/agent/flow/memory/status lineage and broad global historical count | execution-proven through the same corrected path: TestPostgresLiveSessionStorageKeepsExactFlowLineageAndGlobalCount under race, PASS6.592s; isolated query-only schema, not executable session construction |
+| Every original assertion, input, authority, execution cut, SQL statement/binding and bridge | execution-proven through the same corrected path: all three TestFamily145LiveSession roots and the complete cheap family145/historical/finite/idempotency/rename controls, PASS10.765s |
+
+The first native execution was RED7.224s because the new delivery reader omitted
+its eventID bind. That local implementation error was repaired directly;
+both original roots are GREEN8.579s. The fixed join has positive native execution,
+physical binding/scope controls and an explicit omitted-argument source mutant.
+No retry, skip, timing increase, expected-result change or production failure
+attribution was used. Event/delivery/lifecycle/revision/writer boundaries pass
+3.437s. U1000 and dry-run receipts are recorded with the signed checkpoint.
+Two rows make1191 recipes/378 transitions, digest
+681a3b16ceb02a6062983535a221903293b0d0558094566c9dd6d0f091f99289;
+immutable predecessors and24 mechanical receipts remain.
+
+Only the original PG positive surface is claimed; SQLite is a foreign-owner
+refusal control. This closes the coupled fixture/observation dependency, not
+the parent, process-restart, M01/Docker or broader semantic-drain qualifications.
+These two previously semantic-posture cases are qualified by their actual
+original execution, not waived or treated as constructor-only proof. The
+remaining replay-corruption and malformed-mutation openings in this same file
+stay explicit debt. Original-owner bounded storage contract and watchlist
+disposition stand; no new issue/framework or production session/lease/runtime
+semantics. D3/M07/rollback and the run-state diagnostic warning remain open.
+Receipts: ~/.cache/swarm-2542-family145/live-session-frontier-* on vemew;
+Go1.25.0 ordinary tests while #2622 remains OPEN, U1000Go1.26.8. No push, PR,
+server2, tier/full, compatibility behavior or classifier/ratchet relaxation.
+
+Downward ratchet PASS187.783s:8732 ->8714 findings (18 removed, zero added),
+confirmed raw-operation debt6287 ->6273 and uncertainty67 unchanged. Collector
+policy remains fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9.
+Broader54820/39100 includes legitimate owners and is not debt. Supplied-pool
+calls77 ->75 (73 external +2 private); this qualifies the two live-session
+semantic-posture cases, leaving provisional M0/D40/S35 and59 qualified openings.
+Affected six-package U1000 is clean; dry-run Changes=[]; retirement inventory
+PASS6.238s. Signed-head complexity is recorded with the checkpoint. No other
+semantic queue item, parent close obligation or prior hold is credited.
