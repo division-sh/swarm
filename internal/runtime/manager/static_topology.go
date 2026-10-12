@@ -75,12 +75,8 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 		case committedRouteReady:
 			continue
 		case committedRouteAbsent:
-			installing, err := am.committedAgentAttachmentInstalling(ctx, identity)
-			if err != nil {
-				return fmt.Errorf("inspect committed agent %s attachment: %w", identity.Description(), err)
-			}
-			if installing {
-				return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
+			if err := am.finalizeAbsentCommittedAgentReadiness(ctx, identity); err != nil {
+				return err
 			}
 		case committedRouteLaunching, committedRouteRetiring:
 			return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
@@ -92,6 +88,17 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func (am *AgentManager) finalizeAbsentCommittedAgentReadiness(ctx context.Context, identity runtimeagentidentity.Identity) error {
+	installing, err := am.committedAgentAttachmentInstalling(ctx, identity)
+	if err != nil {
+		return fmt.Errorf("inspect committed agent %s attachment: %w", identity.Description(), err)
+	}
+	if installing {
+		return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
 	}
 	return nil
 }
