@@ -76,9 +76,11 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 		attempt: attempt, prepared: make(chan genericschedule.PreparationCommit, 1), release: make(chan struct{}),
 	}
 	defer held.releaseHold()
+	var deliveryReader servedRunDeliveryReader
 	previous := projectRuntimePersistenceForServe
 	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 		projection := previous(owner)
+		deliveryReader = projection.deps.DeliveryStore.SummarizeRun
 		held.Store = projection.deps.GenericScheduleStore
 		projection.deps.GenericScheduleStore = held
 		return projection
@@ -93,7 +95,7 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 	var releaseOnce sync.Once
 	unblockHandler := func() { releaseOnce.Do(func() { close(handlerRelease) }) }
 	defer unblockHandler()
-	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, func(ctx context.Context, _ string, event events.Event) error {
+	rt := startWorkspaceGatewayProofRuntime(t, backend, root, "host", nil, "127.0.0.1:0", func(ctx context.Context, _ string, event events.Event) error {
 		if event.Type() != "platform.join_complete" {
 			return nil
 		}
@@ -120,14 +122,14 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 	ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
 	defer cancel()
 	if attempt == 2 {
-		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-		waitForkReceiverSourceCompletion(t, rt, started.RunID)
-		first, joins := readRetainedRootJoins(t, rt, started.RunID)
+		waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
+		waitWorkspaceProofPipelineHandoff(t, rt, started.RunID)
+		first, joins := readNativeRetainedRootJoins(t, rt.WorkflowTargets, started.RunID)
 		if first.Attempt != 1 || len(joins) != 1 {
 			t.Fatalf("first actual retained arm missing: loop=%+v joins=%+v", first, joins)
 		}
 		if err := waitServedRetainedJoinOutcome(ctx, started.RunID, joins[0].JoinRef(), func() (loopruntime.Activation, []joinruntime.Activation) {
-			return readRetainedRootJoins(t, rt, started.RunID)
+			return readNativeRetainedRootJoins(t, rt.WorkflowTargets, started.RunID)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -148,13 +150,9 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 		t.Fatalf("held native preparation lost exact run/entry/generation: %+v", prepared)
 	}
 	// The original waits really return while this exact future occurrence is owed.
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-	waitForkReceiverSourceCompletion(t, rt, started.RunID)
-	var selected any = rt.Postgres
-	if rt.SQLite != nil {
-		selected = rt.SQLite
-	}
-	if event, found, err := storetest.ReadCanonicalEventRecord(ctx, selected, prepared.Result.Occurrence.EventID); err != nil || found {
+	waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
+	waitWorkspaceProofPipelineHandoff(t, rt, started.RunID)
+	if event, found, err := storetest.ReadCanonicalEventRecord(ctx, rt.Events, prepared.Result.Occurrence.EventID); err != nil || found {
 		t.Fatalf("held exact event already published: found=%t event=%+v err=%v", found, event, err)
 	}
 	stored, found, err := held.Store.LoadGenericScheduleActivation(ctx, activation.ID)
@@ -172,7 +170,7 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 	go func() {
 		defer close(done)
 		done <- waitServedRetainedJoinOutcome(ctx, started.RunID, ref, func() (loopruntime.Activation, []joinruntime.Activation) {
-			loop, joins := readRetainedRootJoins(t, rt, started.RunID)
+			loop, joins := readNativeRetainedRootJoins(t, rt.WorkflowTargets, started.RunID)
 			sample := observation{loop: loop, joins: joins, proceed: make(chan struct{})}
 			select {
 			case observed <- sample:
@@ -238,9 +236,9 @@ func proveServedRetainedJoinOutcomeHeld(t *testing.T, backend servedparity.Backe
 			if err != nil {
 				t.Fatalf("released exact outcome failed: %v", err)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			loop, joins := readRetainedRootJoins(t, rt, started.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
+			waitWorkspaceProofPipelineHandoff(t, rt, started.RunID)
+			loop, joins := readNativeRetainedRootJoins(t, rt.WorkflowTargets, started.RunID)
 			complete, err := retainedJoinOutcomeComplete(started.RunID, ref, loop, joins)
 			if err != nil || !complete {
 				t.Fatalf("authoritative outcome reread failed: %t %v", complete, err)

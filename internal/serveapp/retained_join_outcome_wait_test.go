@@ -6,11 +6,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
+
+func readNativeRetainedRootJoins(t *testing.T, reader pipeline.WorkflowTargetPersistenceReader, runID string) (loopruntime.Activation, []joinruntime.Activation) {
+	t.Helper()
+	if reader == nil {
+		t.Fatal("retained root join observation requires its original workflow reader")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", flowidentity.LogicalInstanceID(runID), runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := reader.LoadWorkflowTargetPersistence(t.Context(), owner, identity.NormalizeEntityID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := record.DecodeComplete(owner.Route, identity.NormalizeEntityID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, found, err := loopruntime.Load(instance.StateBuckets, ".", "revision")
+	if err != nil || !found {
+		t.Fatalf("missing exact root loop: found=%t err=%v", found, err)
+	}
+	joins, err := joinruntime.List(instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loop, joins
+}
 
 func waitServedRetainedJoinOutcome(ctx context.Context, runID string, want timeridentity.JoinRef, read func() (loopruntime.Activation, []joinruntime.Activation)) error {
 	if read == nil {

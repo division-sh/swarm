@@ -10,8 +10,67 @@ import (
 )
 
 var retainedJoinSuccessorEdits = []struct{ before, block string }{
-	{"\t\t\tif len(joins) != 1 || first.Attempt != 1 {\n\t\t\t\tt.Fatalf(\"first ordinary join: loop=%+v joins=%+v\", first, joins)\n\t\t\t}\n", "\t\t\tfirstRef := joins[0].JoinRef()\n\t\t\tfirstCtx, cancelFirst := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tfirstWaitErr := waitServedRetainedJoinOutcome(firstCtx, started.RunID, firstRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readRetainedRootJoins(t, rt, started.RunID)\n\t\t\t})\n\t\t\tcancelFirst()\n\t\t\tif firstWaitErr != nil {\n\t\t\t\tt.Fatalf(\"first exact retained join outcome: %v\", firstWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, started.RunID)\n\t\t\tfirst, joins = readRetainedRootJoins(t, rt, started.RunID)\n"},
-	{"\t\t\tif current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {\n\t\t\t\tt.Fatalf(\"ordinary repeat lost retained joins: loop=%+v joins=%+v\", current, sourceJoins)\n\t\t\t}\n", "\t\t\tvar currentRef timeridentity.JoinRef\n\t\t\tcurrentMatches := 0\n\t\t\tfor _, join := range sourceJoins {\n\t\t\t\tif join.Generation() == current.Generation() {\n\t\t\t\t\tcurrentRef = join.JoinRef()\n\t\t\t\t\tcurrentMatches++\n\t\t\t\t}\n\t\t\t}\n\t\t\tif currentMatches != 1 {\n\t\t\t\tt.Fatalf(\"current retained join reference is not unique: %d\", currentMatches)\n\t\t\t}\n\t\t\tcurrentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tcurrentWaitErr := waitServedRetainedJoinOutcome(currentCtx, started.RunID, currentRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readRetainedRootJoins(t, rt, started.RunID)\n\t\t\t})\n\t\t\tcancelCurrent()\n\t\t\tif currentWaitErr != nil {\n\t\t\t\tt.Fatalf(\"current exact retained join outcome: %v\", currentWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, started.RunID)\n\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)\n"},
+	{"\t\t\tif len(joins) != 1 || first.Attempt != 1 {\n\t\t\t\tt.Fatalf(\"first ordinary join: loop=%+v joins=%+v\", first, joins)\n\t\t\t}\n", "\t\t\tfirstRef := joins[0].JoinRef()\n\t\t\tnativeEvents, hasNativeEvents := rt.ReceiverStateReader.(runtimebus.EventStore)\n\t\t\tif !hasNativeEvents || nativeEvents == nil {\n\t\t\t\tt.Fatal(\"retained join outcome requires its original selected event reader\")\n\t\t\t}\n\t\t\tnativeHandoff := servedWorkspaceProofRuntime{Events: nativeEvents}\n\t\t\tfirstCtx, cancelFirst := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tfirstWaitErr := waitServedRetainedJoinOutcome(firstCtx, started.RunID, firstRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t})\n\t\t\tcancelFirst()\n\t\t\tif firstWaitErr != nil {\n\t\t\t\tt.Fatalf(\"first exact retained join outcome: %v\", firstWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)\n\t\t\tfirst, joins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n"},
+	{"\t\t\tif current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {\n\t\t\t\tt.Fatalf(\"ordinary repeat lost retained joins: loop=%+v joins=%+v\", current, sourceJoins)\n\t\t\t}\n", "\t\t\tvar currentRef timeridentity.JoinRef\n\t\t\tcurrentMatches := 0\n\t\t\tfor _, join := range sourceJoins {\n\t\t\t\tif join.Generation() == current.Generation() {\n\t\t\t\t\tcurrentRef = join.JoinRef()\n\t\t\t\t\tcurrentMatches++\n\t\t\t\t}\n\t\t\t}\n\t\t\tif currentMatches != 1 {\n\t\t\t\tt.Fatalf(\"current retained join reference is not unique: %d\", currentMatches)\n\t\t\t}\n\t\t\tcurrentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tcurrentWaitErr := waitServedRetainedJoinOutcome(currentCtx, started.RunID, currentRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t})\n\t\t\tcancelCurrent()\n\t\t\tif currentWaitErr != nil {\n\t\t\t\tt.Fatalf(\"current exact retained join outcome: %v\", currentWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)\n\t\t\tcurrent, sourceJoins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n"},
+}
+
+func proveRetainedJoinTypedReaderSource(t *testing.T) {
+	t.Helper()
+	const expected = `func readNativeRetainedRootJoins(t *testing.T, reader pipeline.WorkflowTargetPersistenceReader, runID string) (loopruntime.Activation, []joinruntime.Activation) {
+	t.Helper()
+	if reader == nil {
+		t.Fatal("retained root join observation requires its original workflow reader")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", flowidentity.LogicalInstanceID(runID), runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := reader.LoadWorkflowTargetPersistence(t.Context(), owner, identity.NormalizeEntityID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := record.DecodeComplete(owner.Route, identity.NormalizeEntityID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, found, err := loopruntime.Load(instance.StateBuckets, ".", "revision")
+	if err != nil || !found {
+		t.Fatalf("missing exact root loop: found=%t err=%v", found, err)
+	}
+	joins, err := joinruntime.List(instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loop, joins
+}`
+	file, name := "internal/serveapp/retained_join_outcome_wait_test.go", "readNativeRetainedRootJoins"
+	actual := selectedCausalObservationBody(t, file, name)
+	current, currentErr := canonicalFunction(actual)
+	pinned, pinErr := canonicalFunction(expected)
+	if currentErr != nil || pinErr != nil || current != pinned {
+		t.Fatal("typed retained join adapter changed its exact constructed-target/decode owner")
+	}
+	for _, mutation := range []struct{ name, before, after string }{
+		{"foreign_run", "NewRunScopedFlowInstance(runID,", "NewRunScopedFlowInstance(foreignRun,"},
+		{"foreign_route", "flowidentity.StoredRoute(\".\",", "flowidentity.StoredRoute(\"foreign\","},
+		{"foreign_entity", "identity.NormalizeEntityID(runID)", "identity.NormalizeEntityID(foreignEntity)"},
+		{"foreign_reader", "reader.LoadWorkflowTargetPersistence(", "foreignReader.LoadWorkflowTargetPersistence("},
+		{"missing_decode", "record.DecodeComplete(", "unvalidatedDecode("},
+		{"missing_loop", "loopruntime.Load(", "foreignLoopLoad("},
+		{"missing_join", "joinruntime.List(", "foreignJoinList("},
+		{"error_to_empty", "\treturn loop, joins", "\treturn loopruntime.Activation{}, nil"},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			mutant := strings.Replace(expected, mutation.before, mutation.after, 1)
+			if mutant == expected {
+				t.Fatal("typed adapter hostile mutation did not change source")
+			}
+			guard := recipe{File: file, Function: name, Before: expected, After: expected}
+			if _, changed, err := rewriteFunction(file, []byte("package probe\n"+mutant), guard); err == nil || changed {
+				t.Fatal("foreign/unvalidated retained join owner admitted")
+			}
+		})
+	}
 }
 
 func validateRetainedJoinSuccessor(row recipe, candidate string) error {
@@ -86,8 +145,13 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 				{"wrong_first_reference", "firstRef := joins[0].JoinRef()", "firstRef := joins[0].JoinRef().Declaration()"},
 				{"reused_first_at_second", "currentCtx, started.RunID, currentRef", "currentCtx, started.RunID, firstRef"},
 				{"wrong_generation", "join.Generation() == current.Generation()", "join.Generation() == first.Generation()"},
-				{"missing_first_reread", "\t\t\tfirst, joins = readRetainedRootJoins(t, rt, started.RunID)\n", ""},
-				{"missing_second_reread", "\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)\n", ""},
+				{"missing_first_reread", "\t\t\tfirst, joins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n", ""},
+				{"missing_second_reread", "\t\t\tcurrent, sourceJoins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n", ""},
+				{"foreign_native_reader", "readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)", "readNativeRetainedRootJoins(t, foreignReader, started.RunID)"},
+				{"foreign_event_role", "rt.ReceiverStateReader.(runtimebus.EventStore)", "foreignReader.(runtimebus.EventStore)"},
+				{"missing_native_role", "\t\t\tif !hasNativeEvents || nativeEvents == nil {\n\t\t\t\tt.Fatal(\"retained join outcome requires its original selected event reader\")\n\t\t\t}\n", ""},
+				{"missing_first_handoff", "\t\t\twaitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)\n", ""},
+				{"missing_second_handoff", "\t\t\twaitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)\n\t\t\tcurrent, sourceJoins", "\t\t\tcurrent, sourceJoins"},
 				{"weakened_assertion", "len(join.Outputs) != 1", "len(join.Outputs) != 0"},
 				{"changed_setup", "canonicalrouting.CopyForkLoopRetainedJoin(t)", "canonicalrouting.CopyForkLoopRetainedJoinSeparateCheckpoint(t)"},
 			} {
@@ -113,6 +177,7 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 					t.Fatal("late creating-generation wait admitted")
 				}
 			})
+			t.Run("typed_reader_owner", proveRetainedJoinTypedReaderSource)
 		})
 	}
 }
