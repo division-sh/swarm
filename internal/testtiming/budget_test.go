@@ -149,7 +149,7 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
 	plan := committedBroadBudgetPlan(t, proof)
 	const id = "persistence-authority-debt-census"
-	wantJustification := "Reviewed #2535 disposition: runs38284182093 (636s) and38238632747 (371s) use the same census code; same code, runner variance warrants a600s baseline/780s ceiling with the fixed30% buffer and unchanged sibling budgets; above780s split the census job rather than raise again."
+	wantJustification := "Reviewed #2535 disposition: run 38284182093 at 628a21e74 measured 636s; run 38238632747 at 5182245ed measured 371s; source trees differ and cause is unisolated; use a 600s baseline/780s ceiling with the fixed 30% buffer and unchanged sibling budgets; above 780s split the census job rather than raise again."
 	if budget.Hard.UnitCommandSeconds[id].Justification != wantJustification {
 		t.Fatal("census budget lost its exact measured disposition")
 	}

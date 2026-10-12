@@ -14,7 +14,7 @@ hard:
   unit_command_seconds:
     persistence-authority-debt-census:
       limit_seconds: 600
-      justification: 'Reviewed #2535 disposition: runs38284182093 (636s) and38238632747 (371s) use the same census code; same code, runner variance warrants a600s baseline/780s ceiling with the fixed30% buffer and unchanged sibling budgets; above780s split the census job rather than raise again.'
+      justification: 'Reviewed #2535 disposition: run 38284182093 at 628a21e74 measured 636s; run 38238632747 at 5182245ed measured 371s; source trees differ and cause is unisolated; use a 600s baseline/780s ceiling with the fixed 30% buffer and unchanged sibling budgets; above 780s split the census job rather than raise again.'
     broad-03:
       limit_seconds: 300
       justification: 'Lead authorized up to30% timing allowances on 2026-10-02; CI36960543887 measured this exact generated unit at324s against312s, with all tests passing. The unit-only 240s ->300s baseline and312s ->390s ceiling increase25%; the fixed evaluator buffer and every sibling budget remain unchanged.'
