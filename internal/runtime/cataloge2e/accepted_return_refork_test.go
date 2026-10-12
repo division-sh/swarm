@@ -44,6 +44,9 @@ func TestIssue642AcceptedReturnRepeatedPhysicalReforkBothStores(t *testing.T) {
 			}
 			sourceRun, cut := catalogRuntimeRunID, rows[0].AcceptedReplyEventID
 			for hop := 0; hop < 3; hop++ {
+				if hop != 0 {
+					owner = selectedContractExecutionOwnerForCatalogHarness(t, h)
+				}
 				sourceRun, cut = executeAcceptedReturnRefork(t, h, selected, owner, loader, selection, options, sourceRun, cut)
 			}
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
