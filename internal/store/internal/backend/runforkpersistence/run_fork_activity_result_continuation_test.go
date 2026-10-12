@@ -114,6 +114,30 @@ func TestActivityPublicationContinuationUsesCutNotCurrentProgress(t *testing.T) 
 	}
 }
 
+func TestActivityResultOnlyCutDoesNotInferRequestOwnership(t *testing.T) {
+	a, _, evidence, _ := activityPublicationCutFixture(t)
+	a.snapshot.Events = a.snapshot.Events[1:]
+	routes, found, err := a.publishedActivityResultRoutes(context.Background(), nil, evidence.ResultEventID)
+	if err != nil || found || len(routes) != 0 {
+		t.Fatalf("result payload/type inferred a missing ordinary request: routes=%+v found=%t error=%v", routes, found, err)
+	}
+	cut, err := newRunForkReplayCut(a.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := cut.event(evidence.ResultEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visiting := map[string]bool{cut.runID + "/" + result.ID(): true}
+	if found, err := a.admitPublishedActivityResultAtCut(context.Background(), nil, cut, result, visiting); err == nil || found {
+		t.Fatalf("result ownership admitted cyclic evidence: found=%t error=%v", found, err)
+	}
+	if len(visiting) != 1 || !visiting[cut.runID+"/"+result.ID()] {
+		t.Fatal("cycle refusal changed its enclosing traversal evidence")
+	}
+}
+
 func TestActivityPublicationContinuationRejectsContradictoryCutEvidence(t *testing.T) {
 	for _, fault := range []string{"duplicate_result", "foreign_run", "future_result", "producer", "causal_parent", "payload", "completion", "journal_payload"} {
 		t.Run(fault, func(t *testing.T) {

@@ -62,6 +62,14 @@ func TestIssue642TwoOpenReplyLevelsReforkAtPublishedActivityResultBothStores(t *
 	}
 }
 
+func TestIssue642TwoOpenReplyLevelsRepeatedPhysicalResultReforkBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyRepeatedResult)
+		})
+	}
+}
+
 func TestIssue642TwoOpenReplyLevelSiblingForksReturnIndependentlyBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
@@ -89,6 +97,8 @@ const (
 	copiedReplyReforkRequest
 	copiedReplyReforkResult
 	copiedReplySibling
+	copiedReplyRepeatedResult
+	copiedReplyTerminalHistory
 )
 
 func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, nested bool, followup copiedReplyFollowup) {
@@ -290,10 +300,16 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		t.Fatalf("child redispatched, missed final return or changed source: calls=%d child_finished=%d source_found=%t errors=%v/%v", calls.Load(), finished, found, err, rowsErr)
 	}
 	if followup != copiedReplyNoFollowup {
-		if followup == copiedReplySibling {
+		if followup == copiedReplyTerminalHistory {
+			proveCopiedActivityTerminalHistory(t, h, selected, staged.ForkRunID, copied, loader, selection, owner, options)
+		} else if followup == copiedReplySibling {
 			proveCopiedTwoLevelReplySibling(t, h, selected, original, sourceRows, staged.ForkRunID, loader, selection, owner, options)
 		} else {
-			proveCopiedTwoLevelReplyRefork(t, h, selected, staged.ForkRunID, copied, loader, selection, owner, options, followup == copiedReplyReforkResult)
+			atResult := followup == copiedReplyReforkResult || followup == copiedReplyRepeatedResult
+			nextRun, nextJournal, nextResult := proveCopiedTwoLevelReplyRefork(t, h, selected, staged.ForkRunID, copied, copied.ResultEventID, loader, selection, owner, options, atResult)
+			if followup == copiedReplyRepeatedResult {
+				proveCopiedTwoLevelReplyRefork(t, h, selected, nextRun, nextJournal, nextResult, loader, selection, owner, options, true)
+			}
 		}
 		finalCtx, cancelFinal := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 		defer cancelFinal()
@@ -369,7 +385,7 @@ func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected c
 		journal.CompletedAt == nil || !journal.CompletedAt.Equal(*sourceAttempt.CompletedAt) {
 		t.Fatalf("sibling changed or borrowed its recorded result: %+v found=%t error=%v", journal, found, err)
 	}
-	requireReforkedReplyReturns(t, returnCtx, h, selected, childRows, catalogRuntimeRunID, sourceAttempt, journal, inner.ID, false)
+	requireReforkedReplyReturns(t, returnCtx, h, selected, childRows, catalogRuntimeRunID, sourceAttempt, journal, inner.ID, false, sourceAttempt.ResultEventID)
 	afterFirst, err := storetest.ReadReplyContextRecords(returnCtx, selected, firstChild)
 	firstFinished, countErr := storetest.ReadLifecycleEventCardinality(returnCtx, selected, firstChild, "request.finished")
 	if err != nil || countErr != nil || !reflect.DeepEqual(afterFirst, firstRows) || firstFinished != 1 {
@@ -378,7 +394,7 @@ func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected c
 }
 
 func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected copiedActivityReplyStore, sourceRun string, sourceAttempt pipeline.ActivityAttemptRecord,
-	loader runforkexecution.SelectedContractSourceLoader, selection runfork.RunForkContractSelection, owner runforkexecution.SelectedContractExecutionOwner, options runforkexecution.SelectedContractAgentRuntimeOptions, atResult bool) {
+	sourceResultID string, loader runforkexecution.SelectedContractSourceLoader, selection runfork.RunForkContractSelection, owner runforkexecution.SelectedContractExecutionOwner, options runforkexecution.SelectedContractAgentRuntimeOptions, atResult bool) (string, pipeline.ActivityAttemptRecord, string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 	defer cancel()
@@ -394,12 +410,12 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 	// The copied journal's request coordinate is not a physical publication in B.
 	// Only B's actual inherited request or result is a lawful publication cut.
 	_, requestPublished, requestErr := selected.LoadPreparedPublishEvent(ctx, sourceAttempt.RequestEventID)
-	sourceResult, resultPublished, resultErr := selected.LoadPreparedPublishEvent(ctx, sourceAttempt.ResultEventID)
+	sourceResult, resultPublished, resultErr := selected.LoadPreparedPublishEvent(ctx, sourceResultID)
 	if requestErr != nil || requestPublished || resultErr != nil || !resultPublished || len(sourceResult.DeliveryRoutes) != 1 ||
-		sourceResult.DeliveryRoutes[0].Context.ReplyContextID() != sourceAttempt.ReplyContextID {
+		sourceResult.Event.Event().RunID() != sourceRun || string(sourceResult.Event.Event().Type()) != sourceAttempt.ResultEventType || sourceResult.DeliveryRoutes[0].Context.ReplyContextID() != sourceAttempt.ReplyContextID {
 		t.Fatalf("refork did not select an actual result-only cut: result=%+v request_published=%t errors=%v/%v", sourceResult, requestPublished, requestErr, resultErr)
 	}
-	cut := sourceAttempt.ResultEventID
+	cut := sourceResultID
 	if !atResult {
 		cut = sourceAttempt.SourceEventID
 		request, found, err := selected.LoadPreparedPublishEvent(ctx, cut)
@@ -407,7 +423,21 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 			t.Fatalf("refork lacks B's actual inherited activity request: %+v found=%t error=%v", request, found, err)
 		}
 	}
+	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: cut})
+	if err != nil {
+		t.Fatalf("read the exact refork pending-input cut: %v", err)
+	}
+	pendingInputs := 0
+	for _, work := range plan.PendingWork {
+		if work.EventName == "platform.activity_requested" && work.Classification == runfork.RunForkPendingClassificationPending {
+			pendingInputs++
+		}
+	}
+	if pendingInputs > 1 || (!atResult && pendingInputs != 1) {
+		t.Fatalf("refork has an unexpected exact pending-input inventory: %+v", plan.PendingWork)
+	}
 	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut)
+	t.Logf("physical result refork: source=%s cut=%s child=%s pending_inputs=%d", sourceRun, cut, staged.ForkRunID, pendingInputs)
 	grandchildRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || len(grandchildRows) != 2 || staged.SourceRunID != sourceRun || staged.ForkRunID == sourceRun {
 		t.Fatalf("refork did not use the immediate source's two open levels: %+v rows=%+v error=%v", staged, grandchildRows, err)
@@ -424,7 +454,10 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
 			defer cancel()
 			diagnostic, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(cleanup, selected, staged.ForkRunID)
-			t.Logf("exact refork terminal receipts/logs: %+v error=%v", diagnostic, err)
+			t.Logf("exact refork terminal receipts: %+v error=%v", diagnostic.Receipts, err)
+			for _, log := range diagnostic.Logs {
+				t.Logf("exact refork runtime log: %s", log.Payload)
+			}
 			t.Logf("exact retained refork failure/cleanup join: %v", owner.RetireSelectedContexts(cleanup))
 		}
 	})
@@ -432,22 +465,27 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 	defer cancelReturn()
 	waitCopiedActivityRequesterReturn(t, returnCtx, selected, staged.ForkRunID)
 	attempts, err := storetest.ReadActivityAttemptStorage(returnCtx, selected, staged.ForkRunID)
-	if err != nil || len(attempts) != 1 {
+	if err != nil || len(attempts) != pendingInputs {
 		t.Fatalf("grandchild did not retain exactly the admitted pending activity journal: %+v error=%v", attempts, err)
 	}
-	journal, found, err := selected.LoadActivityAttempt(returnCtx, attempts[0].RequestEventID)
-	if err != nil || !found || journal.ReplyContextID != inner.ID || journal.RequestEventID == sourceAttempt.RequestEventID || journal.InputHash != sourceAttempt.InputHash ||
-		!reflect.DeepEqual(journal.ResultPayload, sourceAttempt.ResultPayload) || !journal.StartedAt.Equal(sourceAttempt.StartedAt) ||
-		journal.CompletedAt == nil || sourceAttempt.CompletedAt == nil || !journal.CompletedAt.Equal(*sourceAttempt.CompletedAt) {
-		t.Fatalf("grandchild changed or borrowed the recorded result: %+v found=%t error=%v", journal, found, err)
+	var journal pipeline.ActivityAttemptRecord
+	if pendingInputs != 0 {
+		var found bool
+		journal, found, err = selected.LoadActivityAttempt(returnCtx, attempts[0].RequestEventID)
+		if err != nil || !found || journal.ReplyContextID != inner.ID || journal.RequestEventID == sourceAttempt.RequestEventID || journal.InputHash != sourceAttempt.InputHash ||
+			!reflect.DeepEqual(journal.ResultPayload, sourceAttempt.ResultPayload) || !journal.StartedAt.Equal(sourceAttempt.StartedAt) ||
+			journal.CompletedAt == nil || sourceAttempt.CompletedAt == nil || !journal.CompletedAt.Equal(*sourceAttempt.CompletedAt) {
+			t.Fatalf("grandchild changed or borrowed the recorded result: %+v found=%t error=%v", journal, found, err)
+		}
 	}
-	requireReforkedReplyReturns(t, returnCtx, h, selected, grandchildRows, sourceRun, sourceAttempt, journal, inner.ID, atResult)
+	physicalResult := requireReforkedReplyReturns(t, returnCtx, h, selected, grandchildRows, sourceRun, sourceAttempt, journal, inner.ID, atResult, sourceResultID)
 	afterRows, rowsErr := storetest.ReadReplyContextRecords(returnCtx, selected, sourceRun)
 	afterAttempt, found, attemptErr := selected.LoadActivityAttempt(returnCtx, sourceAttempt.RequestEventID)
 	sourceFinished, countErr := storetest.ReadLifecycleEventCardinality(returnCtx, selected, sourceRun, "request.finished")
 	if rowsErr != nil || attemptErr != nil || countErr != nil || !found || !reflect.DeepEqual(afterRows, beforeRows) || !reflect.DeepEqual(afterAttempt, sourceAttempt) || sourceFinished != 1 {
 		t.Fatalf("grandchild changed B or duplicated its final return: source_finished=%d errors=%v/%v/%v", sourceFinished, rowsErr, attemptErr, countErr)
 	}
+	return staged.ForkRunID, journal, physicalResult
 }
 
 func requireReforkedOpenReplyRows(t *testing.T, sourceRows, childRows []replycontext.Record, childRun string) replycontext.Record {
@@ -484,7 +522,7 @@ func requireReforkedOpenReplyRows(t *testing.T, sourceRows, childRows []replycon
 }
 
 func requireReforkedReplyReturns(t *testing.T, ctx context.Context, h *runtimeHarness, selected copiedActivityReplyStore, childRows []replycontext.Record,
-	sourceRun string, sourceAttempt, journal pipeline.ActivityAttemptRecord, innerID string, atResult bool) {
+	sourceRun string, sourceAttempt, journal pipeline.ActivityAttemptRecord, innerID string, atResult bool, sourceResultID string) string {
 	t.Helper()
 	childRun := childRows[0].RunID
 	for _, row := range childRows {
@@ -501,17 +539,18 @@ func requireReforkedReplyReturns(t *testing.T, ctx context.Context, h *runtimeHa
 	if err != nil {
 		t.Fatal(err)
 	}
-	finished, results := 0, 0
+	finished, results, physicalResult := 0, 0, ""
 	for _, event := range activityLineageEvents(t, ctx, h, childRun) {
 		if event.EventName == sourceAttempt.ResultEventType {
 			results++
 			result, found, err := selected.LoadPreparedPublishEvent(ctx, event.EventID)
 			lineage, hasLineage := result.Event.Event().SelectedForkLineage()
-			if err != nil || !found || (atResult && (!hasLineage || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != sourceAttempt.ResultEventID)) ||
+			if err != nil || !found || (atResult && (!hasLineage || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != sourceResultID)) ||
 				(!atResult && result.Event.Event().ID() != journal.ResultEventID) || !bytes.Equal(result.Event.Event().Payload(), expectedPayload) ||
 				len(result.DeliveryRoutes) != 1 || result.DeliveryRoutes[0].Context.ReplyContextID() != innerID {
 				t.Fatalf("grandchild did not continue the exact result through its own inner row: %+v found=%t error=%v", result, found, err)
 			}
+			physicalResult = result.Event.Event().ID()
 		}
 		if event.EventName == "request.finished" {
 			finished++
@@ -523,6 +562,7 @@ func requireReforkedReplyReturns(t *testing.T, ctx context.Context, h *runtimeHa
 	if finished != 1 || results != 1 {
 		t.Fatalf("grandchild missed/duplicated the final return or recorded result: finished=%d results=%d", finished, results)
 	}
+	return physicalResult
 }
 
 func proveTwoLevelExecutedReplyRefusals(t *testing.T, h *runtimeHarness, owner interface {

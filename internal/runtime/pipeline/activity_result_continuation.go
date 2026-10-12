@@ -42,8 +42,6 @@ func ValidateRecordedActivityPublication(request, result events.Event, journalRe
 	return nil
 }
 
-type selectedActivityPublicationsKey struct{}
-
 func ActivityRequestInputHash(request events.Event) (string, error) {
 	intent, err := activityIntentFromRequestEvent(request)
 	if err != nil {
@@ -80,8 +78,7 @@ func ValidateSelectedActivityResultPayload(request, result events.Event) error {
 }
 
 func selectedActivityInputPublication(ctx context.Context, intent runtimeengine.ActivityIntent) (activityresult.PublishedContinuation, bool, error) {
-	publications, _ := ctx.Value(selectedActivityPublicationsKey{}).(map[string]activityresult.PublishedContinuation)
-	publication, found := publications[activityRequestEventID(intent)]
+	publication, found := activityresult.PublishedContinuationFromContext(ctx, activityRequestEventID(intent))
 	if !found {
 		return activityresult.PublishedContinuation{}, false, nil
 	}
@@ -106,17 +103,11 @@ func WithSelectedActivityPublications(ctx context.Context, childRun string, publ
 	if !ok || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || authority.SelectedFork.ForkRunID != childRun {
 		return nil, fmt.Errorf("selected activity accounting requires its current child execution scope")
 	}
-	byRequest := make(map[string]activityresult.PublishedContinuation, len(publications))
-	for _, publication := range publications {
-		if !publication.Present() || publication.RunID() != childRun {
-			return nil, fmt.Errorf("selected activity accounting has foreign child evidence")
-		}
-		if _, duplicate := byRequest[publication.RequestID()]; duplicate {
-			return nil, fmt.Errorf("selected activity accounting repeats a request")
-		}
-		byRequest[publication.RequestID()] = publication
+	inventory, err := activityresult.NewPublishedInventory(childRun, publications)
+	if err != nil {
+		return nil, err
 	}
-	return context.WithValue(ctx, selectedActivityPublicationsKey{}, byRequest), nil
+	return inventory.Bind(ctx)
 }
 
 func selectedActivityPublicationOwnsResult(ctx context.Context, intent runtimeengine.ActivityIntent, record ActivityAttemptRecord) (bool, error) {

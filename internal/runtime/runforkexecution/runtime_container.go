@@ -310,13 +310,6 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
-	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
-		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
-	)
-	if err != nil {
-		return fmt.Errorf("construct selected-contract receiver execution: %w", err)
-	}
-	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
@@ -342,6 +335,17 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	if err != nil {
 		return err
 	}
+	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
+		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
+	)
+	if err != nil {
+		return fmt.Errorf("construct selected-contract receiver execution: %w", err)
+	}
+	receiverExecution, err = receiverExecution.WithSelectedActivityPublications(selectedActivityPublications(sourceEvents))
+	if err != nil {
+		return fmt.Errorf("retain selected activity accounting in receiver execution: %w", err)
+	}
+	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, workflowProjection, c.proof.ExecutionOwner)
 	if err != nil {
 		return err
@@ -419,7 +423,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
-	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, sourceEvents, bus, pipeline)
+	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
@@ -450,19 +454,23 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 
 // Bind fixed-cut accounting before preparing actors, so every initial and
 // recovered pipeline turn inherits the same decision without authorizing work.
-func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, req publishSelectedContractForkEventsRequest, sources []runfork.RunForkSelectedContractSourceEvent, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
+func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
+	bound, err := req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution.Bind(ctx, c.authority.ExecutionMode)
+	if err != nil {
+		return ctx, nil, managedexecution.Admission{}, err
+	}
+	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, req, bus, pipeline, c.diagnostics)
+	return bound, runtime, admission, err
+}
+
+func selectedActivityPublications(sources []runfork.RunForkSelectedContractSourceEvent) []activityresult.PublishedContinuation {
 	publications := make([]activityresult.PublishedContinuation, 0)
 	for _, source := range sources {
 		if source.PublishedActivityResult.Present() {
 			publications = append(publications, source.PublishedActivityResult)
 		}
 	}
-	bound, err := runtimepipeline.WithSelectedActivityPublications(ctx, req.ForkRunID, publications)
-	if err != nil {
-		return ctx, nil, managedexecution.Admission{}, err
-	}
-	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, req, bus, pipeline, c.diagnostics)
-	return bound, runtime, admission, err
+	return publications
 }
 
 func (c selectedContractForkLocalRuntimeContainer) RetainActivated(prepared *PreparedSelectedFork, diagnostic error) {

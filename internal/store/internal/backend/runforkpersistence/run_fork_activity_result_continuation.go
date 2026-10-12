@@ -86,28 +86,9 @@ func (a runForkSourceStateAdmission) publishedActivityResultRoutes(ctx context.C
 	if err != nil {
 		return nil, false, err
 	}
-	matched := false
-	for _, row := range a.snapshot.Events {
-		if row.EventName != runForkActivityRequestEvent {
-			continue
-		}
-		publication, present, err := a.activityPublicationAtCut(ctx, tx, row.EventID, make(map[string]bool))
-		if err != nil {
-			return nil, false, err
-		}
-		if !present || publication.ID() != sourceID {
-			continue
-		}
-		if matched {
-			return nil, false, fmt.Errorf("published activity result has multiple source requests")
-		}
-		matched = true
-		if err := a.requirePublishedActivityRequestJournal(ctx, tx, cut, row, result); err != nil {
-			return nil, false, err
-		}
-	}
-	if !matched {
-		return nil, false, nil
+	matched, err := a.admitPublishedActivityResultAtCut(ctx, tx, cut, result, make(map[string]bool))
+	if err != nil || !matched {
+		return nil, false, err
 	}
 	routes := make([]events.DeliveryRoute, 0)
 	for _, row := range a.snapshot.Deliveries {
@@ -122,6 +103,84 @@ func (a runForkSourceStateAdmission) publishedActivityResultRoutes(ctx context.C
 		routes = append(routes, route)
 	}
 	return routes, true, nil
+}
+
+func (a runForkSourceStateAdmission) admitPublishedActivityResultAtCut(ctx context.Context, tx *sql.Tx, cut runForkReplayCut, result events.Event, visiting map[string]bool) (bool, error) {
+	key := cut.runID + "/" + result.ID()
+	if visiting[key] {
+		return false, fmt.Errorf("activity result publication lineage contains a cycle")
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	matched := false
+	for _, row := range a.snapshot.Events {
+		if row.EventName != runForkActivityRequestEvent {
+			continue
+		}
+		publication, present, err := a.activityPublicationAtCut(ctx, tx, row.EventID, make(map[string]bool))
+		if err != nil {
+			return false, err
+		}
+		if !present || publication.ID() != result.ID() {
+			continue
+		}
+		if matched {
+			return false, fmt.Errorf("published activity result has multiple source requests")
+		}
+		matched = true
+		if err := a.requirePublishedActivityRequestJournal(ctx, tx, cut, row, result); err != nil {
+			return false, err
+		}
+	}
+	if matched {
+		return true, nil
+	}
+	lineage, inherited := result.SelectedForkLineage()
+	if !inherited {
+		return false, nil
+	}
+	return a.admitInheritedActivityResultAtCut(ctx, tx, cut, result, lineage, visiting)
+}
+
+func (a runForkSourceStateAdmission) admitInheritedActivityResultAtCut(ctx context.Context, tx *sql.Tx, cut runForkReplayCut, result events.Event, lineage events.SelectedForkLineage, visiting map[string]bool) (bool, error) {
+	if tx == nil {
+		return false, fmt.Errorf("inherited activity result requires its native retained binding")
+	}
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, cut.runID)
+	if err != nil {
+		return false, err
+	}
+	if binding.SourceRunID != lineage.SourceRunID() {
+		return false, fmt.Errorf("inherited result has foreign source binding")
+	}
+	if binding.ForkPoint.Kind == runfork.RunForkPointRunStart {
+		// The exclusive creation cut cannot contain an activity result. Its
+		// separately admitted first turn is not a retained publication.
+		return false, nil
+	}
+	parent, err := loadRunForkPointSnapshot(ctx, tx, binding.SourceRunID, binding.ForkPoint)
+	if err != nil {
+		return false, err
+	}
+	parentCut, err := newRunForkReplayCut(parent)
+	if err != nil {
+		return false, err
+	}
+	previous, err := parentCut.event(lineage.SourceEventID())
+	if err != nil {
+		return false, err
+	}
+	parentAdmission := runForkSourceStateAdmission{snapshot: parent, forkRunID: binding.ForkRunID, postgres: a.postgres}
+	matched, err := parentAdmission.admitPublishedActivityResultAtCut(ctx, tx, parentCut, previous, visiting)
+	if err != nil || !matched {
+		return false, err
+	}
+	// A result can be committed before the inherited request is published in
+	// this child. Its exact earlier binding, never later history, owns identity.
+	if err := requireActivityPublicationCutLineage(ctx, tx, binding, result, previous); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (a runForkSourceStateAdmission) requirePublishedActivityRequestJournal(ctx context.Context, tx *sql.Tx, cut runForkReplayCut, row runForkRevisionEvent, result events.Event) error {
