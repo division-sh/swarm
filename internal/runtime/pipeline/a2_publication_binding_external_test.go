@@ -413,8 +413,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					if err := json.Unmarshal([]byte(raw), &refusal); err != nil || refusal.Detail.Code != pinrouting.ConnectFailureInstanceSourceValueMissing.Code() {
 						t.Fatalf("missing key lacks typed refusal: %s err=%v", raw, err)
 					}
-					var routes int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1", outputID).Scan(&routes); err != nil || routes != 0 {
+					routes, err := storetest.CountTemplateEventDeliveries(ctx, selected.events, outputID)
+					if err != nil || routes != 0 {
 						t.Fatalf("missing key invented an executable receiver: count=%d err=%v", routes, err)
 					}
 					root, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))

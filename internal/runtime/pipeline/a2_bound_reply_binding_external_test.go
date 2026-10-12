@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
@@ -298,8 +299,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				if len(failureLogs) != 1 || !reflect.DeepEqual(failureLogs[0], wantFailure) {
 					t.Fatalf("handler diagnostic discarded or changed canonical refusal: got=%+v want=%+v", failureLogs, wantFailure)
 				}
-				var replies int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1 AND event_name=$2", requestID, source.ResolveFlowEventReference("provider", "provider.replied")).Scan(&replies); err != nil || replies != 0 {
+				replies, err := storetest.CountGateSourceNamedEvents(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.replied"), requestID)
+				if err != nil || replies != 0 {
 					t.Fatalf("refused provider output persisted a fresh reply: count=%d err=%v", replies, err)
 				}
 				retained, err := selected.events.LoadReplyContext(ctx, recordID)

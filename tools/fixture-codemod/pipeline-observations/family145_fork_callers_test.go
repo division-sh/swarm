@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 400 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768" {
+	if err != nil || len(rows) != 412 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "41713a1c0ca01a7d9bb0f4a23da23d4512c106b87b8d1b9784e6ca5a9bdae21a" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -55,6 +55,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if family145CLIForkRow(row.File, row.Function) {
 			if err := family145CLIForkProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if key := family145GateScalarReadKey(row.File, row.Function); family145GateScalarReadCuts[key] != nil {
+			if err := family145GateScalarReadProofError(key, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

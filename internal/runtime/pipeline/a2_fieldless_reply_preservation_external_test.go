@@ -234,8 +234,8 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 				t.Fatal(err)
 			}
 			for _, name := range []string{source.ResolveFlowEventReference("requester", "provider.requested"), source.ResolveFlowEventReference("provider", "provider.replied"), source.ResolveFlowEventReference("requester", "reply.observed")} {
-				var publications int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2", runID, name).Scan(&publications); err != nil || publications != 1 {
+				publications, err := storetest.CountRunEventNameStorage(ctx, selected.events, runID, name)
+				if err != nil || publications != 1 {
 					t.Fatalf("fieldless replay duplicated %s: count=%d err=%v", name, publications, err)
 				}
 			}

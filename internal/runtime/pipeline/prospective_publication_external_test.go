@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -220,11 +221,12 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				if observed.calls != wantPlans {
 					t.Fatalf("actual prepared mutation reached planner %d times", observed.calls)
 				}
-				var states, published int
+				var states int
 				if err := selected.db.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&states); err != nil {
 					t.Fatal(err)
 				}
-				if err := selected.db.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='work.ready'`, runID).Scan(&published); err != nil {
+				published, err := storetest.CountRunEventNameStorage(context.Background(), selected.events, runID, "work.ready")
+				if err != nil {
 					t.Fatal(err)
 				}
 				if terminal {

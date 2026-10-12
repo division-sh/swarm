@@ -396,8 +396,8 @@ func (p *a2MapFanOutExecution) assertProgress(t *testing.T, cursor, cardinality 
 		t.Fatalf("durable progress requires exactly one physical intent: %+v", evidence)
 	}
 	intent := evidence.Intents[0]
-	var eventsCount int
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.ready'`, p.runID).Scan(&eventsCount); err != nil {
+	eventsCount, err := storetest.CountRunEventNameStorage(p.ctx, p.selected.events, p.runID, "item.ready")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if evidence.Outcomes != cursor || eventsCount != cursor || intent.Cursor != cursor || intent.Cardinality != cardinality || intent.Status != status || intent.SourceMutationID != sourceMutation {

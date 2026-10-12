@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -176,11 +177,12 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 					if err := proof.bus.Publish(proof.ctx, event); err == nil {
 						t.Fatalf("schema admitted malformed numeric/named record: %s", malformed)
 					}
-					var publications, deliveries int
-					if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, event.ID()).Scan(&publications); err != nil {
+					publications, err := storetest.CountTemplateEventIdentity(proof.ctx, proof.selected.events, event.ID())
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1`, event.ID()).Scan(&deliveries); err != nil {
+					deliveries, err := storetest.CountTemplateEventDeliveries(proof.ctx, proof.selected.events, event.ID())
+					if err != nil {
 						t.Fatal(err)
 					}
 					if publications != 0 || deliveries != 0 || a2CanonicalAccumulatorEvidence(t, proof) != before {
@@ -398,9 +400,11 @@ func requireA2CanonicalAccumulatorItem(t *testing.T, proof *a2AccumulatorPersist
 func a2CanonicalAccumulatorEvidence(t *testing.T, proof *a2AccumulatorPersistenceProof) a2AccumulatorPersistedEvidence {
 	t.Helper()
 	evidence := proof.evidence(t)
-	if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='numeric.completed'`, proof.runID).Scan(&evidence.Publications); err != nil {
+	publications, err := storetest.CountRunEventNameStorage(proof.ctx, proof.selected.events, proof.runID, "numeric.completed")
+	if err != nil {
 		t.Fatal(err)
 	}
+	evidence.Publications = publications
 	return evidence
 }
 

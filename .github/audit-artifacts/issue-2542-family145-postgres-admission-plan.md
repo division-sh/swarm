@@ -3864,3 +3864,60 @@ collector remain. Broader54812/39094 includes legitimate physical/domain owners
 and is not the authority-debt count. The repeated scan was required by the first
 real classifier RED; it was not a retry of unchanged code. Signed-head complexity
 follows with this local checkpoint. No production or parent-completion claim.
+
+## Gate/A2 shared dependency: mechanical scalar-read component, 2026-10-12
+
+Reviewer-b accepted the expanded scope after the prototype deletion exposed
+indirect A2 consumers. The shared carrier/openers are NOT retired yet. Initial
+inventory139 candidate source references across27 files includes85 single-row
+observations,4 scans,19 writes,2 competing-writer transactions,26 dialect branches
+and3 other handoffs. These are source references, not an additional debt census
+or139 bugs. The unqualified carrier-deletion prototype is saved locally as
+0605e46d32f8c093b26b8cad2b4a80991c7a5488; no partial setup conversion or fallback
+getter is landed. The subsequent work removes the dependent readers and named
+faults before deleting the carrier at its last caller. One whole-family review
+checkpoint remains the delivery; this commit is an internal mechanical component.
+
+Sixteen ready scalar queries across ten files now reuse existing exact owners:
+CountPhysicalRunEvents, CountTemplateEventIdentity, CountTemplateEventDeliveries,
+CountRunEventNameStorage and CountGateSourceNamedEvents. No new owner, SQL port,
+predicate, callback, constructor or runtime semantics is introduced. Event-only
+identity remains global; run/name and source/name preserve all coordinates and
+multiplicity. The source/name reader reverses its public argument order exactly
+as its existing SQL requires. Plain QueryRow sites retain context.Background;
+explicit QueryRowContext sites retain their original context. Before/after
+reconstruction counts stay independent and surround the same lifecycle work.
+Both evidence.Publications destinations and every original error/refusal,
+cardinality/state/clock/cancellation assertion stay. No counter is synthesized.
+
+The finite codemod reconciles twelve exact whole-function transitions, including
+both shared evidence/progress methods. A complete consumer/cut map pins every
+owner, context, ID/name, destination and order. Counterexamples remove calls or
+business assertions and must fail. All immutable predecessors, existing
+Successors and24 historical receipts remain; corpus1208/412, digest
+41713a1c0ca01a7d9bb0f4a23da23d4512c106b87b8d1b9784e6ca5a9bdae21a.
+
+| Affected behavior | Exact executed proof, Go1.26.8/race |
+| --- | --- |
+| Count-join component reconstruction retains state and no extra events | TestA2CountJoinRealExecutionAndRestartOnBothStores PASS28.84s |
+| Late publication refuses without event or terminal-state mutation | TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores PASS8.92s |
+| Schema rejection retains publication/delivery/business evidence | TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores PASS23.12s after shared evidence method propagation; earlier untouched receipt23.63s is not substituted for it |
+| Fieldless paired-reply reconstruction preserves exact publication cardinality | TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores PASS4.37s |
+| Keyed/unkeyed persistence, durable multiplicity/order and publication rollback | Three TestA2Accumulator roots PASS9.57s/4.90s/4.02s |
+| Composite map progress retains outcomes/event count/cursor/cardinality/status/source mutation | TestA2MapFanOutCompositeLifecycleOnBothStores PASS23.81s |
+| Missing key refuses with no invented executable receiver, retaining upstream write | TestA2StageEntryMissingComputedKeyRefusesWithoutReceiverMutationOnBothStores PASS4.60s |
+| Paused handed work stays parked, then completes once after continue | TestPausedHandedNodeParksUntilContinueBothStores PASS4.22s |
+| Prospective planning, terminal refusal, ordinary writer fence and real competing revision cases | TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores PASS24.83s; competing writer is still unretired debt, not claimed fixed here |
+| Corrupted bound reply refuses without a fresh provider publication or retained-authority mutation | TestA2BoundReplyCanonicalJoinOwnerRefusesCorruptedEntryOnBothStores, last-two aggregate PASS43.592s |
+| All twelve source transitions and sixteen scalar cuts; missing-read/assertion controls | Complete cheap finite set PASS16.787s; U1000 clean |
+
+Focused original runtime groups PASS66.804s,75.274s and43.592s. No repeated
+cardinality/full/tier sweep, timeout increase or waiver. Existing unchanged
+persistence-boundary receipts carry: no persistence owner/guard/writer was edited.
+The real downward census measured8532 ->8500 findings and6132 ->6100 raw sites:
+32 removed/zero added, uncertainty67 unchanged; final delta PASS33.404s after
+the last two equivalent query shapes. Supplied-pool calls remain61. The exact
+source/collector and parent qualification holds are unchanged. About123 candidate
+DB/dialect references remain in this shared family; final typed inventory must
+reconcile them. Signed-head complexity follows. No family/parent closure, push,
+PR or server2 claim. Receipts ~/.cache/swarm-2542-family145/gate-shared-m-*.

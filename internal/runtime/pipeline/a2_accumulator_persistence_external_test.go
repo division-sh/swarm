@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -192,9 +193,11 @@ func (p *a2AccumulatorPersistenceProof) evidence(t *testing.T) a2AccumulatorPers
 	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, p.runID).Scan(&evidence.Mutations); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.recorded'`, p.runID).Scan(&evidence.Publications); err != nil {
+	publications, err := storetest.CountRunEventNameStorage(p.ctx, p.selected.events, p.runID, "item.recorded")
+	if err != nil {
 		t.Fatal(err)
 	}
+	evidence.Publications = publications
 	return evidence
 }
 
@@ -306,8 +309,8 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 						if err := proof.bus.Publish(proof.ctx, event); err == nil || !strings.Contains(err.Error(), "top-level null") {
 							t.Fatalf("null key escaped payload admission: %v", err)
 						}
-						var committed int
-						if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, event.ID()).Scan(&committed); err != nil || committed != 0 {
+						committed, err := storetest.CountTemplateEventIdentity(proof.ctx, proof.selected.events, event.ID())
+						if err != nil || committed != 0 {
 							t.Fatalf("null publication was committed: %d %v", committed, err)
 						}
 					} else {
