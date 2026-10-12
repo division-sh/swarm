@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
@@ -1015,6 +1016,53 @@ func CommitSemanticForkFrontierForTest(ctx context.Context, selected any, admitt
 		return false, fmt.Errorf("semantic fork frontier fixture requires the original PostgreSQL owner, got %T", selected)
 	}
 	return commitSelectedSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition, true, true)
+}
+
+// Event-only history must not gain a pipeline publication scope or delivery plan.
+func InsertNativeExistingRunRootEventForTest(ctx context.Context, selected any, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, at time.Time) (events.Event, error) {
+	var empty events.Event
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return empty, err
+	}
+	var event events.Event
+	err = runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		event, err = eventfixture.ExistingRunRoot(ctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, at)
+		return err
+	})
+	if err != nil {
+		return empty, err
+	}
+	return event, nil
+}
+
+func CountPostgresForkTypedRuntimeDiagnosticForTest(ctx context.Context, selected any, run, event, owner string) (int, error) {
+	if pg, ok := selected.(*PostgresStore); !ok || pg == nil || owner == "" {
+		return 0, fmt.Errorf("typed fork diagnostics require the original PostgreSQL owner and lineage owner")
+	}
+	return readCLIForkCount(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountPostgresForkTypedRuntimeDiagnosticTx(ctx, tx, run, event, owner)
+	})
+}
+
+func ReadPostgresGlobalRuntimeDiagnosticStorageForTest(ctx context.Context, selected any) (string, error) {
+	if pg, ok := selected.(*PostgresStore); !ok || pg == nil {
+		return "", fmt.Errorf("global runtime diagnostics require the original PostgreSQL owner")
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return "", err
+	}
+	var out string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadPostgresGlobalRuntimeDiagnosticStorageTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
 }
 
 func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, error) {

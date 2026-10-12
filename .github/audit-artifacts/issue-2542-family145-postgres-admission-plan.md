@@ -3774,3 +3774,93 @@ remain; broader54863/39131 includes legitimate owners and is not debt. The
 helper's complete pool/SQL authority and both borrowed caller openings are gone.
 This is whole-dependency canonicalization, not parent failure-class elimination.
 Signed-head complexity is recorded with the local checkpoint.
+
+## Selected-fork CLI whole construction/source/capture chain, 2026-10-12
+
+The already-mapped serveapp dependency now closes together: all twelve
+source-bearing CLI roots, catalog admission, source-aware construction, both
+activation setup helpers, fork-point events and the selected execution source
+helper. The last caller of captureRunForkCLIRevision is migrated and that
+independent transaction helper is deleted. Ten supplied-pool admissions and the
+extra reconstructed delivery store are retired;61 supplied-pool calls remain
+(59 outside persistence +2 private). This is a complete shared dependency, not
+zero-debt or parent completion. Reviewer-b approved preceding0138b497f; its
+unrelated receipts and the explicit semantic qualification holds carry.
+
+No production admission/default/runtime/spec contract is changed. Binding
+platform-spec typed_entrypoint_owners/raw_sql_policy and the approved native
+fixture boundary remain: the original selected coordinator owns transactions;
+public fixture ports expose no DB/transaction/table/predicate/callback or
+reconstructed authority. The existing compiled source, real source fact,
+occurrence, execution authority, constructor plans, exact topology and checked
+source cleanup in seedRunForkCLIConstruction are byte-pinned apart from removal
+of its pool parameter/admission. Catalog projection still uses the actual loaded
+source and admitted artifact, not a fabricated fingerprint or compatibility seam.
+
+| Canonical owner | Exhaustive changed consumption / retained contract |
+| --- | --- |
+| Existing native selected fixture and lifecycle ledger | Every twelve source-bearing roots starts one native PostgreSQL owner at the scalar sandbox DSN; the CLI still opens its independently owned production connection. Consumers finish before selected close and sandbox release. No raw getter or pool-to-coordinator reconstruction survives in the complete CLI helper/caller chain. |
+| eventfixture.ExistingRunRoot + existing native RevisionOnly mutation | All CLI ingress/checkpoint/after events and the main selected-source helper consume the original owner through InsertNativeExistingRunRootEvent. Exact event IDs/run/type/producer/payload/envelope/historical clock are unchanged. Crucially these are event-only history cuts, not CommitSemanticEvent: no publication scope, obligation, header or execution admission is added. Delivery obligations are still separately committed at the original cut. Refused writes return an empty error receipt, not a provisionally created event. |
+| Existing CaptureSelectedRunForkRevision | Every direct and indirect capture preserves its original run, family list and position; events precede obligations, capture precedes the checkpoint, advanced-source events precede the events-only capture. The raw BeginTx/Capture/Commit helper is gone. |
+| pipelinepersistence fixed CLI history | Materialize-only retains the deliberately headerless ready/name source. The original platform/cli-test/seed mutation pair commits first, then the flow-a/1/default/CLI Entity ready/name/empty gates/accumulator/revision1 row commits independently. All three state clocks and both journal clocks remain historical. A duplicate second insert proves the first journal cut survives refusal. No native construction is substituted for this state-only evidence. Both exact writers are explicitly classified in the existing writer census. |
+| Existing runlifecycle/event observations and closed fork/event/delivery projections | All fifteen old SELECTs are mapped in original order to exact physical owners. Source and fork status remain separate reads. Lineage ignores source-run where the old query did, includes duplicate rows and keeps all three selected coordinates. Binding mode keeps fork/source/event; entity-state read keeps only run/entity, not discovery-only routing. Typed diagnostics keep run/name/source/JSON owner; optional diagnostic aggregation remains GLOBAL, created_at-ordered and lazy inside the original zero-diagnostic failure branch. No delivery SQL exists outside the closed delivery projection. |
+| Finite source/caller and owner controls | Nineteen changed functions and the exact helper deletion are reconciled against immutable predecessors. Business assertions, CLI argv, source/event/route/capture inputs and physical SELECT fields/predicates/order/NULL are pinned; missing calls and lost assertions fail hostile controls. Existing diagnostic-history caller guard now pins the same original native pg variable, with no alternate accepted owner. No global guard scope, exemption or allowance is widened. |
+
+| Manifestation | Disposition / named executed proof |
+| --- | --- |
+| State-only dry-run planning, taxonomy and no pending work | reproduced and fixed: TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON, race PASS6.64s |
+| Delivery/event replay-ready dry-run without state-only readiness | reproduced and fixed: TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady, race PASS1.22s |
+| Selected bundle frontier/model/routing/readiness/non-mutating admission | reproduced and fixed: TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON, race PASS1.64s |
+| Persisted source works after removal of ambient contract tree | reproduced and fixed: TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource, race PASS1.67s; actual tree deletion/stat and source-run lookup assertions preserved |
+| Explicit host workspace refusal | reproduced and fixed: TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal, race PASS1.54s |
+| Actual selected CLI execution, lineage and diagnostic exclusion/typed ancestry | reproduced and fixed: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON, race PASS2.40s |
+| Advanced source retains running status and exact divergence owner/policy | reproduced and fixed: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON, race PASS2.39s |
+| Materialization preserves state-only ready history and persisted binding | reproduced and fixed: TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON, repaired focused aggregate PASS8.648s under race |
+| Nonselected public activation with source freeze/status/lineage | reproduced and fixed: TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON, race PASS1.76s |
+| Empty selected-authority schema does not block nonselected activation | reproduced and fixed: TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthoritySchema, race PASS1.75s; no selected authority seeded |
+| Selected binding consumes real runtime admission | reproduced and fixed: TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission, race PASS2.94s |
+| Missing persisted route recovery refuses without status/replay/event/delivery mutation | reproduced and fixed: TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplayWithoutPersistedRouteRecovery, race PASS2.95s |
+| Native event-only append keeps complete durable event, revision finalization, exact envelope/time and no extra scopes; cancelled/foreign/missing-run writes return no receipt or history changes | execution-proven through the same corrected path: TestNativeExistingRunRootEventKeepsEventOnlyHistoryAndOriginalWriterBothStores, race PASS11.01s across SQLite/PostgreSQL; original probe sees one write/one finalization/no active work |
+| Historical state/journal values and clocks, no constructed header, two independent commits, committed journal retained on second-insert failure | execution-proven through the same corrected path: both TestCLIMaterializationHistory roots, race PASS0.63s each; native aggregate PASS13.326s |
+| Native read ownership, absence/SQL no-row, global empty diagnostics, cancelled/raw/typed-nil/closed refusal and exact coordinate/multiplicity scope | execution-proven through the same corrected path: TestCLIForkObservationPortsUseOriginalOwnerAndRefuseProvisionalEvidence, race aggregate PASS7.004s; TestCLIForkStoragePredicatesRetainExactCoordinatesAndMultiplicity, query-only aggregate PASS1.176s |
+| Complete transformation/caller/physical-owner inventory and hostile controls | execution-proven through the same corrected path: three TestFamily145CLIFork controls and final complete cheap finite set PASS9.369s; six persistence boundaries PASS3.230s; final complexity-only guard refactor rerun separately |
+
+The initial CLI aggregate was RED only on materialize readback: the reused
+discovery accessor added flow_instance='discovery', unlike the old run/entity
+predicate. It was replaced, not waived; the exact-predicate control and corrected
+original root pass. Eleven unchanged source-bearing root receipts carry at the
+same consumer tree; only that changed accessor/root was rerun. Initial finite
+controls also caught the reconstructed delivery argument, scalar Database DSN
+field false-positive and stale diagnostic caller variable; the proof now audits
+the actual complete nineteen-function boundary and exact native caller, without
+weakening repository guards. The corrected full finite receipt is green.
+
+Corpus1204/400, digest
+db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768;
+all immutable predecessors and24 historical receipts survive. New SQL ports
+provide physical observation only; event/source admission, capture and routing
+remain their existing semantic owners. M01/Docker/drain/D3/M07/rollback and the
+run-state warning remain unwaived. No push, PR, server2, tier/full, timeout/budget
+change, new framework or blanket corpus regeneration. Receipts:
+~/.cache/swarm-2542-family145/cli-fork-* on vemew with Go1.26.8.
+The real downward census and signed-head complexity receipts follow below.
+
+The first census correctly rejected seven concrete-adapter helper parameters and
+two typed-nil construction expressions in the new refusal test. These are fixed,
+not authorized relocations: helper parameters now use a fixture-local composition
+of the existing named lifecycle/source/bus/workflow/decision ports; no methods,
+delegation or persistence rule is implemented there. Negative controls use typed
+nil declarations rather than constructing a selected carrier. Final opaque
+interface delta: actual selected CLI execution PASS11.264s under race; complete
+finite controls PASS11.477s; refusal ports PASS8.757s; stronger exact journal
+domain/path/old/new-value/clock control PASS10.658s. Original source/route/authority
+and all other behavior receipts carry because only the static parameter boundary
+changed. Final four-package U1000 is clean, carrying the unchanged four domain
+packages' earlier clean receipt. No exception or policy/baseline increase.
+
+Final downward census PASS288.661s:8668 ->8532 findings,6236 ->6132 confirmed raw
+sites;136 removed/zero added, uncertainty67 unchanged. The same exact source and
+collector remain. Broader54812/39094 includes legitimate physical/domain owners
+and is not the authority-debt count. The repeated scan was required by the first
+real classifier RED; it was not a retry of unchanged code. Signed-head complexity
+follows with this local checkpoint. No production or parent-completion claim.

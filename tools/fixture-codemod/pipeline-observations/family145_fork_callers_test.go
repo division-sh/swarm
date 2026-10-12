@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 381 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b958788effb4a9e9141661f57e1cbeb4a30e8fc11ebd666e03f0cf3a40d59546" {
+	if err != nil || len(rows) != 400 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -52,6 +52,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		hostile := strings.Replace(row.Before, "{", "{ unreviewedAuthority();", 1)
 		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), finite); err == nil {
 			t.Fatalf("changed binding/workload accepted: %s", row.Function)
+		}
+		if family145CLIForkRow(row.File, row.Function) {
+			if err := family145CLIForkProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
 		if family145SemanticOwner(row.Function) {
 			assertFamily145SemanticProofs(t, row.Function, row.Before, row.After)

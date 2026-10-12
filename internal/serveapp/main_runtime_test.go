@@ -7819,10 +7819,9 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, selected runForkCLISelectedStore, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: bundleHash,
@@ -7830,8 +7829,8 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	if entityID != runID {
 		t.Fatal("selected root fixture must use the constructed run entity")
 	}
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
+	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, selected,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, at)
@@ -7842,24 +7841,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 				FlowID: ".", FlowInstance: runID, EntityID: runID,
 			}),
 		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-}
-
-func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
-	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin run-fork revision fixture: %v", err)
-	}
-	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("capture run-fork revision fixture: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit run-fork revision fixture: %v", err)
-	}
-	return revision
+	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, runID, runforkrevision.AllFamilies()...)
 }
 
 func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {

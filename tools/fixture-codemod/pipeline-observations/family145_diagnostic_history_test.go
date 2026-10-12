@@ -88,7 +88,7 @@ func TestFamily145DiagnosticHistoryConstructorRetiredAndAllCallersUseOriginalOwn
 				}
 			case "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter":
 				calls++
-				if len(call.Args) != 6 || family145NodeString(call.Args[1]) != "context.Background()" || family145NodeString(call.Args[2]) != "selected" {
+				if len(call.Args) != 6 || family145NodeString(call.Args[1]) != "context.Background()" || family145NodeString(call.Args[2]) != "pg" {
 					t.Fatal("served diagnostic caller lost its original selected owner")
 				}
 			}

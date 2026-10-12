@@ -47,6 +47,15 @@ func AcknowledgedPipelineDisposition() *runtimepipelineobligation.Disposition {
 	return &disposition
 }
 
+func InsertNativeExistingRunRootEvent(t testing.TB, ctx context.Context, selected any, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, at time.Time) events.Event {
+	t.Helper()
+	event, err := private.InsertNativeExistingRunRootEventForTest(ctx, selected, eventID, runID, eventType, producer, payload, envelope, at)
+	if err != nil {
+		t.Fatalf("insert native existing run root event: %v", err)
+	}
+	return event
+}
+
 // InsertCanonicalEventRecord seeds an already-persisted event precondition.
 // The caller must still choose and construct the exact semantic event class;
 // durable encoding and backend SQL remain private to the event record adapters.

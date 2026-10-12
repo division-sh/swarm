@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "b958788effb4a9e9141661f57e1cbeb4a30e8fc11ebd666e03f0cf3a40d59546"
+const targetDigest = "db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -128,6 +128,7 @@ var files = []string{
 	"internal/runtime/runforkexecution/selected_execution_authority_fixture_test.go",
 	"internal/serveapp/main_runtime_test.go",
 	"internal/serveapp/run_fork_runtime_test.go",
+	"internal/serveapp/run_fork_constructor_fixture_test.go",
 	"internal/serveapp/run_state_runtime_test.go",
 	"internal/serveapp/reset_projection_real_docker_test.go",
 	"internal/serveapp/startup_integrity_test.go",
@@ -256,6 +257,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		return "", true
 	}
 	if path == "internal/store/storetest/event.go" && key == "InsertDiagnosticDirectEventRecordForRun" {
+		return "", true
+	}
+	if path == "internal/serveapp/main_runtime_test.go" && key == "captureRunForkCLIRevision" {
 		return "", true
 	}
 	if path == "internal/runtime/runforkexecution/activity_fork_execution_test.go" {
