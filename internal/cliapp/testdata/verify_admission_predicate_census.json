@@ -399,7 +399,7 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "d7b47ebc06f28409fbc9fcea7282b83f6438537fd6cedab2e4663a67128f1516"
+    "body_sha256": "6d39665146bbc7b923a08c9201c2c1aa2bbedd5746c253f97983d925357e48eb"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRetainedChannels",
@@ -741,7 +741,7 @@
     "owner": "internal/runtime/bootverify/admission_store_absence.go::SelectedStoreDependentAdmissionChecks",
     "audit_rows": "A19,A28",
     "proof_families": "2567-P02,P08,P09",
-    "body_sha256": "5395aaab510ec52788805d0c9a50383638764141528b1008729a41c13958947d"
+    "body_sha256": "f6058659014a2d5d1523ddc9ae714739a12b5c102e1031e119563f18f6de1e0d"
   },
   {
     "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
@@ -1413,7 +1413,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.commitStaticTopologyReconciliation",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "bb0905193cb9c044e5cc67ed4e6f847703f9ac74f9d59cfb5b8f6db6c95e95fb"
+    "body_sha256": "17c71a8097af78c0a1e99a98ff9ffb7c7d962ff41f686241338748fe7a890f68"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.committedRouteFinalizeError",
@@ -1437,7 +1437,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.retireRemovedStaticTopology",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "173eb9c27d5d3e48c6be431b230000b401eba5e03be7fdd2e112016a76d268fd"
+    "body_sha256": "d24d209214379e998c4f3ecf9732128608056c28c10d378c9c71dd52b4b37a6c"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.Abort",
@@ -1500,16 +1500,10 @@
     "body_sha256": "89b079c1152fc6c686a7d4bfdb08f5038b2a7d109717d157218de1e0e9b9666b"
   },
   {
-    "owner": "internal/runtime/manager/static_topology.go::sameProcessExecutionOwner",
-    "audit_rows": "A11,A24",
-    "proof_families": "P09,P20,P21",
-    "body_sha256": "4c68da63e60117de65113748cacd741fe23724912d8a9e7def437984d90c64c6"
-  },
-  {
     "owner": "internal/runtime/manager/static_topology.go::sourceSetBindingIsAdjacent",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "e1cdb5b2f253fc75b5964f3f943011c7d9d22712abab250c9e9588426d70d77d"
+    "body_sha256": "6232676b369accb32c1fb70e8ef8eb40a310bab4bb3ba2b7a5ef457af734d4fa"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::sourceSetContainsCoordinate",
@@ -2289,13 +2283,7 @@
     "owner": "internal/runtime/startupownership/acquisition_admission.go::AdmitAuthorityInspection",
     "audit_rows": "A20",
     "proof_families": "P19,P22",
-    "body_sha256": "83676e33ee5a7b8e41fcd6fd5484b90098c926bcad74de2bc94bd89c29af53a7"
-  },
-  {
-    "owner": "internal/runtime/startupownership/acquisition_admission.go::SuccessorAcquisitionKind",
-    "audit_rows": "A20",
-    "proof_families": "P19,P22",
-    "body_sha256": "1c55412fe58d2f6d433d314711efbd79400bfcd69d2efbe9f181ccb1ae031d85"
+    "body_sha256": "4311d8227dc250e5ab7309025f5d90599d5973d740c5ce92336514a02ed00712"
   },
   {
     "owner": "internal/runtime/tools/native_tools_admission.go::NativeToolAdmissionDecisions",
@@ -2847,7 +2835,7 @@
     "owner": "internal/serveapp/main.go::Run",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "c231ad3faf35905e31341120939e934b7e287de894617dfd185f81e111b202a8"
+    "body_sha256": "d1825b3df31983f69d71d1f5b0daf7f63c099381ea6b81e32634640642124259"
   },
   {
     "owner": "internal/serveapp/main.go::addrString",
@@ -2865,7 +2853,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "c8a05a98c016d1e9b3b31471ee4a5d16481162bcc3b5f3bdb163dba97bea1598"
+    "body_sha256": "8bcc10d41bc58b56f5bf765122d6925f1b5757b66e0c8d6e1acf49dfe93dc2c0"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -2890,12 +2878,6 @@
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
     "body_sha256": "6b44099e3c217d0b16d43f65b1a3f88c6ac013d3efd0aceab0b39e0d29384f66"
-  },
-  {
-    "owner": "internal/serveapp/main.go::conciseOwnershipAge",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "35145c8c4b73d54af5a5b6d7cff636ff66bf0a7357d9ee463e83d7f8c10845de"
   },
   {
     "owner": "internal/serveapp/main.go::configureWorkspaceDataProjection",
@@ -3156,12 +3138,6 @@
     "body_sha256": "1d2435d9cfc2b05cd546ca7e59099b28ed74e137e86bda7c48d9b7e0af332a9e"
   },
   {
-    "owner": "internal/serveapp/main.go::serveOwnershipAcquisitionError",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8f7e0b42896a78abcb416489432a34346b435ecfedf313076f96a9e2f8150713"
-  },
-  {
     "owner": "internal/serveapp/main.go::servePinnedBundleHashes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -3225,7 +3201,7 @@
     "owner": "internal/serveapp/main.go::startServeOwnershipWatch",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "e37c1c688e6f649a2ae0c74e2b9ffa7c5a7b6341dd232d0612b417c0e42e1e2d"
+    "body_sha256": "d5c44e2684b44106d92a4401eb21461380c0cdd306acf1b74271f179f359feda"
   },
   {
     "owner": "internal/serveapp/main.go::systemWorkspaceContainers",
@@ -3627,7 +3603,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "5e12947b543d43a8a6470aed426c8685c34e0edad902d749cc8f579b17d16e57"
+    "body_sha256": "7cb06c1034cb2ebe3325c53307ab2d1238e75afb79ca748fccbdcc029b4180d5"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",
@@ -3699,7 +3675,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::inspectSelectedRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "f62b0f5cbe1cdd5c3feeeb972abbefb8cbcc8eb6981458786ee31d5cc855c36d"
+    "body_sha256": "497984defb2336512582efc79bb9fa9df2b09771142d3d7dcc574cdb41e549cb"
   },
   {
     "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupPostgresOwner.ProbePossession",
@@ -3898,5 +3874,23 @@
     "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
     "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "de436ce0bcef10acffa79e5bf6d6753cf7cf8cc07fef63d4d95a6a5b029ca27b"
+  },
+  {
+    "owner": "internal/store/selected/authority.go::*AuthorityInspection.Close",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24,2495-STATUS",
+    "body_sha256": "da61c1f6fc980875af5bcd42142aafb2bfce2ee4d39324aee018811c3bf47182"
+  },
+  {
+    "owner": "internal/store/selected/authority.go::*AuthorityInspection.InspectAuthority",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24,2495-STATUS",
+    "body_sha256": "0c7322e416be9d6d1d7ef41579c656c0e2ee7ec29991e87539926ba14774b2e6"
+  },
+  {
+    "owner": "internal/store/selected/authority.go::OpenAuthorityInspection",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24,2495-STATUS",
+    "body_sha256": "057bec4709cc83679c0bf213b92223f224e431b0d920db45f0763b56a988a40c"
   }
 ]

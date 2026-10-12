@@ -31054,16 +31054,6 @@
       }
     },
     {
-      "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.preserve[48]",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.preserve[4]",
       "provenance": {
         "origin": "authored",
@@ -36214,6 +36204,56 @@
       }
     },
     {
+      "path": "platform.platform_tables.tables.runtime_process_generation",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_process_generation.ddl",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_process_generation.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_process_generation.diagnostic_inspection_contract",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_process_generation.possession_loss_contract",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.tables.runtime_provider_attempt_drains",
       "provenance": {
         "origin": "authored",
@@ -36265,106 +36305,6 @@
     },
     {
       "path": "platform.platform_tables.tables.runtime_reset_operations.description",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.ddl",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.description",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.diagnostic_inspection_contract",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.possession_loss_contract",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.possession_loss_contract.operation_error_recheck",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_facts.possession_loss_contract.terminal_readback",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_repairs",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_repairs.ddl",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.runtime_startup_authority_repairs.description",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

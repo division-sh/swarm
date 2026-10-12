@@ -71,6 +71,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/llm/provider_credentials.go", "A12", "P10,P21"},
 	{"internal/runtime/tools/native_tools_admission.go", "A13", "P09,P11"},
 	{"internal/store/selected/admission.go", "A10,A19,A20,A22,A23,A24,A27", "P08,P18,P19,P20,P21"},
+	{"internal/store/selected/authority.go", "A20,A28", "P19,P22,P24,2495-STATUS"},
 	{"internal/store/internal/startupownership/sqlite_inspection_absence_unix.go", "A19,A28", "2567-P07,P08"},
 	{"internal/store/internal/backend/postgres/backend.go", "A19,A20,A28", "P18,P19,P24"},
 	{"internal/store/internal/backend/postgres/transaction.go", "A19,A28", "P18,P24"},

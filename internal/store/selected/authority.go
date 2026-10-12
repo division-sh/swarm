@@ -3,6 +3,7 @@ package selected
 import (
 	"context"
 	"errors"
+	"time"
 
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -40,7 +41,9 @@ func (s *AuthorityInspection) InspectAuthority(ctx context.Context) (runtimestar
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	observation, err := s.store.ProbePossession(ctx)
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	observation, err := s.store.ProbePossession(bounded)
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
