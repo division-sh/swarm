@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "b9d3b9624fa2f599cccd3b2bc1e9d649a660c5a0108542e7ccc3da28a2135dc1"
+const targetDigest = "35337b9e2d6c070a726f14c3c31360edf528b9fdfcc662d88f89da9324458aa7"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -118,6 +118,7 @@ var files = []string{
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go",
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go",
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go",
+	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go",
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go",
 	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go",
 	"internal/runtime/pipeline/pause_eligibility_test.go",
@@ -247,7 +248,8 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true, "TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
-	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true},
+	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true, "runA2MapFanOutCompiledImmutableSource": true},
+	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true},
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
 	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go":                         {"a2MultiUntilChildren": true},
 	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},

@@ -1008,10 +1008,8 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 		intent.Request.Cardinality != len(keys) || !intent.Request.Capsule.SourceProjection.SourceAfterWrites || intent.Request.Capsule.Lineage.ParentEventID != trigger.ID() {
 		t.Fatalf("handler did not pin its post-write state revision: %#v", intent)
 	}
-	var frozen []byte
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT new_value FROM entity_mutations
-					WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
-		intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&frozen); err != nil {
+	frozen, err := storetest.ReadPinnedAuthoredMutationStorage(p.ctx, p.selected.events, intent.Source)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantFrozen, _ := json.Marshal(original)

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type a2CorruptMapSource struct {
@@ -78,11 +79,9 @@ func newA2CorruptMapSource(t *testing.T, selected gateRecoveryStoreCase) *a2Corr
 
 func (f *a2CorruptMapSource) readRaw(t *testing.T) []byte {
 	t.Helper()
-	var raw []byte
 	source := f.intent.Source
-	if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT new_value FROM entity_mutations
-		WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
-		source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&raw); err != nil {
+	raw, err := storetest.ReadPinnedAuthoredMutationStorage(f.p.ctx, f.p.selected.events, source)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return raw

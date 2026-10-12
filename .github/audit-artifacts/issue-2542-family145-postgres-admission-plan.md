@@ -4674,3 +4674,41 @@ closure is not claimed. All M07/D3/Docker/M01/drain holds remain explicit and
 unwaived. Local only, no push/PR/tier/server2. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/root-accumulator-* and
 exact-join-existing-count-callers.jsonl.
+
+## Shared Gate/A2 Dependency: Complete Pinned Authored-Map Read Chain
+
+Both currently known external raw new_value readers for the captured authored
+map source now reuse ReadPinnedAuthoredMutationStorage. No new owner, facade or
+source interpreter is introduced. Exact mutation/run/entity/domain/path identity
+travels in the genuinely claimed intent's SourceRef. Original read order, source
+kind/after-writes/lineage checks, immutable key/value and whitespace distinctions,
+claim/release, lexical ordering, progress, completion, corruption/refusal and
+restoration assertions remain. The raw write/fault and footprint tails are
+separate live dependencies; neither complete caller file is claimed closed.
+
+All four affected original roots passed both stores under race94.246s: compiled
+immutable source, whitespace/colliding-key preservation, raw corruption reader
+refusal and real pump refusal without progress. Existing native owner proof is
+extended with the original direct new_value byte scan; its CAST AS TEXT projection
+returns identical physical bytes on both stores, including PostgreSQL-owned
+JSONB serialization. Existing exact source coordinate/domain/NULL, cancellation,
+raw/invalid/closed/unavailable-table and original read-coordinator controls remain;
+native both-store race PASS14.908s. No reconstructed/evaluation source or fake
+claim was substituted, and these passes do not attribute or waive existing drain
+or possession-loss holds.
+
+Finite controls retain all original execution assertions and exact source/owner/
+context/byte destinations, requiring the existing canonical source validation,
+native read transaction and unchanged row predicates. Hostile lost bindings and
+assertions reject; immutable mechanical inputs/current historical digest remain
+unchanged. Final relevant collection PASS6.479s (a development guard used the
+wrong repository-relative owner path; the corrected path is now pinned); six
+persistence boundaries PASS4.221s; U1000 clean. Corpus1235/449, digest
+35337b9e2d6c070a726f14c3c31360edf528b9fdfcc662d88f89da9324458aa7.
+
+Ratchet downward PASS61.088s; final unchanged PASS23.684s:8327 ->8323 findings,
+5941 ->5937 raw sites, four removals/zero additions. Uncertainty67 and supplied-
+pool calls61 unchanged; candidate gate-carrier inventory23 references/7files.
+All parent/openers/shared-carrier and M07/D3/Docker/M01/drain holds remain open.
+No push/PR/tier/server2; signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/pinned-map-source-*.

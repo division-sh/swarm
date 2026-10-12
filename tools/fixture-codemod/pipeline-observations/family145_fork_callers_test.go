@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 447 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b9d3b9624fa2f599cccd3b2bc1e9d649a660c5a0108542e7ccc3da28a2135dc1" {
+	if err != nil || len(rows) != 449 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "35337b9e2d6c070a726f14c3c31360edf528b9fdfcc662d88f89da9324458aa7" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -116,6 +116,14 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if family145RootAccumulatorWireCuts[row.Function] != nil {
 			if err := family145RootAccumulatorWireProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
+			}
+		}
+		if family145PinnedMapSourceRow(row.File, row.Function) {
+			if err := family145PinnedMapSourceProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			if row.Function == "readRaw" {
+				continue
 			}
 		}
 		if family145A2CreationFaultCuts[row.Function] != nil {
