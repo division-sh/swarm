@@ -10,6 +10,15 @@ type StandaloneRunStorage struct {
 	RunID, Status, TriggerEventType string
 }
 
+func ReadPostgresRunTriggerEventIdentityStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var eventID string
+	err := tx.QueryRowContext(ctx, `SELECT trigger_event_id::text FROM runs WHERE run_id = $1::uuid`, runID).Scan(&eventID)
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
+}
+
 func ReadRunStatusStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 	var out string
 	err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1`, runID).Scan(&out)

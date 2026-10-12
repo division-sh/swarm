@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 362 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "4becace3e4dfb6c2c6d16858f6215e0ccd731b3c464f1e22d2e40b26faad52fe" {
+	if err != nil || len(rows) != 369 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c91a4bf2ca59207b179740f9352c5792a792abfacf3f778a37ac3b4e828ad682" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -151,6 +151,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if _, ok := family145StageLifecycleCuts[row.Function]; ok {
 			if err := family145StageLifecycleProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145SystemNodeCompletionCalls[row.Function]; ok {
+			if err := family145SystemNodeCompletionProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

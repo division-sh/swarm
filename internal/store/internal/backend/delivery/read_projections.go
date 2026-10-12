@@ -22,6 +22,44 @@ type PreparedTargetConflictStorage struct {
 	SubscriberID, RouteIdentity, TargetEncoding string
 }
 
+type PostgresSystemNodeDeliveryStorage struct {
+	Status, Reason string
+	SettledAt      sql.NullTime
+}
+
+type PostgresSystemNodeOutcomeStorage struct{ Outcome, Reason string }
+
+func ReadPostgresSystemNodeDeliveryStorageTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (PostgresSystemNodeDeliveryStorage, error) {
+	var out PostgresSystemNodeDeliveryStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), settled_at
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+	`, eventID, nodeID).Scan(&out.Status, &out.Reason, &out.SettledAt)
+	if err != nil {
+		return PostgresSystemNodeDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresSystemNodeOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (PostgresSystemNodeOutcomeStorage, error) {
+	var out PostgresSystemNodeOutcomeStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(o.outcome, ''), COALESCE(o.reason_code, '')
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = $2
+	`, eventID, nodeID).Scan(&out.Outcome, &out.Reason)
+	if err != nil {
+		return PostgresSystemNodeOutcomeStorage{}, err
+	}
+	return out, nil
+}
+
 type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Status, Reason, Failure, Target string }
 
 type BusAncestorDeliveryDiagnostic struct{ Name, SubscriberID, Status, Target string }

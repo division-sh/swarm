@@ -6,6 +6,21 @@ import (
 	"errors"
 )
 
+func ReadPostgresExactPipelineReceiptOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var outcome string
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(outcome, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&outcome)
+	if err != nil {
+		return "", err
+	}
+	return outcome, nil
+}
+
 type TemplateInstanceFieldsStorage struct{ Path, Fields string }
 
 type TemplateReceiptDiagnosticStorage struct{ SubscriberType, SubscriberID, Outcome, IdempotencyKey, SideEffects string }

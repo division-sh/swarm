@@ -8,6 +8,23 @@ import (
 
 type TemplateAccountIdentityStorage struct{ Path, EntityID string }
 
+type PostgresFlowEntityTerminalStorage struct{ EntityType, State string }
+
+func ReadPostgresFlowEntityTerminalStorageTx(ctx context.Context, tx *sql.Tx, runID, entityID, flowInstance string) (PostgresFlowEntityTerminalStorage, error) {
+	var out PostgresFlowEntityTerminalStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT entity_type, COALESCE(current_state, '')
+		FROM entity_state
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+		  AND flow_instance = $3
+	`, runID, entityID, flowInstance).Scan(&out.EntityType, &out.State)
+	if err != nil {
+		return PostgresFlowEntityTerminalStorage{}, err
+	}
+	return out, nil
+}
+
 type TemplateAccountDiagnosticStorage struct{ EntityID, Path, State, Fields string }
 
 func CountUndeclaredBusChildEntitiesTx(ctx context.Context, tx *sql.Tx) (int, error) {

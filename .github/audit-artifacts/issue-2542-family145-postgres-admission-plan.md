@@ -3290,3 +3290,59 @@ waived. The closure is this complete fixture dependency; #2542/#2151, M01/
 Docker/drain/D3/M07/rollback remain open. Existing watchlist and narrow native-
 owner architecture disposition stand; no new issue or framework. No push, PR,
 server2, tier/full, timeout/budget change, ratchet exception or compatibility path.
+
+### Complete API System-Node Completion Readback Dependency
+
+The ordinary opening and all six shared readback helpers in
+operator_run_completion_system_node_test.go now use the original selected
+native owners. Every caller is migrated, including both pipeline and root-node
+outcome/settlement observations. The entire consumer file has no pool, getter,
+SQL, transaction callback or independent coordinator left. The real completion
+executor, candidate sink registration, compiled source, pipeline interceptor,
+public run.start/run.get/run.diagnose/terminal event.publish and joined executor
+retirement remain unchanged. No receipt, completion or entity result is seeded.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native PostgreSQL location and existing executor/candidate lifetime | The original root opens StartPostgresRuntimeStore at its original opening point. The same selected instance supplies bus, pipeline, lifecycle executor and every physical reader. Executor retirement still precedes candidate registration release and native store close. |
+| runlifecycle | The incomplete-run diagnostic reads exactly completion_revision/completion_due_at by run_id through run_lifecycle_candidates.go, the already closed candidate-column owner. The trigger reader remains exactly trigger_event_id::text by run_id, without coalescing NULL, artifact lookup, origin reconstruction or snapshot validation. Each original observation has its own native read transaction. |
+| Closed delivery read projections | Node status/reason/settled_at and the original settled-attempt subquery/delivery join retain exact event_id, subscriber_type=node and subscriber_id predicates, COALESCE behavior and multiplicity. Both source-node and root-node callers retain their original delivered/empty-reason/non-NULL-settlement assertions. There is no eligibility/status filter or LIMIT introduced. |
+| pipelinepersistence | Exact platform/pipeline receipt outcome stays a one-column physical read. The existing latest platform pipeline-family reader and canonical outcome/failure decoder are deliberately distinct contracts; neither can replace this original exact subscriber read without adding interpretation or scope. |
+| entityruntime | Exact run_id/entity_id/flow_instance read retains entity_type and COALESCE(current_state), with original discovery/type/done assertions. It is not a stronger entity hydration or an inferred root-route lookup. |
+| Original selected coordinator and six narrow public read ports | The fixed PostgreSQL observations retain native sql.NullTime values and original PostgreSQL casts; this original PG-only witness is not relabeled backend parity. Native SQLite is explicitly a foreign posture for these ports. All raw/foreign/typed-nil/missing/cancelled/closed observations discard provisional facts; no query, selector, handle or callback is public. |
+| Finite whole helper/caller controls | Seven exact transitions preserve original public/lifecycle/refusal/business assertions, normalizing only the deleted root db carrier. Six statements are compared to their immutable predecessors exactly. Hostile controls reject lost owner/coordinate/cut and each original condition. Six new rows plus one reused historical Successor make1182 recipes/369 transitions; no old Before/After or24 mechanical receipt is discarded. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Real public API flow completion, both system-node outcomes/settlements, terminal entity and later-publication refusal | reproduced and fixed: TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces, original PostgreSQL root under race, package7.652s |
+| Failure-only candidate-clock read and uncoalesced trigger observation | execution-proven through the same corrected path: TestPostgresSystemNodeCompletionReadsPreserveNativeClockAndNullableTrigger under race; real native create and scheduled candidate request prove revision0/NULL ->1/exact microsecond due time, exact trigger identity and a scan refusal for a present NULL-trigger row |
+| Original selected read ownership and all six unavailable/foreign postures | execution-proven through the same corrected path: TestPostgresSystemNodeCompletionPortsRefuseMissingForeignCancelledAndClosedOwners, six ports including foreign native SQLite, raw/typed-nil owners, sql.ErrNoRows, cancellation and close; combined owner package10.709s under race |
+| Each original caller, business assertion, physical SQL and closed domain bridge | execution-proven through the same corrected path: TestFamily145SystemNodeCompletionEntireReadChainKeepsPublicLifecycleAssertions, original-condition/coordinate/owner hostile controls and exact six-owner SQL comparison |
+
+The direct native clock/trigger control also proves two separate original read
+commits, zero writes and active0, without a live executor/coordinator that could
+invalidate that counter cut. The successful public flow still uses its real
+executor; it is not replaced by this component control. The existing convergence
+helper, candidate-count diagnostic and timing contract remain intact. Native
+location/construction receipts carry; no process-restart or new SQLite system-
+node journey claim is made. There is no production admission, scheduling,
+completion, retry, settlement or timestamp normalization change.
+
+Complete cheap family145/historical/finite/idempotency/rename controls
+PASS11.439s; event/delivery/lifecycle/revision/writer boundaries PASS3.536s;
+retirement inventory PASS5.967s. Nine-package U1000 is clean, codemod
+Changes=[], diff clean. Corpus digest
+c91a4bf2ca59207b179740f9352c5792a792abfacf3f778a37ac3b4e828ad682.
+Downward ratchet PASS142.254s removed30/added0:8821 ->8791 findings,
+confirmed raw-operation debt6356 ->6334, uncertainty67 and collector/policy
+unchanged. Broader54757/39050 is not debt. Supplied pools83 ->82 (80 external
++2 private), provisional M0/D45/S37,52 qualified openings. Signed-head
+complexity is recorded with this checkpoint. Receipts are in
+~/.cache/swarm-2542-family145/system-node-* on vemew. Ordinary runsGo1.25.0
+while #2622 is OPEN, U1000Go1.26.8; ordinary runs switch after its merge.
+
+This closes the complete API system-node fixture dependency, not #2542/#2151
+or their ordinary-construction parent. M01/Docker/drain/D3/M07/rollback remain
+unwaived. Existing watchlist and narrow original-owner architecture disposition
+stand; no new framework or issue. No push, PR, server2, tier/full, timeout/budget
+raise, classifier relaxation, ratchet exception or compatibility path.
