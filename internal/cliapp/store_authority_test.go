@@ -252,7 +252,7 @@ func TestStoreHasNoRepairMutationCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"store", "repair-authority"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "unknown command") {
-		t.Fatalf("retired repair command remains admitted: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		t.Fatalf("retired repair command remains admitted: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unknown command touched selected-store infrastructure: %v", err)

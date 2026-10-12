@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -91,6 +92,7 @@ type localPreflightRequest struct {
 	DataSource             string
 	MountSources           WorkspaceMountSources
 	WorkspaceBackend       WorkspaceBackendSelection
+	APIListener            net.Listener
 	APIListenAddr          string
 	MCPListenAddr          string
 	CheckListeners         bool
@@ -131,7 +133,11 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		return report.finalize()
 	}
 	if req.CheckListeners {
-		report.checkListener("api_listener", "api", req.APIListenAddr)
+		if req.APIListener != nil {
+			report.add(localPreflightServeListenerPrerequisite, "api_listener", LocalPreflightSeverityInfo, LocalPreflightStatusOK, fmt.Sprintf("api listener is already bound at %s", req.APIListener.Addr()), "")
+		} else {
+			report.checkListener("api_listener", "api", req.APIListenAddr)
+		}
 		report.checkListener("mcp_listener", "mcp", req.MCPListenAddr)
 	}
 	if req.CheckGatewayEnv {
@@ -712,7 +718,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source, apiListener net.Listener) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	if source == nil {
 		report := LocalPreflightReport{Mode: mode, Owner: localPreflightOwner}
@@ -728,6 +734,7 @@ func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts Serv
 		DataSource:             opts.DataSource,
 		MountSources:           mountSources,
 		WorkspaceBackend:       workspaceBackend,
+		APIListener:            apiListener,
 		APIListenAddr:          opts.APIListenAddr,
 		MCPListenAddr:          opts.MCPListenAddr,
 		CheckListeners:         true,
