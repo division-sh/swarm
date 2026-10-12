@@ -127,9 +127,12 @@ func debtForkProofHostility(t *testing.T, original authorityDebtSite, old, curre
 func TestPersistenceAuthorityDebtForkProofCollectorIsPinned(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtForkProofCollectorTo {
-		t.Fatalf("fork proof collector=%s actual=%s error=%v", debtForkProofCollectorTo, digest, err)
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo) {
+		t.Fatalf("fork/process collector=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
+	// The original fork-only transition is immutable. Test its exact historical
+	// destination independently of the later process-owner policy composition.
+	destination := debtForkProofCollectorTo
 	old, current := debtForkProofStates()
 	trusted := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtForkProofCollectorFrom, Sites: old}
 	for _, test := range []struct {
@@ -137,11 +140,11 @@ func TestPersistenceAuthorityDebtForkProofCollectorIsPinned(t *testing.T) {
 		sites                   map[string]authorityDebtSite
 		accept                  bool
 	}{
-		{"unrefreshed", trusted.Collector, digest, old, true},
-		{"forward", trusted.Collector, digest, current, true},
-		{"foreign-base", strings.Repeat("b", 64), digest, current, false},
+		{"unrefreshed", trusted.Collector, destination, old, true},
+		{"forward", trusted.Collector, destination, current, true},
+		{"foreign-base", strings.Repeat("b", 64), destination, current, false},
 		{"foreign-destination", trusted.Collector, strings.Repeat("c", 64), current, false},
-		{"lost-debt", trusted.Collector, digest, debtControlSet(), false},
+		{"lost-debt", trusted.Collector, destination, debtControlSet(), false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			head := trusted

@@ -868,7 +868,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtForkProofCollectorTransition(trusted.Sites, head.Sites) {
 		return nil
 	}
-	if (base == debtFixtureRoleCollectorTo || base == debtForkProofCollectorTo) && trusted.Collector == base && current == debtProcessLeaseCollectorTo && head.Collector == current &&
+	if base == debtForkProofCollectorTo && trusted.Collector == base && current == debtProcessLeaseCollectorTo && head.Collector == current &&
 		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil
 	}
