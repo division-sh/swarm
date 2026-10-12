@@ -1,6 +1,12 @@
 # Pre-Implementation Coverage Audit: Complete Authored Event-Catalog Admission
 
-Agent G, 2026-10-12. READ-ONLY proposal; independent coding gate pending.
+Agent G, 2026-10-12. Independent coding gate approved as first slice:
+https://github.com/division-sh/swarm/issues/2447#issuecomment-6132342528
+The approved conditions supersede the original pending/target wording below.
+The user previously waived one-family/1500-gross/net<=0 limits; they are targets,
+NOT stop conditions. Exact behavior/shared helpers/tests/owner proof,
+characterization-before-extraction, all changed/new callables<25 and the
+independent complexity ratchet remain binding. No vendoring is authorized.
 Source: merged master `ab1f10dac2db203eae9d77382a8962f540081c8c`, Go1.26.8.
 Read IMPLEMENTER_GUIDELINES.md and SEMANTIC_DRIFT.md; re-read the issue's
 current/historical scope and binding first-slice conditions. No production,
@@ -48,10 +54,11 @@ Binding authoritative clauses exist (line numbers at this source):
    and `flow_model.compiled_event_schema_projection`, L14136: exact authored
    key identity before insertion; retained compiled schemas for downstream
    interpretation, diagnostic provenance separate from identity.
-5. #2447 issue/thread: one complete separately gated keep-zone family; original
+5. #2447 issue/thread: one complete separately gated keep-zone family; target
    <=1500 gross changed-production lines, net<=0, changed/new callables<25,
    unchanged maintained tests, pre-extraction characterization and independently
-   measured ratchet. Do NOT inherit the historical multi-family size waiver.
+   measured ratchet. Reviewer6132342528 confirms the user's earlier size/net
+   waiver controls; the first three are targets, not additional merge gates.
 
 No spec delta is proposed for pure extraction. A discovered contradiction,
 changed error/accepted value, bypass or required semantic repair stops coding
@@ -319,9 +326,10 @@ attempt1 toolchain-download failure remains infrastructure evidence.
 Intended closure: complete extraction of the chosen authored event-admission
 maintenance class in ONE PR, approved-first-slice only for the broader parent.
 Closure commitment: ALL chosen-class manifestations, not only one helper.
-Feasible? Yes, tentative: one613-line file, bounded local phases, <1500 gross
-and net<=0 without compression. Actual diff and every resulting callable<25
-must prove it; stop for a user-as-lead ruling if positive net is honestly needed.
+Feasible? Yes, tentative: one613-line file and bounded local phases. Report
+actual gross/net lines honestly; reviewer6132342528 confirms the user waived
+those targets, so necessary positive net needs no second waiver. No compression.
+Every changed/new callable<25 and exact independent ratchet remain required.
 Fixing only entry would leave field's same-class monolith live, so both and
 the full family are required. Shared utility bodies stay unchanged unless gated.
 
@@ -334,8 +342,8 @@ This PR's ROI is clearer phase/error ownership and discriminating executable
 proof, not a claimed runtime speedup. Long-run model effort is not reliably
 estimable without its own cross-family census.
 
-Blocking conditions: independent coding outcome not yet recorded; no production
-or test edit allowed until it is. Other stop conditions: spec contradiction,
+Independent approved-first-slice outcome6132342528 is recorded. Remaining
+stop conditions: spec contradiction,
 new same-concept interpreter, changed accepted shape/error/provenance/identity,
 unreachable supported proof, nondiscriminating mutant, unapproved shared-helper
 change or inability to meet the exact size/complexity/closure boundary.

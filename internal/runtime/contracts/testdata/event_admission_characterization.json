@@ -1,0 +1,2503 @@
+{
+  "bare": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {},
+          "Required": null
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "null"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1"
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "bare_alias": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"first\": an event with no fields is declared bare — write `first:` (remove the `\u0026nil`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_description": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `mapping`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_mapping": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `{}`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `null`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_quoted": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `''`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_tag": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `!!null`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "bare_tilde": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `~`).",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "business_key": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "id",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "uuid",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "note": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "business_key": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 8,
+          "source_presence": "scalar"
+        },
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 7
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 7,
+          "source_presence": "scalar"
+        },
+        "fields.note.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "fields.note.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type",
+            "fields.note.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "business_key_missing": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event key \"id\" is not a declared payload field",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "business_key_optional": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event key field \"id\" must be required",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "business_key_space": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event key at events.yaml:2:8 must not have surrounding whitespace",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "business_names": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "note": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "payload": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "source": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "status": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "note",
+            "payload",
+            "source",
+            "status"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.note.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.note.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 9
+        },
+        "fields.note.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "fields.payload.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.payload.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 12
+        },
+        "fields.payload.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 12,
+          "source_presence": "scalar"
+        },
+        "fields.source.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.source.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 11
+        },
+        "fields.source.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "fields.status.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.status.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 11
+        },
+        "fields.status.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.note.type",
+            "fields.payload.type",
+            "fields.source.type",
+            "fields.status.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "citation": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "note",
+                "AllowedClasses": [
+                  "soft",
+                  "hard"
+                ]
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.citation.allowed_classes": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 68,
+          "source_presence": "sequence"
+        },
+        "fields.id.citation.criteria": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 41,
+          "source_presence": "scalar"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "citation_unknown": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event citation field \"unknown\" is not supported",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "citation_wrong_kind": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: citation.allowed_classes at events.yaml:2:48 is scalar, want sequence",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "document_empty": {
+    "Entries": {},
+    "Provenance": {},
+    "Error": "",
+    "ErrorType": ""
+  },
+  "document_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "YAML input has no document",
+    "ErrorType": "*yamlsource.ParseError"
+  },
+  "document_scalar": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "events.yaml document at events.yaml:1:1 is scalar, want mapping",
+    "ErrorType": "*errors.errorString"
+  },
+  "document_sequence": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "events.yaml document at events.yaml:1:1 is sequence, want mapping",
+    "ErrorType": "*errors.errorString"
+  },
+  "double_optionality": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field optional type must use exactly one trailing ?",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "duplicate_declaration": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "events.yaml event declaration has duplicate effective field \"test.event\" at events.yaml:1:1 and events.yaml:2:1",
+    "ErrorType": "*errors.errorString"
+  },
+  "duplicate_fields": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event test.event has duplicate effective field \"id\" at events.yaml:2:3 and events.yaml:3:3",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "duplicate_merge_declaration": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "events.yaml event declaration has duplicate effective field \"test.event\" at events.yaml:2:3 and events.yaml:3:1",
+    "ErrorType": "*errors.errorString"
+  },
+  "duplicate_nested": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": duplicate effective YAML key \"type\" at events.yaml:2:8 and events.yaml:2:20 for $[\"test.event\"][\"id\"][\"type\"]",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "equality": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": "peer"
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "peer": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id",
+            "peer"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14
+        },
+        "fields.id.refinements.equal_to": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 30,
+          "source_presence": "scalar"
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "fields.peer.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.peer.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 9
+        },
+        "fields.peer.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type",
+            "fields.peer.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "equality_empty": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field equal_to field at events.yaml:2:30 is empty_scalar, want non-empty scalar",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "field_empty": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field type is required",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "field_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field type is required",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "field_unknown": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: events.yaml:$[\"test.event\"][\"id\"][\"typo\"]: event payload field field \"typo\" is not supported. (line 2, column 20) Valid fields: citation, description, equal_to, length, of, pattern, range, type. Did you mean \"type\"? Use one of the supported event payload field fields.",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "first_error_business_key": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:3:7: event payload field optional type must use exactly one trailing ?",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "first_error_field_order": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"z\" at events.yaml:2:6: event payload field list declarations require an of: element type",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "first_error_refinement_order": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field pattern: must compile as a regular expression: error parsing regexp: missing closing ]: `[`",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "first_error_retirement": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:4:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "introductions": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "alias": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": 1,
+                  "Max": 8
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "id": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": 1,
+                  "Max": 8
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "merged": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": 1,
+                  "Max": 8
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": null
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.alias.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.alias.refinements.length.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.alias.refinements.length.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.alias.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.id.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "fields.id.refinements.length.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 27,
+          "source_presence": "scalar"
+        },
+        "fields.id.refinements.length.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 19,
+          "source_presence": "scalar"
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "fields.merged.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 7,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "fields.merged.refinements.length.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 7,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "fields.merged.refinements.length.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 7,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "fields.merged.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 7,
+          "source_column": 9,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.alias.type",
+            "fields.id.type",
+            "fields.merged.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "invalid_optionality": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field optional type must use exactly one trailing ?",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "key_empty": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event declaration name \"\" at events.yaml:1:1 must be an exact canonical event identity or supported wildcard pattern",
+    "ErrorType": "*errors.errorString"
+  },
+  "key_normalized": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event declaration name \" Test.Event \" at events.yaml:1:1 must be an exact canonical event identity or supported wildcard pattern",
+    "ErrorType": "*errors.errorString"
+  },
+  "key_partial_glob": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event declaration name \"test.pre*\" at events.yaml:1:1 must be an exact canonical event identity or supported wildcard pattern",
+    "ErrorType": "*errors.errorString"
+  },
+  "key_path": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event declaration name \"/test.event\" at events.yaml:1:1 must be an exact canonical event identity or supported wildcard pattern",
+    "ErrorType": "*errors.errorString"
+  },
+  "key_pattern": {
+    "Entries": {
+      "**/test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {},
+          "Required": null
+        }
+      },
+      "test.*": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {},
+          "Required": null
+        }
+      }
+    },
+    "Provenance": {
+      "**/test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 1,
+          "source_presence": "null"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1"
+        }
+      },
+      "test.*": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "null"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1"
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "length": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": 0,
+                  "Max": 8
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14
+        },
+        "fields.id.refinements.length.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 42,
+          "source_presence": "scalar"
+        },
+        "fields.id.refinements.length.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 34,
+          "source_presence": "scalar"
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "length_float": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field length: $[\"test.event\"][\"id\"][\"length\"][\"min\"] at events.yaml:2:34 (introduced at events.yaml:2:34, resolved at events.yaml:2:34): length bound must be a nonnegative YAML integer",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "length_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field length: $[\"test.event\"][\"id\"][\"length\"][\"min\"] at events.yaml:2:34 (introduced at events.yaml:2:34, resolved at events.yaml:2:34): length bound must be a nonnegative YAML integer",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "length_overflow": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field length: $[\"test.event\"][\"id\"][\"length\"][\"min\"] at events.yaml:2:34 (introduced at events.yaml:2:34, resolved at events.yaml:2:34): length bound must be a nonnegative YAML integer",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "mapping_foreign_of": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: events.yaml:$[\"test.event\"][\"id\"][\"of\"]: event payload field field \"of\" is not supported. (line 2, column 20) Valid fields: citation, description, equal_to, length, of, pattern, range, type. Did you mean \"of\"? Use one of the supported event payload field fields.",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "mapping_missing_of": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field list declarations require an of: element type",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "mapping_missing_type": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field type is required",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "mapping_types": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "array": {
+              "Type": "[Customer]",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "scalar": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "array",
+            "scalar"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.array.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 17
+        },
+        "fields.array.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 17,
+          "source_presence": "scalar"
+        },
+        "fields.scalar.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.scalar.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 18
+        },
+        "fields.scalar.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 18,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type",
+            "fields.scalar.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "nested_optionality": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field optional type must use exactly one trailing ?",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "optionality": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "a": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "list": {
+              "Type": "[text]",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "map": {
+              "Type": "map[text]uuid",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "z": {
+              "Type": "uuid",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "z"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.a.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 6,
+          "source_presence": "scalar"
+        },
+        "fields.a.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 6,
+          "source_presence": "scalar"
+        },
+        "fields.list.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 16,
+          "source_presence": "scalar"
+        },
+        "fields.list.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 16,
+          "source_presence": "scalar"
+        },
+        "fields.map.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 8,
+          "source_presence": "scalar"
+        },
+        "fields.map.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 8,
+          "source_presence": "scalar"
+        },
+        "fields.z.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.z.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 6
+        },
+        "fields.z.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 6,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.a.type",
+            "fields.list.type",
+            "fields.map.type",
+            "fields.z.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "pattern_bad": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field pattern: must compile as a regular expression: error parsing regexp: missing closing ]: `[`",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "provenance": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "id",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "uuid",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "value": {
+              "Type": "text",
+              "Description": "note",
+              "Refinements": {
+                "Pattern": "^[a-z]+$",
+                "Length": {
+                  "Min": 1,
+                  "Max": 8
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "source",
+                "AllowedClasses": [
+                  "hard"
+                ]
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "business_key": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 8,
+          "source_presence": "scalar"
+        },
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 7
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 7,
+          "source_presence": "scalar"
+        },
+        "fields.value.citation.allowed_classes": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 9,
+          "source_column": 51,
+          "source_presence": "sequence"
+        },
+        "fields.value.citation.criteria": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 9,
+          "source_column": 26,
+          "source_presence": "scalar"
+        },
+        "fields.value.description": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 6,
+          "source_column": 18,
+          "source_presence": "scalar"
+        },
+        "fields.value.is_optional": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "fields.value.refinements.length.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 8,
+          "source_column": 27,
+          "source_presence": "scalar"
+        },
+        "fields.value.refinements.length.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 8,
+          "source_column": 19,
+          "source_presence": "scalar"
+        },
+        "fields.value.refinements.pattern": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 7,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "fields.value.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type",
+            "fields.value.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "range": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "number",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": -0.5,
+                  "Max": 0
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14
+        },
+        "fields.id.refinements.range.max": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 46,
+          "source_presence": "scalar"
+        },
+        "fields.id.refinements.range.min": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 35,
+          "source_presence": "scalar"
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "range_nonfinite": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field range: $[\"test.event\"][\"id\"][\"range\"][\"min\"] at events.yaml:2:35 (introduced at events.yaml:2:35, resolved at events.yaml:2:35): range bound must be finite",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "range_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field range: $[\"test.event\"][\"id\"][\"range\"][\"max\"] at events.yaml:2:35 (introduced at events.yaml:2:35, resolved at events.yaml:2:35): range bound must be a finite YAML number",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer_type/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer_type/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer_type/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_consumer_type/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_note/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_note/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_note/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_note/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_producer/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_producer/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_producer/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_producer/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_source/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_source/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_source/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_source/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_status/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_status/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_status/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/_status/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/alternate_emitters/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/alternate_emitters/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/alternate_emitters/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/alternate_emitters/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/author_summary_field/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/author_summary_field/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/author_summary_field/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/author_summary_field/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer_type/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer_type/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer_type/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/consumer_type/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/delivery_channel/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/delivery_channel/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/delivery_channel/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/delivery_channel/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter_type/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter_type/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter_type/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/emitter_type/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/intercepted/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/intercepted/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/intercepted/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/intercepted/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/owning_node/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/owning_node/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/owning_node/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/owning_node/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/passthrough/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/passthrough/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/passthrough/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/passthrough/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/producer/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/producer/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/producer/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/producer/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/runtime_handling/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/runtime_handling/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/runtime_handling/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/runtime_handling/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/swarm/''": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/swarm/null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/swarm/{nested: value}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "reserved_fields/swarm/{}": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "retired_payload": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event payload at events.yaml:2:3 must be a field type declaration, not a nested payload block",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "retired_required": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": event field name \"required\" at events.yaml:3:3 is reserved for required-by-default field semantics",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "scalar_types": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "array": {
+              "Type": "[text]",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "map": {
+              "Type": "map[text]uuid",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "named": {
+              "Type": "Customer",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "scalar": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "array",
+            "map",
+            "named",
+            "scalar"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.array.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 10
+        },
+        "fields.array.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 4,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.map.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.map.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 8
+        },
+        "fields.map.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 5,
+          "source_column": 8,
+          "source_presence": "scalar"
+        },
+        "fields.named.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.named.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 10
+        },
+        "fields.named.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 10,
+          "source_presence": "scalar"
+        },
+        "fields.scalar.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.scalar.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 11
+        },
+        "fields.scalar.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type",
+            "fields.map.type",
+            "fields.named.type",
+            "fields.scalar.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "sequence_empty": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field type is required",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "sequence_multiple": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field list shorthand requires exactly one element type",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "sequence_optional": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field optional type must use exactly one trailing ?",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "sequence_types": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "array": {
+              "Type": "[text]",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "array"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.array.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 11
+        },
+        "fields.array.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 11,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.array.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "sequence_wrong_kind": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field element type at events.yaml:2:11 is empty_mapping, want non-empty scalar",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "spaced_optionality": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field optional marker must immediately follow its type",
+    "ErrorType": "*fmt.wrapError"
+  },
+  "text_refinements": {
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "text",
+              "Description": "note",
+              "Refinements": {
+                "Pattern": "^[a-z]+$",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.description": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 33,
+          "source_presence": "scalar"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14
+        },
+        "fields.id.refinements.pattern": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 52,
+          "source_presence": "scalar"
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
+  },
+  "type_null": {
+    "Entries": null,
+    "Provenance": null,
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field type at events.yaml:2:14 is null, want non-empty scalar",
+    "ErrorType": "*fmt.wrapError"
+  }
+}
