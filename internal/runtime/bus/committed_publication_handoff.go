@@ -40,6 +40,16 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
 		return nil
 	}
+	if operation.agentHandoff == transferredAgentHandoff {
+		if err := d.bus.AcceptCommittedDeliveryHandoffs(operation.deliveryHandoffs); err != nil {
+			return err
+		}
+		if operation.committedDisposition != nil {
+			d.bus.logPublished(ctx, operation.intent.Event, 0)
+			return nil
+		}
+		return d.bus.completeCommittedAgentHandoff(ctx, operation.intent.Event, operation.publicationClaim)
+	}
 	if err := d.bus.validateContinuationPublication(operation, committed.plan.prepared.plan); err != nil {
 		return err
 	}
