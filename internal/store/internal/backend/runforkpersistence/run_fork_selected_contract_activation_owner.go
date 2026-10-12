@@ -291,7 +291,11 @@ func validateSelectedContractPreparedAttachment(record selectedRecoveryRecord, a
 	if err != nil {
 		return err
 	}
-	if !equalTrimmedStrings(ids, evidence.request.AllowedSourceEventIDs) {
+	// Frontier identity is a set; the caller's retained order is execution
+	// chronology. Sort only a copy and keep duplicate/membership checks exact.
+	actual := slices.Clone(evidence.request.AllowedSourceEventIDs)
+	slices.Sort(actual)
+	if !slices.Equal(ids, actual) {
 		return fmt.Errorf("selected-contract activation inputs differ from prepared frontier")
 	}
 	return nil

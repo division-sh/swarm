@@ -203,6 +203,31 @@ func TestSelectedActivationAttachmentAllowsOwedWorkAndSourceAdvancement(t *testi
 	}
 }
 
+func TestSelectedActivationFrontierInventoryIsOrderIndependent(t *testing.T) {
+	const a = "11111111-1111-4111-8111-111111111111"
+	const b = "22222222-2222-4222-8222-222222222222"
+	for _, frontierIDs := range [][]string{{a, b}, {b, a}} {
+		for _, allowed := range [][]string{{a, b}, {b, a}, {a}, {a, b, uuid.NewString()}, {a, a}, {a, b, b}, {" " + a, b}} {
+			f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
+			for _, id := range frontierIDs {
+				f.evidence.request.FrontierAdmission.FrontierEvents = append(f.evidence.request.FrontierAdmission.FrontierEvents,
+					runfork.RunForkContractFrontierEvent{SourceEventID: id, EventName: "work.done"})
+			}
+			f.evidence.request.AllowedSourceEventIDs = allowed
+			beforeAllowed := append([]string(nil), allowed...)
+			beforeFrontier := append([]runfork.RunForkContractFrontierEvent(nil), f.evidence.request.FrontierAdmission.FrontierEvents...)
+			err := validateSelectedContractPreparedAttachment(f.record, f.authority, f.evidence)
+			valid := reflect.DeepEqual(allowed, []string{a, b}) || reflect.DeepEqual(allowed, []string{b, a})
+			if valid != (err == nil) {
+				t.Fatalf("frontier=%v allowed=%v valid=%v err=%v", frontierIDs, allowed, valid, err)
+			}
+			if !reflect.DeepEqual(beforeAllowed, allowed) || !reflect.DeepEqual(beforeFrontier, f.evidence.request.FrontierAdmission.FrontierEvents) {
+				t.Fatal("identity validation mutated retained execution chronology")
+			}
+		}
+	}
+}
+
 func TestSelectedActivationAttachmentRejectsCrossedEvidence(t *testing.T) {
 	for _, test := range []struct {
 		name   string
