@@ -476,9 +476,13 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 }
 
 func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
+	return selectedContractActivityDeclaredSourceWithResultConsumer(t, serverURL, effectClass, selection, false)
+}
+
+func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection, consumeResult bool) LoadedSelectedContractSource {
 	t.Helper()
 	root := t.TempDir()
-	for path, contents := range map[string]string{
+	files := map[string]string{
 		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
 		"entities.yaml": "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
@@ -518,7 +522,16 @@ loops:
   effect_class: %s
   http: {method: POST, url: %q}
 `, effectClass, serverURL),
-	} {
+	}
+	if consumeResult {
+		files["flow_a/schema.yaml"] = strings.Replace(files["flow_a/schema.yaml"], "  pending: {}\n  review: {}", "  review: {}\n  pending: {}", 1)
+		files["flow_a/nodes.yaml"] = strings.Replace(files["flow_a/nodes.yaml"], "review.retry, review.close]", "review.retry, review.close, connector.succeeded]", 1) + `
+    connector.succeeded:
+      loop: {repeat: revision, from: review}
+      advances_to: review
+`
+	}
+	for path, contents := range files {
 		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	repoRoot := runForkExecutionRepoRoot(t)

@@ -281,6 +281,18 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
 			return err
 		}
+		if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
+			return err
+		} else if ok {
+			d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+				"activity_id":       intent.ActivityID,
+				"tool":              intent.Tool,
+				"effect_class":      string(intent.EffectClass),
+				"result_event_id":   recorded.EventID,
+				"result_event_type": recorded.EventType,
+			})
+			return nil
+		}
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
@@ -291,18 +303,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
 	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error

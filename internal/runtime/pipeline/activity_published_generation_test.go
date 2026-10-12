@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -30,6 +31,24 @@ type absentPublishedActivityResultReader struct{}
 
 func (absentPublishedActivityResultReader) LoadRecordedActivityResult(context.Context, activityresult.Query) (activityresult.Record, bool, error) {
 	return activityresult.Record{}, false, nil
+}
+
+type currentPublishedActivityResultReader struct {
+	record activityresult.Record
+	fault  error
+}
+
+func (r currentPublishedActivityResultReader) LoadRecordedActivityResult(ctx context.Context, query activityresult.Query) (activityresult.Record, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return activityresult.Record{}, false, err
+	}
+	if r.fault != nil {
+		return activityresult.Record{}, false, r.fault
+	}
+	if r.record.EventID != query.SuccessEventID {
+		return activityresult.Record{}, false, errors.New("current publication query changed its exact activity identity")
+	}
+	return r.record, true, nil
 }
 
 func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
@@ -93,6 +112,10 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 		{"retained_advanced", advanced, true, ""},
 		{"fresh_current", old, false, ""},
 		{"fresh_advanced", advanced, false, ""},
+		{"current_published_current", old, false, ""},
+		{"current_published_advanced", advanced, false, ""},
+		{"current_published_canceled", advanced, false, "canceled"},
+		{"current_published_read_failure", advanced, false, "reader"},
 		{"retained_canceled", advanced, true, "canceled"},
 		{"retained_foreign_authority", advanced, true, "authority"},
 		{"retained_changed_input", advanced, true, "input"},
@@ -125,13 +148,21 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 			reader := activityConstructionReader{load: func(_ flowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) { return instance, true, nil }}
 			bus := &recordingPipelineBus{}
 			pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}, executionPosture: executionposture.Live, bus: bus, workflowStore: &workflowInstanceStore{instanceReader: reader, activityResults: absentPublishedActivityResultReader{}}, entityLocks: map[string]*sync.Mutex{}}
+			currentPublished := tc.name == "current_published_current" || tc.name == "current_published_advanced" || tc.name == "current_published_canceled" || tc.name == "current_published_read_failure"
+			if currentPublished {
+				current := currentPublishedActivityResultReader{record: activityresult.Record{EventID: result.eventID, EventType: string(result.eventType)}}
+				if tc.fault == "reader" {
+					current.fault = errors.New("native result read failed")
+				}
+				pc.workflowStore.activityResults = current
+			}
 			before := calls.Load()
 			err = (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, currentIntent)
 			if (err != nil) != (tc.fault != "") {
 				t.Fatalf("accounting admission: %v", err)
 			}
 			wantEmits, wantCalls := 0, int32(0)
-			if !tc.published {
+			if !tc.published && !currentPublished {
 				wantEmits = 1
 				if tc.name == "fresh_current" {
 					wantCalls = 1

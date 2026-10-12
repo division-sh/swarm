@@ -20998,6 +20998,9 @@ run_model:
       Read-only retained input accounting is distinguished from fresh execution before current-loop generation
       admission: consuming the committed result may already have advanced that loop. Exact current-child authority,
       input identity and cancellation remain mandatory; unpublished fresh work still requires its current generation.
+      Successor recovery also consumes an exact result already committed by that child through the existing native
+      activity-result owner before fresh-generation admission; the source cut's inventory alone cannot describe that
+      later child-local commit. This is accounting, not a provider relaunch or new inherited publication.
       Terminal result recipients remain terminal evidence and are not replayed. Initial activation and successor
       recovery rederive this decision from the same bound cut, preserve projected reply bindings, and independently
       enforce exact recipient identity at publication and readback. No source receipt is fabricated, no pending input

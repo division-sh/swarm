@@ -17,13 +17,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -33,14 +36,58 @@ import (
 )
 
 type selectedActivityCrashCheckpoint struct {
-	InputID, ResultID string
-	ResultPayload     json.RawMessage
-	Selection         effects.SelectedContractForkAuthority
-	ExecutionOwner    string
-	LeaseExpiresAt    time.Time
-	FenceGeneration   uint64
-	ExecutionMode     executionmode.Mode
-	ProviderCalls     int64
+	InputID, ResultID  string
+	ResultPayload      json.RawMessage
+	Selection          effects.SelectedContractForkAuthority
+	ExecutionOwner     string
+	LeaseExpiresAt     time.Time
+	FenceGeneration    uint64
+	ExecutionMode      executionmode.Mode
+	ProviderCalls      int64
+	ConsumedGeneration attemptgeneration.Generation
+}
+
+type selectedActivityInputSettlementHold struct {
+	pipelineobligation.Store
+	sourceRequest string
+}
+
+func (p selectedActivityInputSettlementHold) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
+	authority, selected := effects.AuthorityFromContext(ctx)
+	if selected && authority.Kind == effects.AuthoritySelectedContractFork && claim.EventID() == activityidentity.ForkLineageEventID(authority.SelectedFork.ForkRunID, p.sourceRequest) {
+		<-ctx.Done()
+		return pipelineobligation.SettlementOutcome{}, ctx.Err()
+	}
+	return p.Store.Settle(ctx, claim, disposition)
+}
+
+type selectedActivityResultConsumerCrash struct {
+	pipeline.WorkflowPersistenceOwner
+	test  *testing.T
+	after func(context.Context, events.Event, attemptgeneration.Generation)
+}
+
+func (p selectedActivityResultConsumerCrash) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
+	committed, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
+	if !committed.Committed || err != nil || command.DeliverySuccess == nil {
+		return committed, err
+	}
+	event, found := correlation.InboundEventFromContext(ctx)
+	if !found || event.RunID() != command.DeliverySuccess.Claim.RunID() {
+		p.test.Fatalf("acknowledged result consumer lost its exact inbound frame: found=%t", found)
+	}
+	if event.Type() == "flow_a/connector.succeeded" {
+		var buckets map[string]map[string]any
+		if err := json.Unmarshal(command.State.Accumulator, &buckets); err != nil {
+			p.test.Fatal(err)
+		}
+		loops, err := loopruntime.List(buckets)
+		if err != nil || len(loops) != 1 || loops[0].Attempt != 2 {
+			p.test.Fatalf("result consumer did not advance its owned loop: %+v error=%v", loops, err)
+		}
+		p.after(ctx, event, loops[0].Generation())
+	}
+	return committed, err
 }
 
 func (c selectedActivityCrashCheckpoint) previousAuthority() effects.Authority {
@@ -99,12 +146,13 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 	}))
 	defer server.Close()
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
-	readOnly := os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_committed"
+	advanced := os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_consumed"
+	readOnly := advanced || os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_committed"
 	effectClass, forkPolicy, wantCalls := contracts.ActivityEffectClassNonIdempotentWrite, contracts.ActivityForkReuseRecordedResult, int64(0)
 	if readOnly {
 		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, contracts.ActivityForkReexecuteRead, 1
 	}
-	loaded := selectedContractActivityDeclaredSource(t, server.URL, effectClass, selection)
+	loaded := selectedContractActivityDeclaredSourceWithResultConsumer(t, server.URL, effectClass, selection, advanced)
 	fixture := activityForkFixture{db: activityForkFixtureDB{DB: db, sqlite: backend == "sqlite"}, owner: owner}
 	if native, ok := selected.(*store.SQLiteRuntimeStore); ok {
 		fixture.sqlite = native
@@ -133,7 +181,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 		seedSelectedContractActivityAttempt(t, fixture.db, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
 	}
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
-	after := func(ctx context.Context, event events.Event) {
+	after := func(ctx context.Context, event events.Event, consumed attemptgeneration.Generation) {
 		t.Logf("ACTIVITY_CRASH_PUBLICATION_ACK event=%s type=%s run=%s", event.ID(), event.Type(), event.RunID())
 		if event.Type() != "flow_a/connector.succeeded" {
 			return
@@ -155,7 +203,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 		checkpoint := selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: event.RunID(), Activity: &selectedActivityCrashCheckpoint{
 			InputID: inputID, ResultID: event.ID(), ResultPayload: event.Payload(), Selection: authority.SelectedFork,
 			ExecutionOwner: authority.ExecutionOwner, LeaseExpiresAt: authority.LeaseExpiresAt, FenceGeneration: authority.FenceGeneration, ExecutionMode: authority.ExecutionMode,
-			ProviderCalls: calls.Load()}}
+			ProviderCalls: calls.Load(), ConsumedGeneration: consumed}}
 		if err := json.NewEncoder(pipe).Encode(checkpoint); err != nil {
 			t.Fatal(err)
 		}
@@ -164,13 +212,19 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 		_, err = os.Stdin.Read(b[:])
 		t.Fatalf("acknowledged activity publication resumed without SIGKILL: %v", err)
 	}
-	switch native := selected.(type) {
-	case *store.SQLiteRuntimeStore:
-		owner.ports.events = selectedActivityCrashSQLitePublication{native, after}
-	case *store.PostgresStore:
-		owner.ports.events = selectedActivityCrashPostgresPublication{native, after}
-	default:
-		t.Fatalf("activity crash requires original native selected store, got %T", selected)
+	if advanced {
+		owner.ports.pipelineObligations = selectedActivityInputSettlementHold{owner.ports.pipelineObligations, requestID}
+		owner.ports.workflow = pipeline.NewWorkflowPersistence(selectedActivityResultConsumerCrash{selected.(pipeline.WorkflowPersistenceOwner), t, after})
+	} else {
+		publication := func(ctx context.Context, event events.Event) { after(ctx, event, attemptgeneration.Generation{}) }
+		switch native := selected.(type) {
+		case *store.SQLiteRuntimeStore:
+			owner.ports.events = selectedActivityCrashSQLitePublication{native, publication}
+		case *store.PostgresStore:
+			owner.ports.events = selectedActivityCrashPostgresPublication{native, publication}
+		default:
+			t.Fatalf("activity crash requires original native selected store, got %T", selected)
+		}
 	}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
@@ -191,6 +245,10 @@ func TestIssue642SelectedActivityResultSIGKILLReactivationBothStores(t *testing.
 
 func TestIssue642SelectedReadOnlyActivityResultSIGKILLReactivationBothStores(t *testing.T) {
 	proveSelectedActivityResultCrashRecovery(t, "retained_activity_read_result_committed")
+}
+
+func TestIssue642SelectedReadOnlyConsumedResultSIGKILLAccountingBothStores(t *testing.T) {
+	proveSelectedActivityResultCrashRecovery(t, "retained_activity_read_result_consumed")
 }
 
 func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
@@ -229,7 +287,11 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if err != nil || receipt.Found {
 				t.Fatalf("SIGKILL did not preserve unsettled input accounting: %+v %v", receipt, err)
 			}
-			readOnly := cut == "retained_activity_read_result_committed"
+			advanced := cut == "retained_activity_read_result_consumed"
+			readOnly := advanced || cut == "retained_activity_read_result_committed"
+			if advanced && (!checkpoint.Activity.ConsumedGeneration.Valid() || checkpoint.Activity.ConsumedGeneration.Attempt != 2) {
+				t.Fatalf("cut lacks exact consumed-result loop advancement: %+v", checkpoint.Activity)
+			}
 			wantAttempts, wantCalls := 1, int64(0)
 			if readOnly {
 				wantAttempts, wantCalls = 0, 1
@@ -284,6 +346,7 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			}
 			wait, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
+			var remaining int
 			for {
 				receipt, err = storetest.ReadLatestPlatformPipelineReceiptStorage(wait, selected, inputID)
 				if err != nil {
@@ -293,11 +356,17 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 					if receipt.Outcome != "success" || (len(receipt.Failure) > 0 && string(receipt.Failure) != "null") {
 						t.Fatalf("successor did not preserve committed result accounting: %+v", receipt)
 					}
-					break
+					remaining, err = storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, checkpoint.ForkRun)
+					if err != nil {
+						t.Fatalf("read successor pipeline completion: %v", err)
+					}
+					if remaining == 0 {
+						break
+					}
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("successor left exact input unsettled: %+v %v", receipt, context.Cause(wait))
+					t.Fatalf("successor left exact input or output handoff unsettled: receipt=%+v incomplete=%d cause=%v", receipt, remaining, context.Cause(wait))
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
