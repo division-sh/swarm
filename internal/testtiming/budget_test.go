@@ -62,7 +62,7 @@ hard:
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
-	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 480}
+	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 600}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
@@ -149,7 +149,7 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
 	plan := committedBroadBudgetPlan(t, proof)
 	const id = "persistence-authority-debt-census"
-	wantJustification := "PR2569/run37403048513 measured the full source-bound debt census at446.06s inside a538s primary command; isolate this mandatory all-tier proof with a480s baseline, retaining the fixed30% buffer and unchanged sibling budgets."
+	wantJustification := "Reviewed #2535 disposition: runs38284182093 (636s) and38238632747 (371s) use the same census code; same code, runner variance warrants a600s baseline/780s ceiling with the fixed30% buffer and unchanged sibling budgets; above780s split the census job rather than raise again."
 	if budget.Hard.UnitCommandSeconds[id].Justification != wantJustification {
 		t.Fatal("census budget lost its exact measured disposition")
 	}
@@ -162,10 +162,12 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 		censusStatus, other BudgetStatus
 	}{
 		{"observed-root", 446.06, 240, BudgetPass, BudgetPass},
-		{"baseline", 480, 240, BudgetPass, BudgetPass},
-		{"census-ceiling", 624, 312, BudgetPass, BudgetPass},
-		{"census-overrun", 624.001, 240, BudgetFail, BudgetPass},
-		{"admission-overrun", 480, 312.001, BudgetPass, BudgetFail},
+		{"observed-nightly", 371, 240, BudgetPass, BudgetPass},
+		{"observed-push", 636, 240, BudgetPass, BudgetPass},
+		{"baseline", 600, 240, BudgetPass, BudgetPass},
+		{"census-ceiling", 780, 312, BudgetPass, BudgetPass},
+		{"census-overrun", 780.001, 240, BudgetFail, BudgetPass},
+		{"admission-overrun", 600, 312.001, BudgetPass, BudgetFail},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var evidence []CommandEvidence
@@ -184,7 +186,7 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 				switch surface.Surface {
 				case id:
 					found++
-					if surface.Status != test.censusStatus || surface.LimitSeconds != 480 || surface.BufferedCeilingSeconds != 624 {
+					if surface.Status != test.censusStatus || surface.LimitSeconds != 600 || surface.BufferedCeilingSeconds != 780 {
 						t.Fatalf("census budget changed: %+v", surface)
 					}
 				case "store-admission-full":
