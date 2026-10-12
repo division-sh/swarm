@@ -74,6 +74,107 @@ func TestPreparedProcessReleaseFencesSelectedForkCommandsBothStores(t *testing.T
 	}
 }
 
+func TestPreparedProcessReleaseFencesMaterializationBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx, healthy := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			refusedCtx, refused := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			store := fixture.store.(forkWorkflowOwnershipStore)
+			materialized, err := store.MaterializeRunForkForSelectedContractExecution(ctx, healthy)
+			if err != nil {
+				t.Fatalf("live otherwise-equivalent materialization refused: %v", err)
+			}
+			requireForkWorkflowOwnershipPreserved(t, fixture.db, healthy.SourceRunID, materialized.ForkRunID)
+			value, ok := storeTestWorkFixtures.Load(t)
+			if !ok {
+				t.Fatal("original preparation work owner missing")
+			}
+			process := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), fixture.store)
+			stamp, err := process.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			inspection, err := fixture.store.(startupAuthorityParityStore).InspectAuthority(ctx)
+			if err != nil || inspection.Authority == nil || *inspection.Authority != stamp {
+				t.Fatalf("Release changed last-owner evidence: %+v %v", inspection, err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+			if _, err := store.MaterializeRunForkForSelectedContractExecution(refusedCtx, refused); !errors.Is(err, startupownership.ErrProcessNotCurrent) {
+				t.Fatalf("released process materialization refusal: %v", err)
+			}
+			if after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres"); !reflect.DeepEqual(before, after) {
+				t.Fatal("released materialization changed durable evidence")
+			}
+		})
+	}
+}
+
+func TestPreparedProcessReleaseFencesMutatingRecoveryBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			healthy := newSelectedCompletionFixture(t, store, db, sqlite)
+			refused := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, healthy.process)
+			ctx := testAuthorActivityContext()
+			for _, fixture := range []selectedCompletionFixture{healthy, refused} {
+				if _, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := healthy.process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			process := selectedPreparationProcessForTest(t, store)
+			stamp, err := process.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovery := store.(interface {
+				ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+				RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
+			})
+			entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("exact predecessor inventory: %+v %v", entries, err)
+			}
+			requests := map[string]runcontrol.SelectedForkRecoveryRequest{}
+			for _, entry := range entries {
+				request := runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: stamp.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+				if err := request.Validate(); err != nil {
+					t.Fatalf("live admitted recovery request: %v", err)
+				}
+				requests[entry.Binding.ForkRunID] = request
+			}
+			beforeHealthy := snapshotForkHistoricalExecutionTables(t, db, !sqlite)
+			result, err := recovery.RecoverSelectedFork(ctx, requests[healthy.forkRun])
+			if err != nil || result.RunID != healthy.forkRun || result.Disposition != runfork.SelectedForkRecoveryFailed {
+				t.Fatalf("live mutating recovery: %+v %v", result, err)
+			}
+			if reflect.DeepEqual(beforeHealthy, snapshotForkHistoricalExecutionTables(t, db, !sqlite)) {
+				t.Fatal("healthy recovery did not exercise its mutation owner")
+			}
+			if err := process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			inspection, err := store.(startupAuthorityParityStore).InspectAuthority(ctx)
+			if err != nil || inspection.Authority == nil || *inspection.Authority != stamp {
+				t.Fatalf("Release changed last-owner evidence: %+v %v", inspection, err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, db, !sqlite)
+			if _, err := recovery.RecoverSelectedFork(ctx, requests[refused.forkRun]); !errors.Is(err, startupownership.ErrProcessNotCurrent) {
+				t.Fatalf("released process mutating recovery refusal: %v", err)
+			}
+			if after := snapshotForkHistoricalExecutionTables(t, db, !sqlite); !reflect.DeepEqual(before, after) {
+				t.Fatal("released mutating recovery changed durable evidence")
+			}
+		})
+	}
+}
+
 func (c *preparedCommitConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	conn, err := c.pipelineCrashConnector.Connect(ctx)
 	if err != nil {
