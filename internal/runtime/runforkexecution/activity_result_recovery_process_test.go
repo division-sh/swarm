@@ -40,6 +40,7 @@ type selectedActivityCrashCheckpoint struct {
 	LeaseExpiresAt    time.Time
 	FenceGeneration   uint64
 	ExecutionMode     executionmode.Mode
+	ProviderCalls     int64
 }
 
 func (c selectedActivityCrashCheckpoint) previousAuthority() effects.Authority {
@@ -94,11 +95,16 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"value":"unexpected-reexecution"}`))
+		_, _ = w.Write([]byte(`{"value":"live-read-result"}`))
 	}))
 	defer server.Close()
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
-	loaded := selectedContractActivityDeclaredSource(t, server.URL, contracts.ActivityEffectClassNonIdempotentWrite, selection)
+	readOnly := os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_committed"
+	effectClass, forkPolicy, wantCalls := contracts.ActivityEffectClassNonIdempotentWrite, contracts.ActivityForkReuseRecordedResult, int64(0)
+	if readOnly {
+		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, contracts.ActivityForkReexecuteRead, 1
+	}
+	loaded := selectedContractActivityDeclaredSource(t, server.URL, effectClass, selection)
 	fixture := activityForkFixture{db: activityForkFixtureDB{DB: db, sqlite: backend == "sqlite"}, owner: owner}
 	if native, ok := selected.(*store.SQLiteRuntimeStore); ok {
 		fixture.sqlite = native
@@ -118,12 +124,14 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 	fixture.seedSource(t, loaded, sourceRun, entityID, requestID, at, route, source)
 	seedSelectedContractActivityLoop(t, fixture.db, sourceRun, entityID, requestID, activation, at)
 	seedSelectedContractActivityRequest(t, fixture.db, sourceRun, requestID, selectedContractActivityRequestPayload{
-		ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"}, EffectClass: string(contracts.ActivityEffectClassNonIdempotentWrite),
-		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed", RetryMaxAttempts: 1, ForkPolicy: string(contracts.ActivityForkReuseRecordedResult),
+		ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"}, EffectClass: string(effectClass),
+		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed", RetryMaxAttempts: 1, ForkPolicy: string(forkPolicy),
 		EntityID: entityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested", SourceEventID: initiatingID,
 		SourceRunID: sourceRun, Attempt: 1, Generation: activation.Generation(), LoopStage: "review"})
 	fixture.capture(t, sourceRun)
-	seedSelectedContractActivityAttempt(t, fixture.db, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
+	if !readOnly {
+		seedSelectedContractActivityAttempt(t, fixture.db, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
+	}
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
 	after := func(ctx context.Context, event events.Event) {
 		t.Logf("ACTIVITY_CRASH_PUBLICATION_ACK event=%s type=%s run=%s", event.ID(), event.Type(), event.RunID())
@@ -131,8 +139,8 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 			return
 		}
 		authority, present := effects.AuthorityFromContext(ctx)
-		if !present || !authority.Valid() || authority.SelectedFork.ForkRunID != event.RunID() || calls.Load() != 0 {
-			t.Fatalf("result commit lost exact selected authority or redispatched the recorded provider: %+v calls=%d", authority, calls.Load())
+		if !present || !authority.Valid() || authority.SelectedFork.ForkRunID != event.RunID() || calls.Load() != wantCalls {
+			t.Fatalf("result commit lost exact selected authority or changed provider execution: %+v calls=%d want=%d", authority, calls.Load(), wantCalls)
 		}
 		inputID := activityidentity.ForkLineageEventID(event.RunID(), requestID)
 		receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, selected, inputID)
@@ -146,7 +154,8 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 		pipe := os.NewFile(3, "selected-activity-checkpoint")
 		checkpoint := selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: event.RunID(), Activity: &selectedActivityCrashCheckpoint{
 			InputID: inputID, ResultID: event.ID(), ResultPayload: event.Payload(), Selection: authority.SelectedFork,
-			ExecutionOwner: authority.ExecutionOwner, LeaseExpiresAt: authority.LeaseExpiresAt, FenceGeneration: authority.FenceGeneration, ExecutionMode: authority.ExecutionMode}}
+			ExecutionOwner: authority.ExecutionOwner, LeaseExpiresAt: authority.LeaseExpiresAt, FenceGeneration: authority.FenceGeneration, ExecutionMode: authority.ExecutionMode,
+			ProviderCalls: calls.Load()}}
 		if err := json.NewEncoder(pipe).Encode(checkpoint); err != nil {
 			t.Fatal(err)
 		}
@@ -177,6 +186,14 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 }
 
 func TestIssue642SelectedActivityResultSIGKILLReactivationBothStores(t *testing.T) {
+	proveSelectedActivityResultCrashRecovery(t, "retained_activity_result_committed")
+}
+
+func TestIssue642SelectedReadOnlyActivityResultSIGKILLReactivationBothStores(t *testing.T) {
+	proveSelectedActivityResultCrashRecovery(t, "retained_activity_read_result_committed")
+}
+
+func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
@@ -195,7 +212,7 @@ func TestIssue642SelectedActivityResultSIGKILLReactivationBothStores(t *testing.
 				reopen = func() startupownership.Store { s = again(); return s }
 				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
-			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, "retained_activity_result_committed")
+			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
 			if checkpoint.Activity == nil || !checkpoint.Activity.previousAuthority().Valid() || checkpoint.Activity.Selection.ForkRunID != checkpoint.ForkRun {
 				t.Fatalf("crash cut lacks exact selected result/executor evidence: %+v", checkpoint)
 			}
@@ -212,13 +229,22 @@ func TestIssue642SelectedActivityResultSIGKILLReactivationBothStores(t *testing.
 			if err != nil || receipt.Found {
 				t.Fatalf("SIGKILL did not preserve unsettled input accounting: %+v %v", receipt, err)
 			}
+			readOnly := cut == "retained_activity_read_result_committed"
+			wantAttempts, wantCalls := 1, int64(0)
+			if readOnly {
+				wantAttempts, wantCalls = 0, 1
+			}
 			attempts, err := storetest.ReadActivityAttemptStorage(read, selected, checkpoint.ForkRun)
-			if err != nil || len(attempts) != 1 || attempts[0].Status != string(pipeline.ActivityAttemptStatusSucceeded) {
+			if err != nil || len(attempts) != wantAttempts || checkpoint.Activity.ProviderCalls != wantCalls {
 				t.Fatalf("crash lost the exact copied terminal journal: %+v %v", attempts, err)
 			}
-			journal, found, err := selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(read, attempts[0].RequestEventID)
-			if err != nil || !found || journal.ResultEventID != resultID {
-				t.Fatalf("crash result differs from its exact native journal: %+v %v", journal, err)
+			var journal pipeline.ActivityAttemptRecord
+			if !readOnly {
+				var found bool
+				journal, found, err = selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(read, attempts[0].RequestEventID)
+				if err != nil || !found || journal.Status != pipeline.ActivityAttemptStatusSucceeded || journal.ResultEventID != resultID {
+					t.Fatalf("crash result differs from its exact native journal: %+v %v", journal, err)
+				}
 			}
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
@@ -322,9 +348,13 @@ func TestIssue642SelectedActivityResultSIGKILLReactivationBothStores(t *testing.
 			if actual := storetest.LoadCanonicalEventRecord(t, wait, selected, resultID); !reflect.DeepEqual(result, actual) {
 				t.Fatal("durable successor settlement changed the acknowledged physical output")
 			}
-			retained, found, err := selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(wait, journal.RequestEventID)
-			if err != nil || !found || !reflect.DeepEqual(journal, retained) {
-				t.Fatalf("successor replay modified copied journal bytes or clocks: %+v %v", retained, err)
+			if !readOnly {
+				retained, found, err := selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(wait, journal.RequestEventID)
+				if err != nil || !found || !reflect.DeepEqual(journal, retained) {
+					t.Fatalf("successor replay modified copied journal bytes or clocks: %+v %v", retained, err)
+				}
+			} else if attempts, err := storetest.ReadActivityAttemptStorage(wait, selected, checkpoint.ForkRun); err != nil || len(attempts) != 0 {
+				t.Fatalf("read-only successor fabricated a journal: %+v %v", attempts, err)
 			}
 			t.Logf("ISSUE642_ACTIVITY_SIGKILL_REACTIVATED backend=%s input=%s result=%s old_generation=%d new_generation=%d settlement=%s leases=%d", backend,
 				inputID, resultID, checkpoint.Activity.Selection.Generation, current.SelectedFork.Generation, receipt.Outcome, process.ActiveCount())

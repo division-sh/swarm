@@ -293,7 +293,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
-	if os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_result_committed" {
+	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_activity_") {
 		runSelectedActivityResultCrashHelper(t, ctx, backend, db, selected, owner, capability)
 		return
 	}
