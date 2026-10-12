@@ -34,6 +34,7 @@ type ChannelStore interface {
 
 type interfaceSchemaInspection interface {
 	InspectSchema(context.Context, store.SchemaBootstrapRequest) (store.SchemaInspection, error)
+	InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)
 }
 
 func (f *ProcessLeaseFixture) Close() error { return f.close() }
