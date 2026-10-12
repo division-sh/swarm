@@ -657,19 +657,34 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := agentRuntime.genericSchedules.ReconcileRunWakeups(runCtx, req.ForkRunID); err != nil {
 		return fmt.Errorf("restore selected child generic schedule wakeups: %w", err)
 	}
-	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
-		return fmt.Errorf("release selected child wakeups: %w", err)
-	}
 	if err := c.admitSelectedDeploymentFeeds(runCtx); err != nil {
 		return err
 	}
+	// Finish initial serializable commits before autonomous writes. Dispatch
+	// remains separate because it can wait for a handler or an original deadline.
+	inputs, err := c.commitSelectedInputs()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, input := range inputs {
+			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+		}
+	}()
 	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, pipeline)
 	if err != nil {
 		return fmt.Errorf("register selected fan-out serving: %w", err)
 	}
 	pipeline.InstallFanOutWorkNotifier(agentRuntime.fanOutServing)
-	if err := c.publishCommittedInputs(); err != nil {
-		return err
+	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
+		return fmt.Errorf("release selected child wakeups: %w", err)
+	}
+	for len(inputs) > 0 {
+		input := inputs[0]
+		inputs = inputs[1:]
+		if err := c.dispatchCommittedInput(input); err != nil {
+			return err
+		}
 	}
 	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
 		return fmt.Errorf("start activated selected completion owner: %w", err)
@@ -680,50 +695,64 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	return c.awaitTerminalSettlement(runCtx, continuationFailures)
 }
 
-func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() error {
+type committedSelectedInput struct {
+	ctx           context.Context
+	prepared      runtimebus.PreparedPublish
+	sourceEventID string
+	cleanup       error
+}
+
+func (c selectedContractForkLocalRuntimeContainer) commitSelectedInputs() (inputs []committedSelectedInput, finalErr error) {
 	req, attachment := c.req, c.attachment
 	runCtx, bus := attachment.ctx, attachment.runtime.bus
+	defer func() {
+		if finalErr != nil {
+			for _, input := range inputs {
+				finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+			}
+		}
+	}()
 	for _, sourceEvent := range attachment.sourceEvents {
 		input, err := selectedSourceInput(req.Prepared, sourceEvent)
 		if err != nil {
-			return err
+			return inputs, err
 		}
 		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
 		if err != nil {
-			return err
+			return inputs, err
 		}
 		attachment.guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
 		if sourceEvent.JoinContinuation.Present() {
 			if err := attachment.guard.ExpectPublishedJoinDelivery(evt, sourceEvent.JoinRoute); err != nil {
-				return err
+				return inputs, err
 			}
 		}
 		eventCtx, err := c.selectedSourcePublicationContext(
 			runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName), evt, sourceEvent)
 		if err != nil {
-			return err
+			return inputs, err
 		}
 		if len(sourceEvent.ContinuedRecipientRoutes) != 0 {
 			eventCtx, err = runtimebus.WithSelectedForkRecipientContexts(eventCtx, evt, sourceEvent.ContinuedRecipientRoutes)
 			if err != nil {
-				return err
+				return inputs, err
 			}
 		}
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
 			if err != nil {
-				return err
+				return inputs, err
 			}
 			eventCtx, evt = admittedCtx, admitted.Event()
 			payload, bound := evt.PayloadAdmission()
 			if !bound {
-				return errors.New("selected recovery input lacks admitted schema evidence")
+				return inputs, errors.New("selected recovery input lacks admitted schema evidence")
 			}
 			sourceEvent.Payload = evt.Payload()
 			published, err := c.ports.replay.RequireSelectedForkInputPublished(eventCtx, c.authority, sourceEvent, payload.Binding())
 			if err != nil {
-				return fmt.Errorf("admit committed selected input recovery: %w", err)
+				return inputs, fmt.Errorf("admit committed selected input recovery: %w", err)
 			}
 			if published {
 				// Its committed pipeline and receiver rows have already been handed
@@ -733,7 +762,7 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 		}
 		prepared, err := bus.PrepareSelectedForkPublish(eventCtx, evt, input)
 		if err != nil {
-			return fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
+			return inputs, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
 				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
 				forkEventID,
@@ -751,49 +780,46 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 		}
 		committed, commitErr := c.ports.replay.CommitSelectedForkEvent(eventCtx, prepared.SelectedForkCommitRequest(lineage))
 		if committed.AppendOutcome == 0 && commitErr != nil {
-			return errors.Join(commitErr, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		if err := committed.Validate(); err != nil {
-			return errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared, err := prepared.WithCommitOutcome(committed.AppendOutcome)
 		if err != nil {
-			return errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared = committedPrepared.WithCommittedDeliveryHandoffs(committed.DeliveryHandoffs)
-		prepared = committedPrepared
-		// The producer returns this evidence only after acknowledged COMMIT.
-		// Complete its exact handoff once, even if transaction cleanup failed.
-		if err := bus.DispatchPreparedPublish(eventCtx, prepared); err != nil {
-			return errors.Join(commitErr, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
-				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-				sourceEvent.SourceEventID,
-				forkEventID,
-				err,
-			))
-		}
-		if commitErr != nil {
-			c.diagnostics.add(commitErr)
-		}
-		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, attachment.payloadAdmitter).Log(eventCtx, runtimepkg.RuntimeLogEntry{
-			Level:     diaglog.LevelInfo,
-			Message:   "Selected-contract fork event completed local dispatch",
-			Component: "run_fork",
-			Action:    "selected_contract_event_dispatched",
-			EventID:   prepared.Event.ID(),
-			EventType: string(prepared.Event.Type()),
-			EntityID:  prepared.Event.EntityID(),
-			Detail: map[string]any{
-				"source_run_id":   req.SourceRunID,
-				"source_event_id": sourceEvent.SourceEventID,
-			},
-		}); err != nil {
-			return fmt.Errorf("%s persist selected-contract fork event dispatch evidence %s: %w",
-				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-				forkEventID,
-				err,
-			)
-		}
+		c.diagnostics.add(commitErr)
+		inputs = append(inputs, committedSelectedInput{ctx: eventCtx, prepared: committedPrepared, sourceEventID: sourceEvent.SourceEventID, cleanup: commitErr})
+	}
+	return inputs, nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) dispatchCommittedInput(input committedSelectedInput) error {
+	// Acknowledged evidence owns this exact handoff despite cleanup errors.
+	if err := c.attachment.runtime.bus.DispatchPreparedPublish(input.ctx, input.prepared); err != nil {
+		return errors.Join(input.cleanup, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, input.sourceEventID, input.prepared.Event.ID(), err))
+	}
+	if err := runtimepkg.NewRuntimeLogger(c.ports.logs, c.req.AgentRuntime.Options.ExecutionPosture, c.attachment.payloadAdmitter).Log(input.ctx, runtimepkg.RuntimeLogEntry{
+		Level:     diaglog.LevelInfo,
+		Message:   "Selected-contract fork event completed local dispatch",
+		Component: "run_fork",
+		Action:    "selected_contract_event_dispatched",
+		EventID:   input.prepared.Event.ID(),
+		EventType: string(input.prepared.Event.Type()),
+		EntityID:  input.prepared.Event.EntityID(),
+		Detail: map[string]any{
+			"source_run_id":   c.req.SourceRunID,
+			"source_event_id": input.sourceEventID,
+		},
+	}); err != nil {
+		return fmt.Errorf("%s persist selected-contract fork event dispatch evidence %s: %w",
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			input.prepared.Event.ID(),
+			err,
+		)
 	}
 	return nil
 }

@@ -406,6 +406,15 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		return errors.New("selected-fork grant proof requires a transaction and live selected evidence")
 	}
 	binding := evidence.SelectedFork
+	// Revision-only timer admission holds the run before its execution row.
+	// Do not let the joined proof take those rows in the reverse order.
+	hash, bindingID, err := loadRunExecutionBindingModeTx(ctx, tx, binding.ForkRunID, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if hash != evidence.BundleHash || !bindingID.Valid || bindingID.String != binding.BindingID {
+		return errors.New("selected-fork generation grant run binding changed")
+	}
 	row, err := loadSelectedForkGrantExecutionTx(ctx, tx, *binding, sqlite)
 	if err != nil {
 		return err

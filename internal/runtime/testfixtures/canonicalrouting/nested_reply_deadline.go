@@ -48,6 +48,49 @@ func CopyNestedNodeReplyDeadlines(t testing.TB) string {
 	return root
 }
 
+// An unclaimed inner request uses the existing deferred fan-out continuation,
+// rather than requiring unsupported replay of a plain node delivery.
+func CopyNestedFanOutReplyDeadlines(t testing.TB) string {
+	t.Helper()
+	root := CopyNestedNodeReplyDeadlines(t)
+	writeClosedVariantFile(t, root, "u/entities.yaml", `work:
+  items:
+    type: "[text]"
+    initial: [same-business-key]
+`)
+	writeClosedVariantFile(t, root, "u/events.yaml", `u.ready:
+  account_id: text
+  request_id: text
+u.replied:
+  account_id: text
+  request_id: text
+  result: text
+`)
+	writeClosedVariantFile(t, root, "u/nodes.yaml", `u-node:
+  execution_type: system_node
+  subscribes_to: [u.requested, u.ready]
+  event_handlers:
+    u.requested:
+      fan_out:
+        items_from: entity.items
+        as: entry
+        identity: entry
+        emit:
+          event: u.ready
+          fields:
+            account_id: payload.account_id
+            request_id: entry
+    u.ready:
+      emit:
+        event: u.replied
+        fields:
+          account_id: payload.account_id
+          request_id: payload.request_id
+          result: "approved"
+`)
+	return root
+}
+
 func nestedDeadlineReturn(input, output string, account bool) string {
 	fields := "              request_id: \"same-business-key\"\n              result: \"approved\"\n"
 	if account {

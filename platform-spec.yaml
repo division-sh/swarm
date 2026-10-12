@@ -41561,6 +41561,18 @@ managed_agent_capability_surface:
         before the exact current execution fence atomically records execution failure and the canonical run-lifecycle
         terminal disposition. An already-terminal child keeps its committed disposition. The permanent activated
         fork-operation response is immutable; later failure never becomes failed creation or child deletion.
+      selected_input_serving_order: >
+        After acknowledged activation, the existing container commits its exact initial source publications before
+        releasing withheld timer callbacks or starting the process-owned fan-out pump. It then releases the original
+        wakeups and dispatches the acknowledged publication results through the existing bus handoff owner.
+        Publication commit and dispatch are explicit separate steps; no SQL transaction spans handler execution or
+        waiting for a deadline. Undispatched acknowledged results retain their durable event/pipeline/delivery evidence
+        across startup failure or crash. Cleanup releases only their exact process-local publication claims, without
+        deleting committed evidence or repeating publication. Successor recovery consumes those existing rows.
+        Original due coordinates, current execution fencing and successful-commit cleanup diagnostics remain unchanged.
+        The selected generation-grant proof acquires the existing mutation-order fence, then the canonical child run,
+        before its execution/binding proof, matching timer mutation's run-before-execution order. Every current grant,
+        artifact, binding, lease and fingerprint check remains mandatory; observation never grants mutation authority.
       selected_prepared_source_publication: >-
         Non-executing attachment preparation validates every immutable selected source-publication frame through
         the same selected input/schema admission consumed by serving. Missing or substituted original input,
