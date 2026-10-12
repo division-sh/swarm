@@ -760,6 +760,9 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	default:
 		t.Fatal("generation grant was not terminal before loss returned")
 	}
+	if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, testServeRegistrationAuthority(grantEvidence)); err != nil || current {
+		t.Errorf("terminal process still grants executable registration currentness: %v %v", current, err)
+	}
 
 	successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("successor"))
 	if err != nil || successor == nil {
