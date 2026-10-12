@@ -246,8 +246,11 @@ func TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof(t *testing.T) {
 		}
 	}
 	for _, retained := range []string{"proof-unit", "unused-linux", "unused-darwin", "unused-checks", "macos-sqlite-possession"} {
-		if !slices.Contains(workflow.Jobs["required-tests"].Needs, retained) || strings.Contains(workflow.Jobs[retained].If, "schedule") {
-			t.Fatalf("original PR proof moved before bootstrap: %s", retained)
+		if !slices.Contains(workflow.Jobs["required-tests"].Needs, retained) {
+			t.Fatalf("required owner removed: %s", retained)
+		}
+		if !strings.HasPrefix(retained, "unused-") && strings.Contains(workflow.Jobs[retained].If, "schedule") {
+			t.Fatalf("unapproved PR proof moved: %s", retained)
 		}
 	}
 }

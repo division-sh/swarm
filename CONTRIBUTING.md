@@ -39,12 +39,29 @@ go run ./cmd/swarm-openrpc-gen --check
 host, not the complete CI platform union. The guard internally pins its analysis
 toolchain to Go 1.26.8 and Staticcheck v0.8.1. Product builds follow the root
 [`go.mod`](go.mod); see the [development requirements](README.md#development)
-for its minimum and preferred toolchain. Full-tier CI collects native Linux
-and Darwin results with tests enabled for default, race, and `issue2413`
+for its minimum and preferred toolchain. Master nightly and explicit full
+dispatch CI collect native Linux and Darwin results with tests enabled for
+default, race, and `issue2413`
 configurations, then uses upstream
 binary merge semantics: a declaration reachable in any admitted variant is
 live. Collection does not fail on U1000; the source-bound merged check does.
-Missing, skipped, or failed native collection cannot satisfy required CI.
+Missing, skipped, or failed native collection cannot satisfy that cadence's
+required summary. PR and push CI require the three native analysis jobs to be
+skipped, including full-tier PRs and verified master replay; the analyzer's
+contract tests retain their existing tier membership. A branch dispatch proves
+its native path but cannot qualify the master-nightly marker.
+
+Native logs and current-run/attempt artifacts retain failures. The required
+summary lists each native result and refuses unsuccessful cadence; the master
+nightly marker cannot succeed. The merge orchestrator's strict nightly admission
+must reject the newest completed red, partial or stale master cadence rather
+than use an older green. Its deployed gate/configuration and refusal evidence
+are attested separately under [#2535](https://github.com/division-sh/swarm/issues/2535)
+before the [#2640](https://github.com/division-sh/swarm/issues/2640) cutover merges;
+this workflow change does not install or relax an external merge gate.
+The orchestrator and CI-health owner triage a nightly red: U1000 findings go to
+the code owner for a small fix-forward cleanup PR, while analyzer/runner failures
+remain tracked under #2535/#2353. Failed evidence is not ignored or relabeled.
 The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
 configuration remains explicitly parked under E's
 [#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.

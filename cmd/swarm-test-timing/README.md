@@ -90,8 +90,12 @@ one unexpired artifact with the exact valid plan and corresponding `ci-selection
 It never uses the observing master push's coordinates or creation-time heuristics.
 Ordinary consumers and the protected publisher use their own current workflow
 coordinates, not retained `needs` outputs from an earlier attempt. Required native
-artifacts use `unused-linux-<run>-<attempt>` and `unused-darwin-<run>-<attempt>`;
-both current native collectors and the real union must succeed. Names do not replace
+master-nightly/explicit-dispatch native artifacts use `unused-linux-<run>-<attempt>`
+and `unused-darwin-<run>-<attempt>`; both current native collectors and the real
+union must succeed on those runs. PR and push CI require all three native jobs
+to be skipped, regardless of tier or replay. Explicit candidate-branch dispatch
+retains full native execution but cannot qualify the master-nightly marker.
+Names do not replace
 any existing source, config, platform, result-integrity or complete-job validation.
 A failed-only, union-only, timing-only or publisher-only rerun with missing current
 producers is unqualified; perform a complete new attempt rather than relabel evidence.

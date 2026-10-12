@@ -330,11 +330,11 @@ jobs:
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
 
-  # Cold analysis uses a separate pinned toolchain. Keep its budget independent
-  # of the existing product build and possession proof, without extending either.
+  # Native unused analysis is cadence-only; PR/push product proofs stay independent.
+  # Explicit branch dispatch also qualifies this path before a placement change lands.
   unused-linux:
     needs: [ci-plan]
-    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
     timeout-minutes: 19
@@ -358,7 +358,7 @@ jobs:
 
   unused-darwin:
     needs: [ci-plan]
-    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Darwin unused analysis
     runs-on: macos-latest
     # Run 38292434273: 6m35s success / 20m47s canceled; 38304031830: 20m27s canceled.
@@ -382,7 +382,7 @@ jobs:
           if-no-files-found: error
 
   unused-checks:
-    if: needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native union unused checks
     needs: [ci-plan, unused-linux, unused-darwin]
     runs-on: ubuntu-latest
@@ -693,6 +693,8 @@ jobs:
         shell: bash
         env:
           IS_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           if [ "$IS_DRAFT" = true ]; then
@@ -702,9 +704,15 @@ jobs:
           failed=0
           replay='${{ needs.ci-plan.outputs.master_replay }}'
           native_expected=skipped
-          if [ '${{ needs.ci-plan.outputs.profile }}' = full ] && [ "$replay" != true ]; then native_expected=success; fi
-          for native in '${{ needs.unused-linux.result }}' '${{ needs.unused-darwin.result }}' '${{ needs.unused-checks.result }}'; do
-            if [ "$native" != "$native_expected" ]; then failed=1; fi
+          if [ "$EVENT_NAME" = workflow_dispatch ] || { [ "$EVENT_NAME" = schedule ] && [ "$EVENT_REF" = refs/heads/master ]; }; then native_expected=success; fi
+          for item in \
+            'unused-linux:${{ needs.unused-linux.result }}' \
+            'unused-darwin:${{ needs.unused-darwin.result }}' \
+            'unused-checks:${{ needs.unused-checks.result }}'
+          do
+            name="${item%%:*}"; result="${item#*:}"
+            echo "- ${name}: \`${result}\` (expected \`${native_expected}\`)" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" != "$native_expected" ]; then failed=1; fi
           done
           if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.proof-unit.result }}" != success ]; then failed=1; fi
           for item in \
