@@ -28,7 +28,7 @@ func (c ReplyReturnContinuation) ClaimForDelivery(route events.DeliveryRoute) (e
 	if err := c.Validate(); err != nil {
 		return events.ConnectExecutionClaim{}, err
 	}
-	if route.Target.Route() != c.Record.Origin {
+	if !c.MatchesResponseRecipient(route) || route.Target.Route() != c.Record.Origin {
 		return events.ConnectExecutionClaim{}, fmt.Errorf("retained return changed its context-owned destination")
 	}
 	compiled := ConnectDeliveryRoute{Recipient: route.Recipient, Target: c.Record.Origin,
@@ -47,4 +47,14 @@ func (c ReplyReturnContinuation) ClaimForDelivery(route events.DeliveryRoute) (e
 		compiled.Handler = MustConnectReceiverHandler(node)
 	}
 	return ConnectExecutionClaim(c.Plan, compiled)
+}
+
+// Membership is the captured compiled response pin, not the requester address:
+// another connection can legitimately deliver to that same instance.
+func (c ReplyReturnContinuation) MatchesResponseRecipient(route events.DeliveryRoute) bool {
+	receiver, present := route.ConnectClaim.ReceiverIdentity()
+	event, hasEvent := route.ConnectClaim.ReceiverEvent()
+	return present && hasEvent && c.Plan.ReplyRole() == ConnectReplyRoleResponse &&
+		c.Plan.MatchesReplyRecord(c.Record) && receiver == c.Plan.ReceiverPinIdentity().EvidenceIdentity() &&
+		event == c.Plan.ReceiverLocalEvent()
 }

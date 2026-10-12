@@ -31,11 +31,31 @@ func TestIssue642CompletedReplyKeepsPendingObserverWholePublicationBothStores(t 
 	runMixedRequestWholePublication(t, true, true)
 }
 
+func TestIssue642AcceptedReturnWholePublicationRollbackAndDuplicateBothStores(t *testing.T) {
+	runMixedRequestWholePublicationWithProof(t, true, false, true)
+}
+
+func TestIssue642AcceptedReturnSameOriginOrdinaryConnectionBothStores(t *testing.T) {
+	runMixedRequestWholePublicationWithResponseObserver(t, true, false, true, true)
+}
+
 func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequester bool) {
+	runMixedRequestWholePublicationWithProof(t, settledProvider, returnedRequester, false)
+}
+
+func runMixedRequestWholePublicationWithProof(t *testing.T, settledProvider, returnedRequester, publicationProof bool) {
+	t.Helper()
+	runMixedRequestWholePublicationWithResponseObserver(t, settledProvider, returnedRequester, publicationProof, false)
+}
+
+func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledProvider, returnedRequester, publicationProof, responseObserver bool) {
 	t.Helper()
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyMixedReplyRequest(t)
+			if responseObserver {
+				root = canonicalrouting.CopyMixedReplyResponse(t)
+			}
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
@@ -104,7 +124,18 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 				t.Fatal(err)
 			}
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
-			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
+			var owner runforkexecution.SelectedContractExecutionOwner
+			var probe *acceptedReturnPublicationProbe
+			if publicationProof {
+				var replay runforkexecution.SelectedContractReplayPersistence = h.pg
+				if h.sqlite != nil {
+					replay = h.sqlite
+				}
+				probe = &acceptedReturnPublicationProbe{SelectedContractReplayPersistence: replay, selected: selected, done: make(chan error, 1)}
+				owner = selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, probe)
+			} else {
+				owner = selectedContractExecutionOwnerForCatalogHarness(t, h)
+			}
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
 			childRows, err := storetest.ReadReplyContextRecords(h.ctx, selected, staged.ForkRunID)
@@ -125,6 +156,16 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 			}
 			wait, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 			defer cancel()
+			if probe != nil {
+				select {
+				case err := <-probe.done:
+					if err != nil {
+						t.Fatalf("real accepted-return publication proof: %v", err)
+					}
+				case <-wait.Done():
+					t.Fatalf("accepted-return publication owner proof did not complete: %v", wait.Err())
+				}
+			}
 			waitCopiedActivityRequesterReturn(t, wait, selected, staged.ForkRunID)
 			inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, requestID)
 			for {
@@ -210,6 +251,9 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 					t.Fatalf("mixed request returned to another owner: %+v found=%t error=%v", returned, found, err)
 				}
 			}
+			if responseObserver {
+				proveMixedResponseOrdinaryRecipient(t, wait, selected, sourceRows[0].AcceptedReplyEventID, staged.ForkRunID)
+			}
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
 			defer stop()
 			if err := owner.RetireSelectedContexts(cleanup); err != nil {
@@ -220,6 +264,68 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequ
 				t.Fatalf("mixed child publication rewrote source domain: %v", err)
 			}
 		})
+	}
+}
+
+func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, sourceEventID, child string) {
+	t.Helper()
+	source, found, err := selected.LoadPreparedPublishEvent(ctx, sourceEventID)
+	if err != nil || !found || len(source.DeliveryRoutes) != 2 {
+		t.Fatalf("source mixed response: %+v found=%t error=%v", source, found, err)
+	}
+	node, err := identity.AdmitExecutableNodeDeclaration(".", "response-observer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original events.DeliveryRoute
+	for _, route := range source.DeliveryRoutes {
+		if route.Recipient == events.MustNodeDeliveryRecipient(node) {
+			original = route
+		}
+	}
+	if original.Recipient.Empty() || original.Context.ReplyContextID() != "" {
+		t.Fatal("source ordinary response observer borrowed reply authority")
+	}
+	inputID := activityidentity.ForkLineageEventID(child, sourceEventID)
+	for {
+		publication, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
+		if err != nil || !found || len(publication.DeliveryRoutes) != 2 {
+			t.Fatalf("child mixed response: %+v found=%t error=%v", publication, found, err)
+		}
+		var ordinary events.DeliveryRoute
+		for _, route := range publication.DeliveryRoutes {
+			if route.Recipient == original.Recipient {
+				ordinary = route
+			}
+		}
+		projected, err := runfork.ProjectEntityOwnership(catalogRuntimeRunID, child, original.Target.Route().EntityID, original.Target.Route().FlowInstance)
+		if err != nil || ordinary.Target.Route() != (events.RouteIdentity{FlowID: original.Target.Route().FlowID, FlowInstance: projected.Fork.FlowInstance, EntityID: projected.Fork.EntityID}) ||
+			!ordinary.ConnectClaim.Equal(original.ConnectClaim) || !reflect.DeepEqual(ordinary.Context, original.Context) {
+			t.Fatalf("ordinary response observer lost its own target/claim/context: %+v error=%v", ordinary, err)
+		}
+		id, err := deliverylifecycle.DeliveryID(inputID, ordinary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delivery, err := selected.Snapshot(ctx, id)
+		if err != nil || (delivery.Terminal() && delivery.Status != deliverylifecycle.StatusDelivered) {
+			t.Fatalf("ordinary response observer refused: %+v error=%v", delivery, err)
+		}
+		count, err := storetest.ReadLifecycleEventCardinality(ctx, selected, child, "reply.observed")
+		if err != nil || count > 1 {
+			t.Fatalf("ordinary response observer output count=%d error=%v", count, err)
+		}
+		if delivery.Status == deliverylifecycle.StatusDelivered && count == 1 {
+			if delivery.ClaimVersion != 1 {
+				t.Fatal("ordinary response observer executed more than once")
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("ordinary response observer did not finish: %+v count=%d error=%v", delivery, count, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

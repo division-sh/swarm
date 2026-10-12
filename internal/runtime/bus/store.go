@@ -539,7 +539,11 @@ func (r CommitPublishRequest) validateReplyReturns() error {
 		return fmt.Errorf("retained return has foreign context ownership")
 	}
 	for _, route := range r.DeliveryRoutes {
-		if route.Target.Route() == continuation.Record.Origin {
+		if continuation.MatchesResponseRecipient(route) {
+			claim, err := continuation.ClaimForDelivery(route)
+			if err != nil || !claim.Equal(route.ConnectClaim) {
+				return fmt.Errorf("retained return changed its compiled recipient claim: %v", err)
+			}
 			return nil
 		}
 	}

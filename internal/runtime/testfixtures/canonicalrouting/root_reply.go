@@ -117,6 +117,27 @@ result-observer:
 	return root
 }
 
+// CopyMixedReplyResponse routes one output both as a reply and as an ordinary
+// observation to the same instance, under different compiled input pins.
+func CopyMixedReplyResponse(t testing.TB) string {
+	t.Helper()
+	root := CopyMixedReplyRequest(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [request.finished, request.observed]", "outputs: [request.finished, request.observed, reply.observed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", "    correlation_key: request_id\n  - {event: provider.replied, from: provider, to: ., rename: provider.observed}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "request.finished:\n", "reply.observed:\n  request_id: text\nrequest.finished:\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `response-observer:
+  execution_type: system_node
+  subscribes_to: [provider.observed]
+  event_handlers:
+    provider.observed:
+      emit:
+        event: reply.observed
+        fields: {request_id: payload.request_id}
+result-observer:
+`)
+	return root
+}
+
 type RootReplyNegativeMutation uint8
 
 const (

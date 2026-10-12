@@ -74,3 +74,59 @@ func TestIssue642RetainedReturnPreservesCompleteSourceClaim(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue642RetainedReturnPreservesOrdinaryRecipients(t *testing.T) {
+	for _, sameOrigin := range []bool{true, false} {
+		t.Run(map[bool]string{true: "same_origin", false: "different_origin"}[sameOrigin], func(t *testing.T) {
+			snapshot, _, _, _, _ := requestContinuationPartitionFixture(t)
+			source := workflowOwnershipSource(t, canonicalrouting.CopyMixedReplyResponse(t))
+			var response, ordinary pinrouting.ConnectRoutePlan
+			for _, plan := range pinrouting.CompileConnectGraph(source).Plans() {
+				if plan.ReplyRole() == pinrouting.ConnectReplyRoleResponse {
+					response = plan
+				}
+				if plan.ReceiverLocalEvent() == "provider.observed" {
+					ordinary = plan
+				}
+			}
+			record := snapshot.ReplyContexts[0].Record.Normalized()
+			at := record.CreatedAt.Add(time.Millisecond)
+			record.State, record.AcceptedReplyEventID, record.TerminalAt, record.UpdatedAt = replycontext.StateTerminal, uuid.NewString(), &at, at
+			makeRoute := func(plan pinrouting.ConnectRoutePlan, name string, target events.RouteIdentity) events.DeliveryRoute {
+				node := identitytest.FlowNode(t, ".", name)
+				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+				var err error
+				route.ConnectClaim, err = pinrouting.ConnectExecutionClaim(plan, pinrouting.ConnectDeliveryRoute{Recipient: route.Recipient,
+					Target: target, Handler: pinrouting.MustConnectReceiverHandler(node)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return route
+			}
+			ordinaryTarget := record.Origin
+			if !sameOrigin {
+				ordinaryTarget.EntityID = uuid.NewString()
+			}
+			routes := []events.DeliveryRoute{makeRoute(response, "requester", record.Origin), makeRoute(ordinary, "response-observer", ordinaryTarget)}
+			first := snapshot.Deliveries[0]
+			first.Snapshot.EventID, first.Snapshot.Route = record.AcceptedReplyEventID, routes[0]
+			second := first
+			second.Snapshot.Route = routes[1]
+			snapshot.Deliveries = []runForkRevisionDelivery{first, second}
+			before := append([]runForkRevisionDelivery(nil), snapshot.Deliveries...)
+			if err := requireCapturedReplyReturnClaims(snapshot, record.AcceptedReplyEventID, record, response); err != nil {
+				t.Errorf("valid source response subset: %v", err)
+			}
+			if !reflect.DeepEqual(before, snapshot.Deliveries) {
+				t.Fatal("source subset validation rewrote captured evidence")
+			}
+			original := routes[1]
+			if err := bindReplyReturnRecipientClaims(routes, pinrouting.ReplyReturnContinuation{Record: record, Plan: response}); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(original, routes[1]) {
+				t.Fatal("ordinary observer was rebound to the response claim")
+			}
+		})
+	}
+}

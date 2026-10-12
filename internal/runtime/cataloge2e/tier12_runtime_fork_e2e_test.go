@@ -163,7 +163,14 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 }
 
 func selectedContractExecutionOwnerForCatalogTest(t testing.TB, selected *store.PostgresStore, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
+	return selectedContractExecutionOwnerForCatalogTestWithReplay(t, selected, nil, forkOverride...)
+}
+
+func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, selected *store.PostgresStore, replay runtimerunforkexecution.SelectedContractReplayPersistence, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
+	if replay == nil {
+		replay = selected
+	}
 	var fork runtimerunforkexecution.SelectedContractForkLifecycle = selected
 	if len(forkOverride) > 0 {
 		fork = forkOverride[0]
@@ -181,7 +188,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, selected *store.
 		FlowRoutes: selected, StandingRestarts: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
+		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, replay,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		selected, selected,
@@ -198,12 +205,16 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, selected *store.
 }
 
 func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHarness, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
+	return selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, nil, forkOverride...)
+}
+
+func selectedContractExecutionOwnerForCatalogHarnessWithReplay(t testing.TB, h *runtimeHarness, replay runtimerunforkexecution.SelectedContractReplayPersistence, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
-	if len(forkOverride) == 0 && len(h.selectedOwners) > 0 {
+	if replay == nil && len(forkOverride) == 0 && len(h.selectedOwners) > 0 {
 		return h.selectedOwners[0]
 	}
 	if h.pg != nil {
-		owner := selectedContractExecutionOwnerForCatalogTest(t, h.pg, forkOverride...)
+		owner := selectedContractExecutionOwnerForCatalogTestWithReplay(t, h.pg, replay, forkOverride...)
 		bindCatalogSelectedOwner(t, h, owner)
 		h.selectedOwners = append(h.selectedOwners, owner)
 		return owner
@@ -211,6 +222,9 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 	selected := h.sqlite
 	if selected == nil {
 		t.Fatal("selected-contract execution requires a catalog selected store")
+	}
+	if replay == nil {
+		replay = selected
 	}
 	var fork runtimerunforkexecution.SelectedContractForkLifecycle = selected
 	if len(forkOverride) > 0 {
@@ -229,7 +243,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		DirectiveTargets: selected, FlowRoutes: selected, StandingRestarts: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
+		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, replay,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		selected, selected,

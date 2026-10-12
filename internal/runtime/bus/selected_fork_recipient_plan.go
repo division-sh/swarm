@@ -213,7 +213,7 @@ func selectedForkReturnContexts(selected selectedForkRecipientPlan, returns []pi
 	}
 	contexts := make(map[events.DeliveryRouteIdentity]events.DeliveryContext, len(selected.returnRoutes))
 	for _, route := range selected.returnRoutes {
-		if route.Target.Route() == selected.returnReply.Origin {
+		if returns[0].MatchesResponseRecipient(route) {
 			claim, err := returns[0].ClaimForDelivery(route)
 			if err != nil {
 				return nil, err

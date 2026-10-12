@@ -194,10 +194,13 @@ func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineag
 
 func requireCapturedReplyReturnClaims(snapshot *runForkRevisionSnapshot, eventID string, record replycontext.Record, plan pinrouting.ConnectRoutePlan) error {
 	continuation := pinrouting.ReplyReturnContinuation{Record: record, Plan: plan}
+	if err := continuation.Validate(); err != nil {
+		return err
+	}
 	matched := false
 	for _, captured := range snapshot.Deliveries {
 		delivery := captured.Snapshot
-		if delivery.EventID != eventID || delivery.Terminal() || delivery.Route.Target.Route() != record.Origin {
+		if delivery.EventID != eventID || delivery.Terminal() || !continuation.MatchesResponseRecipient(delivery.Route) {
 			continue
 		}
 		claim, err := continuation.ClaimForDelivery(delivery.Route)
@@ -213,8 +216,11 @@ func requireCapturedReplyReturnClaims(snapshot *runForkRevisionSnapshot, eventID
 }
 
 func bindReplyReturnRecipientClaims(routes []events.DeliveryRoute, continuation pinrouting.ReplyReturnContinuation) error {
+	if err := continuation.Validate(); err != nil {
+		return err
+	}
 	for i := range routes {
-		if routes[i].Target.Route() != continuation.Record.Origin {
+		if !continuation.MatchesResponseRecipient(routes[i]) {
 			continue // Unrelated observers retain their complete original claims.
 		}
 		claim, err := continuation.ClaimForDelivery(routes[i])

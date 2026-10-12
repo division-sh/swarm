@@ -15,13 +15,16 @@ import (
 )
 
 func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
-	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootReplyBoundary(t, true, true))
-	var request, response pinrouting.ConnectRoutePlan
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyMixedReplyResponse(t))
+	var request, response, ordinary pinrouting.ConnectRoutePlan
 	for _, plan := range pinrouting.CompileConnectGraph(source).Plans() {
 		if plan.ReplyRole() == pinrouting.ConnectReplyRoleRequest {
 			request = plan
 		} else if plan.ReplyRole() == pinrouting.ConnectReplyRoleResponse {
 			response = plan
+		}
+		if plan.ReceiverLocalEvent() == "provider.observed" {
+			ordinary = plan
 		}
 	}
 	ctx, event, _ := selectedRecipientContextFixture(t)
@@ -59,6 +62,30 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 	intents, err := replyResponseDeliveryIntents(record.RunID, response, []pinrouting.ConnectDeliveryRoute{compiled}, response.ReceiverLocalEvent())
 	if err != nil || len(intents) != 1 || intents[0].ConnectPlan.Empty() || intents[0].ConnectClaim.Empty() {
 		t.Fatalf("reply response omitted complete plan/claim evidence: %+v error=%v", intents, err)
+	}
+	observer := identitytest.FlowNode(t, ".", "response-observer")
+	ordinaryRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(observer), Target: events.MustExistingEntityTarget(record.Origin)}
+	ordinaryRoute.ConnectClaim, err = pinrouting.ConnectExecutionClaim(ordinary, pinrouting.ConnectDeliveryRoute{Recipient: ordinaryRoute.Recipient,
+		Target: record.Origin, Handler: pinrouting.MustConnectReceiverHandler(observer)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseRoute := events.DeliveryRoute{Recipient: compiled.Recipient, Target: events.MustExistingEntityTarget(record.Origin), ConnectClaim: compiled.ConnectClaim}
+	retainedRoutes := []events.DeliveryRoute{ordinaryRoute, responseRoute}
+	contexts, err := selectedForkReturnContexts(selectedForkRecipientPlan{returnReply: &record, returnRoutes: retainedRoutes},
+		[]pinrouting.ReplyReturnContinuation{{Record: record, Plan: response}})
+	if err != nil || len(contexts) != 2 {
+		t.Fatalf("same-origin compiled response subset restoration: contexts=%+v error=%v", contexts, err)
+	}
+	for _, route := range retainedRoutes {
+		key, err := selectedForkContextRouteIdentity(route)
+		actual, found := contexts[key]
+		if err != nil || !found || !reflect.DeepEqual(actual, route.Context.Normalized()) {
+			t.Fatalf("restoration changed or omitted an ordinary/response claim: %+v found=%t error=%v", route, found, err)
+		}
+	}
+	if !reflect.DeepEqual(retainedRoutes, []events.DeliveryRoute{ordinaryRoute, responseRoute}) {
+		t.Fatal("context restoration rewrote retained input")
 	}
 	for _, fault := range []string{"open", "run", "identity", "accepted", "origin", "clock", "original", "enclosing", "canceled"} {
 		t.Run(fault, func(t *testing.T) {
