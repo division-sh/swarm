@@ -129,7 +129,7 @@ child:
 }
 
 func (f *issue2564PublicationFixture) selected() gateRecoveryStoreCase {
-	return gateRecoveryStoreCase{name: f.backend, postgres: f.backend == "postgres",
+	return gateRecoveryStoreCase{name: f.backend,
 		events: f.store, cards: f.store, lifecycle: f.store, trace: f.store.(gateRecoveryTraceStore), persistence: pipeline.NewWorkflowPersistence(f.store)}
 }
 

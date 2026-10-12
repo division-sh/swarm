@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "1ddd6a3f78c2361708cc4d0d29332fd475c82e4f0913158e576ca278eb494472"
+const targetDigest = "87aef9834c1517bc24f648f7cd9ece4346928b6c1dafc852154f57221b24f0ac"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -103,6 +103,7 @@ var files = []string{
 	"internal/runtime/operator_channel_inbound_supported_surface_test.go",
 	"internal/runtime/bus/eventbus_publish_test.go",
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+	"internal/runtime/pipeline/issue2564_publication_handoff_external_test.go",
 	"internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go",
 	"internal/runtime/pipeline/workflow_join_supported_surface_external_test.go",
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go",
@@ -228,6 +229,7 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/pipeline/issue2564_publication_handoff_external_test.go":                  {"selected/*issue2564PublicationFixture": true},
 	"internal/runtime/pipeline/a2_join_hydration_external_test.go":                              {"TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_cancellation_external_test.go":                           {"TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores": true, "a2CancellationFootprint": true},
 	"internal/runtime/pipeline/workflow_join_supported_surface_external_test.go":                {"assertExactJoinDeliveryStatus": true, "assertExactJoinDeliveryCount": true, "exactJoinOccurrenceEventID": true},
@@ -251,7 +253,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true, "runA2MapFanOutCompiledImmutableSource": true, "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores": true},
-	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true, "writeRaw/*a2CorruptMapSource": true, "footprint/*a2CorruptMapSource": true, "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores": true},
+	"internal/runtime/pipeline/a2_map_fan_out_source_corruption_external_test.go":               {"readRaw/*a2CorruptMapSource": true, "writeRaw/*a2CorruptMapSource": true, "footprint/*a2CorruptMapSource": true, "TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores": true, "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores": true},
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
 	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go":                         {"a2MultiUntilChildren": true, "TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},
@@ -264,6 +266,8 @@ var gateRecoveryTargets = map[string]map[string]bool{
 		"TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader":              true,
 	},
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go": {
+		"openSQLiteGateRecoveryStore":                                                          true,
+		"openPostgresGateRecoveryStore":                                                        true,
 		"TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores":                  true,
 		"TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores": true,
 		"TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBothStores":   true,

@@ -5030,3 +5030,53 @@ openers remain live until that final propagation is qualified. M07/D3/Docker/
 M01/drain/integration holds remain explicit. Local only, no push/PR/tier/server2;
 final unchanged census and signed-head complexity follow. Receipts
 ~/.cache/swarm-2542-family145/gate-final-diagnostics-*.
+
+## Shared Gate/A2 Dependency: Whole Carrier/Opener Retirement
+
+The last direct consumers are migrated, so gateRecoveryStoreCase no longer
+contains a database pool or dialect flag. Its original six fields remain:
+display name and the exact event, lifecycle, decision, workflow-persistence and
+trace roles. SQLite no longer recovers Database(selected); PostgreSQL uses the
+existing StartPostgresRuntimeStore instead of a supplied pool. That native
+fixture opens from the canonical sandbox location and registers all owned closes
+before consumers, so existing runtime/bus joins precede selected-owner close and
+PostgreSQL service cleanup. No reconstructed coordinator or new close path exists.
+Both exact trace==selected assertions remain. The indirect issue2564 handoff
+projection drops only the obsolete flag; every role remains its original owner.
+
+The two map-source JSONB differences retain the exact explicit backend matrix,
+source fixture, malformed JSON refusal text and duplicate-key behavior. Their
+enclosing sqlite/postgres cases replace only the carrier's equivalent bool;
+inverse exact-source comparison proves no other expectation/setup changed.
+This is qualification labeling, not runtime backend discovery or compatibility.
+Whole package compiles with the deleted fields, proving indirect consumers
+cannot still use them. The preserved early prototype stash was NOT applied.
+
+Both-store race proofs: original startup unavailable-pin recovery, terminal
+no-emit startup recovery, completed-route replay before bundle fence, and all
+corrupt-source reader controls PASS32.143s. Both indirect ordinary acknowledged
+and recursive handoff roots PASS31.520s. Existing native fixture and original
+consumer cleanup ownership are reused, not a new restoration/teardown framework.
+S/M07 possession-loss, D3 SQL-order, M01, Docker, drain and final integration
+qualification are still explicit holds; these receipts do not certify them or
+claim whole PostgreSQL admission/parent closure.
+
+The closed-field guard rejects pool/dialect/foreign/duplicate capabilities;
+finite constructor controls reject a foreign trace owner and supplied-pool
+reintroduction. All immutable historical inputs remain. Existing trace recipes
+receive exact current Successors; indirect projection and physical dialect
+qualification add only their reviewed finite rows. Corpus1243/461, digest
+87aef9834c1517bc24f648f7cd9ece4346928b6c1dafc852154f57221b24f0ac.
+Complete cheap Family145/current/historical123-root collection PASS13.433s;
+six persistence boundaries PASS3.884s; U1000 clean. Downward census PASS27.240s
+and unchanged25.170s:8278 ->8272 findings,5895 ->5892 raw sites, six/three
+removals,ZERO additions, uncertainty67. Supplied-pool calls61 ->60
+(58 external plus2 private). Signed-head complexity follows.
+
+Consumption disposition: the entire gateRecoveryStoreCase raw/dialect capability
+is retired, including its original openers and indirect handoff projection;
+all remaining callers use the same raw-free role carrier without a shim. Other
+PostgreSQL admission families remain tracked, not hidden behind this deletion.
+No new watchlist node or issue; existing #2542/#2151 native-construction ownership
+mapping applies. Local only, no push/PR/tier/server2. Receipts
+~/.cache/swarm-2542-family145/gate-carrier-retirement-*.

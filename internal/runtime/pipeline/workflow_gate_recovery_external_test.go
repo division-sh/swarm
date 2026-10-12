@@ -41,7 +41,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -83,8 +82,6 @@ func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry {
 
 type gateRecoveryStoreCase struct {
 	name        string
-	postgres    bool
-	db          *sql.DB
 	events      gateRecoverySelectedStore
 	lifecycle   runtimerunlifecycle.CandidateStore
 	cards       gateRecoveryDecisionStore
@@ -1503,7 +1500,7 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
-		name: "sqlite", db: storetest.Database(selected), events: selected, cards: selected,
+		name: "sqlite", events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence, trace: selected,
 	}
 	if result.trace != selected {
@@ -1513,12 +1510,10 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 }
 
 func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
-		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
+		name: "postgres", events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence, trace: selected,
 	}
 	if result.trace != selected {

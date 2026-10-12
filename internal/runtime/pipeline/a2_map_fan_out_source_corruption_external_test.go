@@ -171,7 +171,7 @@ func TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores(t *testing.T) {
 					}
 					beforeSetup := f.footprint(t)
 					if err := f.writeRaw(corruption.raw); err != nil {
-						if !f.p.selected.postgres || !corruption.malformed || !strings.Contains(err.Error(), "invalid input syntax for type json") {
+						if backend.name != "postgres" || !corruption.malformed || !strings.Contains(err.Error(), "invalid input syntax for type json") {
 							t.Fatalf("unexpected hostile source setup refusal: %v", err)
 						}
 						if f.footprint(t) != beforeSetup || !bytes.Equal(f.readRaw(t), f.raw) {
@@ -187,7 +187,7 @@ func TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores(t *testing.T) {
 					})
 					before := f.footprint(t)
 					input, err := f.handoff.owner.LoadFanOutEvaluation(f.p.ctx, f.claim)
-					if corruption.duplicate && f.p.selected.postgres {
+					if corruption.duplicate && backend.name == "postgres" {
 						retained := f.readRaw(t)
 						if _, err := canonicaljson.Decode(retained); err != nil || a2AccumulatorJSONHash(t, retained) != a2AccumulatorJSONHash(t, f.raw) {
 							t.Fatalf("JSONB duplicate-evidence boundary changed logical source: retained=%s err=%v", retained, err)
