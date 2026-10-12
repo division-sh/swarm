@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -137,8 +138,8 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 				count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 0 || count("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='platform.join_complete'") != 0 {
 				t.Fatal("failed completion insertion leaked membership/closure/history/continuation")
 			}
-			var failureJSON string
-			if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1", failed.ID()).Scan(&failureJSON); err != nil {
+			failureJSON, err := storetest.ReadGateEventFailure(ctx, selected.events, failed.ID())
+			if err != nil {
 				t.Fatal(err)
 			}
 			var failure failures.Envelope

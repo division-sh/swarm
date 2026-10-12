@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "79cfd73b6f27f268806e7aa7766ea64adaf73f4fcdd21abbd7c5a9504ba30cfe"
+const targetDigest = "3bc252a0b51337d2166953f6a63d445fa27f2fe37a84432d4cf6dc6be3599253"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -104,6 +104,10 @@ var files = []string{
 	"internal/runtime/bus/eventbus_publish_test.go",
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go",
+	"internal/runtime/pipeline/a2_join_until_race_external_test.go",
+	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go",
+	"internal/runtime/pipeline/a2_join_result_types_external_test.go",
+	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go",
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go",
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go",
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go",
@@ -144,6 +148,7 @@ var files = []string{
 	"internal/serveapp/run_state_runtime_test.go",
 	"internal/serveapp/reset_projection_real_docker_test.go",
 	"internal/serveapp/startup_integrity_test.go",
+	"internal/serveapp/receiver_mixed_agent_test.go",
 	"internal/store/internal/runtimepersistence/flow_activation_attempt_test.go",
 	"internal/store/internal/runtimepersistence/flow_activation_rebind_test.go",
 	"internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go",
@@ -213,11 +218,16 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/serveapp/receiver_mixed_agent_test.go":                                            {"TestReceiverCompositionMixedAgentBothStores": true},
 	"internal/runtime/pipeline/prospective_publication_external_test.go":                        {"TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": true, "CommitWorkflowEngineMutation/*observedProspectivePersistence": true},
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go":                     {"TestReceiverCompositionActivationReuseAndConflictBothStores": true},
 	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go": {"TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores": true},
 	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":                         {"testA2BoundReplyJourney": true},
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":                        {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_until_race_external_test.go":                             {"TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go":                         {"TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_result_types_external_test.go":                           {"TestA2JoinResultTypesRealExecutionAndRestartOnBothStores": true},
+	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true},

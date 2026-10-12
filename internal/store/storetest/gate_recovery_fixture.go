@@ -15,6 +15,26 @@ func ReadGateNodeDeliveryStatus(ctx context.Context, selected any, event, node s
 	return private.ReadGateNodeDeliveryStatusForTest(ctx, selected, event, node)
 }
 
+func ReadGateEventFailure(ctx context.Context, selected any, eventID string) (string, error) {
+	return private.ReadGateEventFailureForTest(ctx, selected, eventID)
+}
+
+func ReadGateSubscriberFailure(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
+	return private.ReadGateSubscriberFailureForTest(ctx, selected, eventID, subscriberID)
+}
+
+func ReadGateNodeFailure(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
+	return private.ReadGateNodeFailureForTest(ctx, selected, eventID, nodeID)
+}
+
+func ReadGateSubscriberFailureOrEmptyObject(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
+	return private.ReadGateSubscriberFailureOrEmptyObjectForTest(ctx, selected, eventID, subscriberID)
+}
+
+func ReadGateDeadLetterFailure(ctx context.Context, selected any, eventID string) (string, error) {
+	return private.ReadGateDeadLetterFailureForTest(ctx, selected, eventID)
+}
+
 func CountGateEventSubscriberDeliveries(ctx context.Context, selected any, event, subscriber string) (int, error) {
 	return private.CountGateEventSubscriberDeliveriesForTest(ctx, selected, event, subscriber)
 }

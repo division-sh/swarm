@@ -21,6 +21,36 @@ func ReadGateNodeDeliveryStatusForTest(ctx context.Context, selected any, event,
 	})
 }
 
+func ReadGateEventFailureForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateEventFailureTx(ctx, tx, eventID)
+	})
+}
+
+func ReadGateSubscriberFailureForTest(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateSubscriberFailureTx(ctx, tx, eventID, subscriberID)
+	})
+}
+
+func ReadGateNodeFailureForTest(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateNodeFailureTx(ctx, tx, eventID, nodeID)
+	})
+}
+
+func ReadGateSubscriberFailureOrEmptyObjectForTest(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateSubscriberFailureOrEmptyObjectTx(ctx, tx, eventID, subscriberID)
+	})
+}
+
+func ReadGateDeadLetterFailureForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateDeadLetterFailureTx(ctx, tx, eventID)
+	})
+}
+
 func CountGateEventSubscriberDeliveriesForTest(ctx context.Context, selected any, event, subscriber string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return delivery.CountGateEventSubscriberDeliveriesTx(ctx, tx, event, subscriber)

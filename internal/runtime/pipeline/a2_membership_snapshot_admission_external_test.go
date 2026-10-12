@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
@@ -248,8 +249,8 @@ func (f *a2MembershipAdmission) assertUnchanged(t *testing.T, before pipeline.Wo
 
 func (f *a2MembershipAdmission) failure(t *testing.T, eventID, nodeKey string) failures.Envelope {
 	t.Helper()
-	var raw string
-	if err := f.selected.db.QueryRowContext(f.ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", eventID, nodeKey).Scan(&raw); err != nil {
+	raw, err := storetest.ReadGateSubscriberFailure(f.ctx, f.selected.events, eventID, nodeKey)
+	if err != nil {
 		t.Fatal(err)
 	}
 	var failure failures.Envelope

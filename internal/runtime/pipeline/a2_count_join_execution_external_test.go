@@ -179,8 +179,8 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					}
 					a2KnownTargetWaitForSettlement(t, ctx, bus, probe, event, node.Key(), handlerStatus, deliveryStatus, logger)
 					if want != "" {
-						var raw string
-						if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1", event.ID()).Scan(&raw); err != nil {
+						raw, err := storetest.ReadGateEventFailure(ctx, selected.events, event.ID())
+						if err != nil {
 							t.Fatal(err)
 						}
 						var failure failures.Envelope

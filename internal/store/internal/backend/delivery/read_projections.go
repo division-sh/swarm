@@ -17,6 +17,36 @@ import (
 	"github.com/google/uuid"
 )
 
+func ReadGateEventFailureTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1`, eventID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateSubscriberFailureTx(ctx context.Context, tx *sql.Tx, eventID, subscriberID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2`, eventID, subscriberID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateNodeFailureTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, eventID, nodeID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateSubscriberFailureOrEmptyObjectTx(ctx context.Context, tx *sql.Tx, eventID, subscriberID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2`, eventID, subscriberID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateDeadLetterFailureTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1`, eventID).Scan(&failure)
+	return failure, err
+}
+
 type PreparedTargetConflictStorage struct {
 	Count                                       int
 	SubscriberID, RouteIdentity, TargetEncoding string

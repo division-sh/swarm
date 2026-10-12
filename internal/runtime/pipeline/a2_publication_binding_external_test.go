@@ -405,8 +405,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					if err != nil || !found || len(blocked.DeliveryRoutes) != 0 || blocked.Settlement.Reason() != events.NoDeliveryResolutionBlocked {
 						t.Fatalf("missing key did not retain route refusal: publication=%#v found=%v err=%v", blocked, found, err)
 					}
-					var raw string
-					if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1", outputID).Scan(&raw); err != nil {
+					raw, err := storetest.ReadGateDeadLetterFailure(ctx, selected.events, outputID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					var refusal failures.Envelope
@@ -433,8 +433,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					_, _, settleErr := probe.WaitAfter(settleCtx, completedCursor, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
 					quietErr := bus.WaitForQuiescence(settleCtx)
 					settleCancel()
-					var failure string
-					readErr := selected.db.QueryRowContext(ctx, "SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", triggerID, worker.Key()).Scan(&failure)
+					failure, readErr := storetest.ReadGateSubscriberFailureOrEmptyObject(ctx, selected.events, triggerID, worker.Key())
 					t.Fatalf("real worker output: status=%s err=%v settlement=%v quiet=%v read=%v failure=%s logs=%s", completed.Status, err, settleErr, quietErr, readErr, failure, logger.String())
 				}
 				outputID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, "item.completed", triggerID)
@@ -455,8 +454,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						t.Fatalf("retry of new output invented a newer arm: %#v", route)
 					}
 					assertExactJoinDeliveryStatus(t, selected, ctx, outputID, collectors[0].Key(), "dead_letter")
-					var raw string
-					if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", outputID, collectors[0].Key()).Scan(&raw); err != nil {
+					raw, err := storetest.ReadGateSubscriberFailure(ctx, selected.events, outputID, collectors[0].Key())
+					if err != nil {
 						t.Fatal(err)
 					}
 					var refusal failures.Envelope

@@ -355,8 +355,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				}
 			}
 			assertExactJoinDeliveryStatus(t, selected, ctx, replyID, collector.Key(), "dead_letter")
-			var raw string
-			if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", replyID, collector.Key()).Scan(&raw); err != nil {
+			raw, err := storetest.ReadGateSubscriberFailure(ctx, selected.events, replyID, collector.Key())
+			if err != nil {
 				t.Fatal(err)
 			}
 			var refusal failures.Envelope

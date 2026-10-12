@@ -4094,3 +4094,63 @@ uncertainty67 unchanged, PASS26.005s. Supplied-pool calls remain61. The shared
 gate/A2 carrier and whole-family checkpoint remain open; no per-reader stacking
 review request, push, PR, tier or server2. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/gate-source-identities-*.
+
+## Shared Gate/A2 Dependency: Complete Plain Failure-Text Family
+
+Ten query/Scan pairs across eight files now consume five fixed physical reads
+owned by delivery/read_projections.go. Event-only, event/subscriber, node-only,
+explicit COALESCE-to-{} and un-ordered dead-letter lookups remain distinct.
+Every original column/cast/predicate/argument, lack of ORDER/LIMIT, context,
+destination and diagnostic decode remains. Plain QueryRow keeps
+context.Background. No synthesized envelope, NULL-to-success normalization,
+reader-side status interpretation, SQL selector or raw getter is introduced.
+
+The private bridge uses the existing readFanOutSemanticStorage coordinator on
+the exact selected native owner. A sibling probe found one matching served
+mixed-agent diagnostic; it now captures the same p.deps.EventStore in its
+already-existing capture callback and consumes the same fixed port. No second
+getter, adapter reconstruction, delegate, cleanup or writer authority is added.
+That fixture's unrelated inherited raw observations remain explicitly unclosed.
+The declared five-shape search finds no matching live raw consumer in pipeline
+or serveapp. Differently scoped status/failure aggregates, latest-dead-letter
+queries and runtime-log diagnostics are NOT claimed migrated by this family.
+
+The finite codemod pins all eight whole-function transitions, ten exact calls,
+complete business assertions and each physical SQL statement against immutable
+originals. Lost context/owner/ID/subscriber/destination/order/assertion controls
+must fail. The membership method is source-pinned with its receiver, not merely
+the common name failure. Corpus1211/421; transition digest
+3bc252a0b51337d2166953f6a63d445fa27f2fe37a84432d4cf6dc6be3599253.
+All24 immutable mechanical records compare unchanged excluding Successor; the
+combined historical/current receipt digest remains unchanged.
+
+| Manifestation | Exact executed proof with Go1.26.8/race |
+| --- | --- |
+| Count-join refusal keeps exact durable diagnostic and post-reconstruction evidence | TestA2CountJoinRealExecutionAndRestartOnBothStores PASS30.06s |
+| Until/final arrival retains one durable close winner and exact losing refusal | TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores PASS4.99s |
+| Real join-close SQL fault rolls back, persists its failure, restores and recovers | TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores PASS5.14s |
+| E1 return isolation, later-sibling exclusion and distinct ordinary provider edge | Three bound-reply roots PASS12.24s/13.45s/7.23s |
+| Payload-directed/multiple-recipient output, missing-key refusal and transition/close races | Five publication roots PASS24.47s/7.09s/4.65s/6.20s/6.30s; original decoding/cardinality/identity/history assertions retained |
+| Join result type, NULL/error and component reconstruction cases | TestA2JoinResultTypesRealExecutionAndRestartOnBothStores PASS43.66s |
+| Invalid persisted source retains terminal failure envelope and zero mutation footprint | TestA2MembershipSnapshotValidationOnBothStores PASS22.99s |
+| Public served mixed-agent execution preserves child/parent ownership, exact agent/node/turn counts and typed routes | TestReceiverCompositionMixedAgentBothStores PASS31.327s; the failure-only diagnostic's correspondence is source-pinned, not claimed executed on this green journey |
+| Native readers preserve SQL NULL scan refusal, absence, explicit {} coalescence, subscriber/event scope, physical bytes, cancellation and read-only clocks/data/history | TestGateFailureReadersPreserveNullAbsenceScopesAndPhysicalBytesBothStores; five original read transactions counted; actual claimed/settled node and agent evidence used |
+| Native raw/uninitialized/nil/closed owners refuse | TestGateFailureReadersRefuseRawAndClosedOwners; first native group PASS16.919s |
+| Removing node-only filter must reject actual agent evidence | Deliberate SQL predicate deletion: both stores RED11.509s at node-only read borrowed actual agent failure; restored exact predicate GREEN12.447s, not a retry loop |
+| Complete finite snapshots, original assertions and lost-cut controls | Five affected/global roots PASS7.030s; final physical-owner-path check PASS0.384s |
+| Six persistence boundaries, accessor and writer inventories | First run exposed wrong file placement; unchanged methods moved into existing classified read_projections.go, no allowance or guard edit; corrected sweep PASS3.644s; U1000 clean |
+
+Two original affected-root groups PASS90.804s/99.754s; no whole-package/tier/full
+rerun. Initial agent proof compile error (selection fact vs observation) was
+corrected to the existing NotApplicableHandlerRuleObservation; no fabricated
+lease, altered runtime admission or weak refusal assertion. The native fixture
+uses the existing compiled/source-aware constructor and genuinely issued claims.
+
+Downward census8456 ->8436 findings,6064 ->6044 raw sites:20 removed/zero added,
+uncertainty67 unchanged. Final corrected location census PASS137.173s; preceding
+count receipt138.822s is not substituted for it. Supplied-pool calls remain61.
+Shared gate/A2 candidate carrier references105 ->96; this is a source-reference
+count, not an additional debt census. Carrier/openers and broader family/parent
+remain live. Existing M01/Docker/drain/D3/M07 holds remain unwaived. No push/PR,
+new gate, local tier or server2. Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/gate-failures-*.
