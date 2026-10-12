@@ -43,6 +43,7 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 			probe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
 			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, probe)
+			baseline := rt.Options.ProcessWorkOwner.ActiveCount()
 			var release sync.Once
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -86,9 +87,6 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitPublishedBarrierPipelineReceipts(t, phase, selected.RuntimeDeps().DeliveryStore, original.id, completed)
-			if err := rt.WorkOccurrence().WaitForQuiescence(phase); err != nil {
-				t.Fatalf("join ordinary source work before measuring selected ownership: %v", err)
-			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, filepath.Join(repo, "platform-spec.yaml"))
 			if err != nil {
 				t.Fatal(err)
@@ -98,7 +96,6 @@ func TestIssue642UnpublishedTransferredBarrierReforkBothStores(t *testing.T) {
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
-			baseline := rt.Options.ProcessWorkOwner.ActiveCount()
 			prepared, err := family.Prepare(phase, request)
 			if err != nil {
 				t.Fatal(err)
