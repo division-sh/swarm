@@ -822,7 +822,7 @@ func RunAuthorityTransactionOutcome(
 	session *SessionAuthority,
 	fn func(context.Context, *sql.Tx) error,
 ) (committed bool, err error) {
-	return runAuthorityTransaction(ctx, session, nil, fn, nil)
+	return runAuthorityTransaction(ctx, session, nil, fn)
 }
 
 // RunAuthorityTransactionOutcomeWithOptions uses the same settlement owner with
@@ -833,7 +833,7 @@ func RunAuthorityTransactionOutcomeWithOptions(
 	opts *sql.TxOptions,
 	fn func(context.Context, *sql.Tx) error,
 ) (committed bool, err error) {
-	return runAuthorityTransaction(ctx, session, opts, fn, nil)
+	return runAuthorityTransaction(ctx, session, opts, fn)
 }
 
 // RunAuthorityReadTransaction owns a complete retained read snapshot. The callback
@@ -843,11 +843,20 @@ func RunAuthorityReadTransaction(
 	session *SessionAuthority,
 	fn func(context.Context, *sql.Tx) error,
 ) error {
-	_, err := runAuthorityTransaction(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn, nil)
+	_, err := runAuthorityTransaction(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)
 	return err
 }
 
 func runAuthorityTransaction(
+	ctx context.Context,
+	session *SessionAuthority,
+	opts *sql.TxOptions,
+	fn func(context.Context, *sql.Tx) error,
+) (committed bool, err error) {
+	return runAuthorityTransactionWithProof(ctx, session, opts, fn, nil)
+}
+
+func runAuthorityTransactionWithProof(
 	ctx context.Context,
 	session *SessionAuthority,
 	opts *sql.TxOptions,
@@ -1028,7 +1037,7 @@ func (l *AdvisoryLockLease) ProveCurrentWithRead(ctx context.Context, deadline t
 		ctx = context.Background()
 	}
 	var decision *localProofDecision
-	_, err := runAuthorityTransaction(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, func(sqlCtx context.Context, tx *sql.Tx) error {
+	_, err := runAuthorityTransactionWithProof(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, func(sqlCtx context.Context, tx *sql.Tx) error {
 		var held bool
 		var err error
 		if prove != nil {
