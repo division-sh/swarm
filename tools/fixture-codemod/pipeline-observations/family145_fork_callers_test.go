@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 379 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "eb1d7d86bd58731abf94b0eab185351e1e6966f6c99d5900735e96bd5f3a1bcb" {
+	if err != nil || len(rows) != 380 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "af1deebde8a80d0107c7b76f49d87cf5fd82640461b57f8736bab4d7f1c57715" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -163,6 +163,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if _, ok := family145RunStateCalls[row.Function]; ok {
 			if err := family145RunStateProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField" {
+			if err := family145GateEmptyPathProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

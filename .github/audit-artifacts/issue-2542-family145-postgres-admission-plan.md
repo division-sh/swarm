@@ -3659,3 +3659,55 @@ eb1d7d86bd58731abf94b0eab185351e1e6966f6c99d5900735e96bd5f3a1bcb.
 No fault, writer, queue, column or source input changed. The prior8709/6270,
 five-removal/zero-addition census is carried with no duplicate cold run, per
 reviewer-b's explicit disposition; no deletion credit is claimed for F1.
+
+### Complete Empty-Gate-Path Constraint Subject And Probe Group
+
+The final borrowed opening in persisted_surfaces_test.go is removed together
+with that file's obsolete testutil import. Its invalid incidental headerless
+entity seed is replaced by the existing source-aware manager/bus construction
+recipe using a genuinely compiled mutation-proof source and acknowledged root.
+The subject remains default/queued with empty authored state; root identity now
+comes from construction instead of the old unrelated fabricated child row.
+The schema-refusal workload still targets the exact constructed run/entity and
+keeps the original gate/empty-path/null-to-true/platform/test/seed INSERT inputs.
+No production construction/admission/schema contract is changed.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Existing native selected fixture and source-aware manager/bus constructor | Original malformed-field root and the new both-store controls open native owners; admitted artifact, run identity, PrepareFlowInstanceActivation, acknowledged Created commit and finalization construct the subject. No raw state seed, fabricated source, borrowed pool or parallel coordinator survives in the original root. |
+| mutationlog schema probe | One fixed ProbeEmptyGatePathForTest checks exact entity presence and executes the original malformed gate INSERT below semantic validation. PG retains UUID/JSONB casts, default mutation identity/clock and the original two bindings; SQLite supplies its required mutation UUID but retains the same physical domain/path/values/writer/step. No caller selector/SQL/value/callback is accepted. Actual INSERT acceptance returns nil, never a synthetic refusal. |
+| Original selected projection-fault writer | ProbeWorkflowGateEmptyPathForTest uses existing validation and runWorkflowProjectionFault. Constraint/setup failures propagate unchanged. Acceptance forces rollback with one exact local sentinel, and only exact sentinel equality becomes nil; joined cleanup failures remain errors. Both accepted and rejected probes cannot leave corrupt history. The older accumulator probe remains authoritative for its distinct consumer and is not substituted into this gate proof. |
+| Original consumer refusal oracle | The original err==nil and Fatal text remain. An additional actual check-constraint assertion rejects missing-entity, cancellation and transport failure masquerading as schema refusal. The original preflight is retained. |
+| Finite transformation, physical source and writer census | One complete transition preserves the original refusal condition and allows only its explicit constraint-evidence strengthening/native incidental setup. Counterexamples reject inverted refusal, wrong probe or run/entity binding, lost schema/source subject, delayed/absent accepted-write rollback and masking joined cleanup failure. One explicit writer-census row names the exact probe and proof; no file/table allowance or production revision obligation changes. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Original malformed gate field is refused by the actual PG database constraint | reproduced and fixed: TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField, Go1.26.8/race, original root0.91s in PASS11.753s affected aggregate |
+| Native SQLite/PG refusal rolls back through the exact original writer and preserves complete entity/mutation history | execution-proven through the same corrected path: TestGateMutationEmptyPathProbeRequiresActualSchemaRefusalAndPreservesHistoryBothStores, race, sqlite4.78s/PG5.02s; zero write commits, one rollback attempt and no active work |
+| Missing subject, cancelled operation and raw/foreign/typed-nil owner cannot become a successful schema witness | execution-proven through the same corrected path: that same both-store control retains sql.ErrNoRows/context.Canceled and validates foreign refusal, then exact before/after history equality |
+| A broken constraint accepting the exact bad row must not fabricate rejection | execution-proven through the same corrected path: TestGateEmptyPathProbeReportsActualAcceptanceAndExactPayloadBothDialects, race PASS6.235s; isolated query-only schema proves nil actual outcome, exact physical fields and rollback to zero rows, not runtime admission |
+| Accepted probe rollback acknowledgment and every original subject/write/refusal input remain closed | execution-proven through the same corrected path: both TestFamily145GateEmptyPath controls plus complete cheap finite set PASS10.735s and six persistence boundaries PASS3.545s |
+
+The first compile correctly rejected a nonexistent Rollbacks counter field and
+the now-unused testutil import; both were repaired directly before execution.
+No schema/runtime red is waived. Existing construction owners replace invalid
+incidental data under standing authorization; the original behavioral refusal
+assertion is not weakened. The independently pending recovery F1 repair remains
+in the current corpus and its exact receipts carry, without a duplicate run.
+
+Downward Go1.26.8 ratchet PASS136.974s:8709 ->8703 findings,6270 ->6266 raw sites,
+six removed/zero added, uncertainty67 unchanged. Collector/source identity remains
+fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9 /
+26701e7b187579220dffe72e01debd2e89cd2675; broader54855/39128 includes legitimate
+owners, not debt. Supplied pools74 ->73 (71 external +2 private), provisional
+M0/D40/S33 and61 qualified openings. Corpus1193/380, digest
+af1deebde8a80d0107c7b76f49d87cf5fd82640461b57f8736bab4d7f1c57715; immutable
+predecessors and24 mechanical receipts remain. Five-package U1000 is clean;
+signed-head complexity follows with the checkpoint. All persisted-surfaces
+borrowed openings are now removed, not the whole parent failure class.
+
+Existing bounded fixture/spec/watchlist disposition stands; no new framework or
+issue. #2542/#2151, M01/Docker/drain/D3/M07/rollback and the run-state diagnostic
+warning remain open and unwaived. Receipts: ~/.cache/swarm-2542-family145/
+gate-empty-path-* on vemew. No push, PR, server2, tier/full, compatibility seam,
+timeout/budget increase, blanket exemption or ratchet/classifier relaxation.

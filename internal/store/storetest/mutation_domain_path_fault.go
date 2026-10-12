@@ -9,3 +9,7 @@ import (
 func ProbeWorkflowMutationMissingDomainPath(ctx context.Context, selected any, run, entity string) error {
 	return private.ProbeWorkflowMutationMissingDomainPathForTest(ctx, selected, run, entity)
 }
+
+func ProbeWorkflowGateEmptyPath(ctx context.Context, selected any, run, entity string) error {
+	return private.ProbeWorkflowGateEmptyPathForTest(ctx, selected, run, entity)
+}

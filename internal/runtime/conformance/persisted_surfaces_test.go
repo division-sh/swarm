@@ -61,7 +61,6 @@ import (
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -1786,33 +1785,15 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 }
 
 func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx, runID, entityID := constructConformanceGateMutationSubject(t, pg)
 	requireMutationSurface(t, pg)
-
-	entityID := uuid.NewString()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
-		)
-	`, runID, entityID); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, handler_step
-		) VALUES (
-			$1::uuid, $2::uuid, 'gate', '', 'null'::jsonb, 'true'::jsonb, 'platform', 'test', 'seed'
-		)
-	`, runID, entityID); err == nil {
+	err := storetest.ProbeWorkflowGateEmptyPath(ctx, pg, runID, entityID)
+	if err == nil {
 		t.Fatal("malformed gate mutation with an empty path was accepted")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "check constraint") {
+		t.Fatalf("empty gate path did not reach the database constraint: %v", err)
 	}
 }
 
