@@ -76,7 +76,11 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 			current = row.Successor
 		}
 		currentPin, pinErr := canonicalFunction(current)
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+		activeName := row.Function
+		if row.File == forkProofTruthFile && row.Function == forkProofTruthOldName && row.Successor != "" {
+			activeName = forkProofTruthNewName
+		}
+		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, activeName))
 		if err != nil || afterErr != nil || pinErr != nil || actualErr != nil || want != got || actual != currentPin {
 			t.Fatalf("delivery caller changed setup, temporal cuts or assertions: %s", row.Function)
 		}

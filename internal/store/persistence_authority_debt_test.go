@@ -138,6 +138,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(failures) != 0 {
 		return failures
 	}
+	head, base, baseActual, failures = debtForkProofComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	old, current := debtQuiescenceUncertaintyTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -230,6 +234,145 @@ func debtForwardQuiescenceUncertainty(sites map[string]authorityDebtSite, old, c
 	delete(forward, old.identity())
 	forward[current.identity()] = current
 	return forward
+}
+
+const debtForkProofFile = "internal/serveapp/issue2277_audit_probe_test.go"
+const debtForkProofOldName = "TestAudit2277ForkCompletionLoss"
+const debtForkProofNewName = "TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores"
+const debtForkProofCollectorFrom = "3958381013996586ea697cd868abcacec29e9316706276f603f32523f74b5cb6"
+const debtForkProofSuccessorSHA = "77b03c87a0baf626a492fa23112e14cf07a840f3c8c5bba1c395ddec87838198"
+
+// B6129214825 authorizes only these nine identities and 21 existing occurrences.
+func debtForkProofRows() [9]authorityDebtSite {
+	return [9]authorityDebtSite{
+		{Kind: "local-raw-type", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "local:rt", Resolved: "github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.DB).Exec", Resolved: "func=func(query string, args ...any) (database/sql.Result, error)|recv=*database/sql.DB|arg=string|results=(database/sql.Result,error)", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 5},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.DB).QueryRow", Resolved: "func=func(query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=string|arg=string|results=(*database/sql.Row)", Family: "observation", Replacement: "domain observation port on the exact selected owner; missing exact port: escalate #2542", Multiplicity: 4},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.DB).QueryRow", Resolved: "func=func(query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=string|results=(*database/sql.Row)", Family: "observation", Replacement: "domain observation port on the exact selected owner; missing exact port: escalate #2542", Multiplicity: 2},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.Row).Scan", Resolved: "func=func(dest ...any) error|recv=*database/sql.Row|arg=*int|results=(error)", Family: "observation", Replacement: "domain observation port on the exact selected owner; missing exact port: escalate #2542", Multiplicity: 4},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.Row).Scan", Resolved: "func=func(dest ...any) error|recv=*database/sql.Row|arg=*string|arg=*string|results=(error)", Family: "observation", Replacement: "domain observation port on the exact selected owner; missing exact port: escalate #2542", Multiplicity: 1},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:database/sql.(*database/sql.Row).Scan", Resolved: "func=func(dest ...any) error|recv=*database/sql.Row|arg=*string|results=(error)", Family: "observation", Replacement: "domain observation port on the exact selected owner; missing exact port: escalate #2542", Multiplicity: 1},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:github.com/division-sh/swarm/internal/serveapp.repeatedStaticRunSnapshot", Resolved: "func=func(t *testing.T, db *database/sql.DB, runID string) map[string][][]string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|results=(map[string][][]string)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 2},
+		{Kind: "raw-operation", File: debtForkProofFile, Declaration: debtForkProofOldName, Operation: "call:github.com/division-sh/swarm/internal/serveapp.startServedControlProofRuntimeWithFixture", Resolved: "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, fixture func(*testing.T) string) github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=func(t *testing.T) string|results=(github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+	}
+}
+
+func debtForkProofRenamed(site authorityDebtSite) authorityDebtSite {
+	site.Declaration = debtForkProofNewName
+	return site
+}
+
+func debtForkProofTransferNeeded(actual, base, source map[string]authorityDebtSite) bool {
+	for _, old := range debtForkProofRows() {
+		if actual[debtForkProofRenamed(old).identity()].Multiplicity > 0 &&
+			(base[old.identity()].Multiplicity > 0 || source[old.identity()].Multiplicity > 0) {
+			return true
+		}
+	}
+	return false
+}
+
+func debtForkProofComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+		oldPresent, newPresent := false, false
+		for _, old := range debtForkProofRows() {
+			oldPresent = oldPresent || state[old.identity()].Multiplicity > 0
+			newPresent = newPresent || state[debtForkProofRenamed(old).identity()].Multiplicity > 0
+		}
+		if oldPresent && newPresent {
+			return head, base, source, []string{"historical and renamed fork proof debt coexist"}
+		}
+	}
+	if !debtForkProofTransferNeeded(actual, base, source) {
+		return head, base, source, nil
+	}
+	for _, old := range debtForkProofRows() {
+		current := debtForkProofRenamed(old)
+		if actual[current.identity()] != current || base[old.identity()] != old || source[old.identity()] != old ||
+			(head[old.identity()] != old && head[current.identity()] != current) {
+			return head, base, source, []string{"fork proof rename lost or changed its exact debt donor"}
+		}
+	}
+	for _, old := range debtForkProofRows() {
+		current := debtForkProofRenamed(old)
+		head = debtForwardQuiescenceUncertainty(head, old, current)
+		base = debtForwardQuiescenceUncertainty(base, old, current)
+		source = debtForwardQuiescenceUncertainty(source, old, current)
+	}
+	return head, base, source, nil
+}
+
+func debtForkProofCollectorTransition(trusted, head map[string]authorityDebtSite) bool {
+	for _, old := range debtForkProofRows() {
+		current := debtForkProofRenamed(old)
+		if trusted[old.identity()] != old || trusted[current.identity()].Multiplicity != 0 ||
+			(head[old.identity()] != old && head[current.identity()] != current) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(head, head, trusted, trusted)) == 0
+}
+
+func debtForkProofSourcePins(root string) error {
+	data, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/recipes.json"))
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		Family, File, Function, Before, After, Successor string
+		Removed                                          bool
+		Mechanical                                       json.RawMessage
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return err
+	}
+	matches := 0
+	for _, row := range rows {
+		if row.File != debtForkProofFile || row.Function != debtForkProofOldName {
+			continue
+		}
+		matches++
+		if row.Family != "native-served-delivery-quiescence-caller" || row.Removed || len(row.Mechanical) != 0 ||
+			debtBaselineChecksum([]byte(row.Before)) != "c205dbc515d172b290e459393d2d0f17a37f52534bbecd78530783322636c0f7" ||
+			debtBaselineChecksum([]byte(row.After)) != "8a77bfcf4a078afc07b19c2bf238c9d3b50fd6591de92b24224bda662bca1fe3" ||
+			debtBaselineChecksum([]byte(row.Successor)) != debtForkProofSuccessorSHA {
+			return fmt.Errorf("fork proof transfer changed its historical recipe or exact Successor")
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("fork proof transfer requires one exact historical recipe")
+	}
+	data, err = os.ReadFile(filepath.Join(root, debtForkProofFile))
+	if err != nil {
+		return err
+	}
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, debtForkProofFile, data, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	matches = 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fn.Name.Name == debtForkProofOldName {
+			return fmt.Errorf("historical fork proof declaration survives its forward transfer")
+		}
+		if fn.Name.Name != debtForkProofNewName {
+			continue
+		}
+		matches++
+		body := data[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset]
+		if debtBaselineChecksum(body) != debtForkProofSuccessorSHA {
+			return fmt.Errorf("fork proof source differs from its exact conserved Successor")
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("fork proof transfer requires one live renamed declaration")
+	}
+	return nil
 }
 
 func parseAuthorityDebtBaseline(data []byte) (authorityDebtBaseline, error) {
@@ -643,6 +786,11 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if bootstrap && !debtSitesEqual(head.Sites, trusted.Sites) {
 		t.Fatal("bootstrap baseline must equal actual extraction-base debt exactly")
 	}
+	if debtForkProofTransferNeeded(actual, trusted.Sites, baseActual) {
+		if err := debtForkProofSourcePins(root); err != nil {
+			t.Fatal(err)
+		}
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -650,6 +798,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if refresh == "downward" {
 		removed := authorityDebtCount(head.Sites) - authorityDebtCount(actual)
 		normalized, _, _, _ := debtRunFixtureSignatureComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		normalized, _, _, _ = debtForkProofComparisons(actual, normalized, trusted.Sites, baseActual)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -704,6 +853,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
+		trusted.Collector == base && head.Collector == current &&
+		debtForkProofCollectorTransition(trusted.Sites, head.Sites) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

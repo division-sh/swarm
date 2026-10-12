@@ -989,6 +989,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^Test([ABD-H].*|2376.*)$'
     required_children:
+      TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores: [default_sqlite, explicit_postgres]
       TestExactOriginPublicationWaitHeldDiagnosticBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
