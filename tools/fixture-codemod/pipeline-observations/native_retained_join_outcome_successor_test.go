@@ -1,0 +1,118 @@
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+)
+
+var retainedJoinSuccessorEdits = []struct{ before, block string }{
+	{"\t\t\tif len(joins) != 1 || first.Attempt != 1 {\n\t\t\t\tt.Fatalf(\"first ordinary join: loop=%+v joins=%+v\", first, joins)\n\t\t\t}\n", "\t\t\tfirstRef := joins[0].JoinRef()\n\t\t\tfirstCtx, cancelFirst := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tfirstWaitErr := waitServedRetainedJoinOutcome(firstCtx, started.RunID, firstRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readRetainedRootJoins(t, rt, started.RunID)\n\t\t\t})\n\t\t\tcancelFirst()\n\t\t\tif firstWaitErr != nil {\n\t\t\t\tt.Fatalf(\"first exact retained join outcome: %v\", firstWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, started.RunID)\n\t\t\tfirst, joins = readRetainedRootJoins(t, rt, started.RunID)\n"},
+	{"\t\t\tif current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {\n\t\t\t\tt.Fatalf(\"ordinary repeat lost retained joins: loop=%+v joins=%+v\", current, sourceJoins)\n\t\t\t}\n", "\t\t\tvar currentRef timeridentity.JoinRef\n\t\t\tcurrentMatches := 0\n\t\t\tfor _, join := range sourceJoins {\n\t\t\t\tif join.Generation() == current.Generation() {\n\t\t\t\t\tcurrentRef = join.JoinRef()\n\t\t\t\t\tcurrentMatches++\n\t\t\t\t}\n\t\t\t}\n\t\t\tif currentMatches != 1 {\n\t\t\t\tt.Fatalf(\"current retained join reference is not unique: %d\", currentMatches)\n\t\t\t}\n\t\t\tcurrentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)\n\t\t\tcurrentWaitErr := waitServedRetainedJoinOutcome(currentCtx, started.RunID, currentRef, func() (loopruntime.Activation, []joinruntime.Activation) {\n\t\t\t\treturn readRetainedRootJoins(t, rt, started.RunID)\n\t\t\t})\n\t\t\tcancelCurrent()\n\t\t\tif currentWaitErr != nil {\n\t\t\t\tt.Fatalf(\"current exact retained join outcome: %v\", currentWaitErr)\n\t\t\t}\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, started.RunID)\n\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)\n"},
+}
+
+func validateRetainedJoinSuccessor(row recipe, candidate string) error {
+	expected, restored := row.After, candidate
+	for _, edit := range retainedJoinSuccessorEdits {
+		if strings.Count(expected, edit.before) != 1 || strings.Count(candidate, edit.before+edit.block) != 1 {
+			return fmt.Errorf("exact join checkpoint/wait block missing, duplicated or moved")
+		}
+		expected = strings.Replace(expected, edit.before, edit.before+edit.block, 1)
+		restored = strings.Replace(restored, edit.before+edit.block, edit.before, 1)
+	}
+	actual, actualErr := canonicalFunction(candidate)
+	want, wantErr := canonicalFunction(expected)
+	original, originalErr := canonicalFunction(row.After)
+	reversed, reversedErr := canonicalFunction(restored)
+	if actualErr != nil || wantErr != nil || originalErr != nil || reversedErr != nil || actual != want || reversed != original {
+		return fmt.Errorf("join successor changed work beyond exact outcome composition")
+	}
+	return nil
+}
+
+func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
+	for _, target := range []struct{ file, function string }{
+		{"internal/serveapp/fork_retained_join_test.go", "testServedJoinWriterCompletedHistoryRefusal"},
+	} {
+		t.Run(target.function, func(t *testing.T) {
+			var rows []recipe
+			if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 893 {
+				t.Fatalf("recipe census=%d,want893", len(rows))
+			}
+			var row *recipe
+			for i := range rows {
+				if rows[i].File == target.file && rows[i].Function == target.function {
+					if row != nil {
+						t.Fatal("ambiguous retained-join recipe")
+					}
+					row = &rows[i]
+				}
+			}
+			if row == nil || row.Family != "native-served-delivery-quiescence-caller" || row.Successor == "" || row.Removed || row.Mechanical != nil {
+				t.Fatal("retained-join historical recipe identity changed")
+			}
+			if fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))) != "9e8f41f028da9f650675a673db43a5c5671a3c88bd490bc091674fae34619aa8" ||
+				fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "fcdf44feff728df7a784859bfa4d3d1a9345866013b5ea8a291530871478d474" {
+				t.Fatal("retained-join Before/After pins changed")
+			}
+			if err := validateRetainedJoinSuccessor(*row, row.Successor); err != nil {
+				t.Fatal(err)
+			}
+			actual := selectedCausalObservationBody(t, row.File, row.Function)
+			current, currentErr := canonicalFunction(actual)
+			pinned, pinErr := canonicalFunction(row.Successor)
+			if currentErr != nil || pinErr != nil || current != pinned {
+				t.Fatal("current caller differs from exact Successor")
+			}
+			if files, changes, err := prepareFiles("../../..", []recipe{*row}); err != nil || len(files) != 0 || len(changes) != 0 {
+				t.Fatalf("reviewed caller is not inert: %v", err)
+			}
+			archive, err := os.ReadFile("../../../internal/serveapp/testdata/future_capabilities/fork_retained_join_success_test.go.txt")
+			if err != nil || fmt.Sprintf("%x", sha256.Sum256(archive)) != "a24e4b0a28a643c56bda44ae35805588dae1e6cc1a90438efa9e07c15055ba59" {
+				t.Fatal("archived future-capability oracle changed")
+			}
+			for _, mutation := range []struct{ name, before, after string }{
+				{"missing_first", retainedJoinSuccessorEdits[0].block, ""},
+				{"duplicate_first", retainedJoinSuccessorEdits[0].block, strings.Repeat(retainedJoinSuccessorEdits[0].block, 2)},
+				{"missing_second", retainedJoinSuccessorEdits[1].block, ""},
+				{"duplicate_second", retainedJoinSuccessorEdits[1].block, strings.Repeat(retainedJoinSuccessorEdits[1].block, 2)},
+				{"wrong_run", "firstCtx, started.RunID, firstRef", "firstCtx, foreignRun, firstRef"},
+				{"wrong_first_reference", "firstRef := joins[0].JoinRef()", "firstRef := joins[0].JoinRef().Declaration()"},
+				{"reused_first_at_second", "currentCtx, started.RunID, currentRef", "currentCtx, started.RunID, firstRef"},
+				{"wrong_generation", "join.Generation() == current.Generation()", "join.Generation() == first.Generation()"},
+				{"missing_first_reread", "\t\t\tfirst, joins = readRetainedRootJoins(t, rt, started.RunID)\n", ""},
+				{"missing_second_reread", "\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)\n", ""},
+				{"weakened_assertion", "len(join.Outputs) != 1", "len(join.Outputs) != 0"},
+				{"changed_setup", "canonicalrouting.CopyForkLoopRetainedJoin(t)", "canonicalrouting.CopyForkLoopRetainedJoinSeparateCheckpoint(t)"},
+			} {
+				t.Run(mutation.name, func(t *testing.T) {
+					mutant := strings.Replace(row.Successor, mutation.before, mutation.after, 1)
+					if mutant == row.Successor {
+						t.Fatal("hostile mutation did not change source")
+					}
+					if err := validateRetainedJoinSuccessor(*row, mutant); err == nil {
+						t.Fatal("hostile join composition admitted")
+					}
+					guard := *row
+					guard.Before, guard.After, guard.Successor = row.Successor, row.Successor, ""
+					if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+						t.Fatal("hostile caller accepted by finite rewrite")
+					}
+				})
+			}
+			t.Run("late_first_wait", func(t *testing.T) {
+				mutant := strings.Replace(row.Successor, retainedJoinSuccessorEdits[0].block, "", 1)
+				mutant = strings.Replace(mutant, retainedJoinSuccessorEdits[1].before, retainedJoinSuccessorEdits[1].before+retainedJoinSuccessorEdits[0].block, 1)
+				if mutant == row.Successor || validateRetainedJoinSuccessor(*row, mutant) == nil {
+					t.Fatal("late creating-generation wait admitted")
+				}
+			})
+		})
+	}
+}
