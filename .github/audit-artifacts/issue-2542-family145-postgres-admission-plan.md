@@ -3711,3 +3711,66 @@ issue. #2542/#2151, M01/Docker/drain/D3/M07/rollback and the run-state diagnosti
 warning remain open and unwaived. Receipts: ~/.cache/swarm-2542-family145/
 gate-empty-path-* on vemew. No push, PR, server2, tier/full, compatibility seam,
 timeout/budget increase, blanket exemption or ratchet/classifier relaxation.
+
+### Whole Selected-Fork Cleanup Helper And Trigger-Fault Caller Chain
+
+Both remaining trigger-fault consumers of assertSelectedContractExecutionCleanup
+now open their original PostgreSQL store natively; the shared helper no longer
+accepts a DB. The complete helper/caller chain is migrated, not just one count.
+The actual selected-contract materialization/publication/refusal workloads,
+source inputs and historical clocks remain, along with every original source
+running/fork-cancelled/binding-retained/no-residue assertion. No faults are mocked,
+no source authority is fabricated, and no cleanup success is inferred from a
+shared helper alone.
+
+| Canonical owner | Exhaustive changed consumption / preserved contract |
+| --- | --- |
+| Native selected fixture and original source/capture/execution owners | Both original WriteSkew and PublishFailure roots consume StartPostgresRuntimeStore. Existing source-aware construction, exact source revision capture, real process capability and executeLiveSelectedContractRunFork inputs are unchanged. The first fault still installs after source/capture; the second still installs before source setup. |
+| pipelinepersistence exact replay-scope fault | The unchanged CREATE OR REPLACE function and AFTER INSERT event trigger writes direct scope at NEW event/run/created_at, including original conflict no-op. It executes through the original selected projection-fault writer. Its fixed drop operation is registered before enable and runs before native close; no SQL, table selector, arbitrary predicate or callback crosses the public bridge. |
+| runforkpersistence exact lineage-insert fault | The unchanged BEFORE INSERT selected-execution trigger raises the original forced lineage failure. Its original installation cut, selected native writer and checked removal before close are retained. It is not synthetic delivery expiry or revision/runtime admission. |
+| Existing runlifecycle and fork observation owners | Source status is independently read and checked before the original source-descendant count; retained fork status is read last. Both original absent-fork branches stay. These existing ports are reused with the exact context.Background/source/fork coordinates, not replaced with lifecycle reconstruction or broad row maps. |
+| Fixed cleanup cardinality assembly and row-family owners | Eight original reads retain independent native read transactions in the original order: exact-run events, closed delivery count, GLOBAL all-status event receipts, exact-run entity fields, exact-run mutation history, fork bindings, fork execution lineage and fork route recoveries. No eligibility/status/history filter, pagination, run narrowing for receipts or read-cut merger is added. API physical-event, closed delivery, pipelinepersistence, mutationlog and runforkpersistence owners provide only the detached fixed tuple; any failure discards provisional values. |
+| Finite source/caller and physical-writer inventories | Three complete transitions cover the entire shared helper/two callers. Original business assertions, actual execution/source/capability inputs, fault/source ordering, native cleanup registration and exact field bindings are pinned. All eleven original helper SELECTs match row-family SQL in order, and CREATE bodies are compared while preserving quoted contents. Counterexamples reject missing source/fault/read, swapped tuple fields, synthetic zeros and partial-error evidence. One explicit census row classifies the same-event injected replay-scope write; no production writer fence, guard scope or exemption changes. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Actual same-event replay-scope collision refuses before activation and retains only the cancelled fork/binding evidence | reproduced and fixed: TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew, Go1.26.8/race, original source/fault/authority and complete cleanup assertions |
+| Actual selected lineage publication fails after materialization, before activation/source freeze, with complete checked cleanup | reproduced and fixed: TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure, race; both original roots final aggregate PASS9.062s |
+| Native cleanup read cuts, absence, invalid/cancelled/raw/foreign/typed-nil/SQLite/closed owner refusal and zero partial evidence | execution-proven through the same corrected path: TestPostgresSelectedCleanupStorageRetainsEightIndependentNativeReadsAndRefusesUnavailableOwners, race; exactly eight read commits/no writes/no active work |
+| Each fixed fault install/remove consumes the original writer, refuses cancelled/foreign owners and joins removal before fixture close | execution-proven through the same corrected path: TestPostgresSelectedCleanupFaultPortsUseOriginalWriterAndRefuseUnavailableOwners, race; two write commits/no read commits/no active work for each pair; storetest aggregate PASS15.470s |
+| All-status exact-run membership and GLOBAL receipt scope include foreign runs/history rather than synthesized zeros | execution-proven through the same corrected path: TestSelectedCleanupPhysicalCountsKeepEveryOriginalScope, race PASS6.960s; isolated query-only schema, no claim/fork/runtime authority |
+| Complete helper/callers, eleven physical predicates, unchanged CREATE bodies, independent field/cut mapping and failure discard | execution-proven through the same corrected path: both TestFamily145SelectedCleanup controls PASS0.054s; final complete cheap finite set PASS9.179s; six persistence boundaries PASS3.353s |
+
+The first source-proof run correctly failed on a mislocated status-owner symbol;
+the next identified that the adapter delegates SQL to runlifecycle. The proof now
+pins that actual row owner, not a fabricated or weakened SQL expectation. All
+other finite receipts carried, followed by one final complete cheap pass. No
+runtime red, assertion or fault is waived; normal workload/counterexample/source
+checks are separated from cold whole-repository census cost. Seven-package U1000
+is clean, including the final source-control delta. Existing source-aware setup,
+scope/error retention and fixed faults remain original-scope qualification, not
+process restart or parent completion.
+
+Corpus1194/381, digest
+b958788effb4a9e9141661f57e1cbeb4a30e8fc11ebd666e03f0cf3a40d59546: one new helper
+row and two exact current caller updates; immutable predecessors and24 historical
+receipts remain. Supplied pools73 ->71 (69 external +2 private), provisional
+M0/D40/S31 and63 qualified openings. The two original semantic trigger-fault cuts
+are genuinely executed and qualified, not relabeled mechanical or waived.
+The downward census and signed-head complexity receipts follow at this checkpoint.
+
+Reviewer-b closed the preceding recovery F1 and approved1eaee85fb, then approved
+the gate-path group at e32bc6b29; those independent receipts carry unchanged.
+Existing bounded native-fixture/spec/watchlist disposition stands, with no new
+production semantics/framework/issue. #2542/#2151, M01/Docker/drain/D3/M07/rollback
+and the run-state warning remain open. No push, PR, server2, tier/full, timeout or
+budget increase, compatibility seam, arbitrary SQL port or ratchet relaxation.
+Receipts: ~/.cache/swarm-2542-family145/selected-cleanup-* on vemew.
+
+Real downward census PASS131.239s:8703 ->8668 findings,6266 ->6236 raw-operation
+sites;35 removed/zero added, uncertainty67 unchanged. Source26701e7b187579220dffe72e01debd2e89cd2675
+and collector fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9
+remain; broader54863/39131 includes legitimate owners and is not debt. The
+helper's complete pool/SQL authority and both borrowed caller openings are gone.
+This is whole-dependency canonicalization, not parent failure-class elimination.
+Signed-head complexity is recorded with the local checkpoint.

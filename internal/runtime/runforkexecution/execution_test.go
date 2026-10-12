@@ -4317,8 +4317,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 }
 
 func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -4337,21 +4336,12 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
-	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION seed_conflicting_replay_scope_after_event_insert()
-		RETURNS trigger AS $$
-		BEGIN
-			INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-			VALUES (NEW.event_id, NEW.run_id, 'direct', NEW.created_at, NEW.created_at)
-			ON CONFLICT (event_id) DO NOTHING;
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		CREATE TRIGGER seed_conflicting_replay_scope_after_event_insert
-		AFTER INSERT ON events
-		FOR EACH ROW EXECUTE FUNCTION seed_conflicting_replay_scope_after_event_insert();
-	`); err != nil {
+	t.Cleanup(func() {
+		if err := storetest.SetSelectedReplayScopeCollisionFault(context.Background(), pg, false); err != nil {
+			t.Errorf("remove conflicting replay-scope trigger: %v", err)
+		}
+	})
+	if err := storetest.SetSelectedReplayScopeCollisionFault(ctx, pg, true); err != nil {
 		t.Fatalf("install conflicting replay-scope trigger: %v", err)
 	}
 
@@ -4372,7 +4362,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	if result.Activation.Activated {
 		t.Fatalf("activation = %#v, want rejection before activation", result.Activation)
 	}
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+	assertSelectedContractExecutionCleanup(t, pg, sourceRunID, result.Materialization.ForkRunID)
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
@@ -4424,8 +4414,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 }
 
 func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -4438,18 +4427,12 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION fail_selected_contract_execution_lineage_insert()
-		RETURNS trigger AS $$
-		BEGIN
-			RAISE EXCEPTION 'forced selected execution lineage failure';
-		END;
-		$$ LANGUAGE plpgsql;
-
-		CREATE TRIGGER fail_selected_contract_execution_lineage_insert
-		BEFORE INSERT ON run_fork_selected_contract_executions
-		FOR EACH ROW EXECUTE FUNCTION fail_selected_contract_execution_lineage_insert();
-	`); err != nil {
+	t.Cleanup(func() {
+		if err := storetest.SetSelectedExecutionLineageInsertFault(context.Background(), pg, false); err != nil {
+			t.Errorf("remove lineage failure trigger: %v", err)
+		}
+	})
+	if err := storetest.SetSelectedExecutionLineageInsertFault(ctx, pg, true); err != nil {
 		t.Fatalf("install lineage failure trigger: %v", err)
 	}
 
@@ -4481,7 +4464,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
 	}
 
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+	assertSelectedContractExecutionCleanup(t, pg, sourceRunID, result.Materialization.ForkRunID)
 }
 
 func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedAfterForkPoint(t *testing.T) {
@@ -4957,49 +4940,33 @@ func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedCo
 	}
 }
 
-func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
+func assertSelectedContractExecutionCleanup(t *testing.T, selected *store.PostgresStore, sourceRunID, forkRunID string) {
 	t.Helper()
 	ctx := context.Background()
-	var sourceStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+	sourceStatus, err := storetest.ReadRunStatusStorage(ctx, selected, sourceRunID)
+	if err != nil {
 		t.Fatalf("load source status: %v", err)
 	}
 	if sourceStatus != "running" {
 		t.Fatalf("source status = %q, want running", sourceStatus)
 	}
 	var forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
+	forkRows, err = storetest.CountSelectedForkRunsForSource(ctx, selected, sourceRunID)
+	if err != nil {
 		t.Fatalf("count fork rows: %v", err)
 	}
 	if forkRunID != "" {
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, forkRunID).Scan(&forkEvents); err != nil {
-			t.Fatalf("count fork events: %v", err)
+		counts, err := storetest.ReadPostgresSelectedForkCleanupStorage(ctx, selected, forkRunID)
+		if err != nil {
+			t.Fatalf("count fork cleanup storage: %v", err)
 		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`, forkRunID).Scan(&forkDeliveries); err != nil {
-			t.Fatalf("count fork deliveries: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts`).Scan(&forkReceipts); err != nil {
-			t.Fatalf("count event receipts after cleanup: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, forkRunID).Scan(&forkState); err != nil {
-			t.Fatalf("count fork state: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID).Scan(&forkMutations); err != nil {
-			t.Fatalf("count fork mutations: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&bindingRows); err != nil {
-			t.Fatalf("count fork binding: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&lineageRows); err != nil {
-			t.Fatalf("count fork lineage: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&routeRecoveryRows); err != nil {
-			t.Fatalf("count fork route recoveries: %v", err)
-		}
+		forkEvents, forkDeliveries, forkReceipts, forkState = counts.Events, counts.Deliveries, counts.GlobalReceipts, counts.State
+		forkMutations, bindingRows, lineageRows, routeRecoveryRows = counts.Mutations, counts.Bindings, counts.Lineage, counts.RouteRecoveries
 	}
 	var forkStatus string
 	if forkRunID != "" {
-		if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
+		forkStatus, err = storetest.ReadRunStatusStorage(ctx, selected, forkRunID)
+		if err != nil {
 			t.Fatalf("load retained fork tombstone: %v", err)
 		}
 	}
