@@ -151,8 +151,8 @@ func TestEventCatalogFactoringCharacterization(t *testing.T) {
 		if err := os.WriteFile(goldenPath, append(body, '\n'), 0600); err != nil {
 			t.Fatal(err)
 		}
-	} else if len(want) != len(got) {
-		t.Fatalf("characterization population changed: %d/%d", len(got), len(want))
+	} else if len(want) != len(cases) {
+		t.Fatalf("characterization population changed: %d/%d", len(cases), len(want))
 	}
 }
 

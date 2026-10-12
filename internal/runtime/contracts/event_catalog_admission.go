@@ -102,39 +102,10 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 	if err != nil {
 		return EventCatalogEntry{}, err
 	}
-	var fields []yamlsource.MappingField
-	if !bare {
-		fields, err = value.Mapping()
-		if err != nil {
-			return EventCatalogEntry{}, err
-		}
+	fields, byName, err := admitEventCatalogFields(name, value, bare)
+	if err != nil {
+		return EventCatalogEntry{}, err
 	}
-	for _, field := range fields {
-		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
-			return EventCatalogEntry{}, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
-		}
-		if field.Name == "required" {
-			return EventCatalogEntry{}, fmt.Errorf("event field name %q at %s is reserved for required-by-default field semantics", field.Name, field.IntroductionLocation())
-		}
-		if field.Name == "payload" && eventPayloadValueIsRetiredNestedBlock(field.Value) {
-			return EventCatalogEntry{}, fmt.Errorf("event payload at %s must be a field type declaration, not a nested payload block", field.IntroductionLocation())
-		}
-	}
-	if !bare {
-		var err error
-		fields, err = uniqueYAMLMappingFields(value, "event "+name)
-		if err != nil {
-			return EventCatalogEntry{}, err
-		}
-	}
-	byName := make(map[string]yamlsource.MappingField, len(fields))
-	for _, field := range fields {
-		byName[field.Name] = field
-		if err := field.Value.ValidateUniqueMappings(); err != nil {
-			return EventCatalogEntry{}, err
-		}
-	}
-
 	entry := EventCatalogEntry{
 		Payload:             EventPayloadSpec{Properties: map[string]EventFieldSpec{}},
 		admissionProvenance: map[string]EffectiveValueProvenance{},
@@ -146,7 +117,6 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		SourceColumn:   declaration.IntroductionLocation().Column,
 		SourcePresence: value.Presence().String(),
 	}
-
 	if field, ok := byName["key"]; ok {
 		key, err := requiredLiteralString(field.Value, "event key")
 		if err != nil {
@@ -158,7 +128,56 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		entry.BusinessKeyField = key
 		entry.admissionProvenance["business_key"] = authoredSourceProvenance(field.Value)
 	}
+	if err := populateEventCatalogPayload(&entry, fields); err != nil {
+		return EventCatalogEntry{}, err
+	}
+	if !bare && len(entry.Payload.Properties) == 0 {
+		return EventCatalogEntry{}, payloadlessEventDeclarationError(name, "mapping")
+	}
+	if err := validateEventCatalogBusinessKey(entry); err != nil {
+		return EventCatalogEntry{}, err
+	}
+	return entry, nil
+}
 
+func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]yamlsource.MappingField, map[string]yamlsource.MappingField, error) {
+	var fields []yamlsource.MappingField
+	if !bare {
+		var err error
+		fields, err = value.Mapping()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, field := range fields {
+		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
+			return nil, nil, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
+		}
+		if field.Name == "required" {
+			return nil, nil, fmt.Errorf("event field name %q at %s is reserved for required-by-default field semantics", field.Name, field.IntroductionLocation())
+		}
+		if field.Name == "payload" && eventPayloadValueIsRetiredNestedBlock(field.Value) {
+			return nil, nil, fmt.Errorf("event payload at %s must be a field type declaration, not a nested payload block", field.IntroductionLocation())
+		}
+	}
+	if !bare {
+		var err error
+		fields, err = uniqueYAMLMappingFields(value, "event "+name)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	byName := make(map[string]yamlsource.MappingField, len(fields))
+	for _, field := range fields {
+		byName[field.Name] = field
+		if err := field.Value.ValidateUniqueMappings(); err != nil {
+			return nil, nil, err
+		}
+	}
+	return fields, byName, nil
+}
+
+func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
 	payloadFieldNames := make([]string, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == "key" || field.Name == "description" {
@@ -166,7 +185,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		}
 		payloadField, optional, typeSource, err := admitEventPayloadField(field.Value)
 		if err != nil {
-			return EventCatalogEntry{}, fmt.Errorf("payload field %q at %s: %w", field.Name, field.Value.Location(), err)
+			return fmt.Errorf("payload field %q at %s: %w", field.Name, field.Value.Location(), err)
 		}
 		if !optional {
 			entry.Payload.Required = append(entry.Payload.Required, field.Name)
@@ -189,8 +208,8 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 				SourceColumn: location.Column,
 			}
 		}
-		if err := populateEventPayloadFieldAdmissionProvenance(&entry, field.Name, field.Value); err != nil {
-			return EventCatalogEntry{}, err
+		if err := populateEventPayloadFieldAdmissionProvenance(entry, field.Name, field.Value); err != nil {
+			return err
 		}
 	}
 	sort.Strings(entry.Payload.Required)
@@ -201,22 +220,24 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		InputPaths: eventFieldTypePaths(payloadFieldNames),
 	}
 
-	if !bare && len(entry.Payload.Properties) == 0 {
-		return EventCatalogEntry{}, payloadlessEventDeclarationError(name, "mapping")
+	return nil
+}
+
+func validateEventCatalogBusinessKey(entry EventCatalogEntry) error {
+	if entry.BusinessKeyField == "" {
+		return nil
 	}
-	if entry.BusinessKeyField != "" {
-		field, ok := entry.Payload.Properties[entry.BusinessKeyField]
-		if !ok {
-			return EventCatalogEntry{}, fmt.Errorf("event key %q is not a declared payload field", entry.BusinessKeyField)
-		}
-		if !slices.Contains(entry.Payload.Required, entry.BusinessKeyField) {
-			return EventCatalogEntry{}, fmt.Errorf("event key field %q must be required", entry.BusinessKeyField)
-		}
-		if strings.TrimSpace(field.Type) == "" {
-			return EventCatalogEntry{}, fmt.Errorf("event key field %q has no admitted type", entry.BusinessKeyField)
-		}
+	field, ok := entry.Payload.Properties[entry.BusinessKeyField]
+	if !ok {
+		return fmt.Errorf("event key %q is not a declared payload field", entry.BusinessKeyField)
 	}
-	return entry, nil
+	if !slices.Contains(entry.Payload.Required, entry.BusinessKeyField) {
+		return fmt.Errorf("event key field %q must be required", entry.BusinessKeyField)
+	}
+	if strings.TrimSpace(field.Type) == "" {
+		return fmt.Errorf("event key field %q has no admitted type", entry.BusinessKeyField)
+	}
+	return nil
 }
 
 func payloadlessEventDeclarationError(name, variant string) error {
@@ -358,7 +379,11 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 	default:
 		return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s type is required", context)
 	}
+	return admitEventPayloadMapping(value)
+}
 
+func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, yamlsource.Value, error) {
+	const context = "event payload field"
 	fields, err := uniqueYAMLMappingFields(value, context)
 	if err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
@@ -398,43 +423,52 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
 	}
 	out := EventFieldSpec{Type: typeName}
+	if err := populateEventPayloadRefinements(&out, byName); err != nil {
+		return EventFieldSpec{}, false, yamlsource.Value{}, err
+	}
+	return out, optional, typeField.Value, nil
+}
+
+func populateEventPayloadRefinements(out *EventFieldSpec, byName map[string]yamlsource.MappingField) error {
+	const context = "event payload field"
+	var err error
 	if field, ok := byName["description"]; ok {
 		out.Description, err = optionalScalarString(field.Value, context+" description")
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return err
 		}
 	}
 	if field, ok := byName["pattern"]; ok {
 		out.Refinements.Pattern, err = admitEventPattern(field.Value)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s pattern: %w", context, err)
+			return fmt.Errorf("%s pattern: %w", context, err)
 		}
 	}
 	if field, ok := byName["length"]; ok {
 		out.Refinements.Length, err = decodeSchemaLengthRefinementValue(field.Value)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s length: %w", context, err)
+			return fmt.Errorf("%s length: %w", context, err)
 		}
 	}
 	if field, ok := byName["range"]; ok {
 		out.Refinements.Range, err = decodeSchemaRangeRefinementValue(field.Value)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s range: %w", context, err)
+			return fmt.Errorf("%s range: %w", context, err)
 		}
 	}
 	if field, ok := byName["equal_to"]; ok {
 		out.Refinements.EqualTo, err = requiredLiteralString(field.Value, context+" equal_to field")
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return err
 		}
 	}
 	if field, ok := byName["citation"]; ok {
 		out.Citation, err = admitEventCitation(field.Value)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return err
 		}
 	}
-	return out, optional, typeField.Value, nil
+	return nil
 }
 
 func admitEventFieldTypeMarker(raw, context string) (string, bool, error) {
