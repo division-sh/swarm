@@ -20,8 +20,10 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 109 {
-		t.Fatalf("platform table plan count = %d, want 109 including turn lifetime and emit stage evidence", len(platformPlans))
+	// runtime_startup_authority_facts becomes runtime_process_generation;
+	// retiring runtime_startup_authority_repairs removes one platform table.
+	if len(platformPlans) != 108 {
+		t.Fatalf("platform table plan count = %d, want 108 after runtime_startup_authority_repairs retirement, including turn lifetime and emit stage evidence", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
@@ -69,8 +71,10 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}
 	}
-	if sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), "event_delivery_outcomes") {
-		t.Fatal("retired event_delivery_outcomes table remains authoritative")
+	for _, retired := range []string{"event_delivery_outcomes", "runtime_startup_authority_facts", "runtime_startup_authority_repairs"} {
+		if sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), retired) {
+			t.Fatalf("retired %s table remains authoritative", retired)
+		}
 	}
 	for _, column := range []string{
 		"payload_schema_bundle_hash",
@@ -393,6 +397,9 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"run_scenario_execution_profiles",
 		"entity_mutations",
 		"runtime_store_metadata",
+		"runtime_process_generation",
+		"runtime_agent_turn_lifetimes",
+		"workflow_publication_stage_receipts",
 	}
 }
 
