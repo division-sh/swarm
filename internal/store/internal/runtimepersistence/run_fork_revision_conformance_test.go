@@ -202,6 +202,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/store/internal/backend/runforkpersistence/run_fork_activation.go",
 		"internal/store/internal/backend/runforkpersistence/run_fork_planner.go",
 		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go",
+		"internal/store/internal/backend/runforkpersistence/test_receiver_history_cut.go", // exact source-cut absence read; destination CAS belongs to runlifecycle
 		"internal/store/internal/backend/runforkrevision/postgres.go",
 		"internal/store/internal/backend/runforkrevision/sqlite.go",
 		"internal/store/platformschema/platformschema.go",
