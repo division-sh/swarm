@@ -86,7 +86,8 @@ func family145ConnectorSQL(t testing.TB, source string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "select ") {
+		words := strings.Fields(value)
+		if len(words) == 0 || !strings.EqualFold(words[0], "select") {
 			return true
 		}
 		for i := 1; strings.Contains(value, "?"); i++ {

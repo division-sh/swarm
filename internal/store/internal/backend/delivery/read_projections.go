@@ -29,6 +29,54 @@ type PostgresSystemNodeDeliveryStorage struct {
 
 type PostgresSystemNodeOutcomeStorage struct{ Outcome, Reason string }
 
+type PostgresRunStatusSettlementStorage struct{ EventCount, ActiveDeliveries int }
+type PostgresRunStatusFailureDiagnosticStorage struct{ Status, Failure string }
+
+func ReadPostgresRunStatusSettlementStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusSettlementStorage, error) {
+	var out PostgresRunStatusSettlementStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name <> 'platform.runtime_log'),
+			(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
+	`, runID).Scan(&out.EventCount, &out.ActiveDeliveries)
+	if err != nil {
+		return PostgresRunStatusSettlementStorage{}, err
+	}
+	return out, nil
+}
+
+func CountPostgresRunStatusActiveDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND status IN ('pending', 'in_progress')
+	`, runID).Scan(&count)
+	return count, err
+}
+
+func ReadPostgresRunStatusFailureDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (out []PostgresRunStatusFailureDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status, COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries WHERE run_id=$1::uuid`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row PostgresRunStatusFailureDiagnosticStorage
+		if err := rows.Scan(&row.Status, &row.Failure); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func ReadPostgresSystemNodeDeliveryStorageTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (PostgresSystemNodeDeliveryStorage, error) {
 	var out PostgresSystemNodeDeliveryStorage
 	err := tx.QueryRowContext(ctx, `

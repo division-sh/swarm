@@ -602,6 +602,15 @@ func ReadStageLifecycleRuntimeLogPayloadsForTest(ctx context.Context, selected a
 	})
 }
 
+func CountPostgresRunStatusSemanticEventsForTest(ctx context.Context, selected any, runID string) (int, error) {
+	if err := validatePostgresPublicationIdentities(selected, runID); err != nil {
+		return 0, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountPostgresRunStatusSemanticEventsTx(ctx, tx, runID)
+	})
+}
+
 func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, name, parent string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run, parent}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadNestedSourceEventIDsTx(ctx, tx, run, name, parent)

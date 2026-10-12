@@ -66,6 +66,12 @@ func CountTemplateEventIdentityTx(ctx context.Context, tx *sql.Tx, event string)
 	return count, err
 }
 
+func CountPostgresRunStatusSemanticEventsTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid AND event_name <> 'platform.runtime_log'`, runID).Scan(&count)
+	return count, err
+}
+
 // ReadStageLifecycleRuntimeLogPayloadsTx preserves physical payload text, not
 // decoded event bytes, for the bounded whole-store failure diagnostic.
 func ReadStageLifecycleRuntimeLogPayloadsTx(ctx context.Context, tx *sql.Tx) (out []string, err error) {

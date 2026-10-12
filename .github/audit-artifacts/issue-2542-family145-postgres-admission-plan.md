@@ -3346,3 +3346,77 @@ or their ordinary-construction parent. M01/Docker/drain/D3/M07/rollback remain
 unwaived. Existing watchlist and narrow original-owner architecture disposition
 stand; no new framework or issue. No push, PR, server2, tier/full, timeout/budget
 raise, classifier relaxation, ratchet exception or compatibility path.
+
+### Complete Held-Manager Run-State Construction And Readback Dependency
+
+All three ordinary PostgreSQL openings and both shared completion/settlement
+helpers in run_state_runtime_test.go are migrated. The complete consumer file
+has no pool, raw getter, SQL, transaction callback or reconstructed coordinator.
+Its three native roots retain the original source/catalog, bus, issued delivery
+authority, prepared entity aggregate, actual manager, delayed agent, completion
+executor operation and original assertions. This is the existing isolated
+component witness, not a new public served journey or restart qualification.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native opening and current selected lifetime | All three roots use StartPostgresRuntimeStore at their original opening point. The same selected object supplies manager, publication, entity construction, completion and observations. Existing process/runtime occurrence, readiness and source-catalog owners are reused. |
+| runlifecycle | The event-to-run/bundle join, COALESCE(status)/native ended_at, exact stored event_count plus correlated COUNT(DISTINCT entity_id), and global other-running-run complement stay separate exact physical statements. No stronger lifecycle snapshot, reconstructed origin, extra status/source filter or inferred counter substitutes for them. |
+| Closed delivery read projection | The settlement helper retains ONE statement containing both original event and active-delivery subqueries; it is not split into two read snapshots. The standalone active count keeps pending/in_progress. Failure diagnostics keep every status, duplicate and native failure text at exact run_id, with no ordering/filter added. Scan/iteration/close failure now discards provisional diagnostics; the consumer still treats diagnostics as best-effort before its original fatal settlement report. |
+| eventrecord and existing event bridge | The independent semantic count remains exact run_id with only platform.runtime_log excluded. Its bridge is in test_event_support.go, without a new eventrecord import seam. It is not the stored event counter or the atomic event/delivery observation. |
+| Selected native read coordinator | Eight fixed PostgreSQL read ports return detached tuples/scalars/rows, never handles, selectors or callbacks. Original contexts, native NullTime/NULL behavior, multiplicity and field mappings remain. Native SQLite is a foreign posture for these PG-only statements, not new backend-parity evidence. Missing/foreign/raw/typed-nil/cancelled/closed results discard evidence. |
+| Original manager/held-agent lifetime | Each delayed-agent root uses a single sync.OnceFunc release. Deferred release/join is registered before manager.Run, so constructor/startup/assertion failure cannot leave blocked work live. Normal release remains AFTER the held-work assertions and BEFORE settlement/completion. Checked shutdown still joins the actual manager before fixture cleanup; no test grant, new lifecycle abstraction or second close owner. |
+| Finite whole helper/caller controls | Five complete function transitions preserve original conditions, source/final catalog, contexts, fields, 1s startup/120ms held-work/2s-3s convergence windows and 10ms polling. Hostile controls reject lost native owners, fields, timing, conditions, once-only release and release/join ordering. All eight distinct SQL statements are compared exactly against their immutable predecessors. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Durable normal completion persists a nonzero ended_at | reproduced and fixed: TestRunState_UsesDurableCompletedRunState under race, original PostgreSQL component scope |
+| Blocked manager work retains running status, exact semantic count/entity count and active delivery; release permits coherent completion without extra running rows | reproduced and fixed: TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles under race, original start/release/completion windows |
+| After the original120ms window, running/NULL-ended truth and runtime active work remain until release | reproduced and fixed: TestRunState_PreservesRunningTruthWhileManagerWorkIsActive under race; initial complete three-root package PASS9.270s |
+| Fatal assertion while actual agent work is held still releases and joins before native teardown | execution-proven through the same corrected path: deliberately injected run-state assertion-failure cleanup control is expected RED6.686s, with only the intended fatal and no manager/process/store join timeout/error; exact restored root GREEN7.176s |
+| Exact native event/run identity, stored versus semantic counter, global running complement and one-statement settlement read | execution-proven through the same corrected path: TestPostgresRunStatusStorageKeepsPhysicalCountersScopesAndOriginalReads under race, real target/sibling/paused runs plus three actual target records, eight separate original read commits/zero writes/active0; final helper-only organization PASS7.510s |
+| Missing/empty/foreign/raw/typed-nil/cancelled/closed observation authority | execution-proven through the same corrected path: TestPostgresRunStatusStorageRefusesUnavailableOwnersAndDiscardsEvidence, all eight ports under race; initial combined native-control package PASS10.594s, unchanged refusal receipt carries |
+| Failure-only diagnostic includes terminal/duplicate rows and native JSON text, but rejects corrupted NULL status without provisional rows | execution-proven through the same corrected path: TestPostgresRunStatusDiagnosticKeepsAllRowsNativeFailureTextAndFailClosedScan under race, bounded unadmitted backend query-only schema, PASS6.148s; no runtime store or executable authority is constructed |
+| Complete source, caller, predicate, field and cleanup cut inventory | execution-proven through the same corrected path: TestFamily145RunStateWholeManagerReadChainKeepsAssertionsAndTemporalCuts and TestFamily145PhysicalSQLCorrespondenceRecognizesSelectWhitespaceNotLookalikes, including original-condition and cleanup counterexamples |
+
+The first source proof was RED1.657s because canonical AST output compacted
+WorkOwner and expanded the once-only callback. Its exact expected spelling was
+repaired, not the authority/lifetime cut. The next RED1.828s exposed a real
+proof-helper inventory defect: SELECT followed by newline was omitted. The
+shared test-only statement extractor now recognizes the exact SELECT token
+followed by any whitespace, rejects SELECTED, and preserves quoted content;
+the original atomic query and every eight-owner comparison remain unchanged.
+The complete affected finite set was rerun because this proof helper is shared:
+family145/historical/finite/idempotency/rename controls PASS8.102s. This changes
+no debt classifier, baseline policy, production SQL or original expected result.
+
+Boundary/event/delivery/lifecycle/revision/writer guards PASS3.440s, retirement
+inventory PASS5.784s, affected eight-package U1000 clean; final proof/positive-
+helper deltas separately checked. Dry-run Changes=[] and diff clean. Five new
+rows make1187 recipes/374 transitions, digest
+8cdd888755e9d7ca555b74044bb8167c83101bcaf36bac65b4787622dbe97344;
+all immutable Before/After and24 mechanical receipts remain.
+
+Downward ratchet PASS136.511s removed43/added0:8791 ->8748 findings,
+confirmed raw-operation debt6334 ->6299, uncertainty67 and collector/policy
+unchanged. After organizing the new positive-control assertions into focused
+helpers, final warm ratchet PASS24.051s confirms0/0 and the same ceiling.
+Broader54769/39058 is not debt. Supplied pools82 ->79 (77 external +2 private),
+provisional M0/D42/S37 and55 qualified openings. Signed-head complexity is
+recorded with the checkpoint. Receipts: ~/.cache/swarm-2542-family145/run-state-*
+on vemew. Ordinary testsGo1.25.0 while #2622 is OPEN; U1000Go1.26.8, with
+ordinary runs switching after its merge.
+
+Non-closure-bearing diagnostic note: the manager printed lifecycle diagnostic
+projection failed warnings. The exact pre-group consumer at f03f2b9c3, overlaid
+without any caller migration, reproduces the same warning under race while
+passing7.756s. This proves the pre-group fixture warning, NOT clean-master
+inheritance or its cause. No successful diagnostic-persistence claim is made;
+the residual diagnostic observation is recorded here/#2542, not silently fixed
+as a production change or waived as pressure. Its source/runtime diagnosis and
+broader #2542/#2151, M01/Docker/drain/D3/M07/rollback holds remain open.
+
+Closure is this complete construction/readback/held-work fixture dependency,
+not parent elimination. Existing watchlist and narrow native-owner architecture
+disposition stand; no new issue/framework, compatibility seam or ownership
+decision. No push, PR, server2, tier/full, timeout/budget raise, assertion
+weakening, generic SQL allowance or ratchet/classifier relaxation.

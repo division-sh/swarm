@@ -10,6 +10,68 @@ type StandaloneRunStorage struct {
 	RunID, Status, TriggerEventType string
 }
 
+type PostgresRunCompletionIdentityStorage struct{ RunID, BundleHash string }
+type PostgresRunStatusClockStorage struct {
+	Status  string
+	EndedAt sql.NullTime
+}
+type PostgresRunStatusCountsStorage struct {
+	Status                  string
+	EventCount, EntityCount int
+}
+
+func ReadPostgresRunCompletionIdentityStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (PostgresRunCompletionIdentityStorage, error) {
+	var out PostgresRunCompletionIdentityStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT r.run_id::text, r.bundle_hash
+		FROM events e
+		JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+	`, eventID).Scan(&out.RunID, &out.BundleHash)
+	if err != nil {
+		return PostgresRunCompletionIdentityStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresRunStatusClockStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusClockStorage, error) {
+	var out PostgresRunStatusClockStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&out.Status, &out.EndedAt)
+	if err != nil {
+		return PostgresRunStatusClockStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresRunStatusCountsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusCountsStorage, error) {
+	var out PostgresRunStatusCountsStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&out.Status, &out.EventCount, &out.EntityCount)
+	if err != nil {
+		return PostgresRunStatusCountsStorage{}, err
+	}
+	return out, nil
+}
+
+func CountPostgresExtraRunningStatusRowsTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runs
+		WHERE run_id <> $1::uuid
+		  AND status = 'running'
+	`, runID).Scan(&count)
+	return count, err
+}
+
 func ReadPostgresRunTriggerEventIdentityStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 	var eventID string
 	err := tx.QueryRowContext(ctx, `SELECT trigger_event_id::text FROM runs WHERE run_id = $1::uuid`, runID).Scan(&eventID)

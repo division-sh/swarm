@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
@@ -204,15 +204,11 @@ func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, source runt
 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, eventID string) {
 	t.Helper()
-	var runID, bundleHash string
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(runStatusAuthorActivityContext(source), `
-		SELECT r.run_id::text, r.bundle_hash
-		FROM events e
-		JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-	`, eventID).Scan(&runID, &bundleHash); err != nil {
+	identity, err := storetest.ReadPostgresRunCompletionIdentityStorage(runStatusAuthorActivityContext(source), pg, eventID)
+	if err != nil {
 		t.Fatalf("load completion candidate identity: %v", err)
 	}
+	runID, bundleHash := identity.RunID, identity.BundleHash
 	if _, err := storetest.ExecuteRunCompletionCandidate(
 		runStatusAuthorActivityContext(source), pg, bundleHash, runID,
 		stagecatalogfixture.NewFinalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
@@ -243,33 +239,22 @@ func TestCLI_ServeRetiredPlatformSpecWritesOnlyStderr(t *testing.T) {
 	}
 }
 
-func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEvents int) {
+func waitRunStatusEventSettlement(t *testing.T, selected any, runID string, wantEvents int) {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		var (
-			eventCount       int
-			activeDeliveries int
-		)
-		err := db.QueryRowContext(ctx, `
-			SELECT
-				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name <> 'platform.runtime_log'),
-				(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
-		`, runID).Scan(&eventCount, &activeDeliveries)
+		observed, err := storetest.ReadPostgresRunStatusSettlementStorage(ctx, selected, runID)
+		eventCount, activeDeliveries := observed.EventCount, observed.ActiveDeliveries
 		if err == nil && eventCount >= wantEvents && activeDeliveries == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			rows, queryErr := db.QueryContext(ctx, `SELECT status, COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries WHERE run_id=$1::uuid`, runID)
+			rows, queryErr := storetest.ReadPostgresRunStatusFailureDiagnosticsStorage(ctx, selected, runID)
 			if queryErr == nil {
-				for rows.Next() {
-					var status, failure string
-					if scanErr := rows.Scan(&status, &failure); scanErr == nil {
-						t.Logf("delivery status=%s failure=%s", status, failure)
-					}
+				for _, row := range rows {
+					t.Logf("delivery status=%s failure=%s", row.Status, row.Failure)
 				}
-				rows.Close()
 			}
 			t.Fatalf("run %s did not settle after release: last err=%v event_count=%d want_events=%d active_deliveries=%d", runID, err, eventCount, wantEvents, activeDeliveries)
 		}
@@ -278,8 +263,7 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 }
 
 func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	eb, _, source := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg, source)
 	runID := uuid.NewString()
@@ -292,12 +276,9 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var endedAt sql.NullTime
 	for {
-		var status string
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), ended_at
-			FROM runs
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&status, &endedAt)
+		observed, err := storetest.ReadPostgresRunStatusClockStorage(ctx, pg, runID)
+		status := observed.Status
+		endedAt = observed.EndedAt
 		if err == nil && status == "completed" && endedAt.Valid {
 			break
 		}
@@ -312,13 +293,13 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 }
 
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	eb, workOwner, source := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg, source)
 
 	agentStarted := make(chan struct{}, 1)
 	releaseAgent := make(chan struct{})
+	releaseAgentWork := sync.OnceFunc(func() { close(releaseAgent) })
 	testAgent := delayedRunStatusAgent{
 		id:            "agent-1",
 		subscriptions: []events.EventType{"scan.requested"},
@@ -339,13 +320,18 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
+	defer func() {
+		releaseAgentWork()
+		if err := am.Shutdown(); err != nil {
+			t.Errorf("join run-status manager: %v", err)
+		}
+	}()
 	runID := uuid.NewString()
 	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
-	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
@@ -364,19 +350,16 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		entityCount      int
 		activeDeliveries int
 	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count,
-		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&status, &eventCount, &entityCount); err != nil {
+	observed, err := storetest.ReadPostgresRunStatusCountsStorage(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("load in-flight run row: %v", err)
 	}
+	status, eventCount, entityCount = observed.Status, observed.EventCount, observed.EntityCount
 	if status != "running" {
 		t.Fatalf("in-flight run status = %q, want running", status)
 	}
-	var semanticCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid AND event_name <> 'platform.runtime_log'`, runID).Scan(&semanticCount); err != nil {
+	semanticCount, err := storetest.CountPostgresRunStatusSemanticEvents(ctx, pg, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if semanticCount != 1 || eventCount < semanticCount {
@@ -385,30 +368,22 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if entityCount != 1 {
 		t.Fatalf("in-flight entity_count = %d, want 1", entityCount)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		  AND status IN ('pending', 'in_progress')
-	`, runID).Scan(&activeDeliveries); err != nil {
+	activeDeliveries, err = storetest.CountPostgresRunStatusActiveDeliveries(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("count active deliveries: %v", err)
 	}
 	if activeDeliveries == 0 {
 		t.Fatal("expected active delivery while agent work is blocked")
 	}
 
-	close(releaseAgent)
-	waitRunStatusEventSettlement(t, db, runID, 2)
+	releaseAgentWork()
+	waitRunStatusEventSettlement(t, pg, runID, 2)
 	markRunStatusCompleted(t, pg, source, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), event_count,
-			       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
-			FROM runs
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&status, &eventCount, &entityCount)
+		observed, err := storetest.ReadPostgresRunStatusCountsStorage(ctx, pg, runID)
+		status, eventCount, entityCount = observed.Status, observed.EventCount, observed.EntityCount
 		if err == nil && status == "completed" {
 			break
 		}
@@ -423,13 +398,8 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if entityCount != 1 {
 		t.Fatalf("completed entity_count = %d, want 1", entityCount)
 	}
-	var extraRunningRows int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runs
-		WHERE run_id <> $1::uuid
-		  AND status = 'running'
-	`, runID).Scan(&extraRunningRows); err != nil {
+	extraRunningRows, err := storetest.CountPostgresExtraRunningStatusRows(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("count extra running rows: %v", err)
 	}
 	if extraRunningRows != 0 {
@@ -438,13 +408,13 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 }
 
 func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	eb, workOwner, source := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg, source)
 
 	agentStarted := make(chan struct{}, 1)
 	releaseAgent := make(chan struct{})
+	releaseAgentWork := sync.OnceFunc(func() { close(releaseAgent) })
 	testAgent := delayedRunStatusAgent{
 		id:            "agent-1",
 		subscriptions: []events.EventType{"scan.requested"},
@@ -465,13 +435,18 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
+	defer func() {
+		releaseAgentWork()
+		if err := am.Shutdown(); err != nil {
+			t.Errorf("join run-status manager: %v", err)
+		}
+	}()
 	runID := uuid.NewString()
 	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
-	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
@@ -491,25 +466,19 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		activeDeliveries int
 		endedAt          sql.NullTime
 	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), ended_at
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&status, &endedAt); err != nil {
+	observed, err := storetest.ReadPostgresRunStatusClockStorage(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("load timed-out run row: %v", err)
 	}
+	status, endedAt = observed.Status, observed.EndedAt
 	if status != "running" {
 		t.Fatalf("timed-out run status = %q, want running", status)
 	}
 	if endedAt.Valid {
 		t.Fatalf("timed-out run ended_at = %s, want NULL while same-run work remains active", endedAt.Time)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		  AND status IN ('pending', 'in_progress')
-	`, runID).Scan(&activeDeliveries); err != nil {
+	activeDeliveries, err = storetest.CountPostgresRunStatusActiveDeliveries(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("count active deliveries after timeout window: %v", err)
 	}
 	if activeDeliveries == 0 {
@@ -518,17 +487,14 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	if got := workOwner.ActiveCount(); got == 0 {
 		t.Fatal("expected runtime occurrence to retain active manager work after shutdown timeout window")
 	}
-	close(releaseAgent)
-	waitRunStatusEventSettlement(t, db, runID, 2)
+	releaseAgentWork()
+	waitRunStatusEventSettlement(t, pg, runID, 2)
 	markRunStatusCompleted(t, pg, source, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), ended_at
-			FROM runs
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&status, &endedAt)
+		observed, err := storetest.ReadPostgresRunStatusClockStorage(ctx, pg, runID)
+		status, endedAt = observed.Status, observed.EndedAt
 		if err == nil && status == "completed" && endedAt.Valid {
 			break
 		}
