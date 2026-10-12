@@ -334,6 +334,9 @@ type mockCompletionInput struct {
 }
 
 func buildMockRequest(_ context.Context, session *Session, message Message) (mockCompletionInput, error) {
+	if err := ValidateProviderToolDefinitions(session.Tools); err != nil {
+		return mockCompletionInput{}, err
+	}
 	messages := append([]Message(nil), session.Messages...)
 	messages = append(messages, message)
 	input := mockCompletionInput{

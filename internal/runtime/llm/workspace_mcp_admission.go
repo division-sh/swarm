@@ -131,6 +131,9 @@ func compareWorkspaceMCPDefinitions(expected map[string]string, definitions []to
 		if !exists || ToolDefinitionIdentity(ToolDefinition{Name: name, Description: definition.Description, Schema: schema}) != hash {
 			return workspaceMCPDefinitionMismatch(name, "unplanned_or_changed_definition")
 		}
+		if err := ValidateProviderToolSchema(name, schema); err != nil {
+			return failures.Wrap(failures.ClassSchemaInvalid, "managed_capability_mcp_definition_mismatch", "llm-runtime", "observe_mcp", map[string]any{"tool": name, "reason": "invalid_input_schema"}, err)
+		}
 	}
 	for name := range expected {
 		if !seen[name] {
