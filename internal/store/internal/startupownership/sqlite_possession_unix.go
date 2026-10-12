@@ -142,10 +142,6 @@ func prevalidateSQLiteDatabasePath(path string, createDatabase bool) error {
 	return nil
 }
 
-func acquireSQLitePossessionCoordinate(path string) (*os.File, os.FileInfo, error) {
-	return openSQLitePossessionCoordinate(path, true)
-}
-
 func openSQLitePossessionCoordinate(path string, create bool) (*os.File, os.FileInfo, error) {
 	return lockSQLitePossessionCoordinate(context.Background(), path, create, false)
 }
