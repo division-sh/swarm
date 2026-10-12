@@ -1,9 +1,12 @@
 # Pre-Implementation Coverage Audit: Provider JSON-Schema Subset Family
 
-Agent-g, 2026-10-12. Source `cc369e5eb5aa79d18fa5792a8e95b2d860bc370d`
-(`origin/master`); separate worktree/branch from pending PR2626. **Gate requested,
+Agent-g, 2026-10-12. Integrated source `730c17b988303b84c1a82bb6345fa25d600784d8`
+(actual Go1.26 master after2622); separate worktree/branch from pending PR2626. **Gate requested,
 not approved. No production/test/spec edits.** A PR2626 finding takes priority.
-Integrate the actual Go1.26 master when2622 merges; never qualify a guessed base.
+The original intake source wascc369e5eb5.2622 actually merged; this audit-only
+branch is rebased, not speculatively stacked. Target provider-schema blob is
+unchanged across both masters and PR2626. Old Go1.25 controls remain historical
+baseline evidence, not new Go1.26 execution credit.
 
 ## Binding Context And Proposed Class
 
@@ -116,7 +119,7 @@ these exact subtests. These are planned proofs, not assertions of execution:
 | C05 | Frozen fork-chat admission | Same root/forkchat; exact authority remains earlier, invalid schema refuses before freezing; existing freeze/foreign actor tests unchanged |
 | Q01 | Real public supported surface | TestWorkspaceMCPCompiledHostConformance runs actual compiled swarm test, real host worker, HTTP MCP/read/emit and settlement, private SQLite only. Separately run named SQLite/PostgreSQL generated-schema/runtime-tool tests through their existing selected-store fixtures; those are component/store proofs, NOT a second compiled public backend. Direct Compatible/Responses local HTTP controls and fork-chat fakeToolExec authority controls are not public or genuine-provider proof. No paid provider/Docker credit. |
 | Q02 | Whole-family complexity/size | Exact independent base/head ratchet; every changed/new callable <25, same metric policy, gross/net production counts reported |
-| Q03 | Complete current qualification | Full census/inventory/registry and core structural guards locally; per6117588660 hosted lifecycle/no extra units and Local focused, no duplicate local tier; exact final head after actual2622 integration |
+| Q03 | Complete current qualification | Full census/inventory/registry and core structural guards locally; per6117588660 hosted lifecycle/no extra units and Local focused, no duplicate local tier; exact final head on the now-integrated Go1.26 master |
 | A01 | Anthropic accepts a canonically invalid delivered schema | **split / escalated as separate class to2627**. Independent6117588660 direct red probe: validator rejects bad={type:unsupported-provider-type}; Anthropic buildRequest returns nil error and the same bad schema. This proves the adapter-boundary mismatch only, NOT public-route reachability or a provider response. No repair/closure credit in this maintenance PR. |
 
 Generic failing proofs: separately omit recursive property walk, oneOf recursion,
@@ -176,8 +179,17 @@ unresolved/nested-enum, boot mapping and compatible/Responses frame controls,
 race x3,36 pass terminals, no failure/skip: llm1.189s, tools2.483s,
 bootverify1.064s. Evidence next-provider-schema-baseline.jsonl. No new
 characterization, mutation, public/dual-store candidate, tier or closure credit.
+After the actual730c17b98 integration, the same roots plus the named Claude
+projection/construction and fork-authority controls pass race x3 under effective
+GOVERSION go1.26.8:81 pass terminals, zero fail/skip; llm1.248s, tools2.631s,
+bootverify1.081s. Evidence next-provider-schema-go126-baseline.jsonl. These are
+unchanged component/local-HTTP/stub controls, NOT new public or genuine-provider
+proof. No production/test/spec edits were made to obtain them.
 No server2 request. Current PR2626 has code-positive cycle2 review and green
-hosted lifecycle38200300122 attempt1 atdb3d74011; findings there preempt this branch.
+Go1.25 hosted lifecycle38200300122 attempt1 atdb3d74011. Per the user, its branch
+stays frozen and the orchestrator started ONE fresh hosted38203162730 on the new
+Go1.26 merge ref; do not toggle/push it or treat the old version as new-version
+credit. Findings there preempt this audit-only branch.
 
 Overlap: paginated inventories2612/2614/2616/2617/2622/2624/2626 and A642 local
 branch803e2c691 show no target/direct-test edit.2614 changes nearby tool catalog
