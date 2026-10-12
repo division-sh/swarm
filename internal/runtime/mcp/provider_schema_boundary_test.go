@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/google/uuid"
 )
 
@@ -101,6 +105,54 @@ func TestProviderSchemaGatewayAdmission(t *testing.T) {
 			t.Fatalf("actor bytes=%s, want %s", raw, want)
 		}
 	})
+	t.Run("fork/frozen", testProviderSchemaFrozenForkCatalog)
+}
+
+func testProviderSchemaFrozenForkCatalog(t *testing.T) {
+	actor := models.AgentConfig{ID: "schema-fork-agent"}
+	forkTurnID := uuid.NewString()
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityConversationForkChat, ID: forkTurnID, ExecutionOwner: "schema-owner",
+		LeaseExpiresAt: time.Now().Add(time.Minute), FenceGeneration: 1, ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ForkChat: runtimeeffects.ConversationForkChatAuthority{ForkTurnID: forkTurnID, ForkID: uuid.NewString(),
+			SourceRunID: uuid.NewString(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
+			ActorTokenID: "schema-actor", RequestOccurrenceID: uuid.NewString(), RequestHash: "schema-request"},
+	}
+	ctx := models.WithActor(runtimeeffects.WithAuthority(context.Background(), authority), actor)
+	definition := llm.ToolDefinition{Name: "read_file", Description: "frozen description", Schema: map[string]any{"type": "object", "properties": map[string]any{}}}
+	sandboxCalls, liveCalls := 0, 0
+	sandbox := actorScopedToolExecutorStub{actorDefs: []llm.ToolDefinition{definition}, callCount: &sandboxCalls}
+	runtime := &projectionForkRuntime{}
+	conversation, err := llm.NewForkChatConversation(actor.ID, "", "", sandbox.actorDefs, agentmemory.Plan{}, 2, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation.SetToolExecutor(sandbox)
+	if _, err := conversation.RunForkChat(ctx, "capture frozen schema dispatch"); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	token := registry.RegisterConversationForkSandboxTurnContext(runtime.ctx, time.Minute, []string{definition.Name})
+	if token == "" {
+		t.Fatal("exact fork authority did not register its frozen dispatch")
+	}
+	defer registry.UnregisterTurnContext(token)
+	definition.Schema.(map[string]any)["type"] = "unsupported-provider-type"
+	live := &leasedCatalogExecutorStub{actorScopedToolExecutorStub: actorScopedToolExecutorStub{callCount: &liveCalls}, leasedDefinitions: []llm.ToolDefinition{definition}}
+	server := httptest.NewServer(NewGateway(live, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext, WithActor: models.WithActor, ActorFromContext: models.ActorFromContext,
+	}).Handler())
+	defer server.Close()
+	tools, err := (toolgateway.HTTPObservation{URL: server.URL + "/mcp", Headers: map[string]string{
+		"Authorization": "Bearer " + testGatewayToken, "X-SWARM-Context-Token": token,
+	}}).Probe(ctx)
+	if err != nil || len(tools) != 1 {
+		t.Fatalf("frozen tools/list failed: tools=%v err=%v", tools, err)
+	}
+	want := `{"properties":{},"type":"object"}`
+	if tools[0].Name != definition.Name || tools[0].Description != "frozen description" || string(tools[0].InputSchema) != want || sandboxCalls != 0 || liveCalls != 0 || live.acquired != 0 {
+		t.Fatalf("frozen list used mutable/live authority: tools=%v sandbox=%d live=%d leases=%d", tools, sandboxCalls, liveCalls, live.acquired)
+	}
 }
 
 func providerSchemaGatewaySurface(t testing.TB, kind managedcapabilities.ExecutionKind, definitions []llm.ToolDefinition, startup bool) (context.Context, managedcapabilities.Surface) {

@@ -7606,7 +7606,8 @@ engine:
             tools/list schema, and target-observed MCP definition before request dispatch, list/evidence publication, or
             observed confirmation. Validate the selected/defaulted projection, not unrelated hidden catalog entries.
             Earlier source admission and exact definition identity do not substitute for this final schema admission.
-            Refusal returns no partial request, list, or confirmation and must occur before model/worker launch; existing
+            Refusal returns no partial request, list, or confirmation and must occur before model execution or its worker
+            launch; a target-local observation worker earns probe evidence only and cannot execute the model. Existing
             actor, token, identity, credential, memory, message, and lease authority retain their earlier gate precedence.
           - Platform tool results must be returned through the provider adapter in a normalized message form.
         session_lifecycle:
