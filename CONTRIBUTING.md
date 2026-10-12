@@ -37,9 +37,11 @@ go run ./cmd/swarm-openrpc-gen --check
 
 `go run ./cmd/swarm-unused` defaults to native-only analysis on the current
 host, not the complete CI platform union. The guard internally pins its analysis
-toolchain to Go 1.26.8 and Staticcheck v0.8.1; product Go setup and `go.mod` are
-unchanged. Full-tier CI collects native Linux and Darwin results with tests
-enabled for default, race, and `issue2413` configurations, then uses upstream
+toolchain to Go 1.26.8 and Staticcheck v0.8.1. Product builds follow the root
+[`go.mod`](go.mod); see the [development requirements](README.md#development)
+for its minimum and preferred toolchain. Full-tier CI collects native Linux
+and Darwin results with tests enabled for default, race, and `issue2413`
+configurations, then uses upstream
 binary merge semantics: a declaration reachable in any admitted variant is
 live. Collection does not fail on U1000; the source-bound merged check does.
 Missing, skipped, or failed native collection cannot satisfy required CI.

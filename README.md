@@ -245,7 +245,13 @@ Available in this repo too:
 
 ## Development
 
-Requirements: Go 1.25. Docker is the default workspace-isolation backend; an
+Requirements: Go 1.26.0 or newer, with Go 1.26.8 as the preferred toolchain
+in [`go.mod`](go.mod). With `GOTOOLCHAIN=auto`, Go can select or download a
+newer toolchain when needed. For offline builds or `GOTOOLCHAIN=local`, install
+a compatible Go toolchain yourself; Go 1.26.8 is recommended, and Go 1.25
+cannot build this module without a toolchain switch.
+
+Docker is the default workspace-isolation backend; an
 explicit host backend is available for local-dev or trusted remote work (see
 [`swarm.example.yaml`](swarm.example.yaml)). Host backend command execution is
 trusted/unsafe: native `bash` commands run as the host user when both host
