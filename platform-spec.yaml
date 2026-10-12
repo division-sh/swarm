@@ -40931,6 +40931,23 @@ agent_topology_authority:
       from a healthy silent server and does not prove remote release. All outstanding proof/readback/cleanup remains
       owned and joined before dependency release. Caller cancellation and monitor shutdown alone do not create
       possession loss, and late transition/proof success cannot overwrite an established terminal decision.
+      Prepared startup effects, ordinary grant-backed probes and provider registration, and selected
+      materialization/issuance/claim/control operations consume the actual native capability bound by private
+      acquisition composition. Closed typed synchronous store commands hold the existing process-operation
+      serialization from native proof through the original store transaction's acknowledged outcome and
+      cleanup; a separate proof followed by an unlocked write is forbidden. Native admission precedes SQL.
+      Existing transactional generation, grant-state/version, preparation, receipt and source/fingerprint
+      checks remain required. Missing, released, locally fenced or foreign bindings cannot authorize new
+      operations, and stale preparation cannot redirect onto a successor, including same-boot reacquisition.
+      A private exact-owner invocation scope exists only during that synchronous command and ends before
+      process serialization is released; caller cancellation does not retire admitted cleanup ownership,
+      but retaining a WithoutCancel context cannot revive the ended scope or nest another command.
+      This scope is neither a durable liveness bit nor another permission authority. It exposes no SQL or
+      arbitrary callback, never spans external provider I/O, and cannot replace the accepted work lifetime.
+      Last-owner stamp comparisons remain history/fencing evidence only. Read-only historical recovery
+      needs no process acquisition, and accepted-result response/settlement/drain retains its separate
+      exact-operation/origin rules rather than being blanket-fenced as new work. Selected control requests
+      carry canonical lease stamps as data; their store operation independently proves retained possession.
     lifecycle_reconciliation: >-
       Every durable static and flow-readiness lifecycle cell carries the exact process authority, owner, boot,
       generation grant, bundle source coordinate, runtime instance, and runtime generation allowed to execute it.

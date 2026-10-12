@@ -29,7 +29,9 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/lib/pq"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -324,9 +326,22 @@ func newTestPostgresStore(t *testing.T, db *sql.DB) *PostgresStore {
 	return pg
 }
 
-func admitTestPostgresStore(t testing.TB, db *sql.DB) *PostgresStore {
+func admitTestPostgresStore(t testing.TB, db *sql.DB, inspection ...pq.Config) *PostgresStore {
 	t.Helper()
-	pg := NewPostgresStoreForTest(db)
+	if len(inspection) > 1 {
+		t.Fatal("native PostgreSQL fixture accepts one inspection config")
+	}
+	var backend *postgresbackend.Backend
+	var err error
+	if len(inspection) == 0 {
+		backend, err = postgresbackend.New(db)
+	} else {
+		backend, err = postgresbackend.NewWithInspectionConfig(db, inspection[0])
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := newPostgresStoreWithBackend(backend)
 	bootstrapTestPostgresStore(t, pg)
 	return pg
 }

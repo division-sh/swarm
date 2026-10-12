@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -116,6 +117,11 @@ func (s *RunForkPostgresOwner) requireRunForkSelectedContractExecutionAccess() e
 }
 
 func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkMaterialize, s) {
+		var materialized runfork.RunForkMaterialization
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkMaterializeOperation(s, req, req.Preparation, &materialized))
+		return materialized, err
+	}
 	if s == nil || s.backend == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
@@ -123,6 +129,10 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 }
 
 func (s *RunForkSQLiteOwner) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (materialization runfork.RunForkMaterialization, err error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkMaterialize, s) {
+		err = runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkMaterializeOperation(s, req, req.Preparation, &materialization))
+		return materialization, err
+	}
 	if s == nil || s.backend == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("sqlite store is required")
 	}

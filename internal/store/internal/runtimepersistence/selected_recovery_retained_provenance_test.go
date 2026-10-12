@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -58,8 +60,7 @@ func TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothS
 					case "future_generation":
 						bad.Preparation.ProcessGeneration++
 					}
-					if _, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, bad); err == nil ||
-						!strings.Contains(err.Error(), "process is no longer current") {
+					if _, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, bad); !errors.Is(err, startupownership.ErrProcessNotCurrent) {
 						t.Fatalf("%s bypassed native issuance admission: %v", field, err)
 					}
 					var count int

@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
@@ -64,27 +65,49 @@ type canceledTurnPublicationOwner interface {
 }
 
 type EffectPostgresOwner struct {
-	channelChanges *render.ReconcileSignal
-	backend        *postgresbackend.Backend
-	requireCurrent func() error
-	lifecycle      mutationprotocol.CandidateWriter
-	candidates     *storerunhandoff.CandidateCoordinator
-	llm            *storellm.LLMPostgresOwner
-	delivery       providerDrainDeliveryOwner
-	directives     providerDrainDirectiveOwner
-	publications   canceledTurnPublicationOwner
+	processOperations preparedProcessOwner
+	channelChanges    *render.ReconcileSignal
+	backend           *postgresbackend.Backend
+	requireCurrent    func() error
+	lifecycle         mutationprotocol.CandidateWriter
+	candidates        *storerunhandoff.CandidateCoordinator
+	llm               *storellm.LLMPostgresOwner
+	delivery          providerDrainDeliveryOwner
+	directives        providerDrainDirectiveOwner
+	publications      canceledTurnPublicationOwner
 }
 
 type EffectSQLiteOwner struct {
-	channelChanges *render.ReconcileSignal
-	backend        *sqlitebackend.Backend
-	requireCurrent func() error
-	lifecycle      mutationprotocol.CandidateWriter
-	candidates     *storerunhandoff.CandidateCoordinator
-	llm            *storellm.LLMSQLiteOwner
-	delivery       providerDrainDeliveryOwner
-	directives     providerDrainDirectiveOwner
-	publications   canceledTurnPublicationOwner
+	processOperations preparedProcessOwner
+	channelChanges    *render.ReconcileSignal
+	backend           *sqlitebackend.Backend
+	requireCurrent    func() error
+	lifecycle         mutationprotocol.CandidateWriter
+	candidates        *storerunhandoff.CandidateCoordinator
+	llm               *storellm.LLMSQLiteOwner
+	delivery          providerDrainDeliveryOwner
+	directives        providerDrainDirectiveOwner
+	publications      canceledTurnPublicationOwner
+}
+
+type preparedProcessOwner interface {
+	RunPreparedProcessOperation(context.Context, runtimeownership.PreparedProcessOperation) error
+}
+
+func (s *EffectPostgresOwner) BindPreparedProcessOwner(owner preparedProcessOwner) error {
+	if owner == nil || s.processOperations != nil {
+		return errors.New("PostgreSQL effects require one prepared process owner binding")
+	}
+	s.processOperations = owner
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindPreparedProcessOwner(owner preparedProcessOwner) error {
+	if owner == nil || s.processOperations != nil {
+		return errors.New("SQLite effects require one prepared process owner binding")
+	}
+	s.processOperations = owner
+	return nil
 }
 
 func (s *EffectPostgresOwner) BindCanceledTurnPublication(owner canceledTurnPublicationOwner) error {

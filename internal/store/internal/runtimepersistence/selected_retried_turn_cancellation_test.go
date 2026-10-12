@@ -132,7 +132,7 @@ func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
 				if err != nil || len(entries) != 1 {
 					t.Fatalf("selected retry recovery entry: %+v %v", entries, err)
 				}
-				request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+				request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
 				pending, err := recovery.RecoverSelectedFork(ctx, request)
 				turns := pending.PendingCancellations
 				currentAttempt, firstLaunch := "", ""

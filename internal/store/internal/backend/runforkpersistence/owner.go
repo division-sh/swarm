@@ -13,6 +13,7 @@ import (
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -58,6 +59,7 @@ var cloneConversationToolCalls = storeoperatorsurface.CloneConversationToolCalls
 var cloneConversationToolResults = storeoperatorsurface.CloneConversationToolResults
 
 type RunForkPostgresOwner struct {
+	processOperations    preparedProcessOwner
 	lifecycleDiagnostics lifecycleDiagnosticObservations
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
@@ -76,6 +78,7 @@ type RunForkPostgresOwner struct {
 }
 
 type RunForkSQLiteOwner struct {
+	processOperations    preparedProcessOwner
 	lifecycleDiagnostics lifecycleDiagnosticObservations
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
@@ -92,6 +95,33 @@ type RunForkSQLiteOwner struct {
 	apiIdempotency *storeapiidempotency.SQLiteOwner
 	candidates     *storerunhandoff.CandidateCoordinator
 	channelChanges *runtimechanneldelivery.ReconcileSignal
+}
+
+type preparedProcessOwner interface {
+	RunPreparedProcessOperation(context.Context, runtimeownership.PreparedProcessOperation) error
+}
+
+func runPreparedForkOperation(ctx context.Context, owner preparedProcessOwner, operation runtimeownership.PreparedProcessOperation) error {
+	if owner == nil {
+		return runtimeownership.ErrProcessNotCurrent
+	}
+	return owner.RunPreparedProcessOperation(ctx, operation)
+}
+
+func (s *RunForkPostgresOwner) BindPreparedProcessOwner(owner preparedProcessOwner) error {
+	if owner == nil || s.processOperations != nil {
+		return errors.New("PostgreSQL forks require one prepared process owner binding")
+	}
+	s.processOperations = owner
+	return nil
+}
+
+func (s *RunForkSQLiteOwner) BindPreparedProcessOwner(owner preparedProcessOwner) error {
+	if owner == nil || s.processOperations != nil {
+		return errors.New("SQLite forks require one prepared process owner binding")
+	}
+	s.processOperations = owner
+	return nil
 }
 
 func (s *RunForkPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {

@@ -90,7 +90,7 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 			return results, errors.Join(diagnostics, err)
 		}
 		runCtx := authoractivity.WithScope(correlation.WithSourceArtifactFact(ctx, fact), authoractivity.BundleScope(process.RuntimeInstanceID, entry.BundleHash))
-		result, err := ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req})
+		result, err := ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process.LeaseStamp(), Effects: req})
 		if result.RunID != entry.Binding.ForkRunID {
 			return results, errors.Join(diagnostics, err, fmt.Errorf("recover selected fork %s: missing or mismatched acknowledged result", entry.Binding.ForkRunID))
 		}
@@ -105,7 +105,7 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 			if err != nil {
 				return results, errors.Join(diagnostics, err)
 			}
-			result, err = o.settleRecoveredSelectedCancellations(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req}, result, environment)
+			result, err = o.settleRecoveredSelectedCancellations(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process.LeaseStamp(), Effects: req}, result, environment)
 			if err != nil {
 				return append(results, result), errors.Join(diagnostics, err)
 			}

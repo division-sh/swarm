@@ -30,7 +30,7 @@ func TestSelectedForkStopAuthorityBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: fixture.forkRun}, Binding: binding, Process: process}
+			req := runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: fixture.forkRun}, Binding: binding, Process: process.LeaseStamp()}
 			assertUnchanged := func() {
 				t.Helper()
 				var forkStatus, sourceStatus string
@@ -60,9 +60,9 @@ func TestSelectedForkStopAuthorityBothStores(t *testing.T) {
 					r.Binding.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: "bundle-v2:sha256:" + strings.Repeat("9", 64)}
 				}},
 				{"created", func(r *runcontrol.SelectedStopRequest) { r.Binding.CreatedAt = r.Binding.CreatedAt.Add(time.Second) }},
-				{"process", func(r *runcontrol.SelectedStopRequest) { r.Process.AuthorityID = uuid.NewString() }},
+				{"process", func(r *runcontrol.SelectedStopRequest) { r.Process.LeaseID = uuid.NewString() }},
 				{"boot", func(r *runcontrol.SelectedStopRequest) { r.Process.BootID = uuid.NewString() }},
-				{"generation", func(r *runcontrol.SelectedStopRequest) { r.Process.AuthorityGeneration++ }},
+				{"generation", func(r *runcontrol.SelectedStopRequest) { r.Process.Generation++ }},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					bad := req
@@ -131,7 +131,7 @@ func TestSelectedForkStopAuthorityBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.StopSelectedFork(ctx, runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: queued.forkRun}, Binding: queuedBinding, Process: process}); err != nil {
+			if _, err := store.StopSelectedFork(ctx, runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: queued.forkRun}, Binding: queuedBinding, Process: process.LeaseStamp()}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := selected.ClaimRunForkSelectedContractRuntimeExecution(ctx, queuedExecution, "claim-after-stop", time.Minute); err == nil {

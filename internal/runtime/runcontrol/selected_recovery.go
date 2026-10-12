@@ -4,15 +4,15 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
 type SelectedForkRecoveryRequest struct {
 	Entry         runfork.SelectedForkRecoveryEntry
-	Process       startupownership.Authority
+	Process       processbinding.LeaseStamp
 	Effects       effects.RecoveryRequest
 	Cancellations []effects.CanceledTurnCommand
 }
