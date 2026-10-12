@@ -132,6 +132,7 @@ type ProcessCapability interface {
 	runtimedestructivereset.OperationStore
 	Evidence() (Authority, error)
 	ProveCurrent(context.Context) error
+	RunPreparedOperation(context.Context, PreparedProcessOperation) error
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
 	IssueGenerationGrant(context.Context, GrantRequest) (LiveGenerationGrant, error)
 	IssueSelectedForkGenerationGrant(context.Context, SelectedForkGrantRequest) (GenerationGrant, error)

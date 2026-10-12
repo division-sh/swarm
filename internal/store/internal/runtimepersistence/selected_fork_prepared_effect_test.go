@@ -20,7 +20,8 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			store := fixture.store.(startupAuthorityParityStore)
 			ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
-			capability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("prepared-probe-process"))
+			acquire := testStartupAcquireRequest("prepared-probe-process")
+			capability, err := store.AcquireProcessCapability(ctx, acquire)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,6 +162,15 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			acceptedRequest := request
+			acceptedRequest.OperationID, acceptedRequest.AttemptID = uuid.NewString(), uuid.NewString()
+			accepted, err := controller.Authorize(effects.WithAuthority(ctx, authority), acceptedRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.MarkExternalAttemptLaunched(ctx, accepted, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
 			if err := capability.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -185,6 +195,35 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			}
 			if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, request.OperationID); err != nil || found {
 				t.Errorf("refused authorization persisted an operation: %+v found=%v err=%v", outcome, found, err)
+			}
+			if err := store.MarkExternalAttemptResponseObserved(ctx, accepted, map[string]any{"accepted_before_release": true}, time.Now().UTC()); err != nil {
+				t.Fatalf("Release refused already accepted response evidence: %v", err)
+			}
+			if err := store.SettleExternalAttempt(ctx, effects.Settlement{OperationID: accepted.OperationID, AttemptID: accepted.AttemptID, Authority: authority, State: effects.StateSettled, Now: time.Now().UTC()}); err != nil {
+				t.Fatalf("Release refused already accepted result settlement: %v", err)
+			}
+			if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, accepted.OperationID); err != nil || !found || !outcome.TerminalSuccess() {
+				t.Errorf("accepted settlement evidence lost after Release: %+v found=%v err=%v", outcome, found, err)
+			}
+			// The same owner/boot/runtime inputs still mint a new native lease.
+			// A retained prepared value must never redirect onto that successor.
+			successor, err := store.AcquireProcessCapability(ctx, acquire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = successor.Release(context.Background()) })
+			next, err := successor.Evidence()
+			if err != nil || next.AuthorityID == process.AuthorityID || next.AuthorityGeneration != process.AuthorityGeneration+1 {
+				t.Fatalf("reacquisition reused native identity: %+v %v", next, err)
+			}
+			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
+				t.Errorf("stale preparation redirected currentness onto successor: %v %v", current, err)
+			}
+			if _, err := controller.Authorize(effects.WithAuthority(ctx, authority), request); err == nil {
+				t.Error("stale preparation authorized through successor")
+			}
+			if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
+				t.Error("stale preparation launched through successor")
 			}
 		})
 	}

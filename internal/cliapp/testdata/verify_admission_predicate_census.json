@@ -1539,7 +1539,7 @@
     "owner": "internal/runtime/runforkexecution/recovery.go::SelectedContractExecutionOwner.RecoverSelectedForkContexts",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "4d5caa9f7b66b0a5e0c09272c38ae8ba83b8ae9ce8e97f933df09257bc6c978d"
+    "body_sha256": "7533e1152b3331586952679ff4cf6b061eb61d9ab0e93fd780fed3d3523dd9b4"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery.go::admitSelectedRecoverySource",
@@ -3573,7 +3573,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "6e7717ec8dbdccd98141bf60a87ccc0073ea9468a58a40fadb7bdeb50d5b26d9"
+    "body_sha256": "0e902704540c7f5ffa813d85f92523a185526ae6e0ad8d0f595c12769a60e450"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.ListSelectedForkRecoveryEntries",
@@ -3585,7 +3585,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "2dc5a1314d39d41d91c140b72ea5987ec3123c8fa520a3a72d7f9293fb4bf2ee"
+    "body_sha256": "2bf7f0e6db2494ea94bff8eb6ded0f419d01869320f8fced0e542879ffb53108"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::admitSelectedRecoveryTx",
@@ -3621,7 +3621,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "7cb06c1034cb2ebe3325c53307ab2d1238e75afb79ca748fccbdcc029b4180d5"
+    "body_sha256": "9e997f8a66d89d876be8d0baab48a81ef301ecae0ce44ca52ac6127c561936b7"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",

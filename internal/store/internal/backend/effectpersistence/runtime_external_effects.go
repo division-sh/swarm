@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -199,11 +200,38 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 }
 
 func (s *EffectPostgresOwner) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
+	if processEffectAuthority(authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectCurrent, s) {
+		var current bool
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectCurrentOperation(s, authority, &current))
+		if errors.Is(err, runtimeownership.ErrProcessNotCurrent) {
+			return false, nil
+		}
+		return current, err
+	}
 	return externalEffectAuthorityCurrentPostgres(ctx, s.backend, authority)
 }
 
 func (s *EffectSQLiteOwner) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
+	if processEffectAuthority(authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectCurrent, s) {
+		var current bool
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectCurrentOperation(s, authority, &current))
+		if errors.Is(err, runtimeownership.ErrProcessNotCurrent) {
+			return false, nil
+		}
+		return current, err
+	}
 	return externalEffectAuthorityCurrentSQLite(ctx, s.backend, authority)
+}
+
+func processEffectAuthority(authority runtimeeffects.Authority) bool {
+	return authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration
+}
+
+func runPreparedEffectOperation(ctx context.Context, owner preparedProcessOwner, operation runtimeownership.PreparedProcessOperation) error {
+	if owner == nil {
+		return runtimeownership.ErrProcessNotCurrent
+	}
+	return owner.RunPreparedProcessOperation(ctx, operation)
 }
 
 func (s *EffectPostgresOwner) GetExternalEffectOutcome(ctx context.Context, operationID string) (runtimeeffects.OperationOutcome, bool, error) {
@@ -464,6 +492,11 @@ func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.Chann
 }
 
 func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if processEffectAuthority(authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectAuthorize, s) {
+		var attempt runtimeeffects.Attempt
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectAuthorizeOperation(s, authority, req, &attempt))
+		return attempt, err
+	}
 	if authority.StartupProbe.Preparation != nil {
 		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
 			return runtimeeffects.Attempt{}, err
@@ -621,6 +654,11 @@ func requireLaunchSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, a
 }
 
 func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if processEffectAuthority(authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectAuthorize, s) {
+		var attempt runtimeeffects.Attempt
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectAuthorizeOperation(s, authority, req, &attempt))
+		return attempt, err
+	}
 	if authority.StartupProbe.Preparation != nil {
 		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
 			return runtimeeffects.Attempt{}, err
@@ -1727,6 +1765,11 @@ func persistExternalAttemptLaunchPostgresTx(txctx context.Context, tx *sql.Tx, a
 }
 
 func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	if processEffectAuthority(attempt.Authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectLaunch, s) {
+		var launch runtimeeffects.ExternalAttemptLaunch
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectLaunchOperation(s, attempt, now, &launch))
+		return launch, err
+	}
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.ExternalAttemptLaunch{}, err
 	}
@@ -1789,6 +1832,11 @@ func persistExternalAttemptLaunchSQLiteTx(txctx context.Context, tx *sql.Tx, att
 }
 
 func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	if processEffectAuthority(attempt.Authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectLaunch, s) {
+		var launch runtimeeffects.ExternalAttemptLaunch
+		err := runPreparedEffectOperation(ctx, s.processOperations, runtimeownership.PreparedEffectLaunchOperation(s, attempt, now, &launch))
+		return launch, err
+	}
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.ExternalAttemptLaunch{}, err
 	}

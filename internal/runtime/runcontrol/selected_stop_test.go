@@ -6,13 +6,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
 func TestSelectedStopValidatesExactForkPointUnion(t *testing.T) {
-	process := startupownership.Authority{AuthorityID: uuid.NewString(), AuthorityGeneration: 1,
-		OwnerID: "selected-stop-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}
+	process := processbinding.LeaseStamp{LeaseIdentity: processbinding.LeaseIdentity{LeaseID: uuid.NewString(),
+		OwnerID: "selected-stop-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}, Generation: 1}
 	base := SelectedStopRequest{
 		Transition: TransitionRequest{RunID: uuid.NewString()},
 		Binding: runfork.RunForkSelectedContractBinding{

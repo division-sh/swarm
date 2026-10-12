@@ -9,14 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
 func selectedRecoveryRequestForPoint(t *testing.T, point runfork.RunForkPoint) SelectedForkRecoveryRequest {
 	t.Helper()
-	process := startupownership.Authority{AuthorityID: uuid.NewString(), AuthorityGeneration: 1,
-		OwnerID: "selected-recovery", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}
+	process := processbinding.LeaseStamp{LeaseIdentity: processbinding.LeaseIdentity{LeaseID: uuid.NewString(),
+		OwnerID: "selected-recovery", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}, Generation: 1}
 	return SelectedForkRecoveryRequest{
 		Entry: runfork.SelectedForkRecoveryEntry{
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
