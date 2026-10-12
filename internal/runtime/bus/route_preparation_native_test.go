@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -77,7 +77,6 @@ func VerifySubscribedRoutePreparationNativeForTest(t *testing.T, fixture ExactHa
 	}
 	// Runtime control avoids constructing a second workflow: the native fixture
 	// owns this event, and the test isolates subscribed descriptor preparation.
-	event = eventtest.RuntimeControl(event.ID(), event.Type(), "preparation-proof", "", event.Payload(), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	before := eb.routeTable.snapshotGeneration()
 	if _, err := planner.planForRecipientMaterialization(ctx, event); err != nil {
 		t.Fatalf("native descriptor preparation rejected same-source installation: %v (reads=%d installs=%d)", err, readCount, installCount)
@@ -93,7 +92,7 @@ func VerifySubscribedRoutePreparationNativeForTest(t *testing.T, fixture ExactHa
 	if readCount != 1 || installCount != 1 || eb.routeTable.snapshotGenerationCurrent(before) {
 		t.Fatalf("preparation/install disposition: reads=%d installs=%d generation_unchanged=%t", readCount, installCount, eb.routeTable.snapshotGenerationCurrent(before))
 	}
-	if got := fixture.Load(t, event.ID()); got.ID() != event.ID() || got.RunID() != runID {
+	if got := fixture.Load(t, event.ID()); !reflect.DeepEqual(got, event) {
 		t.Fatal("preparation changed the exact native publication")
 	}
 }
