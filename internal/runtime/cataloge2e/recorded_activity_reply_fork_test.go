@@ -46,6 +46,30 @@ func TestIssue642TwoOpenReplyLevelsReturnThroughCopiedActivityBothStores(t *test
 	}
 }
 
+func TestIssue642TwoOpenReplyLevelsStagedRestartAndReforkBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyStagedRestart)
+		})
+	}
+}
+
+func TestIssue642NestedContextOnlyOpenReforkBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyContextOnlyOpen)
+		})
+	}
+}
+
+func TestIssue642NestedContextOnlyTerminalReforkBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyContextOnlyTerminal)
+		})
+	}
+}
+
 func TestIssue642TwoOpenReplyLevelsReforkCopiedActivityAndReturnBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
@@ -99,6 +123,9 @@ const (
 	copiedReplySibling
 	copiedReplyRepeatedResult
 	copiedReplyTerminalHistory
+	copiedReplyStagedRestart
+	copiedReplyContextOnlyOpen
+	copiedReplyContextOnlyTerminal
 )
 
 func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, nested bool, followup copiedReplyFollowup) {
@@ -219,7 +246,13 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 	owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 	options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
-	staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+	var operations []runfork.ForkOperationRequest
+	if followup == copiedReplyStagedRestart {
+		operations = append(operations, runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-reply-restart",
+			IdempotencyKey: uuid.NewString(), TransportHash: "nested-reply-restart", SourceRunID: catalogRuntimeRunID, ForkEventID: cut,
+			TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection})
+	}
+	staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operations...)
 	t.Logf("fixed activity cut: point=%+v blockers=%+v", staged.ForkPoint, staged.ReplayResumeAdmission.UnsupportedBlockers)
 	childRows, err := storetest.ReadReplyContextRecords(h.ctx, reader, staged.ForkRunID)
 	if err != nil || len(childRows) != levels {
@@ -245,13 +278,31 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 			t.Fatalf("inner projected return borrowed a source or foreign enclosing level: inner=%+v outer=%+v", childInner, outer)
 		}
 	}
-	executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
-	})
-	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
-		t.Fatalf("activate real recorded-result child: %+v error=%v", executed, err)
+	if followup == copiedReplyContextOnlyOpen {
+		proveNativeNestedContextOnlyRefork(t, h, selected, staged.ForkRunID, childRows, "", owner, loader, selection, options)
+		return
 	}
-	t.Logf("acknowledged child: run=%s activated=%t", executed.Materialization.ForkRunID, executed.Activation.Activated)
+	if followup == copiedReplyStagedRestart {
+		h, owner = restartNestedReplyChild(t, h, staged, childRows, operations[0], step)
+		selected = h.pg
+		if h.sqlite != nil {
+			selected = h.sqlite
+		}
+		reader, err = h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), PlatformSpecPath: platformSpecPathFromCatalogE2E(t), Store: selected}
+		options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
+	} else {
+		executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		})
+		if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
+			t.Fatalf("activate real recorded-result child: %+v error=%v", executed, err)
+		}
+		t.Logf("acknowledged child: run=%s activated=%t", executed.Materialization.ForkRunID, executed.Activation.Activated)
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 	defer cancel()
 	waitCopiedActivityRequesterReturn(t, ctx, selected, staged.ForkRunID)
@@ -298,6 +349,14 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	afterRows, rowsErr := storetest.ReadReplyContextRecords(ctx, reader, catalogRuntimeRunID)
 	if err != nil || rowsErr != nil || !found || !reflect.DeepEqual(afterJournal, original) || !reflect.DeepEqual(afterRows, sourceRows) || calls.Load() != 1 || finished != 1 {
 		t.Fatalf("child redispatched, missed final return or changed source: calls=%d child_finished=%d source_found=%t errors=%v/%v", calls.Load(), finished, found, err, rowsErr)
+	}
+	if followup == copiedReplyContextOnlyTerminal {
+		terminalRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
+		if err != nil || len(terminalRows) != 2 {
+			t.Fatalf("terminal context-only source rows: %+v error=%v", terminalRows, err)
+		}
+		proveNativeNestedContextOnlyRefork(t, h, selected, staged.ForkRunID, terminalRows, copied.SourceEventID, owner, loader, selection, options)
+		return
 	}
 	if followup != copiedReplyNoFollowup {
 		if followup == copiedReplyTerminalHistory {

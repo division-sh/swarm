@@ -213,11 +213,18 @@ func selectedContractExecutionOwnerForCatalogHarnessWithReplay(t testing.TB, h *
 	if replay == nil && len(forkOverride) == 0 && len(h.selectedOwners) > 0 {
 		return h.selectedOwners[0]
 	}
+	owner := constructCatalogSelectedExecutionOwner(t, h, replay, forkOverride...)
+	bindCatalogSelectedOwner(t, h, owner)
+	h.selectedOwners = append(h.selectedOwners, owner)
+	return owner
+}
+
+// Successor proofs must inspect and supply the exact recovery environment
+// before allowing execution, rather than using the ordinary eager test bind.
+func constructCatalogSelectedExecutionOwner(t testing.TB, h *runtimeHarness, replay runtimerunforkexecution.SelectedContractReplayPersistence, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
+	t.Helper()
 	if h.pg != nil {
-		owner := selectedContractExecutionOwnerForCatalogTestWithReplay(t, h.pg, replay, forkOverride...)
-		bindCatalogSelectedOwner(t, h, owner)
-		h.selectedOwners = append(h.selectedOwners, owner)
-		return owner
+		return selectedContractExecutionOwnerForCatalogTestWithReplay(t, h.pg, replay, forkOverride...)
 	}
 	selected := h.sqlite
 	if selected == nil {
@@ -251,8 +258,6 @@ func selectedContractExecutionOwnerForCatalogHarnessWithReplay(t testing.TB, h *
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner(SQLite): %v", err)
 	}
-	bindCatalogSelectedOwner(t, h, owner)
-	h.selectedOwners = append(h.selectedOwners, owner)
 	t.Cleanup(func() {
 		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 			t.Errorf("retire selected contexts: %v", err)
