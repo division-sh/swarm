@@ -1377,7 +1377,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.FinalizeCommittedAgentReadiness",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "b7905b6e7dd5087bf3dfcc066bf4517439679fce24c225f583b422b7f63055ee"
+    "body_sha256": "b80bcb44d8abc172527bd3c28e6e2e9bcd99e6ca0a0497117715ff9f7c0e7e7c"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.HydrateStaticTopologyForStartup",
@@ -1420,6 +1420,12 @@
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
     "body_sha256": "060f488ad89a8bfa1dbcf9bfff3cd9c59380d4aff33dbbdbc95d7f7a38b8181a"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.finalizeAbsentCommittedAgentReadiness",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "c72108f45f91f59ee330d2354239b9e64808daa1855d5c1fc9eaf6f1d1dea9ce"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.hydratePersistedAgentExecutions",
