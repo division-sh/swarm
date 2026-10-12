@@ -127,7 +127,7 @@ func debtProcessLeaseCustodyDigest(root string) (string, error) {
 					}
 				}
 			case *ast.FuncDecl:
-				owned = decl.Recv == nil && decl.Name.Name == "NewPostgres"
+				owned = decl.Recv == nil && (decl.Name.Name == "NewPostgres" || decl.Name.Name == "RetainPostgresConstructionPossession")
 				if decl.Recv != nil {
 					for _, field := range decl.Recv.List {
 						typ := field.Type
@@ -175,7 +175,7 @@ func debtClassifyProcessLeaseCustody(root string, findings []authorityFinding) {
 	}
 }
 
-const debtProcessLeaseCustodyPin = "27d133f46e97a55fc1593a9633da9fd332272dde5675f370a02b6d31d7ba2814"
+const debtProcessLeaseCustodyPin = "3a98dde069a2da8d89f0ea0c47a8eb94ca486e0269fbf7836bb503c7ca083cf1"
 
 var debtProcessLeaseSourcePins = [7][2]string{
 	{"7e75914657c1f1b2f76fccc721dec583214956a8a26921f419a076bd56df19c7", "e9bc335965128cb3d6d4d9f73e9f733150894148b5f694b594b53efab6a90d8e"},

@@ -14,7 +14,7 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtProcessLeaseCollectorTo = "fac8c15d09513ebba99297f15e237f6aa6ad24b92ed3c049e68e2dbe3a988344"
+const debtProcessLeaseCollectorTo = "8546e40cca6ccd52681fca3d2ca461f7559f6249be3bca9a8bfcbbd080880881"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -242,7 +242,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change"} {
+	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change", "construction-wiring"} {
 		t.Run(mutation, func(t *testing.T) {
 			copy := t.TempDir()
 			for _, entry := range entries {
@@ -259,6 +259,9 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				}
 				if entry.Name() == "postgres_construction.go" && mutation == "custody-change" {
 					text = strings.Replace(text, "return lease, capacity, nil", "return s.acquireConstructionPossession(ctx)", 1)
+				}
+				if entry.Name() == "postgres_construction.go" && mutation == "construction-wiring" {
+					text = strings.Replace(text, "schemastore.BindPostgresProcessLease(schema, lease)", "schemastore.BindPostgresProcessLease(schema, nil)", 1)
 				}
 				debtWriteModuleSource(t, copy, dir+"/"+entry.Name(), text)
 			}

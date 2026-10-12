@@ -163,5 +163,5 @@ func (s *PostgresStore) RetainConstructionPossession(ctx context.Context) error 
 	if s == nil || s.startupPostgresOwner == nil {
 		return errors.New("PostgreSQL process construction owner is required")
 	}
-	return s.startupPostgresOwner.RetainConstructionPossession(ctx, s.schemaOwner)
+	return storestartupownership.RetainPostgresConstructionPossession(ctx, s.startupPostgresOwner, s.schemaOwner)
 }
