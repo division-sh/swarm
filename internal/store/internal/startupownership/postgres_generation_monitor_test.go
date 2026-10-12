@@ -171,7 +171,7 @@ func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.BindProcessLease(lease); err != nil {
+	if err := schemastore.BindPostgresProcessLease(schema, lease); err != nil {
 		t.Fatal(err)
 	}
 	if err := schema.BootstrapSchema(context.Background(), schemastore.SchemaBootstrapRequest{PlatformPlans: plans, Origin: schemastore.RuntimeStoreOrigin{
