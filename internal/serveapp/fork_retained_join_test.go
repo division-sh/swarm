@@ -1,10 +1,12 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -72,6 +74,18 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
 			}
+			firstRef := joins[0].JoinRef()
+			firstCtx, cancelFirst := context.WithTimeout(t.Context(), servedProofPollDeadline)
+			firstWaitErr := waitServedRetainedJoinOutcome(firstCtx, started.RunID, firstRef, func() (loopruntime.Activation, []joinruntime.Activation) {
+				return readRetainedRootJoins(t, rt, started.RunID)
+			})
+			cancelFirst()
+			if firstWaitErr != nil {
+				t.Fatalf("first exact retained join outcome: %v", firstWaitErr)
+			}
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
+			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			first, joins = readRetainedRootJoins(t, rt, started.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
@@ -82,6 +96,28 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
 			}
+			var currentRef timeridentity.JoinRef
+			currentMatches := 0
+			for _, join := range sourceJoins {
+				if join.Generation() == current.Generation() {
+					currentRef = join.JoinRef()
+					currentMatches++
+				}
+			}
+			if currentMatches != 1 {
+				t.Fatalf("current retained join reference is not unique: %d", currentMatches)
+			}
+			currentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)
+			currentWaitErr := waitServedRetainedJoinOutcome(currentCtx, started.RunID, currentRef, func() (loopruntime.Activation, []joinruntime.Activation) {
+				return readRetainedRootJoins(t, rt, started.RunID)
+			})
+			cancelCurrent()
+			if currentWaitErr != nil {
+				t.Fatalf("current exact retained join outcome: %v", currentWaitErr)
+			}
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
+			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			current, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)
 			for _, join := range sourceJoins {
 				if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || len(join.Outputs) != 1 || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
