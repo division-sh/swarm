@@ -99,7 +99,7 @@ The other relevant unchanged owners are yamlsource expansion/location,
 sourceartifact exact bytes/hash, optionalDeclarationAdmission presence/liveness,
 eventidentity.IsCanonicalDeclaration, validateWave1TypeRef/catalog resolution,
 strict decodeSchemaLengthRefinementValue/decodeSchemaRangeRefinementValue,
-effectiveProvenanceBuilder and retained CompiledEventSchema projection.
+populateEffectiveProvenance/EffectiveProvenanceLedger and retained CompiledEventSchema projection.
 
 ## Full Execution Paths And Gates
 
