@@ -6,9 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
@@ -17,25 +14,10 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 	config, env := clockReleaseConfig(t, root, "sqlite")
 	source := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/workspace_mcp"), source)
-	configure := func(replacements map[string][]byte) {
-		t.Helper()
-		_, directories := packfixture.DevelopmentBase(t, replacements)
-		body, err := os.ReadFile(config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var document map[string]any
-		if err := yaml.Unmarshal(body, &document); err != nil {
-			t.Fatal(err)
-		}
-		document["platform"] = map[string]any{"packs": map[string]any{"platform_dirs": directories}}
-		body, err = yaml.Marshal(document)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeReleaseFile(t, config, string(body))
+	imported := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "import", "provider.telegram.hitl_channel", source, "--config", config, "--json")
+	if imported.err != nil {
+		t.Fatalf("public pack import: %v\n%s", imported.err, imported.output)
 	}
-	configure(nil)
 	for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 		if result.err != nil || !strings.Contains(result.output, `"live_readiness":"not_evaluated"`) {
@@ -43,23 +25,18 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 		}
 	}
 	// A real admitted channel output relation feeds compiled-result admission.
-	// Changing the target minimum preserves all lexical/seal gates, then refuses.
-	replacements := map[string][]byte{}
-	for _, entry := range packfixture.EmbeddedBase(t).Entries() {
-		if entry.Type() != "channel" {
-			continue
-		}
-		body := string(entry.ManifestBody())
-		needle := "id: {type: integer, minimum: 1, maximum: 2147483647}"
-		if !strings.Contains(body, needle) {
-			t.Fatal("channel fixture no longer carries the bounded result id")
-		}
-		replacements[entry.ID()] = []byte(strings.Replace(body, needle, "id: {type: integer, minimum: 2, maximum: 2147483647}", 1))
+	// Project-owned imports derive identity from authored bytes, so a changed
+	// target minimum reaches directional proof without bypassing the seal owner.
+	path := filepath.Join(source, "packs", "provider.telegram.hitl_channel", "channel.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(replacements) != 1 {
-		t.Fatal("expected one exact channel fixture")
+	needle := "id: {type: integer, minimum: 1, maximum: 2147483647}"
+	if !strings.Contains(string(body), needle) {
+		t.Fatal("channel fixture no longer carries the bounded result id")
 	}
-	configure(replacements)
+	writeReleaseFile(t, path, strings.Replace(string(body), needle, "id: {type: integer, minimum: 2, maximum: 2147483647}", 1))
 	for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 		if result.err == nil || !strings.Contains(result.output, "source minimum is broader than target minimum 2") {
