@@ -33,7 +33,7 @@ import (
 func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			runCopiedActivityReplyReturn(t, backend, false, false, false)
+			runCopiedActivityReplyReturn(t, backend, false, copiedReplyNoFollowup)
 		})
 	}
 }
@@ -41,7 +41,7 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 func TestIssue642TwoOpenReplyLevelsReturnThroughCopiedActivityBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			runCopiedActivityReplyReturn(t, backend, true, false, false)
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyNoFollowup)
 		})
 	}
 }
@@ -49,7 +49,7 @@ func TestIssue642TwoOpenReplyLevelsReturnThroughCopiedActivityBothStores(t *test
 func TestIssue642TwoOpenReplyLevelsReforkCopiedActivityAndReturnBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			runCopiedActivityReplyReturn(t, backend, true, true, false)
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyReforkRequest)
 		})
 	}
 }
@@ -57,7 +57,15 @@ func TestIssue642TwoOpenReplyLevelsReforkCopiedActivityAndReturnBothStores(t *te
 func TestIssue642TwoOpenReplyLevelsReforkAtPublishedActivityResultBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			runCopiedActivityReplyReturn(t, backend, true, true, true)
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplyReforkResult)
+		})
+	}
+}
+
+func TestIssue642TwoOpenReplyLevelSiblingForksReturnIndependentlyBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runCopiedActivityReplyReturn(t, backend, true, copiedReplySibling)
 		})
 	}
 }
@@ -74,7 +82,16 @@ type copiedActivityReplyStore interface {
 	EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 }
 
-func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, nested, refork, reforkAtResult bool) {
+type copiedReplyFollowup uint8
+
+const (
+	copiedReplyNoFollowup copiedReplyFollowup = iota
+	copiedReplyReforkRequest
+	copiedReplyReforkResult
+	copiedReplySibling
+)
+
+func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, nested bool, followup copiedReplyFollowup) {
 	t.Helper()
 	levels := 1
 	if nested {
@@ -272,8 +289,12 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	if err != nil || rowsErr != nil || !found || !reflect.DeepEqual(afterJournal, original) || !reflect.DeepEqual(afterRows, sourceRows) || calls.Load() != 1 || finished != 1 {
 		t.Fatalf("child redispatched, missed final return or changed source: calls=%d child_finished=%d source_found=%t errors=%v/%v", calls.Load(), finished, found, err, rowsErr)
 	}
-	if refork {
-		proveCopiedTwoLevelReplyRefork(t, h, selected, staged.ForkRunID, copied, loader, selection, owner, options, reforkAtResult)
+	if followup != copiedReplyNoFollowup {
+		if followup == copiedReplySibling {
+			proveCopiedTwoLevelReplySibling(t, h, selected, original, sourceRows, staged.ForkRunID, loader, selection, owner, options)
+		} else {
+			proveCopiedTwoLevelReplyRefork(t, h, selected, staged.ForkRunID, copied, loader, selection, owner, options, followup == copiedReplyReforkResult)
+		}
 		finalCtx, cancelFinal := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 		defer cancelFinal()
 		afterRows, rowsErr := storetest.ReadReplyContextRecords(finalCtx, selected, catalogRuntimeRunID)
@@ -281,6 +302,78 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		if err != nil || rowsErr != nil || !found || !reflect.DeepEqual(afterRows, sourceRows) || !reflect.DeepEqual(afterJournal, original) || calls.Load() != 1 {
 			t.Fatalf("refork redispatched or changed A: calls=%d errors=%v/%v", calls.Load(), err, rowsErr)
 		}
+	}
+}
+
+func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected copiedActivityReplyStore, sourceAttempt pipeline.ActivityAttemptRecord,
+	sourceRows []replycontext.Record, firstChild string, loader runforkexecution.SelectedContractSourceLoader,
+	selection runfork.RunForkContractSelection, owner runforkexecution.SelectedContractExecutionOwner, options runforkexecution.SelectedContractAgentRuntimeOptions) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
+	defer cancel()
+	firstRows, err := storetest.ReadReplyContextRecords(ctx, selected, firstChild)
+	if err != nil || len(firstRows) != 2 {
+		t.Fatalf("sibling lacks its already-settled first child: %+v error=%v", firstRows, err)
+	}
+	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "catalog-reply-sibling", IdempotencyKey: uuid.NewString(),
+		TransportHash: "copied-reply-sibling", SourceRunID: catalogRuntimeRunID, ForkEventID: sourceAttempt.RequestEventID,
+		TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
+	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: catalogRuntimeRunID,
+		At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+	if err != nil {
+		t.Fatalf("prepare the sibling's exact durable operation: %v", err)
+	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Errorf("join sibling preparation: %v", err)
+		}
+	}()
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ForkOperation = &operation
+	staged, err := selected.MaterializeRunForkForSelectedContractExecution(correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request)
+	if err != nil || staged.ForkRunID == "" || staged.ForkRunID == firstChild || staged.SourceRunID != catalogRuntimeRunID {
+		t.Fatalf("distinct operation reused the first child: %+v error=%v", staged, err)
+	}
+	childRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
+	if err != nil || len(childRows) != 2 {
+		t.Fatalf("sibling open reply inventory: %+v error=%v", childRows, err)
+	}
+	inner := requireReforkedOpenReplyRows(t, sourceRows, childRows, staged.ForkRunID)
+	for _, row := range childRows {
+		for _, first := range firstRows {
+			if row.ID == first.ID || row.EnclosingReplyContextID == first.ID {
+				t.Fatalf("sibling borrowed the first child's reply authority: %+v", row)
+			}
+		}
+	}
+	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: catalogRuntimeRunID, At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true,
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+	})
+	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
+		t.Fatalf("activate the exact sibling operation: %+v error=%v", executed, err)
+	}
+	returnCtx, cancelReturn := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
+	defer cancelReturn()
+	waitCopiedActivityRequesterReturn(t, returnCtx, selected, staged.ForkRunID)
+	attempts, err := storetest.ReadActivityAttemptStorage(returnCtx, selected, staged.ForkRunID)
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("sibling lost or duplicated its own journal: %+v error=%v", attempts, err)
+	}
+	journal, found, err := selected.LoadActivityAttempt(returnCtx, attempts[0].RequestEventID)
+	if err != nil || !found || journal.ReplyContextID != inner.ID || journal.InputHash != sourceAttempt.InputHash ||
+		!reflect.DeepEqual(journal.ResultPayload, sourceAttempt.ResultPayload) || !journal.StartedAt.Equal(sourceAttempt.StartedAt) ||
+		journal.CompletedAt == nil || !journal.CompletedAt.Equal(*sourceAttempt.CompletedAt) {
+		t.Fatalf("sibling changed or borrowed its recorded result: %+v found=%t error=%v", journal, found, err)
+	}
+	requireReforkedReplyReturns(t, returnCtx, h, selected, childRows, catalogRuntimeRunID, sourceAttempt, journal, inner.ID, false)
+	afterFirst, err := storetest.ReadReplyContextRecords(returnCtx, selected, firstChild)
+	firstFinished, countErr := storetest.ReadLifecycleEventCardinality(returnCtx, selected, firstChild, "request.finished")
+	if err != nil || countErr != nil || !reflect.DeepEqual(afterFirst, firstRows) || firstFinished != 1 {
+		t.Fatalf("sibling changed or repeated first-child settlement: rows=%+v finished=%d errors=%v/%v", afterFirst, firstFinished, err, countErr)
 	}
 }
 
