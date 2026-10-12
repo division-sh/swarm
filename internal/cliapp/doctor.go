@@ -124,22 +124,9 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix platform.packs.platform_dirs or the referenced platform pack inventory")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	if opts.schemaInventory {
-		inventory, err := buildDoctorSchemaInventory(platformSpecPath)
-		if err != nil {
-			report := configReport
-			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform store schema")
-			return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-		}
-		configReport.SchemaInventory = &inventory
+	if !appendDoctorInstalledReadback(&configReport, platformSpecPath, platformPackBase, opts.schemaInventory) {
+		return returnLocalPreflightResult(cmd, configReport.finalize(), opts.asJSON)
 	}
-	effectiveInventory, err := packartifact.NewEffectivePackInventory(platformPackBase, nil)
-	if err != nil {
-		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-	}
-	appendDoctorPackInventoryReadback(&configReport, platformSpecPath, effectiveInventory)
 	_, err = BuildProviderCredentialStore()
 	if err != nil {
 		report := configReport
@@ -227,27 +214,47 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		PlatformPackBase: platformPackBase,
 	})
 	report.SchemaInventory = configReport.SchemaInventory
+	report.PackInventory = configReport.PackInventory
+	report.CapabilitySubjects = configReport.CapabilitySubjects
+	report.Findings = append(configReport.Findings, report.Findings...)
 	if opts.gatewayProbe {
 		applyDoctorGatewayProbe(ctx, &report, cfgResult.Config, workspaceBackend, WorkspaceMCPListenAddr(opts.mcpListenAddr, opts.mcpListenAddrSource, workspaceBackend))
 	}
-	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)
-	addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 }
 
-func appendDoctorPackInventoryReadback(report *LocalPreflightReport, platformSpecPath string, inventory *packartifact.EffectivePackInventory) {
-	if report == nil || inventory == nil {
-		return
+func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPath string, base *packartifact.PlatformPackInventory, schemaInventory bool) bool {
+	if schemaInventory {
+		inventory, err := buildDoctorSchemaInventory(platformSpecPath)
+		if err != nil {
+			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform store schema")
+			return false
+		}
+		report.SchemaInventory = &inventory
 	}
+	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory")
+		return false
+	}
+	if err := appendDoctorPackInventoryReadback(report, platformSpecPath, inventory); err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory or platform spec")
+		return false
+	}
+	return !report.HasBlockers()
+}
+
+func appendDoctorPackInventoryReadback(report *LocalPreflightReport, platformSpecPath string, inventory *packartifact.EffectivePackInventory) error {
 	platformSpec, err := loadChannelPlatformSpecDocument(platformSpecPath)
 	if err != nil {
-		return
+		return err
 	}
 	projection, err := packadmission.Admit(inventory, platformSpec)
 	if err != nil {
-		return
+		return err
 	}
 	appendProviderTriggerCapabilitySubjects(report, projection.LoadedProviderPacks)
 	packReadback := packInventoryReadbackFromInventory(inventory)
 	report.PackInventory = &packReadback
+	return nil
 }

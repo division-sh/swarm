@@ -13,9 +13,9 @@ the old42-row audit as current planning, preserving every original S/N/Q row.
 in this baseline, not copied from an anticipated candidate. The parked
 dependency is obsolete. Reviewer-g6116259035 approved coding as a first slice.
 Implementation rebased onto green master cc369e5eb5 before characterization.
-**Extraction is now paused at that gate's public-proof stop condition:** the
-compiled source-free doctor baseline loses its installed capability inventory.
-See the bounded checkpoint/addendum below; no production extraction has begun.
+The public-proof stop was honored: source-free doctor loses installed inventory.
+Reviewer-g6116517210 authorizes the bounded D01 consumer repair in this PR.
+Prove D01 RED->GREEN before resuming private extraction, per the addendum below.
 
 Reuse #2509: one PR, two complete separately owned maintenance families.
 Existing tests remain unchanged; characterize before private extraction.
@@ -470,3 +470,26 @@ class remains approved but extraction frozen. Parents2447/2407/2250 stay OPEN.
 Raw compiled counterexample/positive controls and owner-characterization
 receipts remain in the existing external evidence directory. No local tier,
 hosted qualification, candidate extraction or closure is claimed.
+
+## D01 Independent Absorption Gate (6116517210)
+
+Reviewer-g approved D01 here as a separately named behavioral consumer repair,
+not another normalization owner or a new issue. The59 S/N/Q rows above stay
+intact; D01 is an additional distinct manifestation, total60 obligations.
+
+| Row | Consumer / owner | Required proof |
+| --- | --- | --- |
+| D01 | Existing cliapp doctor report owner; appendDoctorPackInventoryReadback and final successful SourceFree composition | Retain red public3/3; compiled doctor JSON/text on valid/hostile trees carries exact target-free installed AVAILABLE subjects, pack provenance AND text findings, no duplicate/private diagnostics. Invalid pack/admission produces the existing typed blocker, not ok=true/empty fallback. Existing prerequisite/schema-inventory gates unchanged. Disposable dropped-readback counterexample must fail. Q02 both-store source-bound controls and all six S/N characterizations must pass on corrected source BEFORE extraction. |
+
+Only successful source-free installed/base composition is authorized: no tree
+loading, evaluated effective credentials, target installation, status change,
+shared report framework, other-lane edits or compatibility. Carry typed subjects,
+pack_inventory and their findings together. The helper's formerly silent
+platform/admission errors must become the existing blocking diagnostic.
+Source-free early prerequisite errors retain their findings and precedence.
+The eventual authoritative spec also aligns doctor installed-only presentation
+with provider-capability prose. CI lifecycle/no CI-Units and Local focused remain
+binding; any final selection change requires a delta rule.
+
+Watchlist2682f94 records the stop; link6116517210 at the next refinement. Parents
+2447/2407/2250 remain OPEN. Stop again for any further semantic gap.
