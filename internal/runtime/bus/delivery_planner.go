@@ -218,6 +218,10 @@ func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, ev
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan, nil
 	}
+	if table := p.connectPlanner.routeTable; table != nil {
+		table.preparationMu.RLock()
+		defer table.preparationMu.RUnlock()
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		snapshot := p.connectPlanner.routeTable.snapshotGeneration()
 		planned, err := p.planAtGeneration(ctx, evt)

@@ -419,6 +419,7 @@ units:
   local-runtime-bus-full:
     packages: [github.com/division-sh/swarm/internal/runtime/bus]
     required_children:
+      TestSubscribedRoutePreparationNativeBothStores: [sqlite, postgres]
       TestCoordinatorRetirementRealEventBusDispatch: [normal/before_acquire, normal/after_acquire, selected/before_acquire, selected/after_acquire]
       TestCommittedAgentTransitionNativePublicationBothStores: [sqlite/live, sqlite/retired, sqlite/wrong_generation, postgres/live, postgres/retired, postgres/wrong_generation]
     count_mode: count-1
@@ -548,6 +549,7 @@ units:
       - github.com/division-sh/swarm/internal/runtime/llm
       - github.com/division-sh/swarm/internal/runtime/bus
     required_children:
+      TestSubscribedRoutePreparationNativeBothStores: [sqlite, postgres]
       TestPublicCompletionCapacityNativeMixedBothStores: [sqlite, postgres]
       TestFeedOnlyRunStartReplayPrecedenceBothStores: [sqlite, postgres]
       TestPublicCompletionExactOccurrenceSurvivesRuntimeFence: [runtime, standing, selected, manager-standing]

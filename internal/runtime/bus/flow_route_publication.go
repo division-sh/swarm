@@ -159,5 +159,18 @@ func (eb *EventBus) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Cont
 	if table == nil {
 		return nil, errors.New("route table is not initialized")
 	}
+	// Queue before generation ownership: descriptor callbacks can read EventBus,
+	// while reset holds EventBus.mu and reads generationMu. Retirement stays free
+	// to invalidate an evaluation rather than waiting for its preparation scope.
+	table.preparationMu.Lock()
+	defer table.preparationMu.Unlock()
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	if eb.resetInProgress || eb.routeTable != table {
+		return nil, exhaustedConnectRoutePlanSnapshotError()
+	}
+	if err := ensurePublishEpoch(admittedCtx); err != nil {
+		return nil, err
+	}
 	return table.publishFlowInstanceRouteForAttempt(req, attempt)
 }
