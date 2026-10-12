@@ -23,7 +23,22 @@ func TestNativeSelectedContinuationConstructionRetainsEveryWorkload(t *testing.T
 		got, afterErr := canonicalFunction(row.After)
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
 		value, sourceErr := canonicalFunction(actual)
-		if err != nil || afterErr != nil || sourceErr != nil || want != got || value != got {
+		currentWant := before
+		if row.Function == "TestSelectedForkProcessAdmissionBothStores" {
+			old := `{"acquisition", func(a *startupownership.Authority) { a.AcquisitionID = uuid.NewString() }}`
+			next := `{"lease_and_generation", func(a *startupownership.Authority) { a.AuthorityID = uuid.NewString(); a.AuthorityGeneration++ }}`
+			if row.Successor == "" || strings.Count(before, old) != 1 {
+				t.Fatal("exact process-authority successor is missing or ambiguous")
+			}
+			currentWant = strings.Replace(before, old, next, 1)
+		}
+		current, checkpointErr := checkpointRecipes([]byte("package proof\n"+actual), []recipe{row})
+		if checkpointErr != nil || len(current) != 1 {
+			t.Fatalf("continuation checkpoint is missing: %s/%v", row.Function, checkpointErr)
+		}
+		currentPin, pinErr := canonicalFunction(current[0].After)
+		currentExpected, expectedErr := canonicalFunction(currentWant)
+		if err != nil || afterErr != nil || sourceErr != nil || pinErr != nil || expectedErr != nil || want != got || currentPin != currentExpected || value != currentExpected {
 			t.Fatalf("continuation workload drift: %s", row.Function)
 		}
 		for _, raw := range []string{"testutil.StartPostgres", "AdmitPostgresRuntimeStore", "storetest.Database", "*sql.DB"} {
@@ -31,13 +46,12 @@ func TestNativeSelectedContinuationConstructionRetainsEveryWorkload(t *testing.T
 				t.Fatalf("continuation retains raw authority: %s", raw)
 			}
 		}
-		for _, cut := range []string{"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStore(t)", "i < 200", "create(-1, \"target\")", "target.CardContentHash", "returned 2 items", "selected, owner = s", "process.ActiveCount() != baseline", "capability.Release(context.Background())", "successor.ProveCurrent(ctx)", "a.AuthorityGeneration++", "a.AcquisitionID", "context.Canceled", "t.Fatalf(", "t.Fatal("} {
-			mutant := strings.Replace(row.After, cut, "unreviewedContinuationCut", 1)
-			if mutant == row.After {
+		for _, cut := range []string{"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStore(t)", "i < 200", "create(-1, \"target\")", "target.CardContentHash", "returned 2 items", "selected, owner = s", "process.ActiveCount() != baseline", "capability.Release(context.Background())", "successor.ProveCurrent(ctx)", "a.AuthorityGeneration++", "a.AuthorityID", "lease_and_generation", "a.AcquisitionID", "context.Canceled", "t.Fatalf(", "t.Fatal("} {
+			mutant := strings.Replace(current[0].After, cut, "unreviewedContinuationCut", 1)
+			if mutant == current[0].After {
 				continue
 			}
-			changed, mutantErr := canonicalFunction(mutant)
-			if mutantErr == nil && changed == want {
+			if _, _, mutantErr := rewriteFunction(row.File, []byte("package proof\n"+mutant), current[0]); mutantErr == nil {
 				t.Fatalf("continuation identity/workload/assertion mutation accepted: %s", cut)
 			}
 		}
