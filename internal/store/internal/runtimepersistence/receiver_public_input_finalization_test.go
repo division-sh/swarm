@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -64,8 +65,10 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			var am *manager.AgentManager
 			var finalized []pipeline.CommittedFlowInstanceActivation
 			var finalizationErrors []error
+			probe := lifecycleprobe.New()
 			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), bus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact,
+				TestLifecycleProbe: probe,
 				TemplateInstancePlanner: pipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, error) {
 					return am.PrepareFlowInstanceActivation(ctx, req)
 				}),
@@ -127,6 +130,11 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			if err != nil || replay || got.ResourceID != eventID {
 				t.Fatalf("initial public completion: %+v replay=%v err=%v", got, replay, err)
 			}
+			joinCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if _, err := probe.WaitForPostCommitDispatchCompleted(joinCtx, got.ResourceID); err != nil {
+				t.Fatal(err)
+			}
 			if len(finalizationErrors) != 2 || len(finalized) != 2 {
 				t.Fatalf("first-pass finalizations=%d", len(finalizationErrors))
 			}
@@ -181,9 +189,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatalf("automatic event target=%+v, want exact activated receiver %+v", target, wantTarget)
 			}
 			// Readiness was checked inside the initial finalizer, before this
-			// join of its foreground dispatch. No recovery worker is running.
-			joinCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
+			// join of its accepted consequence. No recovery worker is running.
 			if err := publisher.WaitForQuiescence(joinCtx); err != nil {
 				t.Fatal(err)
 			}
