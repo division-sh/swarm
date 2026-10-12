@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -3167,6 +3168,26 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
+	process := fixtureValue.(*runForkTestWorkFixture).process
+	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignOwner := newSelectedContractExecutionOwnerForTest(t, standaloneStore)
+	if err := foreignOwner.BindSelectedProcess(ctx, process, processCapability); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foreignOwner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
+		t.Fatalf("foreign store borrowed native process permission: %v", err)
+	}
+	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("foreign-store refusal changed storage: %v", err)
+	}
+	if err := processCapability.ProveCurrent(ctx); err != nil {
+		t.Fatalf("foreign-store refusal retired the native owner: %v", err)
+	}
 	fixedPlan, err := servedStore.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatal(err)
@@ -3261,22 +3282,43 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		surface   string
 		container selectedContractForkLocalRuntimeContainer
 		store     *store.PostgresStore
+		owner     SelectedContractExecutionOwner
 		prepared  *PreparedSelectedFork
 		err       error
 	}
 	start := make(chan struct{})
+	defer func() {
+		select {
+		case <-start:
+		default:
+			close(start)
+		}
+	}()
 	results := make(chan contenderResult, 2)
 	contenders := []struct {
 		surface string
 		store   *store.PostgresStore
 	}{
 		{surface: "served", store: servedStore},
-		{surface: "standalone", store: standaloneStore},
+		{surface: "standalone", store: servedStore},
 	}
+	// Two component contexts compete inside one legitimately acquired process.
+	// Neither borrows another store's capability or shares a local context cache.
+	var previousOwner SelectedContractExecutionOwner
 	for _, contender := range contenders {
 		contender := contender
 		operation := selectedContractOperationForTest(t, ctx)
-		owner := selectedContractExecutionOwnerWithProcessForTest(t, contender.store, processCapability)
+		owner := newSelectedContractExecutionOwnerForTest(t, contender.store)
+		if previousOwner.ports != nil && previousOwner.ports.contexts == owner.ports.contexts {
+			t.Fatal("served and standalone contenders share their local context registry")
+		}
+		previousOwner = owner
+		if err := owner.BindSelectedProcess(ctx, process, processCapability); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
+			t.Fatal(err)
+		}
 		prepared, err := prepareSelectedFork(ctx, operation, owner.ports, baseRequest.LoadedSource, fixedPlan, runfork.RunForkContractFrontierAdmission{}, planning, baseRequest.AgentRuntime)
 		if err != nil {
 			t.Fatal(err)
@@ -3288,7 +3330,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 			req.Owner = owner
 			req.Prepared = prepared
 			container, buildErr := buildSelectedContractForkLocalRuntimeContainer(ctx, req)
-			results <- contenderResult{surface: contender.surface, container: container, store: contender.store, prepared: prepared, err: buildErr}
+			results <- contenderResult{surface: contender.surface, container: container, store: contender.store, owner: owner, prepared: prepared, err: buildErr}
 		}()
 	}
 	close(start)
@@ -3306,6 +3348,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if winner.surface == loser.surface {
 		t.Fatalf("served/standalone authority race returned duplicate surface %q", winner.surface)
 	}
+	if errors.Is(loser.err, runtimestartupownership.ErrProcessNotCurrent) || !strings.Contains(loser.err.Error(), "already has current execution") {
+		t.Fatalf("losing %s container did not reach durable selected-execution contention: %v", loser.surface, loser.err)
+	}
 	proof := winner.container.Proof()
 	if proof.RuntimeExecutionID == "" || proof.RuntimeGeneration != 1 || proof.AuthorityExecutionOwner == "" {
 		t.Fatalf("winning %s authority proof = %#v", winner.surface, proof)
@@ -3314,7 +3359,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	authority := winner.container.authority
 	grantRequest := baseRequest
 	grantRequest.Prepared = winner.prepared
-	grantRequest.Owner = selectedContractExecutionOwnerWithProcessForTest(t, winner.store, processCapability)
+	grantRequest.Owner = winner.owner
 	grantRequest.AgentRuntime.Options.ProcessCapability = processCapability
 	grant, err := issueSelectedContractAgentRuntimeGenerationGrant(ctx, grantRequest, authority)
 	if err != nil {
