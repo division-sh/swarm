@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 543 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f744a97047492b00836bc1f0cd46208db33cf9fcfe808f50fd010f6ee81b009d" {
+	if err != nil || len(rows) != 544 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "4d9005e8dec7d8583516fb1f89f49e7f78400d55dffce1fc052c3da608d05e5e" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -115,6 +115,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "TestCompletionBudgetRecoveryProjectionParity" || row.Function == "TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores" {
 			if err := family145BudgetConstructionProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "forEachDurableDataStore" {
+			if err := family145DurableDataConstructionProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

@@ -79,8 +79,8 @@ func forEachDurableDataStore(t *testing.T, run func(*testing.T, durableDataSelec
 		run(t, selected, storetest.Database(selected))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
+		dsn, db, _ := testutil.StartPostgres(t)
+		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 		run(t, selected, db)
 	})
 }

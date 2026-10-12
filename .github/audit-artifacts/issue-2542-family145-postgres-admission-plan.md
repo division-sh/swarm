@@ -5877,3 +5877,46 @@ Existing tracker/watchlist/spec suffice; no production contract changes, new
 framework, fallback or legacy behavior. All parent qualification holds remain.
 Local only; no push/PR/tier/server2. Rebase still waits for #2617's signal.
 Receipts:~/.cache/swarm-2542-family145/budget-native-construction-*.
+
+## Whole durable-data shared construction family (2026-10-12)
+
+forEachDurableDataStore now uses EXISTING StartPostgresRuntimeStoreWithReopen
+at its original sandbox DSN, not selected-store construction from the supplied
+pool. All22 callers are unchanged, including their callback argument shapes,
+backend registration, sources, catalog/declaration/spend/receipt/prune/pin
+assertions and concurrency/hostile cuts. The separate setup/readback pool remains
+at the same sandbox location. No connection-limit or shared-pool assumption was
+found; no production data, dialect, selector or transaction policy changes.
+Native cleanup is registered before later consumers; the unused reopen result
+is not restart evidence. The raw callback/setup/fault inventory remains parent
+debt; this closes only this complete shared constructor escape.
+
+An exact two-line inverse preserves the helper's whole body. Owned-source AST
+enumeration rejects indirect/aliased consumers and pins all22 complete caller
+functions (digest aa02e101d7b0279ae7f31d7bbdf3fca4e3b8d91a2926fa06e23b771ae56c56b2).
+The pre-transform file matched immutable c96e20aa7 exactly; the actual diff
+changes ONLY the constructor. Location/backend/SQLite/callback hostile controls
+fail. Restoring the ACTUAL legacy constructor is RED in both the source-pinned
+guard and the REAL ratchet (expected7841 vs actual7843); exact restoration GREEN.
+No accepted-signature transition or classifier exception was needed.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Source lifecycle exact replay and destructive/non-destructive prune receipts | reproduced and fixed | Original TestDurableDataSelectedStoreLifecycleReplayAndPrune BOTH stores under race, all complete result/history/retention assertions preserved |
+| Concurrent CAS has exactly one real winner | reproduced and fixed | Original TestDurableDataConcurrentCASHasOneWinner BOTH stores under race, workload and winner/conflict assertions unchanged |
+| Typed receipt corruption and complete multi-page pin refusal evidence | reproduced and fixed | Original typed-column-corruption and complete-pin-refusal roots BOTH stores under race, all corruptions and original pinCount retained |
+| Atomic version/payload resolution during real prune/rematerialize cycles | execution-proven through the same corrected path | Original TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize BOTH stores under race PASS13.040s, all12 writer cycles, joins and consistency assertions retained |
+| Entire unchanged22-caller shared construction chain | execution-proven through the same corrected path | Exact whole-helper inverse, complete owned-source caller body/argument/registration hash and the five original BOTH-store constructor executions above; no fresh execution of the other17 workloads claimed |
+
+Original four-root baseline PASS56.064s; native PASS53.173s (no performance claim).
+Complete cheap collection PASS18.849s; six boundaries and affected store/tool
+U1000 pass. Immutable Before/24 receipts/prior Successor survive:1300/544,
+digest 4d9005e8dec7d8583516fb1f89f49e7f78400d55dffce1fc052c3da608d05e5e.
+Downward census PASS26.796s:7843 ->7841 findings,5544 ->5543 raw sites,
+2/1 removed, ZERO added; supplied-pool54 ->53, uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Existing tracker/watchlist/spec suffice. Long-run direction for remaining raw
+setup/fault callbacks is existing exact named owners, tracked only in #2542's
+existing debt/watchlist, not a new abstraction or issue. All qualification holds
+survive. Local only; no push/PR/tier/server2. Rebase waits for #2617's signal.
+Receipts:~/.cache/swarm-2542-family145/durable-data-native-construction-*.
