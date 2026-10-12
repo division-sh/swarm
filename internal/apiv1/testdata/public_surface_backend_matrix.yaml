@@ -109,6 +109,24 @@ store_parity:
     - {id: product_destructive_reset, parent: productPorts.destructiveReset, role_source_path: internal/store/selected/selected.go, role_type: DestructiveReset}
     - {id: product_startup_recovery, parent: productPorts.startupRecovery, role_source_path: internal/store/selected/selected.go, role_type: StartupRecovery}
   proof_catalog:
+    - id: event-catalog-refined-publication
+      kind: go_test
+      name: TestEventCatalogFactoringRefinedPublicationBothStores
+      path: internal/releasee2e/event_catalog_factoring_test.go
+      profile: lifecycle
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [runtime]
+      capabilities: [{claim_id: event_delivery}]
+    - id: event-catalog-retained-artifact
+      kind: go_test
+      name: TestEventCatalogFactoringRetainedArtifactBothStores
+      path: internal/runtime/tools/event_catalog_factoring_retained_test.go
+      profile: lifecycle
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [runtime]
+      capabilities: [{claim_id: source_artifact}]
     - id: runtime-open-sqlite
       kind: go_test
       name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce
