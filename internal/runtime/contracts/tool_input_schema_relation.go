@@ -28,8 +28,6 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 		}
 		return fmt.Errorf("%s oneOf schemas are not provably assignable unless identical", subject)
 	}
-	sourceType := string(source.Kind())
-	targetType := string(target.Kind())
 	if err := validateToolSchemaEqualitySubset(subject, source, target, declaredProperties); err != nil {
 		return err
 	}
@@ -47,6 +45,12 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 	if target.Kind() == ToolSchemaAny {
 		return nil
 	}
+	return validateToolSchemaKindSubset(subject, source, target)
+}
+
+func validateToolSchemaKindSubset(subject string, source, target ToolInputSchema) error {
+	sourceType := string(source.Kind())
+	targetType := string(target.Kind())
 	if sourceType != targetType && !(sourceType == "integer" && targetType == "number") {
 		return fmt.Errorf("%s has incompatible types %s and %s", subject, sourceType, targetType)
 	}
@@ -55,11 +59,9 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 	case "string":
 		return validateToolSchemaStringSubset(subject, source, target)
 	case "integer", "number":
-		if err := validateToolSchemaFloatBoundsSubset(subject+" numeric range", admittedToolSchemaFloat(source.Minimum), admittedToolSchemaFloat(source.Maximum), admittedToolSchemaFloat(target.Minimum), admittedToolSchemaFloat(target.Maximum)); err != nil {
-			return err
-		}
+		return validateToolSchemaFloatBoundsSubset(subject+" numeric range", source.Minimum, source.Maximum, target.Minimum, target.Maximum)
 	case "array":
-		if err := validateToolSchemaIntBoundsSubset(subject+" array length", admittedToolSchemaInt(source.MinItems), admittedToolSchemaInt(source.MaxItems), admittedToolSchemaInt(target.MinItems), admittedToolSchemaInt(target.MaxItems)); err != nil {
+		if err := validateToolSchemaIntBoundsSubset(subject+" array length", source.MinItems, source.MaxItems, target.MinItems, target.MaxItems); err != nil {
 			return err
 		}
 		targetItems, targetHasItems := target.ItemsSchema()
@@ -68,9 +70,7 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema, de
 			if !sourceHasItems {
 				return fmt.Errorf("%s source array items are unconstrained while target items are constrained", subject)
 			}
-			if err := validateToolSchemaSubset(subject+"[]", sourceItems, targetItems, false); err != nil {
-				return err
-			}
+			return validateToolSchemaSubset(subject+"[]", sourceItems, targetItems, false)
 		}
 	case "object":
 		return validateToolSchemaObjectSubset(subject, source, target)
@@ -113,7 +113,7 @@ func toolSchemaRelationEqual(source, target ToolInputSchema, declaredProperties 
 }
 
 func validateToolSchemaStringSubset(subject string, source, target ToolInputSchema) error {
-	if err := validateToolSchemaIntBoundsSubset(subject+" string length", admittedToolSchemaInt(source.MinLength), admittedToolSchemaInt(source.MaxLength), admittedToolSchemaInt(target.MinLength), admittedToolSchemaInt(target.MaxLength)); err != nil {
+	if err := validateToolSchemaIntBoundsSubset(subject+" string length", source.MinLength, source.MaxLength, target.MinLength, target.MaxLength); err != nil {
 		return err
 	}
 	if target.Pattern() != "" && source.Pattern() != target.Pattern() {
@@ -146,10 +146,8 @@ func validateFiniteToolSchemaSourceEnum(subject string, source, target ToolInput
 		if err := sourceConstraint.Validate(value.Interface()); err != nil {
 			return false, fmt.Errorf("%s source enum value is outside its declared schema: %w", subject, err)
 		}
-		if targetDeclared {
-			if _, ok := targetEnums[key]; !ok {
-				return false, fmt.Errorf("%s source enum value %s is absent from target enum", subject, key)
-			}
+		if _, ok := targetEnums[key]; targetDeclared && !ok {
+			return false, fmt.Errorf("%s source enum value %s is absent from target enum", subject, key)
 		}
 		if err := targetConstraint.Validate(value.Interface()); err != nil {
 			return false, fmt.Errorf("%s source enum value is outside target schema: %w", subject, err)
@@ -170,58 +168,37 @@ func toolSchemaEnumSet(values []semanticvalue.Value) (map[string]struct{}, error
 	return out, nil
 }
 
-func admittedToolSchemaInt(accessor func() (int, bool)) *int {
-	value, ok := accessor()
-	if !ok {
-		return nil
+func validateToolSchemaIntBoundsSubset(subject string, sourceMin, sourceMax, targetMin, targetMax func() (int, bool)) error {
+	sMin, sHasMin := sourceMin()
+	sMax, sHasMax := sourceMax()
+	tMin, tHasMin := targetMin()
+	tMax, tHasMax := targetMax()
+	if tHasMin && (!sHasMin || sMin < tMin) {
+		return fmt.Errorf("%s source minimum is broader than target minimum %d", subject, tMin)
 	}
-	return &value
-}
-
-func admittedToolSchemaFloat(accessor func() (float64, bool)) *float64 {
-	value, ok := accessor()
-	if !ok {
-		return nil
-	}
-	return &value
-}
-
-func validateToolSchemaIntBoundsSubset(subject string, sourceMin, sourceMax, targetMin, targetMax *int) error {
-	if targetMin != nil && (sourceMin == nil || *sourceMin < *targetMin) {
-		return fmt.Errorf("%s source minimum is broader than target minimum %d", subject, *targetMin)
-	}
-	if targetMax != nil && (sourceMax == nil || *sourceMax > *targetMax) {
-		return fmt.Errorf("%s source maximum is broader than target maximum %d", subject, *targetMax)
+	if tHasMax && (!sHasMax || sMax > tMax) {
+		return fmt.Errorf("%s source maximum is broader than target maximum %d", subject, tMax)
 	}
 	return nil
 }
 
-func validateToolSchemaFloatBoundsSubset(subject string, sourceMin, sourceMax, targetMin, targetMax *float64) error {
-	if targetMin != nil && (sourceMin == nil || *sourceMin < *targetMin) {
-		return fmt.Errorf("%s source minimum is broader than target minimum %v", subject, *targetMin)
+func validateToolSchemaFloatBoundsSubset(subject string, sourceMin, sourceMax, targetMin, targetMax func() (float64, bool)) error {
+	sMin, sHasMin := sourceMin()
+	sMax, sHasMax := sourceMax()
+	tMin, tHasMin := targetMin()
+	tMax, tHasMax := targetMax()
+	if tHasMin && (!sHasMin || sMin < tMin) {
+		return fmt.Errorf("%s source minimum is broader than target minimum %v", subject, tMin)
 	}
-	if targetMax != nil && (sourceMax == nil || *sourceMax > *targetMax) {
-		return fmt.Errorf("%s source maximum is broader than target maximum %v", subject, *targetMax)
+	if tHasMax && (!sHasMax || sMax > tMax) {
+		return fmt.Errorf("%s source maximum is broader than target maximum %v", subject, tMax)
 	}
 	return nil
 }
 
 func validateToolSchemaObjectSubset(subject string, source, target ToolInputSchema) error {
-	if targetNames, constrained := target.PropertyNamesSchema(); constrained {
-		if sourceNames, sourceConstrained := source.PropertyNamesSchema(); sourceConstrained {
-			if err := validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames, false); err != nil {
-				return err
-			}
-		} else {
-			if admittedToolSchemaAdditionalProperties(source).allowed {
-				return fmt.Errorf("%s source admits unconstrained property names while target constrains them", subject)
-			}
-			for _, name := range source.PropertyNames() {
-				if err := targetNames.Validate(name); err != nil {
-					return fmt.Errorf("%s source property name %q is outside target propertyNames: %w", subject, name, err)
-				}
-			}
-		}
+	if err := validateToolSchemaPropertyNamesSubset(subject, source, target); err != nil {
+		return err
 	}
 	sourceRequired := toolSchemaStringSet(source.RequiredProperties())
 	for _, name := range target.RequiredProperties() {
@@ -252,37 +229,60 @@ func validateToolSchemaObjectSubset(subject string, source, target ToolInputSche
 	}
 
 	if sourceAdditional.allowed {
-		for _, name := range target.PropertyNames() {
-			if _, declaredBySource := sourceProperties[name]; declaredBySource {
-				continue
-			}
-			targetProperty, _ := target.Property(name)
-			sourceProperty := sourceAdditional.schema
-			if sourceProperty == nil {
-				if targetProperty.Kind() != ToolSchemaAny {
-					return fmt.Errorf("%s source admits unconstrained additional property %q while target constrains it", subject, name)
-				}
-				unrestricted := MustToolInputSchema(ToolSchemaAny)
-				sourceProperty = &unrestricted
-			}
-			if err := validateToolSchemaSubset(subject+"."+name, *sourceProperty, targetProperty, false); err != nil {
-				return err
-			}
+		if err := validateToolSchemaOpenSourceMembersSubset(subject, sourceProperties, sourceAdditional, target); err != nil {
+			return err
 		}
 	}
-	if !sourceAdditional.allowed {
+	if !sourceAdditional.allowed || (targetAdditional.allowed && targetAdditional.schema == nil) {
 		return nil
 	}
 	if !targetAdditional.allowed {
 		return fmt.Errorf("%s source admits additional properties while target is closed", subject)
 	}
-	if targetAdditional.schema == nil {
-		return nil
-	}
 	if sourceAdditional.schema == nil {
 		return fmt.Errorf("%s source admits unconstrained additional properties while target constrains them", subject)
 	}
 	return validateToolSchemaSubset(subject+".*", *sourceAdditional.schema, *targetAdditional.schema, false)
+}
+
+func validateToolSchemaOpenSourceMembersSubset(subject string, sourceProperties map[string]struct{}, sourceAdditional admittedToolSchemaAdditionalPropertyConstraint, target ToolInputSchema) error {
+	for _, name := range target.PropertyNames() {
+		if _, declaredBySource := sourceProperties[name]; declaredBySource {
+			continue
+		}
+		targetProperty, _ := target.Property(name)
+		sourceProperty := sourceAdditional.schema
+		if sourceProperty == nil {
+			if targetProperty.Kind() != ToolSchemaAny {
+				return fmt.Errorf("%s source admits unconstrained additional property %q while target constrains it", subject, name)
+			}
+			unrestricted := MustToolInputSchema(ToolSchemaAny)
+			sourceProperty = &unrestricted
+		}
+		if err := validateToolSchemaSubset(subject+"."+name, *sourceProperty, targetProperty, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateToolSchemaPropertyNamesSubset(subject string, source, target ToolInputSchema) error {
+	targetNames, constrained := target.PropertyNamesSchema()
+	if !constrained {
+		return nil
+	}
+	if sourceNames, sourceConstrained := source.PropertyNamesSchema(); sourceConstrained {
+		return validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames, false)
+	}
+	if admittedToolSchemaAdditionalProperties(source).allowed {
+		return fmt.Errorf("%s source admits unconstrained property names while target constrains them", subject)
+	}
+	for _, name := range source.PropertyNames() {
+		if err := targetNames.Validate(name); err != nil {
+			return fmt.Errorf("%s source property name %q is outside target propertyNames: %w", subject, name, err)
+		}
+	}
+	return nil
 }
 
 type admittedToolSchemaAdditionalPropertyConstraint struct {
