@@ -1756,7 +1756,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				`, result.Materialization.ForkRunID).Scan(&runtimeDiagnostic)
 				t.Fatalf("provider calls=%d lookup calls=%d, want 2/1; deliveries=%s; runtime=%s", providerCalls.Load(), lookupCalls.Load(), deliveryDiagnostic, runtimeDiagnostic)
 			}
-			assertSelectedForkProviderCapabilityEvidence(t, ctx, db, result, tc.adapter, 2)
+			assertSelectedForkProviderCapabilityEvidence(t, ctx, pg, result, tc.adapter, 2)
 		})
 	}
 }
@@ -1868,61 +1868,31 @@ func selectedForkAPIProviderConfig(backend, model, baseURL string) *config.Confi
 	return cfg
 }
 
-func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Context, db *sql.DB, result SelectedContractExecutionResult, adapter string, wantTurns int) {
+func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Context, selected any, result SelectedContractExecutionResult, adapter string, wantTurns int) {
 	t.Helper()
 	proof := result.ForkLocalRuntimeContainer
 	if proof == nil || proof.RuntimeExecutionID == "" || proof.RuntimeGeneration == 0 || proof.AuthorityExecutionOwner == "" {
 		t.Fatalf("selected completion runtime authority proof = %#v", proof)
 	}
 
-	var operationCount int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runtime_external_effect_operations
-		WHERE effect_kind = 'provider_turn'
-		  AND authority_kind = 'selected_contract_fork'
-		  AND authority_id = $1
-		  AND selected_execution_id = $1::uuid
-		  AND generation = $2
-		  AND authority_evidence->>'execution_id' = $1
-		  AND (authority_evidence->>'generation')::bigint = $2
-	`, proof.RuntimeExecutionID, proof.RuntimeGeneration).Scan(&operationCount); err != nil {
+	operationCount, err := storetest.CountSelectedProviderOperationsStorage(ctx, selected, proof.RuntimeExecutionID, proof.RuntimeGeneration)
+	if err != nil {
 		t.Fatalf("count selected completion operations: %v", err)
 	}
 	if operationCount != wantTurns {
 		t.Fatalf("selected completion operations = %d, want %d", operationCount, wantTurns)
 	}
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT a.capability_surface_id::text, t.capability_surface_id::text, s.surface::text,
-		       o.capability_plan_fingerprint, t.turn_id::text, o.agent_frame_bytes, t.agent_frame_bytes
-		FROM runtime_external_effect_attempts a
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
-		JOIN managed_agent_capability_surfaces s ON s.surface_id = a.capability_surface_id
-		WHERE o.selected_execution_id = $1::uuid
-		  AND a.adapter = $2
-		  AND a.generation = $3
-		  AND a.execution_owner = $4
-		  AND a.state = 'settled'
-		  AND t.run_id = $5::uuid
-		  AND t.agent_id = 'test-agent'
-		  AND t.usage_exactness = 'exact'
-		ORDER BY t.created_at, t.turn_id
-	`, proof.RuntimeExecutionID, adapter, proof.RuntimeGeneration, proof.AuthorityExecutionOwner, result.Materialization.ForkRunID)
+	rows, err := storetest.ReadSelectedCompletionCapabilitiesStorage(ctx, selected, proof.RuntimeExecutionID, adapter, proof.RuntimeGeneration, proof.AuthorityExecutionOwner, result.Materialization.ForkRunID)
 	if err != nil {
 		t.Fatalf("load selected completion capability evidence: %v", err)
 	}
-	defer rows.Close()
 	turnCount := 0
 	frames := make([]agentframe.Frame, 0, wantTurns)
-	for rows.Next() {
+	for _, row := range rows {
 		turnCount++
-		var attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint, turnID string
-		var operationFrameBytes, turnFrameBytes []byte
-		if err := rows.Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface, &planFingerprint, &turnID, &operationFrameBytes, &turnFrameBytes); err != nil {
-			t.Fatalf("scan selected completion capability evidence: %v", err)
-		}
+		attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint, turnID := row.AttemptSurfaceID, row.TurnSurfaceID, row.Surface, row.PlanFingerprint, row.TurnID
+		operationFrameBytes, turnFrameBytes := row.OperationFrame, row.TurnFrame
 		if !slices.Equal(operationFrameBytes, turnFrameBytes) {
 			t.Fatalf("selected completion operation/turn frame bytes differ for turn %s", turnID)
 		}
@@ -1955,9 +1925,6 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 			t.Fatalf("operation plan fingerprint = %q, want %q", planFingerprint, wantFingerprint)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate selected completion capability evidence: %v", err)
-	}
 	if turnCount != wantTurns {
 		t.Fatalf("selected completion evidence rows = %d, want %d", turnCount, wantTurns)
 	}
@@ -1975,7 +1942,7 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 			t.Fatalf("selected fork frames are not fresh parent-bound occurrences: %#v", frames)
 		}
 	}
-	assertSelectedForkCompletionModelAlias(t, ctx, db, proof.RuntimeExecutionID, adapter, wantTurns)
+	assertSelectedForkCompletionModelAlias(t, ctx, selected, proof.RuntimeExecutionID, adapter, wantTurns)
 }
 
 func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabilityAuthority(t *testing.T) {
@@ -2238,7 +2205,7 @@ fi
 	if emitted != 1 {
 		t.Fatalf("selected-fork flow-scoped MCP emissions = %d, want 1", emitted)
 	}
-	assertSelectedForkClaudeCapabilityEvidence(t, ctx, db, result)
+	assertSelectedForkClaudeCapabilityEvidence(t, ctx, selected, result)
 }
 
 func capturedSelectedForkArgValue(t testing.TB, raw []byte, name string) string {
@@ -2310,17 +2277,17 @@ func (selectedForkWorkspaceLifecycle) ReleaseSourceProjection(context.Context) e
 func (selectedForkWorkspaceLifecycle) EnsurePrereqs(context.Context) error           { return nil }
 func (selectedForkWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error  { return nil }
 
-func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Context, db *sql.DB, result SelectedContractExecutionResult) {
+func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Context, selected any, result SelectedContractExecutionResult) {
 	t.Helper()
 	proof := result.ForkLocalRuntimeContainer
 	if proof == nil {
 		t.Fatal("selected Claude runtime authority proof is missing")
 	}
-	var preparationRaw []byte
-	var preparationFingerprint string
-	if err := db.QueryRowContext(ctx, `SELECT preparation_binding, preparation_fingerprint FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, proof.RuntimeExecutionID).Scan(&preparationRaw, &preparationFingerprint); err != nil {
+	stored, err := storetest.ReadSelectedPreparationStorage(ctx, selected, proof.RuntimeExecutionID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	preparationRaw, preparationFingerprint := stored.Binding, stored.Fingerprint
 	var preparation runfork.SelectedForkPreparationBinding
 	if err := json.Unmarshal(preparationRaw, &preparation); err != nil {
 		t.Fatal(err)
@@ -2329,42 +2296,16 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	if err != nil || fingerprint != preparationFingerprint || preparation.ForkRunID != result.Materialization.ForkRunID || len(preparation.Actors) != 1 {
 		t.Fatalf("invalid durable preparation binding: %s, %v", preparationRaw, err)
 	}
-	var startupSurfaces, startupAttempts int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT s.surface_id), COUNT(DISTINCT a.attempt_id)
-		FROM managed_agent_capability_surfaces s
-		JOIN runtime_external_effect_attempts a ON a.capability_surface_id = s.surface_id
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id IS NULL
-		  AND o.authority_kind = 'startup_probe'
-		  AND o.startup_authority_id = $2
-		  AND o.authority_id = CAST(s.authority_id AS TEXT)
-		  AND a.adapter = 'claude_cli_startup_probe'
-		  AND a.state = 'settled'
-		  AND s.execution_kind = 'selected_fork_preparation'
-		  AND s.execution_authority_id = $1
-		  AND s.run_id IS NULL
-		  AND s.actor_id = 'test-agent'
-	`, preparation.PreparationID, preparation.Coordinates.ProcessAuthorityID).Scan(&startupSurfaces, &startupAttempts); err != nil {
+	counts, err := storetest.ReadSelectedClaudeStartupCountsStorage(ctx, selected, preparation.PreparationID, preparation.Coordinates.ProcessAuthorityID)
+	if err != nil {
 		t.Fatalf("load selected Claude startup capability evidence: %v", err)
 	}
+	startupSurfaces, startupAttempts := counts.Surfaces, counts.Attempts
 	if startupSurfaces != 1 || startupAttempts != 1 {
 		t.Fatalf("selected Claude startup surfaces=%d attempts=%d, want 1/1", startupSurfaces, startupAttempts)
 	}
-	var rawStartupSurface string
-	if err := db.QueryRowContext(ctx, `
-		SELECT s.surface
-		FROM managed_agent_capability_surfaces s
-		JOIN runtime_external_effect_attempts a ON a.capability_surface_id = s.surface_id
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id IS NULL
-		  AND o.startup_authority_id = $2
-		  AND s.execution_authority_id = $1
-		  AND a.adapter = 'claude_cli_startup_probe'
-		  AND a.state = 'settled'
-		  AND s.run_id IS NULL
-		  AND s.actor_id = 'test-agent'
-	`, preparation.PreparationID, preparation.Coordinates.ProcessAuthorityID).Scan(&rawStartupSurface); err != nil {
+	rawStartupSurface, err := storetest.ReadSelectedClaudeStartupSurfaceStorage(ctx, selected, preparation.PreparationID, preparation.Coordinates.ProcessAuthorityID)
+	if err != nil {
 		t.Fatalf("load selected Claude startup surface: %v", err)
 	}
 	var startupSurface managedcapabilities.Surface
@@ -2388,38 +2329,17 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	}
 	assertSelectedForkClaudeManagedSurface(t, startupSurface, preparation.PreparationID, "", managedcapabilities.AuthorityStartupProbe)
 
-	var attemptSurfaceID, turnSurfaceID, rawSurface string
-	if err := db.QueryRowContext(ctx, `
-		SELECT a.capability_surface_id, t.capability_surface_id, s.surface
-		FROM runtime_external_effect_attempts a
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
-		JOIN managed_agent_capability_surfaces s ON s.surface_id = a.capability_surface_id
-		WHERE o.selected_execution_id = $1
-		  AND a.adapter = 'claude_cli'
-		  AND a.state = 'settled'
-		  AND t.run_id = $2
-		  AND t.agent_id = 'test-agent'
-	`, proof.RuntimeExecutionID, result.Materialization.ForkRunID).Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface); err != nil {
-		rows, queryErr := db.QueryContext(ctx, `
-			SELECT a.adapter, a.state, COALESCE(CAST(a.capability_surface_id AS TEXT),''),
-			       COALESCE(CAST(t.capability_surface_id AS TEXT),''), COALESCE(CAST(t.failure AS TEXT),'')
-			FROM runtime_external_effect_attempts a
-			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-			LEFT JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
-			WHERE o.selected_execution_id = $1
-			ORDER BY a.authorized_at
-		`, proof.RuntimeExecutionID)
+	turn, err := storetest.ReadSelectedClaudeTurnCapabilityStorage(ctx, selected, proof.RuntimeExecutionID, result.Materialization.ForkRunID)
+	if err != nil {
+		rows, queryErr := storetest.ReadSelectedClaudeAttemptDiagnosticsStorage(ctx, selected, proof.RuntimeExecutionID)
 		if queryErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var adapter, state, attemptSurface, turnSurface, failure string
-				_ = rows.Scan(&adapter, &state, &attemptSurface, &turnSurface, &failure)
-				t.Logf("selected Claude attempt adapter=%s state=%s attempt_surface=%s turn_surface=%s failure=%s", adapter, state, attemptSurface, turnSurface, failure)
+			for _, row := range rows {
+				t.Logf("selected Claude attempt adapter=%s state=%s attempt_surface=%s turn_surface=%s failure=%s", row.Adapter, row.State, row.AttemptSurface, row.TurnSurface, row.Failure)
 			}
 		}
 		t.Fatalf("load selected Claude turn capability evidence: %v", err)
 	}
+	attemptSurfaceID, turnSurfaceID, rawSurface := turn.AttemptSurfaceID, turn.TurnSurfaceID, turn.Surface
 	if attemptSurfaceID == "" || attemptSurfaceID != turnSurfaceID {
 		t.Fatalf("Claude capability surface attempt=%q turn=%q, want one exact identity", attemptSurfaceID, turnSurfaceID)
 	}
@@ -2428,22 +2348,16 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 		t.Fatalf("decode selected Claude turn surface: %v", err)
 	}
 	assertSelectedForkClaudeManagedSurface(t, surface, proof.RuntimeExecutionID, result.Materialization.ForkRunID, managedcapabilities.AuthorityProviderTurn)
-	assertSelectedForkCompletionModelAlias(t, ctx, db, proof.RuntimeExecutionID, "claude_cli", 1)
+	assertSelectedForkCompletionModelAlias(t, ctx, selected, proof.RuntimeExecutionID, "claude_cli", 1)
 }
 
-func assertSelectedForkCompletionModelAlias(t testing.TB, ctx context.Context, db *sql.DB, executionID, adapter string, wantTurns int) {
+func assertSelectedForkCompletionModelAlias(t testing.TB, ctx context.Context, selected any, executionID, adapter string, wantTurns int) {
 	t.Helper()
-	var total, canonical int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*), COUNT(*) FILTER (WHERE l.model_alias = $3)
-		FROM spend_ledger l
-		JOIN runtime_external_effect_attempts a ON a.attempt_id = l.external_effect_attempt_id
-		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id = $1
-		  AND a.adapter = $2
-	`, executionID, adapter, llmselection.ModelAliasRegular).Scan(&total, &canonical); err != nil {
+	counts, err := storetest.ReadSelectedCompletionModelAliasStorage(ctx, selected, executionID, adapter)
+	if err != nil {
 		t.Fatalf("load selected completion model aliases: %v", err)
 	}
+	total, canonical := counts.Total, counts.Canonical
 	if total != wantTurns || canonical != wantTurns {
 		t.Fatalf("selected completion model aliases total=%d canonical=%d, want %d exact regular aliases", total, canonical, wantTurns)
 	}

@@ -5195,3 +5195,54 @@ the complete128-root cheap collection PASS16.606s, script U1000 clean, unchanged
 ratchet PASS27.995s at8197/5831. All unchanged original/native/race/counterexample
 receipts carry; no repeated business matrix or tier. The repaired signed-head
 complexity receipt follows before this family is offered for stacking.
+
+## Whole Selected Completion Capability Observation Chain
+
+The next ready dependency is the ENTIRE three-helper provider/Claude capability
+chain, not one scalar: provider completion evidence, Claude startup/turn evidence,
+and their common model-alias witness. All four direct helper calls (two outer
+callers and two shared model checks) now consume the original selected owner.
+No SQL/pool/rows capability survives in those three helpers. Their enclosing
+source construction, provider/process lifetimes and separate diagnostic reads
+remain independently tracked; this checkpoint does not claim their retirement.
+
+Eight exact physical queries move to existing domain boundaries: effectpersistence
+owns effect/attempt/turn/surface joins, runforkpersistence owns stored preparation
+bytes/fingerprint, and budgetspend owns the selected-attempt spend-alias join.
+The private adapter opens one ORIGINAL native read transaction per original
+query. Preparation, startup counts, startup surface, turn surface and alias cuts
+remain separate; the attempt diagnostic query remains ERROR-ONLY. Public bridges
+return detached fields and expose no query/table/pool/callback. The provider-only
+PostgreSQL projections remain PostgreSQL-only, rather than introducing a new
+dialect interpretation; existing Claude and alias projections support both stores.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Provider operation/generation authority, exact frames and shared surface identity | reproduced and fixed | Entire original three-adapter frame root under race, plus both-store original Claude root, PASS30.206s; complete frame/identity/fingerprint/tool/cardinality assertions unchanged |
+| Claude preparation/startup/turn evidence and common model-alias helper | execution-proven through the same corrected path | Both original backend cells above; source-pinned eight-query equality, original fields/joins/NULL defaults/order and three helper/all four call inventory |
+| Independent selected-coordinator cuts, absence and unavailable owners | reproduced and fixed | Two native both-store roots race PASS15.349s; PostgreSQL8 begins/5 read commits and SQLite6/3, zero writes/active work, exact ErrNoRows and nil results, full history/clock equality, raw/invalid/cancelled/closed refusals |
+| Canonical model-alias evidence accidentally widened or rebound | reproduced and fixed | Alter only actual alias predicate to a foreign alias: original SQLite and PostgreSQL cells RED20.728s with total1/canonical0; restore exact predicate GREEN24.748s |
+| Enclosing raw source setup and outer error-only diagnostics | explicitly split / tracked separately | Original outer execution bodies/diagnostics retained, already-tracked #2542 debt; no setup, process-restart or parent-closure credit claimed |
+
+Finite helpers retain every business assertion and explicit field/argument/cut
+mapping with hostile controls. All eight SQL bodies are compared to immutable
+predecessors. Shared collection130 roots PASS15.178s; six persistence boundaries
+PASS3.455s; affected seven-package/script U1000 clean. Early compile failed only
+because of an incorrect new import path; it was corrected before executions.
+Early finite checks caught an incorrect Claude caller name, stale recipe count,
+and delegated row-iteration error assertions; exact inventory and named complete
+semantic proof delegation repair these without assertion or collector relaxation.
+
+Corpus1265/488, digest
+c24a604a6da35ceb93c7952e4a14d7a7acf649377519dfae74edc0620aaa5852.
+All24 immutable historical receipts and earlier current successors are retained.
+Downward census PASS109.258s:8197 ->8167 findings,5831 ->5806 raw sites,
+30/25 removals,ZERO additions, uncertainty67; supplied-pool calls58 unchanged.
+Final unchanged ratchet and signed-head complexity are recorded before offering
+this checkpoint for stacking. No production contract or platform semantics
+change; binding raw_sql_policy and existing #2542/#2151 watchlist mapping suffice.
+No new issue/framework, no push/PR/tier/server2. M01/Docker/drain/D3/M07/integration
+holds remain explicit and unwaived. The inspected resource-read raw pin seed and
+integrity faults were NOT changed or certified; its canonical construction
+dependency remains separate. Receipts
+~/.cache/swarm-2542-family145/selected-capability-chain-*.
