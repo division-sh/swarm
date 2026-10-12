@@ -23,6 +23,24 @@ cancellation-winning cells prove durable terminal disposition only: actual
 nonempty `AcceptCommitted` transfer is UNOBSERVED there. Positive handoff and
 held-tail controls retain their separate provenance.
 
+## Readiness Consumer Census
+
+Hosted38224591981 at77969d68a rejected one unregistered Manager read in
+`committed_agent_attachment.go::committedAgentAttachmentInstalling`.
+The path is `FinalizeCommittedAgentReadiness` ->
+`finalizeAbsentCommittedAgentReadiness` -> that exact attachment observation.
+It loads the canonical selected-store row once to validate run/route, plan hash,
+attempt ordinal, accepted state, eligible pre-agents_registered phase and the
+declared actor census; it then verifies the native activation receipt and
+rechecks the live executor. It writes no phase, creates no actor and grants no
+delivery claim. The read therefore belongs to the existing flow-attachment
+authority, not a new readiness reconciler or outbox-owned store interpreter.
+The static census adds only this named file's one call: six calls in five files
+become seven calls in six files. All prior reader/writer maps, call counts and
+the phase-reconciler size bound stay exact. Execution witnesses remain the
+native eight-cell partial-attachment proof and the 22-cell exact-owner controls
+listed above; the census repair changes no production body or contract.
+
 ## Preserved #2286 Admission Obligations
 
 These runtime.go helpers are included because the independent census measures
