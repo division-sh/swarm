@@ -224,6 +224,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 }
 
 func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPath string, base *packartifact.PlatformPackInventory, schemaInventory bool) bool {
+	findingStart := len(report.Findings)
 	if schemaInventory {
 		inventory, err := buildDoctorSchemaInventory(platformSpecPath)
 		if err != nil {
@@ -241,7 +242,8 @@ func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPat
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory or platform spec")
 		return false
 	}
-	return !report.HasBlockers()
+	readback := LocalPreflightReport{Findings: report.Findings[findingStart:]}
+	return !readback.HasBlockers()
 }
 
 func appendDoctorPackInventoryReadback(report *LocalPreflightReport, platformSpecPath string, inventory *packartifact.EffectivePackInventory) error {

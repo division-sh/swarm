@@ -10859,6 +10859,8 @@ tool_model:
         The source-free doctor report owner preserves its already-admitted installed subjects, pack_inventory and
         corresponding text findings together when composing prerequisite results. Invalid inventory or projection
         produces the existing typed blocking diagnostic, never ok=true with a missing or fallback inventory.
+        Installed-readback success depends only on its own admission findings; previously recorded blockers remain
+        in the final report without skipping independent prerequisite checks after valid readback.
         Schema-inventory options, prerequisite refusals, ordering and redaction remain intact without duplicate
         findings. Doctor never loads the invocation tree, evaluates effective-target credentials or installs a target.
       ordering:

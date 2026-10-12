@@ -531,3 +531,45 @@ retirement-text hit described provider request assembly, not the retired
 product transport; this audit now names it accurately. No scanner exception,
 code rename or hiding of a live path is used. Final owner census, planned-root
 uniqueness, focused/public receipts and hosted lifecycle still govern readiness.
+
+## PR2626 First Hosted Failure And D01 Delta
+
+Hosted lifecycle38198078153 attempt1 at77db0fe98 has one failing proof root:
+TestRewrite2566NoFinalRootCensusIsExplicitlyClassified in broad-05.56 jobs
+succeeded,28 were cancelled and6 skipped. The other two failure conclusions
+are timing INCOMPLETE and Required test summary, not independent test defects.
+The failed hosted receipt remains failed evidence; no same-head rerun is used.
+
+Exact census comparison is43 previously classified top-level no-final roots
+versus44 discovered; one addition, zero removals. The lexical scanner ignores
+nested schemas with a tracked schema ancestor. The S/N extraction changed no
+schema-discovery or finite-admission owner. The new public fixture is classified
+in scripts/rewrite-stages-2566/finite_fixtures_test.go, without an acceptance
+wildcard or a runtime finite-start exemption:
+
+| Added schema source | Caller and census disposition |
+| --- | --- |
+| internal/releasee2e/testdata/admission_factoring | New census root; compiled verify/describe structural source and compiled serve standing.declare/provision/restart source. No finite run.start caller; explicitly classified standing/startup/provider/component source. |
+| admission_factoring/beta | Nested beta standing ingress; covered by the root, not a separate top-level census root. |
+| admission_factoring/alpha-receiver | Nested alpha event receiver; covered by the root, not a separate census root. |
+| admission_factoring/beta-receiver | Nested beta event receiver; covered by the root, not a separate census root. |
+| admission_factoring/alpha-receiver/detail | Nested receiver child; covered by the root, not a separate census root. |
+
+Bot4244357924 exposes an additional D01 helper predicate: successful installed
+readback checked all report blockers instead of just its new admission findings.
+The existing report owner now records the finding boundary and applies its
+canonical HasBlockers predicate only to the newly appended findings. All prior
+findings remain intact; new capability/model/schema/pack failures still refuse.
+The authoritative doctor_rule states that distinction. No consumer/owner change,
+source load, credential observation or compatibility path is introduced.
+
+TestDoctorInstalledReadbackScopesAdmissionBlockers is an actual RED->GREEN
+counterexample at that boundary plus malformed capability and missing-spec
+negatives. Compiled doctor JSON/text independently prove valid/hostile installed
+inventory and invalid pack/admission/workspace refusal. An unknown stale env
+in the compiled process is refused by the earlier config loader; the added
+invalid-env-config control preserves that refusal and redaction. It is NOT
+credited as public execution of the preexisting-report-blocker helper case.
+The existing60-row matrix is retained: Q05 gains the exact fixture classification
+control and D01 gains these report/admission controls. Parents2447/2407/2250 stay
+open. Existing watchlist nodes are refined; no new issue or framework is needed.

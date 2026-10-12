@@ -167,6 +167,8 @@ func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
 			"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
 		},
 		"standing/startup/provider/component sources, not finite run.start": {
+			// Public structural readers and standing declare/restart, not finite run.start.
+			"internal/releasee2e/testdata/admission_factoring",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3",
