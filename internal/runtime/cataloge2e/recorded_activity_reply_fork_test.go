@@ -299,7 +299,7 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 		}
 	}
 	// The copied journal's request coordinate is not a physical publication in B.
-	// Cut at B's actual result, before its handler answers the two open levels.
+	// Only B's actual inherited request or result is a lawful publication cut.
 	_, requestPublished, requestErr := selected.LoadPreparedPublishEvent(ctx, sourceAttempt.RequestEventID)
 	sourceResult, resultPublished, resultErr := selected.LoadPreparedPublishEvent(ctx, sourceAttempt.ResultEventID)
 	if requestErr != nil || requestPublished || resultErr != nil || !resultPublished || len(sourceResult.DeliveryRoutes) != 1 ||
@@ -330,6 +330,8 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 		if t.Failed() {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
 			defer cancel()
+			diagnostic, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(cleanup, selected, staged.ForkRunID)
+			t.Logf("exact refork terminal receipts/logs: %+v error=%v", diagnostic, err)
 			t.Logf("exact retained refork failure/cleanup join: %v", owner.RetireSelectedContexts(cleanup))
 		}
 	})
