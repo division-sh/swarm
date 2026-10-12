@@ -5118,3 +5118,63 @@ change, fault substitute or compatibility path was introduced. Existing #2542/
 #2151 construction/read ownership watchlist mapping remains sufficient, with
 M01/Docker/drain/D3/M07/integration holds unwaived. Local only, no push/PR/tier/
 server2. Receipts ~/.cache/swarm-2542-family145/serving-lifetime-read-chain-*.
+
+## Whole Canonical Event Fixture Transaction Island Retirement
+
+The source-route matrix's two residual record writers were the entry point,
+not the boundary. Exhaustive live-symbol probing found six further canonical
+record calls and six root-record calls, all already carrying their exact selected
+owner. Propagation now closes the ENTIRE public raw transaction island: the old
+canonical-record constructor, root constructor, unused child constructor and
+runCanonicalEventMutation are deleted. storetest/event.go is SQL/pool/dialect/
+transaction-callback/reconstructed-backend free. The contextual-lineage getter
+and supplied-pool opener are also deleted, alongside the source-route matrix's
+last supplied-pool opener. No delegating compatibility implementation remains.
+
+Event class, payload binding, persistent identity admission, exact settlement,
+eventrecord projection and dialect-specific Insert/Load remain the existing
+semantic owners. The native fixture runs through the ORIGINAL selected backend's
+RevisionOnly mutation, not a new coordinator. Exact duplicate replay compares
+the complete record, changed same-ID input refuses without mutation, and selected-
+fork replay is refused before SQL so its lineage owner cannot be bypassed. Root
+record construction reuses the already-qualified InsertNativeExistingRunRootEvent
+owner. Neither path ensures/invents flow headers, a delivery plan or publication
+scope. The admission census renames ONE existing operation1 ->1, not a larger
+allowance. Original event-only and unrevisioned-child/revision-capture cuts remain
+separate, including source active-delivery/fork-point history.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Revision source-route shared raw constructor/writers | reproduced and fixed | Original eight-case PostgreSQL matrix plus frontier/history root under race PASS8.356s; no-construction, precise route/history/refusal and separate captures preserved |
+| Canonical record writer's six sibling calls | execution-proven through the same corrected path | Entire original tools fork-revision/activation roots race PASS8.499s; composed startup creation/recovery/finalizer proof both stores PASS49.163s; all44 lineage class/mode/backend cases race PASS11.773s |
+| Root record writer's six remaining consumers | execution-proven through the same corrected path | Both supported API witnesses plus both-store latest-turn/output-contract roots race PASS20.335s; both original serve-abandon roots PASS16.233s; active-delivery source/fork-point root PASS8.369s |
+| Native record writer, precise bytes/clock/class and strict replay | reproduced and fixed | Both-store native record/root owner controls PASS14.489s; one original writer/finalization, no manufactured scope/header/delivery, full-record decoding, exact duplicate, conflict, unadmitted/raw/invalid/cancelled/closed/selected-replay refusals and complete history/clock equality |
+| Changed same-ID input accidentally accepted | reproduced and fixed | Disable only actual record.Equal conflict predicate: both stores RED10.395s; exact restoration GREEN14.489s |
+| Raw transaction reconstruction and unused child constructor | reproduced and fixed | Exact source-pinned retired declarations, finite hostile controls and full affected-package compilation; no remaining live symbol consumers and public event fixture source has no SQL/pool/dialect/callback capability |
+
+Every14 original record-call occurrence is accounted for (seven canonical,
+seven root including the matrix precursor). Finite whole-body inverse propagation
+preserves every original argument, clock, mode, branch, assertion, claim/turn/
+receipt/recovery cut. The active-delivery root composes only its already-reviewed
+source construction and capture transformations. Three deleted declarations and
+the contextual getter remain explicit removed rows. Immutable24 historical
+receipts and prior current successors are retained; corpus1262/485, digest
+570b27003208a4d87bfc08fc2453f6d96c8a1d6bbf6893d360e4b82b5663f31b.
+Complete cheap Family145/current/historical128-root collection PASS13.388s;
+six persistence boundaries PASS3.348s; final affected U1000 clean. Early compile
+receipts disclosed the three newly-unused dialect imports; they were removed,
+then the unchanged original roots qualified. Finite controls caught comment-free
+AST formatting and a no-op hostile mutation in the assertion-free turn helper;
+exact binding/identity controls repair both without relaxing source equality.
+
+Downward census PASS89.010s:8240 ->8197 findings,5863 ->5831 raw sites,
+43/32 removed,ZERO added, uncertainty67. Supplied-pool calls60 ->58
+(57 external plus1 private). Final unchanged ratchet PASS25.280s; signed-head
+complexity follows. Other raw constructors/readers/writers in these same
+files remain their independently tracked families; this does NOT certify full
+API/serve/fork parent closure or a process-restart qualification beyond the actual
+named proofs. Existing M01/Docker/drain/D3/M07/integration holds stay unwaived.
+No new architecture or spec semantics: existing native/domain owners are reused
+under the binding raw_sql_policy. Existing #2542/#2151 watchlist mapping remains
+sufficient; no new issue or framework. Local only, no push/PR/tier/server2.
+Receipts ~/.cache/swarm-2542-family145/source-route-event-only-chain-*.

@@ -1266,6 +1266,55 @@ func InsertNativeExistingRunRootEventForTest(ctx context.Context, selected any, 
 	return event, nil
 }
 
+func InsertNativeCanonicalEventRecordForTest(ctx context.Context, selected any, admitted events.AdmittedEvent, settlement events.RouteSettlement) (bool, error) {
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return false, err
+	}
+	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
+		return false, fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
+	}
+	record, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
+		return false, err
+	}
+	var inserted bool
+	err = runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		switch dialect {
+		case authoractivityfixture.DialectPostgres:
+			inserted, err = eventrecordpostgres.Insert(ctx, attempt, record)
+		case authoractivityfixture.DialectSQLite:
+			inserted, err = eventrecordsqlite.Insert(ctx, attempt, record)
+		}
+		if err != nil || inserted {
+			return err
+		}
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var existing eventrecord.Record
+			var found bool
+			var err error
+			switch dialect {
+			case authoractivityfixture.DialectPostgres:
+				existing, found, err = eventrecordpostgres.Load(ctx, tx, record.EventID)
+			case authoractivityfixture.DialectSQLite:
+				existing, found, err = eventrecordsqlite.Load(ctx, tx, record.EventID)
+			}
+			if err != nil {
+				return err
+			}
+			if !found || !record.Equal(existing) {
+				return fmt.Errorf("canonical event record fixture %s conflicts with its persisted record", record.EventID)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return false, err
+	}
+	return inserted, nil
+}
+
 func CountPostgresForkTypedRuntimeDiagnosticForTest(ctx context.Context, selected any, run, event, owner string) (int, error) {
 	if pg, ok := selected.(*PostgresStore); !ok || pg == nil || owner == "" {
 		return 0, fmt.Errorf("typed fork diagnostics require the original PostgreSQL owner and lineage owner")

@@ -69,7 +69,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -4051,8 +4050,8 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	turnEvent := storetest.InsertExistingRunRootEventRecord(
-		t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), sourceRunID, "turn.fixture",
+	turnEvent := storetest.InsertNativeExistingRunRootEvent(
+		t, ctx, pg, uuid.NewString(), sourceRunID, "turn.fixture",
 		eventtest.Producer(events.EventProducerExternal, "run-fork-turn-fixture"), []byte(`{}`), events.EventEnvelope{}, at,
 	)
 	persistRunForkManagedTurn(t, ctx, pg, turnEvent, agentIdentity, sourceRunID, sessionID, turnID, entityID, at)

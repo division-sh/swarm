@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 471 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c50e4a5ebbfc7728125e09d605c180d31a245e78ccd7a56547cf7e959b1a0bef" {
+	if err != nil || len(rows) != 485 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "570b27003208a4d87bfc08fc2453f6d96c8a1d6bbf6893d360e4b82b5663f31b" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -194,6 +194,29 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			if !family145GateCountFunctions[row.Function] {
 				continue
 			}
+		}
+		if row.File == "internal/runtime/runforkadmission/revision_source_route_test.go" && row.Function == "TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres" {
+			if err := family145SourceRouteMatrixProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145CanonicalRecordCaller(row.Function) {
+			if err := family145CanonicalRecordCallerProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145NativeRootCallerBindings[row.Function]; ok {
+			if err := family145NativeRootCallerProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/store/storetest/event.go" && row.Function == "InsertCanonicalEventRecord" {
+			// Exact admission/replay policy and its original private writer are
+			// checked by the complete canonical-record owner/caller guard.
+			continue
 		}
 		if owner := family145CompetingRevisionPairOwner(row.File, row.Function); owner != "" {
 			if err := family145CompetingRevisionPairProofError(owner, row.Before, row.After); err != nil {

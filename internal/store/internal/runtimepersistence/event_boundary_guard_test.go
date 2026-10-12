@@ -44,7 +44,7 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	// Read-only exact diagnostic receipt comparison uses the selected store's payload admission owner.
 	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventPostgresOwner.admitRuntimeLogRecord", name: "AdmitForPersistence"}: 1,
 	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventSQLiteOwner.admitRuntimeLogRecord", name: "AdmitForPersistence"}:   1,
-	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                                                         1,
+	{path: "internal/store/storetest/event.go", scope: "InsertNativeCanonicalEventRecord", name: "AdmitForPersistence"}:                                                   1,
 	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                                    1,
 	{path: "internal/store/storetest/event.go", scope: "AdmitNativeDeliveryEvent", name: "AdmitForPublish"}:                                                               1,
 }

@@ -30,7 +30,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1330,7 +1329,7 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
@@ -1358,7 +1357,7 @@ accounts:
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
@@ -1435,7 +1434,7 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
@@ -1489,7 +1488,7 @@ accounts:
 		t.Fatalf("seed exact native fork source header: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,

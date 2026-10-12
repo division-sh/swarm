@@ -24,7 +24,6 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
@@ -845,8 +844,8 @@ func (f agentSnapshotBoundaryFixture) seedTurnWithOutputContract(t *testing.T, t
 	t.Helper()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-20 * time.Second)
-	event := storetest.InsertExistingRunRootEventRecord(
-		t, f.ctx, f.db, authoractivityfixture.Dialect(f.backend.name), eventID, f.runID, events.EventType("snapshot.turn"),
+	event := storetest.InsertNativeExistingRunRootEvent(
+		t, f.ctx, f.store, eventID, f.runID, events.EventType("snapshot.turn"),
 		eventtest.Producer(events.EventProducerExternal, "snapshot-turn"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt.Add(-time.Second),
 	)

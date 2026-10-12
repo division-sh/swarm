@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "c50e4a5ebbfc7728125e09d605c180d31a245e78ccd7a56547cf7e959b1a0bef"
+const targetDigest = "570b27003208a4d87bfc08fc2453f6d96c8a1d6bbf6893d360e4b82b5663f31b"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -47,6 +47,9 @@ var files = []string{
 	"internal/apiv1/operator_stage_completion_journey_test.go",
 	"internal/apiv1/operator_stage_completion_read_test.go",
 	"internal/apiv1/operator_test_setup_test.go",
+	"internal/apiv1/agent_snapshot_atomicity_test.go",
+	"internal/apiv1/selected_store_read_supported_surface_test.go",
+	"internal/apiv1/sqlite_operator_read_supported_surface_test.go",
 	"internal/apiv1/sqlite_observability_supported_surface_test.go",
 	"internal/cliapp/data_show_selected_test.go",
 	"internal/cliapp/runtime_log_filter_supported_test.go",
@@ -138,6 +141,9 @@ var files = []string{
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
 	"internal/runtime/artifact_action_result_delivery_test.go",
 	"internal/runtime/runforkadmission/revision_source_route_test.go",
+	"internal/runtime/tools/executor_entity_test.go",
+	"internal/serveapp/startup_creation_handoff_test.go",
+	"internal/store/internal/runtimepersistence/contextual_runtime_lineage_parity_test.go",
 	"internal/runtime/runforkexecution/activity_fork_execution_test.go",
 	"internal/runtime/runforkexecution/agent_runtime_materialization_test.go",
 	"internal/runtime/runforkexecution/operation_lifetime_parity_test.go",
@@ -232,6 +238,26 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/apiv1/agent_snapshot_atomicity_test.go": {
+		"seedTurnWithOutputContract/agentSnapshotBoundaryFixture": true,
+	},
+	"internal/apiv1/selected_store_read_supported_surface_test.go": {
+		"TestPostgresAgentConversationOwnerBacksSupportedAPISurface": true,
+	},
+	"internal/apiv1/sqlite_operator_read_supported_surface_test.go": {
+		"TestSQLiteAgentConversationOwnerBacksSupportedAPISurface": true,
+	},
+	"internal/runtime/tools/executor_entity_test.go": {
+		"TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision":   true,
+		"TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID": true,
+	},
+	"internal/serveapp/startup_creation_handoff_test.go": {
+		"TestComposedStartupCreationPublicationHandoffOnBothStores": true,
+	},
+	"internal/store/internal/runtimepersistence/contextual_runtime_lineage_parity_test.go": {
+		"TestContextualRuntimeProducerLineageReadbackParity": true,
+		"selectedDatabase": true,
+	},
 	"internal/runtime/conformance/fan_out_serving_lifetime_conformance_test.go": {
 		"TestFanOutServingM06GenerationRetirementOnBothBackends":           true,
 		"TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends": true,
@@ -306,6 +332,15 @@ var gateRecoveryTargets = map[string]map[string]bool{
 }
 
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if path == "internal/store/storetest/event.go" && (key == "InsertExistingRunRootEventRecord" || key == "InsertChildEventRecord" || key == "runCanonicalEventMutation") {
+		return "", true
+	}
+	if path == "internal/store/storetest/event.go" && key == "InsertCanonicalEventRecord" {
+		return after["InsertNativeCanonicalEventRecord"], false
+	}
+	if path == "internal/store/internal/runtimepersistence/contextual_runtime_lineage_parity_test.go" && key == "selectedDatabase" {
+		return "", true
+	}
 	if replacement := after[key]; replacement != "" {
 		return replacement, false
 	}

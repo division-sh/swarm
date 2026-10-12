@@ -84,7 +84,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -7583,7 +7582,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, sqliteStore,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
@@ -8705,7 +8704,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, runtimePG,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
