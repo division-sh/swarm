@@ -34,8 +34,9 @@ import (
 
 type selectedForkCrashCheckpoint struct {
 	SourceRun, ForkRun string
-	ScheduleID         string                           `json:"schedule_id,omitempty"`
-	Activity           *selectedActivityCrashCheckpoint `json:"activity,omitempty"`
+	ScheduleID         string                                `json:"schedule_id,omitempty"`
+	Activity           *selectedActivityCrashCheckpoint      `json:"activity,omitempty"`
+	FanOut             *selectedHandlerFanOutCrashCheckpoint `json:"fan_out,omitempty"`
 }
 
 // These are actual process deaths during the existing execution path. They do
@@ -159,11 +160,11 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 	defer reader.Close()
 	defer writer.Close()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSelectedForkCrashProcessHelper$")
-	if strings.HasPrefix(cut, "retained_activity_") {
+	if strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
 		cmd.Args = append(cmd.Args, "-test.v")
 	}
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
-	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") {
+	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
 		// The killed child cannot release its sealed source projections. Keep
 		// every private scratch root under the parent's exact cleanup ownership.
 		root := t.TempDir()
@@ -295,6 +296,10 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
 	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_activity_") {
 		runSelectedActivityResultCrashHelper(t, ctx, backend, db, selected, owner, capability)
+		return
+	}
+	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_handler_fan_out_") {
+		runSelectedHandlerFanOutCrashHelper(t, ctx, selected, owner, capability)
 		return
 	}
 	root := runForkExecutionRepoRoot(t)
