@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 // FanOutCapacity is a selected-backend observation, not operator authority to
@@ -65,17 +66,18 @@ type fanOutCapacityState struct {
 }
 
 type FanOutServingRegistration struct {
-	grant            *generationGrant
-	occurrence       worklifetime.Occurrence
-	ctx              context.Context
-	cancel           context.CancelFunc
-	done             chan struct{}
-	closeOnce        sync.Once
-	turns            sync.WaitGroup // Add is fenced by registration removal under the process mutex.
-	turnsClosing     bool           // protected by the process mutex
-	executor         FanOutExecutor // protected by the process mutex
-	testScanObserver func(FanOutCandidate, bool, error)
-	lastCommit       *fanOutCommitTiming
+	grant             *generationGrant
+	occurrence        worklifetime.Occurrence
+	ctx               context.Context
+	cancel            context.CancelFunc
+	done              chan struct{}
+	closeOnce         sync.Once
+	turns             sync.WaitGroup // Add is fenced by registration removal under the process mutex.
+	turnsClosing      bool           // protected by the process mutex
+	executor          FanOutExecutor // protected by the process mutex
+	testScanObserver  func(FanOutCandidate, bool, error)
+	testChunkObserver func(context.Context, pipeline.FanOutChunkCommand)
+	lastCommit        *fanOutCommitTiming
 }
 
 // RegisterFanOutServing consumes only process-minted authority and its exact
@@ -135,6 +137,7 @@ func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrenc
 		return nil, errors.New("fan-out runtime occurrence has no process work owner")
 	}
 	r := &FanOutServingRegistration{grant: g, occurrence: occurrence, ctx: registrationCtx, cancel: cancel, done: make(chan struct{})}
+	r.testChunkObserver, _ = ctx.Value(fanOutChunkObserverContextKey{}).(func(context.Context, pipeline.FanOutChunkCommand))
 	p.mu.Lock()
 	if p.fanOutCapacity == nil {
 		p.fanOutCapacity = &fanOutCapacityState{limit: limit, workProcess: workProcess, registrations: make(map[string]*FanOutServingRegistration)}

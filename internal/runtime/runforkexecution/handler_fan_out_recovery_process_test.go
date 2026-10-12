@@ -133,11 +133,15 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 }
 
 func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testing.T) {
-	runSelectedHandlerFanOutRecovery(t, false)
+	runSelectedHandlerFanOutRecovery(t, false, false)
 }
 
 func TestIssue642SelectedHandlerFanOutExpiredClaimFencesPredecessorBothStores(t *testing.T) {
-	runSelectedHandlerFanOutRecovery(t, true)
+	runSelectedHandlerFanOutRecovery(t, true, false)
+}
+
+func TestIssue642SelectedHandlerFanOutLiveSuccessorClaimFencingBothStores(t *testing.T) {
+	runSelectedHandlerFanOutRecovery(t, true, true)
 }
 
 type selectedHandlerFanOutBinder interface {
@@ -165,7 +169,7 @@ func selectedHandlerFanOutGrant(t *testing.T, owner SelectedContractExecutionOwn
 	return evidence
 }
 
-func runSelectedHandlerFanOutRecovery(t *testing.T, claimed bool) {
+func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -202,7 +206,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed bool) {
 				}
 				// Recovery eligibility follows real lease expiry. This is not a
 				// synthetic clock advance or an immediate dead-owner takeover.
-				if remaining := time.Until(claim.LeaseUntil); remaining > 0 {
+				if remaining := time.Until(claim.LeaseUntil); remaining > 0 && !live {
 					timer := time.NewTimer(remaining)
 					defer timer.Stop()
 					select {
@@ -239,7 +243,14 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed bool) {
 				}
 			})
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
-			recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+			recoveryCtx := ctx
+			var held *selectedHandlerFanOutClaimHold
+			if live {
+				held = newSelectedHandlerFanOutClaimHold(key)
+				defer held.resume()
+				recoveryCtx = startupownership.WithFanOutChunkObserverForTest(ctx, held.observe)
+			}
+			recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			})
 			if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
@@ -257,9 +268,29 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed bool) {
 			default:
 				t.Fatal("recovery did not claim a fresh selected executor")
 			}
+			if live {
+				if remaining := time.Until(checkpoint.FanOut.Claim.LeaseUntil); remaining > 0 {
+					timer := time.NewTimer(remaining)
+					defer timer.Stop()
+					select {
+					case <-t.Context().Done():
+						t.Fatal(context.Cause(t.Context()))
+					case <-timer.C:
+					}
+				}
+			}
 			// No Wake or manual ServeFanOutCandidate call occurs after reopening.
 			wait, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
+			if live {
+				select {
+				case acquired := <-held.acquired:
+					requireSelectedHandlerFanOutLiveClaimFenced(t, wait, selected, owner, checkpoint, acquired)
+					held.resume()
+				case <-wait.Done():
+					t.Fatalf("successor never acquired its actual live claim: %v", wait.Err())
+				}
+			}
 			inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, original.Result.ForkEventID)
 			for {
 				progress, err := storetest.ReadFanOutIntentCompletionStorage(wait, selected, key)

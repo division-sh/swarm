@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const fanOutRecoveryInterval = time.Second
@@ -122,6 +123,14 @@ func (r *FanOutServingRegistration) SetTestScanObserver(observer func(FanOutCand
 	r.grant.owner.mu.Lock()
 	r.testScanObserver = observer
 	r.grant.owner.mu.Unlock()
+}
+
+type fanOutChunkObserverContextKey struct{}
+
+// WithFanOutChunkObserverForTest observes a prepared turn outside SQL, while
+// its native claim is live. It neither substitutes a plan nor changes its owner.
+func WithFanOutChunkObserverForTest(ctx context.Context, observer func(context.Context, pipeline.FanOutChunkCommand)) context.Context {
+	return context.WithValue(ctx, fanOutChunkObserverContextKey{}, observer)
 }
 
 func (s *fanOutServingService) reportTestScan(registrations map[string]*FanOutServingRegistration, candidate FanOutCandidate, found bool, err error) {
