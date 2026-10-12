@@ -9747,7 +9747,9 @@ engine:
         concrete MCP availability/discovery are deployment observations, explicitly unperformed in
         structural reports.
         Mixed tool/model checks retain declaration validation without inventing successful discovery or
-        selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
+        selecting an execution backend. Runtime boot retains concrete live readiness checks. Source-free
+        doctor reports installed inventory and configured prerequisites; a live gateway observation requires
+        its explicit probe and does not grant project or effective-target authority.
       output: >
         Portable verify and describe report validation_scope: structural and live_readiness:
         not_evaluated. Portable verify additionally reports admission_complete: false; describe
@@ -10709,7 +10711,10 @@ tool_model:
     owner: internal/packs typed capability-surface model and deterministic renderer consuming internal/userfacing human-code projection
     description: >
       Provider trigger packs, effective compiled ingress targets, and provider connector declarations expose one typed
-      proof-ready model to verify, local preflight, serve readiness, and doctor. Body-specific owners derive capability and
+      proof-ready model to source-bound local preflight and serve readiness; source-free doctor reports installed/base
+      inventory only. Structural verify and describe validate admitted source/pack facts, not operational subjects or
+      credential readiness. Default verify with deployment context retains its separate scoped admission observations.
+      Body-specific owners derive capability and
       guarantee facts from accepted manifests, compiled inbound admission plans, or ToolSchemaEntry values;
       credential owners derive connector requirement state. The common owner normalizes subject identity, applicability,
       status, requirements, enforcement evidence, ordering, and text/JSON projections. Pack envelope capabilities and
@@ -10735,7 +10740,7 @@ tool_model:
         connector_pack: installed but not imported connector action
         flow_local: flow-local ToolSchemaEntry with category provider_connector
         channel_pack: structurally satisfied immutable channel plan
-        channel_outbound_binding: selected outbound binding projected from that same plan
+        channel_binding: selected outbound binding projected from that same plan
       applicability_values:
         effective: compiled ingress target or callable connector declaration selected by the contract
         installed: verified pack inventory that is not an effective callable connector
@@ -10760,9 +10765,11 @@ tool_model:
         runtime-only evidence; structural projections omit them and grant no execution authority.
       AVAILABLE: >
         Installed capability that is not effective in the current contract, or the immutable lifecycle-owned base projection
-        of an effective provider-trigger target before read-time deployment credential evaluation. Operator-facing verify,
-        preflight, doctor, serve, and prove surfaces MUST evaluate effective target requirements and MUST NOT publish the base
-        AVAILABLE state as readiness. Unimported connector actions are AVAILABLE and carry import remediation but MUST remain
+        of an effective provider-trigger target before read-time deployment credential evaluation. Source-bound preflight,
+        serve and prove surfaces evaluate effective target requirements and MUST NOT publish base AVAILABLE as readiness.
+        Source-free doctor retains target-free installed AVAILABLE inventory; structural verify/describe do not evaluate
+        operational readiness, and default deployment verify retains its distinct scoped admission checks.
+        Unimported connector actions are AVAILABLE and carry import remediation but MUST remain
         absent from ToolEntries, agent surfaces, validation, and execution.
       rollup_rule: >
         `internal/packs NormalizeSubjects` derives status from kind, applicability, and validated requirement state.
@@ -10836,16 +10843,24 @@ tool_model:
         SCOPE_INSUFFICIENT: swarm connections connect <resolved-deployment-key>
       trigger_rule: >
         Installed trigger-pack subjects render inventory facts with no target admission. Every declared standing ingress
-        provider also renders one effective typed subject with stable id `ingress:<bundle_hash>:<alias>:<provider>`, exact
+        provider also renders one effective typed subject with stable id `ingress:<bundle_hash>:<flow_path>:<provider>`, exact
         catalog generation, policy_source, request_authentication, event policy, and resolved pack identity when applicable.
-        Trigger signing requirements render with `scope: target` and no status, satisfied value, binding remediation,
-        READY/NOT_READY claim, selected-store query, or inferred global binding. #1944 owns redacted SQLite/Postgres
+        Installed/base trigger signing requirements render with `scope: target` and no status, satisfied value,
+        binding remediation, selected-store query or inferred global binding. Live source-bound evaluation supplies the
+        existing canonical BOUND/UNBOUND, satisfied, remediation and credential_store tuple for the exact target;
+        readiness also respects frozen binding enablement and recovery evidence. #1944 owns redacted SQLite/Postgres
         signing-binding readback and mutation/remediation; it consumes this target identity and MUST NOT reconstruct another
         admission model.
     projection:
       structured_owner: local preflight report capability_subjects
       human_phrase_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
       text_rule: Human text is a deterministic projection of the same typed records emitted in JSON.
+      doctor_rule: >
+        The source-free doctor report owner preserves its already-admitted installed subjects, pack_inventory and
+        corresponding text findings together when composing prerequisite results. Invalid inventory or projection
+        produces the existing typed blocking diagnostic, never ok=true with a missing or fallback inventory.
+        Schema-inventory options, prerequisite refusals, ordering and redaction remain intact without duplicate
+        findings. Doctor never loads the invocation tree, evaluates effective-target credentials or installs a target.
       ordering:
       - unsatisfied requirements with inline remediation
       - CAN facts grouped by target
@@ -12240,8 +12255,10 @@ tool_model:
         tampered, or incompatible packs, base/project digest mismatch, target collision, or projection failure rejects that
         boot context before readiness.
       projections: >
-        Verify, local preflight, serve readiness, and doctor consume `tool_model.provider_capability_surface` installed and
-        effective subjects from the compiled owner. Basic describe and routing topology remain declaration-only and show
+        Source-bound local preflight and serve readiness consume `tool_model.provider_capability_surface` installed and
+        effective subjects from the compiled owner. Source-free doctor consumes installed/base inventory only. Verify
+        validates admitted source/pack facts and any distinct deployment admission, not operational subject readiness.
+        Basic describe and routing topology remain declaration-only and show
         authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
         request authentication, or readiness.
       provider_delivery_transaction: >
@@ -13724,8 +13741,10 @@ flow_model:
       readback: >
         Basic describe projects activation, alias, providers, signing-secret references, and authored admission kind, pack
         pin, raw authentication/event policy, and acknowledgement from filesystem flow declarations only. It never claims a resolved
-        pack identity, catalog generation, effective request authentication, or readiness. Verify, local preflight, serve,
-        and doctor project installed and effective trigger subjects from the process admission authority; effective rows name
+        pack identity, catalog generation, effective request authentication, or readiness. Verify keeps structural and
+        distinct deployment admission separate from operational readiness. Source-free doctor projects installed/base
+        inventory only; source-bound local preflight and serve project installed and effective trigger subjects from the
+        process admission authority. Effective rows name
         the exact POST URL, policy_source, request_authentication, event, generation, and resolved pack identity when present.
         #1944 adds BOUND/UNBOUND state from the deployment credential store. `routing-topology/v1.root_input_sources`
         projects each authored alias/provider/admission binding and target flow as admission provenance; it is not a producer,
