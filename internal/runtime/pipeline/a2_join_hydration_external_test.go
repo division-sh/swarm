@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
@@ -27,19 +28,17 @@ func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
 			arm := exactJoinPersistedArm(t, initial)
 			node := externalPipelineSourceNode(t, p.source, ".", "collector")
 			bucketKey := "handler_joins:" + node.Key()
-			var original []byte
-			if err := p.selected.db.QueryRowContext(p.ctx,
-				"SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1", p.runID).Scan(&original); err != nil {
+			original, err := storetest.ReadRootFlowAccumulatorStorage(p.ctx, p.selected.events, p.runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			write := func(raw []byte) {
 				t.Helper()
-				result, err := p.selected.db.ExecContext(p.ctx,
-					"UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2", string(raw), p.runID)
+				count, err := storetest.SetRootFlowAccumulatorWire(p.ctx, p.selected.events, p.runID, raw)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if count, err := result.RowsAffected(); err != nil || count != 1 {
+				if err != nil || count != 1 {
 					t.Fatalf("hostile setup affected %d receivers: %v", count, err)
 				}
 			}
@@ -85,8 +84,8 @@ func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					write(raw)
 					t.Cleanup(func() { write(original) })
+					write(raw)
 					before, counts := p.instance(t), footprint()
 					carrier, err := engine.StateCarrierFromPersisted(before.Fields, before.Bookkeeping, before.Gates, before.StateBuckets)
 					if err != nil {

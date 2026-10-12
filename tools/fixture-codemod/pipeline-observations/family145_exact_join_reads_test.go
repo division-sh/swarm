@@ -19,7 +19,7 @@ var family145ExactJoinReadCuts = map[string][]string{
 		"runtimeLog, _ := storetest.ReadLatestWorkflowTimerRuntimeLogText(ctx, selected.events)",
 	},
 	"assertExactJoinDeliveryCount": {
-		"count, err := storetest.CountExactJoinNodeDeliveries(ctx, selected.events, eventID, subscriberKey)",
+		"count, err := storetest.CountTemplateNodeDelivery(ctx, selected.events, eventID, subscriberKey)",
 	},
 	"exactJoinOccurrenceEventID": {
 		"deadline := time.Now().Add(5 * time.Second)",
@@ -92,7 +92,6 @@ func TestFamily145ExactJoinSharedHelpersKeepPhysicalScopesAndAllWaitAssertions(t
 	}
 	for _, tc := range []struct{ function, caller string }{
 		{"ReadExactJoinNodeDeliveryStorageTx", "assertExactJoinDeliveryStatus"},
-		{"CountExactJoinNodeDeliveriesTx", "assertExactJoinDeliveryCount"},
 	} {
 		owner := family145ConversationForkOwnerSource(t, "internal/backend/delivery/read_projections.go", tc.function)
 		actual := family145A2ClaimLiteralQueries(t, owner)
@@ -106,6 +105,15 @@ func TestFamily145ExactJoinSharedHelpersKeepPhysicalScopesAndAllWaitAssertions(t
 		if len(actual) != 2 || !reflect.DeepEqual(actual, original) {
 			t.Fatalf("%s changed exact original dialects, node/event/subscriber predicates or text casts: %v/%v", tc.function, actual, original)
 		}
+	}
+	count := family145ConversationForkOwnerSource(t, "internal/backend/delivery/read_projections.go", "CountTemplateNodeDeliveryTx")
+	if queries := family145A2ClaimLiteralQueries(t, count); len(queries) != 1 || queries[0] != "SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2" || !strings.Contains(count, "event, node).Scan(&count)") {
+		t.Fatalf("existing count owner changed exact node/event/subscriber scope or count destination: %v", queries)
+	}
+	actualCount := family145ConnectorSQL(t, "package proof\n"+count)
+	originalCount := family145ConnectorSQL(t, "package proof\n"+found["assertExactJoinDeliveryCount"])
+	if len(actualCount) != 1 || len(originalCount) != 2 || originalCount[0] != actualCount[0] || originalCount[1] != actualCount[0] {
+		t.Fatalf("existing count owner is not both original dialects' exact physical predicate: %v/%v", actualCount, originalCount)
 	}
 	identity := family145ConversationForkOwnerSource(t, "internal/backend/eventrecord/template_storage_observation.go", "ReadWorkflowTimerEventIdentityTx")
 	if actual, original := family145A2ClaimLiteralQueries(t, identity), family145A2ClaimLiteralQueries(t, found["exactJoinOccurrenceEventID"]); !reflect.DeepEqual(actual, original) || len(actual) != 2 {

@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "2b1b50aec2784cd69ce327d782f01c9b757a54ded1ecdedaea21f417edb9d719"
+const targetDigest = "b9d3b9624fa2f599cccd3b2bc1e9d649a660c5a0108542e7ccc3da28a2135dc1"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -111,6 +111,7 @@ var files = []string{
 	"internal/runtime/pipeline/a2_join_commit_ack_loss_external_test.go",
 	"internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go",
+	"internal/runtime/pipeline/a2_join_hydration_external_test.go",
 	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go",
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go",
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go",
@@ -225,6 +226,7 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/pipeline/a2_join_hydration_external_test.go":                              {"TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores": true},
 	"internal/runtime/pipeline/workflow_join_supported_surface_external_test.go":                {"assertExactJoinDeliveryStatus": true, "assertExactJoinDeliveryCount": true, "exactJoinOccurrenceEventID": true},
 	"internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go":               {"workflowTimerPersistedActivation": true, "workflowTimerPersistedOccurrence": true, "assertWorkflowTimerServedRows": true, "waitWorkflowTimerRowStatus": true, "workflowTimerPersistedEventID": true, "workflowTimerEventCount": true, "workflowTimerDeliveryTrace": true, "TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores": true},
 	"internal/serveapp/receiver_mixed_agent_test.go":                                            {"TestReceiverCompositionMixedAgentBothStores": true},
@@ -242,7 +244,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go":                           {"TestA2JoinResultTypesRealExecutionAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true, "footprint/*a2MembershipAdmission": true, "TestA2MembershipSnapshotValidationOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
-	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
+	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true, "TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true},

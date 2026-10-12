@@ -52,10 +52,6 @@ func ReadExactJoinNodeDeliveryStorage(ctx context.Context, selected any, eventID
 	return private.ReadExactJoinNodeDeliveryStorageForTest(ctx, selected, eventID, subscriberKey)
 }
 
-func CountExactJoinNodeDeliveries(ctx context.Context, selected any, eventID, subscriberKey string) (int, error) {
-	return private.CountExactJoinNodeDeliveriesForTest(ctx, selected, eventID, subscriberKey)
-}
-
 func ReadWorkflowTimerNodeFailure(ctx context.Context, selected any, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
 	return private.ReadWorkflowTimerNodeFailureForTest(ctx, selected, eventID, nodeID)
 }

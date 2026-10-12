@@ -51,7 +51,7 @@ func TestExactJoinDeliveryObserversKeepPhysicalTextCountAndNodeScopeBothStores(t
 			if got, err := ReadExactJoinNodeDeliveryStorageForTest(f.ctx, f.store, event.ID(), node.Key()); err != nil || got != want {
 				t.Fatalf("join observation changed status/physical failure text: %+v %v", got, err)
 			}
-			if got, err := CountExactJoinNodeDeliveriesForTest(f.ctx, f.store, event.ID(), node.Key()); err != nil || got != 1 {
+			if got, err := CountTemplateNodeDeliveryForTest(f.ctx, f.store, event.ID(), node.Key()); err != nil || got != 1 {
 				t.Fatalf("join count inferred delivery eligibility instead of storage: %d %v", got, err)
 			}
 			if counts := probe.Snapshot(); counts.Active != 0 || counts.Total.Begun != 2 || counts.Total.ReadCommits != 2 || counts.Total.WriteCommits != 0 {
@@ -80,7 +80,7 @@ func assertExactJoinObserversAbsent(t *testing.T, ctx context.Context, selected 
 	if got, err := ReadExactJoinNodeDeliveryStorageForTest(ctx, selected, eventID, subscriberKey); !errors.Is(err, sql.ErrNoRows) || got != (ExactJoinNodeDeliveryStorage{}) {
 		t.Fatalf("foreign/non-node identity borrowed join status/failure: %+v %v", got, err)
 	}
-	if got, err := CountExactJoinNodeDeliveriesForTest(ctx, selected, eventID, subscriberKey); err != nil || got != 0 {
+	if got, err := CountTemplateNodeDeliveryForTest(ctx, selected, eventID, subscriberKey); err != nil || got != 0 {
 		t.Fatalf("foreign/non-node identity borrowed join count: %d %v", got, err)
 	}
 }
@@ -92,7 +92,7 @@ func assertExactJoinObserversFailure(t *testing.T, ctx context.Context, selected
 	if got, err := ReadExactJoinNodeDeliveryStorageForTest(ctx, selected, id, "join-node"); !failed(err) || got != (ExactJoinNodeDeliveryStorage{}) {
 		t.Fatalf("failed owner manufactured join status/failure: %+v %v", got, err)
 	}
-	if got, err := CountExactJoinNodeDeliveriesForTest(ctx, selected, id, "join-node"); !failed(err) || got != 0 {
+	if got, err := CountTemplateNodeDeliveryForTest(ctx, selected, id, "join-node"); !failed(err) || got != 0 {
 		t.Fatalf("failed owner manufactured successful zero join count: %d %v", got, err)
 	}
 }

@@ -23,6 +23,14 @@ type WorkflowAccumulatorStorage struct {
 	Fields, Accumulator []byte
 }
 
+func ReadRootFlowAccumulatorStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]byte, error) {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 func ReadWorkflowAccumulatorStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) (WorkflowAccumulatorStorage, error) {
 	var out WorkflowAccumulatorStorage
 	err := tx.QueryRowContext(ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).

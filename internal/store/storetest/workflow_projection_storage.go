@@ -15,6 +15,10 @@ type WorkflowStateObservationRow = private.WorkflowStateObservationRow
 type WorkflowRunFieldsRevisionStorage = private.WorkflowRunFieldsRevisionStorage
 type WorkflowAccumulatorStorage = private.WorkflowAccumulatorStorage
 
+func ReadRootFlowAccumulatorStorage(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return private.ReadRootFlowAccumulatorStorageForTest(ctx, selected, runID)
+}
+
 func ReadWorkflowAccumulatorStorage(ctx context.Context, selected any, runID, path string) (WorkflowAccumulatorStorage, error) {
 	return private.ReadWorkflowAccumulatorStorageForTest(ctx, selected, runID, path)
 }

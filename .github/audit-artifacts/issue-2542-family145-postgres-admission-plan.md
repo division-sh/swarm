@@ -4621,3 +4621,56 @@ Carrier/openers, other gate/A2 dependencies and parent completion remain open;
 all M07/D3/Docker/M01/drain holds stay explicit and unwaived. No push/PR, tier or
 server2; signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/exact-join-*.
+
+## Shared Gate/A2 Dependency: Whole Root-Accumulator Wire Fault Protocol
+
+Both remaining root-header accumulator read/write interpreters (canonical keyed
+evidence and join hydration) now consume one fixed physical reader and the
+existing projection shape-fault owner. Exact run_id/entity_id equality, raw wire,
+scan destination, UPDATE payload and exactly-one result remain; no storage path,
+table/column selector, general mutation callback or detached coordinator is
+exposed. Native writer admission commits only after the exact-one check; storage
+failure/missing root rolls back without a write receipt. The writer census names
+this precise function, scope and proofs. Each caller registers its original-wire
+restoration before applying the first hostile mutation, closing the prior
+assertion-failure gap without changing any business/refusal/replay assertion.
+
+Both original whole roots passed both stores under race18.966s, including corrupt
+retained keys/arms, restoration, real pump and continuation execution. New native
+pipeline proof PASS11.726s uses the actually compiled writer's root accumulator,
+observes one original write plus a separate native read, rejects cancellation/
+foreign run, restores identical physical bytes and compares complete selected
+application/history/lease/clock snapshots. Immediate deferred restoration covers
+assertion failure while the live fixture remains owned. Private controls verify
+raw/invalid/closed refusal, and a channel-held exact SQLite writer admits neither
+the queued fault nor a second transaction before cancellation. After joining the
+holder, the valid child cannot substitute for the absent root: its fault rolls
+back and complete history/clock/data stays unchanged. This is deliberate child
+exclusion, not a fabricated positive root. The first development attempt reused
+a child-only shared control that expected root success after release; it failed
+correctly. The control is repaired to test the actual root-only contract, while
+real-root success remains independently exercised above. No timeout changes.
+
+Reviewer-b F1 from c1ab0bed0 is repaired in this checkpoint: the duplicate join
+count backend/private/public layers are deleted. Existing CountTemplateNodeDelivery
+is now the sole count owner; every context/identity/count assertion remains.
+Original join declaration/occurrence roots both-store race PASS31.580s. Final
+private root-wire plus join-observer race collection PASS20.097s. Finite controls
+pin both accumulator callers, every original assertion, exact fault scope/payload
+and pre-fault cleanup; the join proof pins the existing count predicate and both
+original dialects' equivalence. Canonical recipe printing expands one-line cleanup;
+the hostile control now pins that exact After representation, not stale local
+formatting. Relevant finite/current/historical collection PASS6.498s; all six
+persistence boundaries PASS3.455s; U1000 clean. Corpus1233/447, digest
+b9d3b9624fa2f599cccd3b2bc1e9d649a660c5a0108542e7ccc3da28a2135dc1;
+all immutable mechanical inputs preserved. The count-layer deletion gets no
+additional debt credit.
+
+Downward census PASS143.685s:8337 ->8327 findings,5949 ->5941 raw sites,
+ten removals/zero additions; uncertainty67 and supplied-pool calls61 unchanged.
+Candidate carrier inventory25 references/7files. Distinct compound footprints,
+claim readback and metadata/source faults remain live; whole caller/file/parent
+closure is not claimed. All M07/D3/Docker/M01/drain holds remain explicit and
+unwaived. Local only, no push/PR/tier/server2. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/root-accumulator-* and
+exact-join-existing-count-callers.jsonl.

@@ -700,7 +700,7 @@ func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase,
 
 func assertExactJoinDeliveryCount(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, subscriberKey string, want int) {
 	t.Helper()
-	count, err := storetest.CountExactJoinNodeDeliveries(ctx, selected.events, eventID, subscriberKey)
+	count, err := storetest.CountTemplateNodeDelivery(ctx, selected.events, eventID, subscriberKey)
 	if err != nil || count != want {
 		t.Fatalf("delivery %s rows = %d err=%v, want %d", eventID, count, err, want)
 	}

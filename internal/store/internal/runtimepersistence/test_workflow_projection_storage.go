@@ -38,6 +38,12 @@ type WorkflowStateObservationRow = pipelinepersistence.WorkflowStateObservationR
 type WorkflowRunFieldsRevisionStorage = pipelinepersistence.WorkflowRunFieldsRevisionStorage
 type WorkflowAccumulatorStorage = pipelinepersistence.WorkflowAccumulatorStorage
 
+func ReadRootFlowAccumulatorStorageForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+		return pipelinepersistence.ReadRootFlowAccumulatorStorageTx(ctx, tx, runID)
+	})
+}
+
 func ReadWorkflowAccumulatorStorageForTest(ctx context.Context, selected any, runID, path string) (WorkflowAccumulatorStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (WorkflowAccumulatorStorage, error) {
 		return pipelinepersistence.ReadWorkflowAccumulatorStorageTx(ctx, tx, runID, path)

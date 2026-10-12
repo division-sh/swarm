@@ -23,6 +23,10 @@ func SetWorkflowProjectionAccumulatorArrayForTest(ctx context.Context, tx *sql.T
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET accumulator = '[]' WHERE run_id = $2 AND instance_path = $1`, key, run))
 }
 
+func SetRootFlowAccumulatorWireForTest(ctx context.Context, tx *sql.Tx, run string, raw []byte) (int64, error) {
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), run))
+}
+
 func SetWorkflowProjectionMalformedTransitionHistoryForTest(ctx context.Context, tx *sql.Tx, run, key string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET config = '{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}' WHERE run_id = $2 AND instance_path = $1`, key, run))
 }

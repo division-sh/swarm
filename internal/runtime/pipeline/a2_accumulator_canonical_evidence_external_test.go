@@ -203,9 +203,8 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			proof := newA2CanonicalAccumulatorProof(t, backend.open(t))
 			proof.execute(t, proof.publish(t, "numeric.requested",
 				`{"id":"original","value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`), "")
-			var original []byte
-			if err := proof.selected.db.QueryRowContext(proof.ctx,
-				`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, proof.runID).Scan(&original); err != nil {
+			original, err := storetest.ReadRootFlowAccumulatorStorage(proof.ctx, proof.selected.events, proof.runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			var buckets map[string]any
@@ -231,17 +230,16 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			// all positive state, publications, claims and outcomes use real owners.
 			write := func(raw []byte) {
 				t.Helper()
-				result, err := proof.selected.db.ExecContext(proof.ctx,
-					`UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), proof.runID)
+				rows, err := storetest.SetRootFlowAccumulatorWire(proof.ctx, proof.selected.events, proof.runID, raw)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+				if err != nil || rows != 1 {
 					t.Fatalf("hostile fixture changed %d receivers: %v", rows, err)
 				}
 			}
-			write(hostile)
 			t.Cleanup(func() { write(original) })
+			write(hostile)
 			restartA2CanonicalAccumulatorProof(t, proof)
 			before := a2CanonicalAccumulatorEvidence(t, proof)
 			payload := `{"id":"next","value":4,"amount":8,"nested":{"numbers":[3,4],"fraction":0.5}}`
