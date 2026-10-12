@@ -163,6 +163,9 @@ func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding r
 	if err := validateSelectedForkPublishedInput(binding, lineage, admitted.Event(), sourceEvent, expectedSchema); err != nil {
 		return false, eventrecord.Corrupt(eventID, err)
 	}
+	if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, sourceEvent.SourceEventID, !sqlite); err != nil {
+		return false, eventrecord.Corrupt(eventID, err)
+	}
 	if err := requireSelectedForkFanOutPublishedTx(ctx, tx, binding, sourceEvent.SourceEventID, !sqlite); err != nil {
 		return false, eventrecord.Corrupt(eventID, err)
 	}

@@ -159,6 +159,23 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 				return reject(id, err)
 			}
 		}
+		if roots[id] {
+			// These are exact selected physical inputs, not newly emitted
+			// results under a reminted journal identity. Recheck their source
+			// partition through the publication owner before final settlement.
+			binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
+			if err != nil {
+				return reject(id, err)
+			}
+			lineage, selected := event.SelectedForkLineage()
+			if !selected || lineage.SourceRunID() != binding.SourceRunID {
+				return reject(id, fmt.Errorf("selected input has foreign publication binding"))
+			}
+			if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, lineage.SourceEventID(), postgres); err != nil {
+				return reject(id, err)
+			}
+			continue
+		}
 		resultType, validResult := false, false
 		for _, request := range requests {
 			if !request.OwnsResultType(event.Type()) {

@@ -66,6 +66,16 @@ func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, wan
 		lineage.AuthorityStamp() != stored.SelectionAuthority || !stored.CreatedAt.Equal(event.CreatedAt()) {
 		return eventrecord.Corrupt(want.ForkEventID, fmt.Errorf("selected fork duplicate publication changed its retained event/lineage binding"))
 	}
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, stored.ForkRunID)
+	if err != nil {
+		return err
+	}
+	if binding.SourceRunID != stored.SourceRunID {
+		return fmt.Errorf("selected duplicate publication has foreign source binding")
+	}
+	if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, stored.SourceEventID, postgres); err != nil {
+		return err
+	}
 	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres)
 }
 
@@ -75,6 +85,9 @@ func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
+			return err
+		}
+		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, true); err != nil {
 			return err
 		}
 		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, true)
@@ -87,6 +100,9 @@ func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.C
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
+			return err
+		}
+		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, false); err != nil {
 			return err
 		}
 		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, false)

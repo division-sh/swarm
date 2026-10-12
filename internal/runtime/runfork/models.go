@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -1432,16 +1433,17 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	InputPublication      InputPublication                          `json:"-"`
-	PublishedJoin         genericschedule.PublishedJoinContinuation `json:"-"`
-	PublishedJoinRoute    events.DeliveryRoute                      `json:"-"`
-	ContinuedFanOutRoutes []events.DeliveryRoute                    `json:"-"`
-	SourceEventID         string                                    `json:"source_event_id"`
-	EventName             string                                    `json:"event_name"`
-	ExecutionMode         executionmode.Mode                        `json:"execution_mode"`
-	Scope                 string                                    `json:"scope,omitempty"`
-	RoutingSource         events.RoutingSource                      `json:"routing_source"`
-	Payload               json.RawMessage                           `json:"payload,omitempty"`
+	PublishedActivityResult  activityresult.PublishedContinuation      `json:"-"`
+	InputPublication         InputPublication                          `json:"-"`
+	PublishedJoin            genericschedule.PublishedJoinContinuation `json:"-"`
+	PublishedJoinRoute       events.DeliveryRoute                      `json:"-"`
+	ContinuedRecipientRoutes []events.DeliveryRoute                    `json:"-"`
+	SourceEventID            string                                    `json:"source_event_id"`
+	EventName                string                                    `json:"event_name"`
+	ExecutionMode            executionmode.Mode                        `json:"execution_mode"`
+	Scope                    string                                    `json:"scope,omitempty"`
+	RoutingSource            events.RoutingSource                      `json:"routing_source"`
+	Payload                  json.RawMessage                           `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {

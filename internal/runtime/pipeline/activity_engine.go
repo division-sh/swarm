@@ -280,6 +280,9 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
+		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
+			return err
+		}
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.executeNonIdempotentActivityIntent(ctx, intent, tool, mockResponse)
@@ -1613,6 +1616,11 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	}
 	if rec.CompletedAt == nil || rec.CompletedAt.IsZero() {
 		return fmt.Errorf("activity attempt %s has no valid terminal completion timestamp", rec.RequestEventID)
+	}
+	if owned, err := selectedActivityPublicationOwnsResult(ctx, intent, rec); err != nil || owned {
+		// Its exact publication is continuing independently. The input still
+		// completes through the normal pipeline settlement owner.
+		return err
 	}
 	intent.Attempt = rec.Attempt
 	intent.Generation = rec.Generation

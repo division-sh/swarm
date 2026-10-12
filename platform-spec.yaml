@@ -20990,6 +20990,15 @@ run_model:
       ordinary source requests. Missing, duplicate or contradictory publication/lineage/journal evidence refuses.
       No logical journal coordinate is minted as an event or accepted as a physical fork cut. Historical evidence
       does not replace the new child's current selected execution authority.
+      The fixed-cut publication owner and canonical activity request/journal/result validators select exactly one
+      output continuation for an unfinished activity input. If its result is absent at the cut, the policy-authorized
+      journal publication remains owed, regardless of later source progress. If its exact result is already committed,
+      only that physical publication's unfinished recipient partition continues; the copied input and journal remain
+      admitted accounting evidence and settle through the normal pipeline without publishing a second result.
+      Terminal result recipients remain terminal evidence and are not replayed. Initial activation and successor
+      recovery rederive this decision from the same bound cut, preserve projected reply bindings, and independently
+      enforce exact recipient identity at publication and readback. No source receipt is fabricated, no pending input
+      is dropped, and no event-name/payload deduplication or provider replay substitutes for the exact linkage.
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
       store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,

@@ -45,6 +45,7 @@ func TestSelectedForkDuplicatePublicationRequiresOriginalEvidenceBothDialects(t 
 						WillReturnRows(selectedInputRecordRows(f.record, !postgres, eventFound))
 				}
 				if fault == "exact" || fault == "fresh_retry_time" || fault == "fan_out_read_failure" {
+					expectSelectedAttachmentBinding(mock, f.attachment.evidence.binding)
 					query := mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM fan_out_intents WHERE run_id=`).WithArgs(want.ForkRunID)
 					if fault == "fan_out_read_failure" {
 						query.WillReturnError(context.DeadlineExceeded)

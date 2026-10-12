@@ -299,7 +299,10 @@ func receiverOwnershipCollect(pkg *types.Package, info *types.Info, fset *token.
 						if field := structure.Field(i); field.Name() == "PublishedJoinRoute" && receiverOwnershipType(field.Type()) == "events.DeliveryRoute" {
 							continue
 						}
-						if field := structure.Field(i); field.Name() == "ContinuedFanOutRoutes" {
+						if field := structure.Field(i); field.Name() == "PublishedActivityResult" && receiverOwnershipType(field.Type()) == "runtime/activityresult.PublishedContinuation" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "ContinuedRecipientRoutes" {
 							if slice, ok := field.Type().(*types.Slice); ok && receiverOwnershipType(slice.Elem()) == "events.DeliveryRoute" {
 								continue
 							}

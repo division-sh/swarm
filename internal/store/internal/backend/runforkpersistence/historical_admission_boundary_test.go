@@ -81,12 +81,14 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
 		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort", "postgresRunForkWorkflowTimerReadbackPort",
+		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "exact shared contextual event-point consumer"}
 	}
 	for _, caller := range []string{
 		"lockSQLiteRunForkSourceRevisionFrontier", "RunForkSQLiteOwner.PlanRunFork", "RunForkSQLiteOwner.ReadEntityAtEventCutForTest", "RunForkSQLiteOwner.ActivateRunFork", "RunForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents",
 		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort", "sqliteRunForkWorkflowTimerReadbackPort",
+		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "thin SQLite adapter consumes the shared contextual event point"}
 	}

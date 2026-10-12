@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -415,6 +416,16 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx := selectedContractRuntimeContainerLineageContext(lease.Context(), c.proof)
 	runCtx = runtimecorrelation.WithRunID(runCtx, req.ForkRunID)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
+	publications := make([]activityresult.PublishedContinuation, 0)
+	for _, source := range sourceEvents {
+		if source.PublishedActivityResult.Present() {
+			publications = append(publications, source.PublishedActivityResult)
+		}
+	}
+	runCtx, err = runtimepipeline.WithSelectedActivityPublications(runCtx, req.ForkRunID, publications)
+	if err != nil {
+		return errors.Join(err, lease.Done())
+	}
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
@@ -667,13 +678,13 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 				return err
 			}
 		}
-		eventCtx, err := c.selectedFanOutPublicationContext(
-			runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName), evt, sourceEvent.SourceEventID)
+		eventCtx, err := c.selectedSourcePublicationContext(
+			runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName), evt, sourceEvent)
 		if err != nil {
 			return err
 		}
-		if len(sourceEvent.ContinuedFanOutRoutes) != 0 {
-			eventCtx, err = runtimebus.WithSelectedForkRecipientContexts(eventCtx, evt, sourceEvent.ContinuedFanOutRoutes)
+		if len(sourceEvent.ContinuedRecipientRoutes) != 0 {
+			eventCtx, err = runtimebus.WithSelectedForkRecipientContexts(eventCtx, evt, sourceEvent.ContinuedRecipientRoutes)
 			if err != nil {
 				return err
 			}
@@ -766,16 +777,16 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 	return nil
 }
 
-func (c selectedContractForkLocalRuntimeContainer) selectedFanOutPublicationContext(ctx context.Context, event events.Event, sourceEventID string) (context.Context, error) {
-	_, continuing, err := c.req.SourcePlan.FanOutPendingRecipientPartition(sourceEventID)
+func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationContext(ctx context.Context, event events.Event, source runfork.RunForkSelectedContractSourceEvent) (context.Context, error) {
+	_, continuing, err := c.req.SourcePlan.FanOutPendingRecipientPartition(source.SourceEventID)
 	if err != nil {
 		return nil, err
 	}
-	if !continuing {
+	if !continuing && len(source.ContinuedRecipientRoutes) == 0 {
 		return ctx, nil
 	}
 	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {
-		if plan.SourceEventID != sourceEventID {
+		if plan.SourceEventID != source.SourceEventID {
 			continue
 		}
 		ctx, err = runtimebus.WithSelectedForkRecipientPlan(ctx, event, plan.Recipients)

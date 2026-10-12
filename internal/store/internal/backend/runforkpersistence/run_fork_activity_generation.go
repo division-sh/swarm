@@ -325,14 +325,16 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, flowInstance, request, reference, evidence, replyID); err != nil {
 			return event, err
 		}
-		return event, nil
+		event.PublishedActivityResult, err = admission.publishedActivityResult(ctx, tx, sourceEvent.SourceEventID, evidence, request, reference, replyID)
+		return event, err
 	}
 	switch policy {
 	case runtimecontracts.ActivityForkReexecuteRead:
 		if runtimecontracts.NormalizeActivityEffectClass(request.EffectClass) != runtimecontracts.ActivityEffectClassReadOnly {
 			return event, fmt.Errorf("activity request %s declares reexecute_read for effect class %s", event.SourceEventID, request.EffectClass)
 		}
-		return event, nil
+		event.PublishedActivityResult, err = admission.publishedReadOnlyActivityResult(ctx, tx, sourceEvent.SourceEventID, request, reference)
+		return event, err
 	case runtimecontracts.ActivityForkReuseRecordedResult:
 		if runtimecontracts.NormalizeActivityEffectClass(request.EffectClass) != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			return event, fmt.Errorf("activity request %s declares reuse_recorded_result for effect class %s", event.SourceEventID, request.EffectClass)
@@ -357,14 +359,25 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, flowInstance, request, reference, evidence, replyID); err != nil {
 		return event, err
 	}
-	return event, nil
+	event.PublishedActivityResult, err = admission.publishedActivityResult(ctx, tx, sourceEvent.SourceEventID, evidence, request, reference, replyID)
+	return event, err
 }
 
 func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
 	var err error
-	projected.ContinuedFanOutRoutes, err = projectContinuedFanOutSourceRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
+	projected.ContinuedRecipientRoutes, err = projectContinuedFanOutSourceRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
 	if err != nil {
 		return projected, err
+	}
+	activityRoutes, activityResult, err := a.publishedActivityResultRoutes(ctx, tx, source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if activityResult {
+		if len(projected.ContinuedRecipientRoutes) != 0 {
+			return projected, fmt.Errorf("activity result has competing fan-out continuation ownership")
+		}
+		projected.ContinuedRecipientRoutes = activityRoutes
 	}
 	if projected.EventName == "platform.join_complete" || projected.EventName == "platform.join_timeout" {
 		payload, err := canonicaljson.Decode(source.Payload)
