@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -32,11 +33,15 @@ func readNativeRetainedRootJoins(t *testing.T, reader pipeline.WorkflowTargetPer
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop, found, err := loopruntime.Load(instance.StateBuckets, ".", "revision")
+	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, found, err := loopruntime.Load(carrier.StateBuckets, ".", "revision")
 	if err != nil || !found {
 		t.Fatalf("missing exact root loop: found=%t err=%v", found, err)
 	}
-	joins, err := joinruntime.List(instance.StateBuckets)
+	joins, err := joinruntime.List(carrier.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}
