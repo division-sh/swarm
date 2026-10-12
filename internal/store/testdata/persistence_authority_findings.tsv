@@ -276,8 +276,8 @@ typed-process-local	interface-method	typed	internal/runtime/contracts/compiled_e
 typed-process-local	callback-type	typed	internal/runtime/contracts/pack_platform_provenance.go	populatePlatformCatalogProvenance	param:add	func(string, github.com/division-sh/swarm/internal/yamlsource.Value, string) error
 typed-process-local	callback-type	typed	internal/runtime/contracts/pack_platform_provenance.go	populatePlatformLawProvenance	param:add	func(string, github.com/division-sh/swarm/internal/yamlsource.Value, string) error
 typed-process-local	callback-type	typed	internal/runtime/contracts/platform_spec_value.go	platformValueMap	param:project	func(github.com/division-sh/swarm/internal/yamlsource.Value) (T, error)
-typed-process-local	callback-type	typed	internal/runtime/contracts/tool_input_schema_relation.go	admittedToolSchemaFloat	param:accessor	func() (float64, bool)
-typed-process-local	callback-type	typed	internal/runtime/contracts/tool_input_schema_relation.go	admittedToolSchemaInt	param:accessor	func() (int, bool)
+typed-process-local	callback-type	typed	internal/runtime/contracts/tool_input_schema_relation.go	validateToolSchemaFloatBoundsSubset	param:sourceMin,sourceMax,targetMin,targetMax	func() (float64, bool)
+typed-process-local	callback-type	typed	internal/runtime/contracts/tool_input_schema_relation.go	validateToolSchemaIntBoundsSubset	param:sourceMin,sourceMax,targetMin,targetMax	func() (int, bool)
 typed-process-local	callback-type	typed	internal/runtime/contracts/tool_input_schema_value.go	toolInputSchemaOption	named-function-type	func(*github.com/division-sh/swarm/internal/runtime/contracts.toolInputSchemaDraft) error
 typed-process-local	interface-method	typed	internal/runtime/contracts/tool_input_schema_value.go	ToolInputSchemaOption	method:applyToolInputSchema	func(*github.com/division-sh/swarm/internal/runtime/contracts.toolInputSchemaDraft) error
 typed-process-local	callback-type	typed	internal/runtime/contracts/tool_schema_entry_value.go	toolSchemaEntryOption	named-function-type	func(*github.com/division-sh/swarm/internal/runtime/contracts.toolSchemaEntryDraft) error
