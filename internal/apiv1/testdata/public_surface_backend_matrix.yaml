@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go, internal/serveapp/serve_runtime_execution.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, channel-delivery-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates, process-generation-missing, process-generation-publication, process-publication-outcome, process-effect-generation, process-generation-monitor-phases, process-generation-monitor-queue, process-generation-monitor-join]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, channel-delivery-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates, process-generation-missing, process-generation-publication, process-publication-outcome, process-effect-generation, process-generation-monitor-phases, process-generation-monitor-queue, process-generation-monitor-join, event-catalog-refined-publication, event-catalog-retained-artifact]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
