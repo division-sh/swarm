@@ -11,6 +11,10 @@ func CountGateRunProposedEffectContinuations(ctx context.Context, selected any, 
 	return private.CountGateRunProposedEffectContinuationsForTest(ctx, selected, run)
 }
 
+func CountA2MembershipRefusalEvents(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountA2MembershipRefusalEventsForTest(ctx, selected, runID)
+}
+
 func ReadGateNodeDeliveryStatus(ctx context.Context, selected any, event, node string) (string, error) {
 	return private.ReadGateNodeDeliveryStatusForTest(ctx, selected, event, node)
 }

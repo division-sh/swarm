@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "3bc252a0b51337d2166953f6a63d445fa27f2fe37a84432d4cf6dc6be3599253"
+const targetDigest = "604a4fd256aded067a159816ba576465d436efcaaa5822da6ba17e563cdf8afe"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -106,6 +106,8 @@ var files = []string{
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go",
 	"internal/runtime/pipeline/a2_join_until_race_external_test.go",
 	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go",
+	"internal/runtime/pipeline/a2_join_commit_ack_loss_external_test.go",
+	"internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go",
 	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go",
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go",
@@ -226,8 +228,10 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":                        {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_until_race_external_test.go":                             {"TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go":                         {"TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores": true},
+	"internal/runtime/pipeline/a2_join_commit_ack_loss_external_test.go":                        {"TestA2JoinCloseLostOwnerResultRecoversOnBothStores": true},
+	"internal/runtime/pipeline/a2_activation_join_seam_external_test.go":                        {"TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go":                           {"TestA2JoinResultTypesRealExecutionAndRestartOnBothStores": true},
-	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true},
+	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true, "footprint/*a2MembershipAdmission": true},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true},

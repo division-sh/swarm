@@ -9,6 +9,12 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
 
+func CountRunFlowRuntimeReadinessStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountRunFlowRuntimeReadinessStorageTx(ctx, tx, runID)
+	})
+}
+
 func CountSelectedForkSourceEventLineageStorageForTest(ctx context.Context, selected any, forkRunID, sourceEventID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, forkRunID); err != nil {
 		return 0, err

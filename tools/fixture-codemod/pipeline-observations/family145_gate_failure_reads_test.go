@@ -44,7 +44,7 @@ func family145GateFailureReadProofError(key, before, after string) error {
 	if err != nil {
 		return err
 	}
-	got, err := family145DescriptorBusinessAssertions(after)
+	got, err := family145DescriptorBusinessAssertions(family145NormalizeGateCountAssertions(key, after))
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func TestFamily145GateFailureReadsPreserveCompleteConsumersAndRejectLostCuts(t *
 				t.Fatalf("lost context/owner/scope/destination/order passed: %s", cut)
 			}
 		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
+		assertions, err := family145DescriptorBusinessAssertions(row.After)
 		if err != nil {
 			t.Fatal(err)
 		}

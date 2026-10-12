@@ -87,10 +87,9 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 				}
 				return instance
 			}
-			count := func(query string) int {
+			count := func(n int, err error) int {
 				t.Helper()
-				var n int
-				if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&n); err != nil {
+				if err != nil {
 					t.Fatal(err)
 				}
 				return n
@@ -111,7 +110,7 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 			}
 			publish("a", "completed", "delivered")
 			before := load()
-			mutations := count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1")
+			mutations := count(storetest.CountRunMutationStorage(ctx, selected.events, runID))
 			if arm := exactJoinPersistedArm(t, before); arm.Status != joinruntime.StatusOpen || arm.Completed() != 1 {
 				t.Fatalf("fault checkpoint lacks one admitted member: %#v", arm)
 			}
@@ -134,8 +133,8 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("no actual close-transaction result")
 			}
-			if after := load(); !reflect.DeepEqual(after, before) || count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != mutations ||
-				count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 0 || count("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='platform.join_complete'") != 0 {
+			if after := load(); !reflect.DeepEqual(after, before) || count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != mutations ||
+				count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 0 || count(storetest.CountRunEventNameStorage(ctx, selected.events, runID, "platform.join_complete")) != 0 {
 				t.Fatal("failed completion insertion leaked membership/closure/history/continuation")
 			}
 			failureJSON, err := storetest.ReadGateEventFailure(ctx, selected.events, failed.ID())
@@ -166,14 +165,14 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 			quietCtx, cancelQuiet := context.WithTimeout(ctx, 5*time.Second)
 			quietErr := bus.WaitForQuiescence(quietCtx)
 			cancelQuiet()
-			if quietErr != nil || !reflect.DeepEqual(load(), before) || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 0 {
+			if quietErr != nil || !reflect.DeepEqual(load(), before) || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 0 {
 				t.Fatalf("exact failed-delivery replay closed the arm: %v", quietErr)
 			}
 			assertExactJoinDeliveryStatus(t, selected, ctx, failed.ID(), node.Key(), "dead_letter")
 			publish("b", "completed", "delivered")
 			arm := exactJoinPersistedArm(t, load())
 			if arm.Status != joinruntime.StatusClosed || arm.Completed() != 2 || !arm.OutcomePending || arm.OutcomeFired ||
-				!arm.JoinRef().Equal(exactJoinPersistedArm(t, before).JoinRef()) || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 1 {
+				!arm.JoinRef().Equal(exactJoinPersistedArm(t, before).JoinRef()) || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 1 {
 				t.Fatalf("new lawful arrival did not close the original arm once: %#v", arm)
 			}
 			pending := exactJoinPendingSchedule(t, selected, ctx, arm)
@@ -205,7 +204,7 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 				t.Fatalf("recovered close lost exact business result: %#v", final)
 			}
 			assertExactJoinFiredSchedule(t, selected, ctx, pending, completionID)
-			if count("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='platform.join_complete'") != 1 {
+			if count(storetest.CountRunEventNameStorage(ctx, selected.events, runID, "platform.join_complete")) != 1 {
 				t.Fatal("rollback/recovery duplicated completion publication")
 			}
 		})

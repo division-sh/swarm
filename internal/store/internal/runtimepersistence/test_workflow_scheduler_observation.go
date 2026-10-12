@@ -10,6 +10,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func CountRunTimerStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return genericschedule.CountTimerRowsForRun(ctx, tx, runID)
+	})
+}
+
 func CountWorkflowSchedulerTimersForTest(ctx context.Context, selected any, entity, path string) (int64, error) {
 	id, err := uuid.Parse(entity)
 	if err != nil || id == uuid.Nil || id.String() != entity || strings.Trim(strings.TrimSpace(path), "/") != path || path == "" {

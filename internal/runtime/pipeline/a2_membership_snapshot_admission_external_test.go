@@ -228,14 +228,28 @@ func (f *a2MembershipAdmission) load(t *testing.T) pipeline.WorkflowInstance {
 func (f *a2MembershipAdmission) footprint(t *testing.T) [6]int {
 	t.Helper()
 	var counts [6]int
+	reads := [...]func() (int, error){
+		func() (int, error) { return storetest.CountRunMutationStorage(f.ctx, f.selected.events, f.owner.RunID) },
+		func() (int, error) { return storetest.CountRunTimerStorage(f.ctx, f.selected.events, f.owner.RunID) },
+		func() (int, error) {
+			return storetest.CountRunFanOutIntentStorage(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountRunFanOutBarrierStorage(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountNestedRunFanOutOutcomes(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountA2MembershipRefusalEvents(f.ctx, f.selected.events, f.owner.RunID)
+		},
+	}
 	for index, table := range []string{"entity_mutations", "timers", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes", "events"} {
-		query := "SELECT COUNT(*) FROM " + table + " WHERE run_id=$1"
-		if table == "events" {
-			query += " AND event_name IN ('platform.join_complete','platform.join_timeout','items.child','batch.completed')"
-		}
-		if err := f.selected.db.QueryRowContext(f.ctx, query, f.owner.RunID).Scan(&counts[index]); err != nil {
+		count, err := reads[index]()
+		if err != nil {
 			t.Fatalf("read %s refusal footprint: %v", table, err)
 		}
+		counts[index] = count
 	}
 	return counts
 }

@@ -94,6 +94,12 @@ func CountNestedRunFanOutOutcomesTx(ctx context.Context, tx *sql.Tx, run string)
 	return out, nil
 }
 
+func CountRunFanOutBarrierStorageTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_obligation_barriers WHERE run_id=$1`, run).Scan(&out)
+	return out, err
+}
+
 func ReadNestedRunFanOutOwedTx(ctx context.Context, tx *sql.Tx, run string) (NestedFanOutOwedStorage, error) {
 	var out NestedFanOutOwedStorage
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cardinality-cursor),0) FROM fan_out_intents WHERE run_id=$1`, run).Scan(&out.Intents, &out.Owed)

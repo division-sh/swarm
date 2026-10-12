@@ -6,6 +6,10 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
+func CountRunMutationStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountRunMutationStorageForTest(ctx, selected, runID)
+}
+
 type ScenarioSetupRunStorage = private.ScenarioSetupRunStorage
 type PostgresScenarioSetupEntityStorage = private.PostgresScenarioSetupEntityStorage
 

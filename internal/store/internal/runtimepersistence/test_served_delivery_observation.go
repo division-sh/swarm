@@ -253,6 +253,18 @@ func CountNestedRunFanOutOutcomesForTest(ctx context.Context, selected any, run 
 	})
 }
 
+func CountRunFanOutIntentStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountFanOutIntentsForRun(ctx, tx, run)
+	})
+}
+
+func CountRunFanOutBarrierStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountRunFanOutBarrierStorageTx(ctx, tx, run)
+	})
+}
+
 func ReadNestedRunFanOutOwedForTest(ctx context.Context, selected any, run string) (NestedFanOutOwedStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (NestedFanOutOwedStorage, error) {
 		return pipelinepersistence.ReadNestedRunFanOutOwedTx(ctx, tx, run)

@@ -61,6 +61,14 @@ func ReadNestedFanOutCursorClaim(ctx context.Context, selected any, key fanoutob
 func CountNestedRunFanOutOutcomes(ctx context.Context, selected any, run string) (int, error) {
 	return private.CountNestedRunFanOutOutcomesForTest(ctx, selected, run)
 }
+
+func CountRunFanOutIntentStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountRunFanOutIntentStorageForTest(ctx, selected, run)
+}
+
+func CountRunFanOutBarrierStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountRunFanOutBarrierStorageForTest(ctx, selected, run)
+}
 func ReadNestedRunFanOutOwed(ctx context.Context, selected any, run string) (NestedFanOutOwedStorage, error) {
 	return private.ReadNestedRunFanOutOwedForTest(ctx, selected, run)
 }

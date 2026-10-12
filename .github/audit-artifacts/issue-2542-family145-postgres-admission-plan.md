@@ -4154,3 +4154,43 @@ count, not an additional debt census. Carrier/openers and broader family/parent
 remain live. Existing M01/Docker/drain/D3/M07 holds remain unwaived. No push/PR,
 new gate, local tier or server2. Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/gate-failures-*.
+
+## Shared Gate/A2 Dependency: Dynamic Run-Count Helpers
+
+The five query/table-string helpers in activation, fieldless paired reply,
+lost-owner-result, close rollback and membership footprint now use fixed domain
+read ports. This is component closure, NOT closure of gate/A2 or its carrier.
+Mutation, timer, fields, flow header, construction receipt, fan-out intent and
+outcome queries reuse existing physical owners. Readiness, barrier and the exact
+four-name membership event count remain with their native projection/event
+owners. No public SQL/table selector, callback, raw getter or reconstructed
+coordinator is introduced. The event bridge stays in test_event_support.go.
+
+Every run predicate, event-name set, count destination and error/refusal gate is
+preserved. Local closures defer each observation until its original cut. The
+fieldless and activation loops retain label/order; all original || short-circuit
+ordering and repeated replay/history checks stay. H2 accounting reads only the
+original construction-receipt count. Membership keeps six separate reads in
+the original array order, not one aggregate transaction or cached snapshot.
+Differently scoped timer/fire-event and mutation/causing-event queries, live
+schedule faults and the shared carrier/openers remain explicit migration tail.
+
+| Proof | Executed receipt with Go1.26.8 |
+| --- | --- |
+| Five complete original roots: activation's ten scenarios/store, fieldless reply/reconstruction, lost acknowledgment/result, real close rollback/recovery and membership refusals | Both stores under race, PASS99.183s; no source, authority, clocks, waits or assertions changed |
+| Physical counts, nine independent read commits, positive native construction witnesses, absent/foreign runs, cancellation and unchanged complete application snapshots | TestGateRunCountsRetainPhysicalScopesAndIndependentReadsBothStores; raw/closed control included in native PASS13.912s |
+| Membership count excludes an actual admitted ordinary event | Same native root; deleting the four-name SQL predicate produces both-store RED11.196s, restored exact predicate GREEN13.611s |
+| Complete consumer assertions, call multiplicity/temporal order, labels/port bindings and physical SQL, with hostile lost scope/domain/index/assertion controls | Six finite/snapshot roots PASS6.340s |
+| Event/delivery/lifecycle/fork boundaries and writer/accessor inventories | Complete six-root sweep PASS3.161s; U1000 clean |
+| Global decreasing ratchet | PASS136.781s:8436 ->8426 findings,6044 ->6034 raw sites,10 removed/zero added; uncertainty67 unchanged |
+
+Finite corpus1212/424, transition digest
+604a4fd256aded067a159816ba576465d436efcaaa5822da6ba17e563cdf8afe.
+All24 immutable historical Before/After/Mechanical inputs compare unchanged;
+only current Successor correspondence advances, combined digest
+ff1c4e49dbaa8115acb3997c443e0a620edec04e3ce5d90db510111d54d54764.
+Initial finite REDs exposed formatting-sensitive cuts, stale exact count/digest
+pins and a hostile assertion still targeting the old spelling; those controls
+now use lexical cuts and the actual current condition, not relaxed semantics.
+No push/PR, tier, server2 or qualification-hold waiver. Signed-head complexity
+follows. Receipts ~/.cache/swarm-2542-family145/gate-counts-*.

@@ -562,6 +562,12 @@ func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, nam
 	return count, nil
 }
 
+func CountA2MembershipRefusalEventsForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountA2MembershipRefusalEventsTx(ctx, tx, runID)
+	})
+}
+
 type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
 
 type FanInDiagnosticEventStorage = eventrecord.FanInDiagnosticEventStorage

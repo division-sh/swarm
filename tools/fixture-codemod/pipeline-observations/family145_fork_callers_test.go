@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 421 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "3bc252a0b51337d2166953f6a63d445fa27f2fe37a84432d4cf6dc6be3599253" {
+	if err != nil || len(rows) != 424 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "604a4fd256aded067a159816ba576465d436efcaaa5822da6ba17e563cdf8afe" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -68,6 +68,23 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if family145GateEntityConflictKeys[row.Function] != "" {
 			if err := family145GateEntityConflictProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
+			}
+			continue
+		}
+		if family145GateCountFunctions[row.Function] {
+			key := family145GateScalarReadKey(row.File, row.Function)
+			if err := family145GateCountProofError(key, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			if family145GateFailureReadCuts[key] != nil {
+				if err := family145GateFailureReadProofError(key, row.Before, row.After); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if family145GateScalarReadCuts[key] != nil {
+				if err := family145GateScalarReadProofError(key, row.Before, row.After); err != nil {
+					t.Fatal(err)
+				}
 			}
 			continue
 		}

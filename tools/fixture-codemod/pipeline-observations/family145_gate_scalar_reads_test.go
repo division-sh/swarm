@@ -170,7 +170,7 @@ func family145GateScalarReadProofError(key, before, after string) error {
 	if err != nil {
 		return err
 	}
-	got, err := family145DescriptorBusinessAssertions(after)
+	got, err := family145DescriptorBusinessAssertions(family145NormalizeGateCountAssertions(key, after))
 	if err != nil {
 		return err
 	}

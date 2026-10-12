@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -119,17 +120,30 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					plannedArm.JoinRef().StageEntry() != entry || len(targetPlan.Lifecycle.Schedules) != 1 {
 					t.Fatalf("activation omitted exact initial lifecycle: entry=%#v arm=%#v plan=%#v err=%v", entry, plannedArm, targetPlan.Lifecycle, err)
 				}
-				count := func(table string) int {
+				count := func(n int, err error) int {
 					t.Helper()
-					var n int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&n); err != nil {
+					if err != nil {
 						t.Fatal(err)
 					}
 					return n
 				}
-				for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "timers", "entity_mutations"} {
-					if count(table) != 0 {
-						t.Fatalf("preparation persisted %s", table)
+				observations := []struct {
+					table string
+					read  func() (int, error)
+				}{
+					{"entity_state", func() (int, error) { return storetest.CountWorkflowRunFieldRows(ctx, selected.events, runID) }},
+					{"flow_instances", func() (int, error) { return storetest.CountRunFlowInstanceStorage(ctx, selected.events, runID) }},
+					{"workflow_instance_initial_materializations", func() (int, error) {
+						accounting, err := storetest.ObserveH2ConstructionAccounting(ctx, selected.events, runID)
+						return accounting.Constructions, err
+					}},
+					{"flow_instance_runtime_readiness", func() (int, error) { return storetest.CountRunFlowRuntimeReadinessStorage(ctx, selected.events, runID) }},
+					{"timers", func() (int, error) { return storetest.CountRunTimerStorage(ctx, selected.events, runID) }},
+					{"entity_mutations", func() (int, error) { return storetest.CountRunMutationStorage(ctx, selected.events, runID) }},
+				}
+				for _, observation := range observations {
+					if count(observation.read()) != 0 {
+						t.Fatalf("preparation persisted %s", observation.table)
 					}
 				}
 				if scenario.fault {
@@ -138,9 +152,9 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "a2_activation_join_sql_fault") || failed.Acknowledged {
 						t.Fatalf("activation did not reach real schedule fault: result=%#v err=%v", failed, err)
 					}
-					for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "timers", "entity_mutations"} {
-						if count(table) != 0 {
-							t.Fatalf("failed activation leaked %s", table)
+					for _, observation := range observations {
+						if count(observation.read()) != 0 {
+							t.Fatalf("failed activation leaked %s", observation.table)
 						}
 					}
 					drop()
@@ -209,9 +223,9 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				if err != nil || !found || readiness.AttemptOrdinal != committed.ReadinessAttemptOrdinal || readiness.Phase != pipeline.FlowAttachmentPlanned {
 					t.Fatalf("commit did not retain unfinalized readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
-				history := count("entity_mutations")
+				history := count(storetest.CountRunMutationStorage(ctx, selected.events, runID))
 				replayed, err := bus.CommitFlowInstanceActivation(ctx, plan)
-				if err != nil || !replayed.Acknowledged || replayed.Created || count("timers") != wantTimers || count("entity_mutations") != history ||
+				if err != nil || !replayed.Acknowledged || replayed.Created || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != wantTimers || count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != history ||
 					!reflect.DeepEqual(load(), persisted) {
 					t.Fatalf("exact activation replay reapplied initial lifecycle: result=%#v err=%v", replayed, err)
 				}
@@ -222,7 +236,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatalf("duplicate readiness finalization: %v", err)
 				}
 				readiness, found, err = pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
+				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || !bus.HasFlowInstanceRoute(owner) || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != wantTimers {
 					t.Fatalf("readiness/route did not converge once: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
 				if strings.HasSuffix(scenario.name, "restart_before_arrival") {
@@ -253,7 +267,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 							t.Fatalf("reconstruct sibling readiness: %v", err)
 						}
 					}
-					if !reflect.DeepEqual(load(), before) || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
+					if !reflect.DeepEqual(load(), before) || !bus.HasFlowInstanceRoute(owner) || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != wantTimers {
 						t.Fatal("reconstruction reminted initial entry, membership or deadline")
 					}
 					if scenario.descendant != "" {
@@ -331,7 +345,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				if err != nil || summary.HasOpenWork() || summary.TerminalNonSuccess != 0 {
 					t.Fatalf("activation pipeline not durably complete before replay: summary=%#v err=%v", summary, err)
 				}
-				history = count("entity_mutations")
+				history = count(storetest.CountRunMutationStorage(ctx, selected.events, runID))
 				completionPublication, found, err := selected.events.LoadPreparedPublishEvent(ctx, completionID)
 				if err != nil || !found {
 					t.Fatalf("read committed activation continuation: found=%v err=%v", found, err)
@@ -346,7 +360,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					quiet, cancel := context.WithTimeout(ctx, 5*time.Second)
 					err := bus.WaitForQuiescence(quiet)
 					cancel()
-					if err != nil || !reflect.DeepEqual(load(), final) || count("entity_mutations") != history {
+					if err != nil || !reflect.DeepEqual(load(), final) || count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != history {
 						t.Fatalf("duplicate activated work reexecuted: %v", err)
 					}
 					assertExactJoinDeliveryCount(t, selected, ctx, duplicate.ID(), node.Key(), 1)

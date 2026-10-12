@@ -18,6 +18,12 @@ type TemplateAccountIdentityStorage = entitystore.TemplateAccountIdentityStorage
 
 type TemplateAccountDiagnosticStorage = entitystore.TemplateAccountDiagnosticStorage
 
+func CountRunMutationStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return mutationlog.CountRunMutationStorageTx(ctx, tx, runID)
+	})
+}
+
 func ReadTemplateAccountDiagnosticsForTest(ctx context.Context, selected any) ([]TemplateAccountDiagnosticStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, nil, entitystore.ReadTemplateAccountDiagnosticsTx)
 }
