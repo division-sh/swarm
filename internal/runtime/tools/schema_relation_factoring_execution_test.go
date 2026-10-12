@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func relationExecutionEntry(t *testing.T, url string, minimum int) (runtimecontracts.ToolSchemaEntry, error) {
@@ -51,13 +53,13 @@ func TestSchemaRelationFactoringRetainedReconstructionBothStores(t *testing.T) {
 func proveRelationSelectedExecution(t *testing.T, backend string, reconstruct bool) {
 	t.Helper()
 	var selected httpSettlementSelectedStore
-	var reopen func() httpSettlementSelectedStore
+	var location string
 	if backend == "sqlite" {
-		owner, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
-		selected, reopen = owner, func() httpSettlementSelectedStore { return open() }
+		location = filepath.Join(t.TempDir(), "runtime.db")
+		selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
 	} else {
-		owner, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
-		selected, reopen = owner, func() httpSettlementSelectedStore { return open() }
+		location = testutil.StartPostgresDSN(t)
+		selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
 	}
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -111,7 +113,11 @@ func proveRelationSelectedExecution(t *testing.T, backend string, reconstruct bo
 	if err := selected.(interface{ Close() error }).Close(); err != nil {
 		t.Fatal(err)
 	}
-	selected = reopen()
+	if backend == "sqlite" {
+		selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
+	} else {
+		selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+	}
 	fresh, err := relationExecutionEntry(t, server.URL, 3)
 	if err != nil {
 		t.Fatal(err)
