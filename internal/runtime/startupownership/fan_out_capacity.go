@@ -165,13 +165,38 @@ func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrenc
 		if budget.registrations[evidence.GrantID] == r && (r.executor == nil || p.requireLive() != nil || grantRetired(g)) {
 			delete(budget.registrations, evidence.GrantID)
 		}
+		idleService := p.retireIdleFanOutServiceLocked()
 		p.mu.Unlock()
 		r.Wake()
 		// Cancellation precedes the locked removal, so no BeginTurn can Add
 		// after this point. Join only this registration's admitted finite work.
 		r.turns.Wait()
+		if idleService != nil {
+			<-idleService.done
+			p.mu.Lock()
+			if budget.service == idleService {
+				budget.service = nil
+			}
+			p.mu.Unlock()
+		}
 	}()
 	return r, nil
+}
+
+// The process owns the shared observer, but its last registered occurrence
+// must join it. Durable closing-grant census entries are not live observers.
+func (p *processCapability) retireIdleFanOutServiceLocked() *fanOutServingService {
+	if p.fanOutCapacity == nil || p.fanOutCapacity.service == nil {
+		return nil
+	}
+	for _, r := range p.fanOutCapacity.registrations {
+		if !r.turnsClosing && r.ctx.Err() == nil {
+			return nil
+		}
+	}
+	service := p.fanOutCapacity.service
+	service.cancel()
+	return service
 }
 
 func fanOutGenerationGrant(grant GenerationGrant) (*generationGrant, error) {

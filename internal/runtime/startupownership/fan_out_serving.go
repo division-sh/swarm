@@ -58,6 +58,20 @@ func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence w
 	p := g.owner
 	p.mu.Lock()
 	budget := p.fanOutCapacity
+	for budget.service != nil && budget.service.ctx.Err() != nil {
+		closing := budget.service
+		p.mu.Unlock()
+		select {
+		case <-closing.done:
+		case <-ctx.Done():
+			r.Close()
+			return nil, ctx.Err()
+		}
+		p.mu.Lock()
+		if budget.service == closing {
+			budget.service = nil
+		}
+	}
 	evidence, evidenceErr := r.grant.Evidence()
 	if evidenceErr != nil || p.fanOutClosing || r.ctx.Err() != nil || r.turnsClosing || budget.registrations[evidence.GrantID] != r {
 		p.mu.Unlock()
@@ -65,8 +79,8 @@ func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence w
 		return nil, errors.New("process fan-out serving is closing")
 	}
 	if budget.service == nil {
-		// This standing observer outlives individual source registrations, but
-		// not retained process possession or the process work owner.
+		// One observer serves all current registrations. The last closing
+		// registration joins it; a later registration starts the next epoch.
 		standing, beginErr := budget.workProcess.BeginStanding(context.Background())
 		if beginErr != nil {
 			p.mu.Unlock()

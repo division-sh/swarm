@@ -20336,7 +20336,12 @@ run_model:
       Candidate observation is read-only and is never mutation authority. Claim, evaluation, publication and
       settlement re-prove current process and selected execution authority and the exact intent/claim at their
       existing mutation boundaries. Prepared but unactivated work is not serviceable. Retirement cancels and
-      joins this registration's finite work before retiring its grant. A changed pin retires only the inherited
+      joins this registration's finite work before retiring its grant. The last active registration additionally
+      cancels and joins the shared process observer, leaving no idle work lease behind in a selected-only process.
+      A live registration keeps the same observer; a later registration starts a fresh observer only after the
+      prior epoch joins. Process possession cannot release before either current serving or a closing epoch joins.
+      Closing-grant census evidence remains durable accounting, not a reason to retain an idle observer.
+      A changed pin retires only the inherited
       unissued suffix and creates a new child-live feed
       at ordinal zero. Committed old-version events, attempts, deliveries and outcomes remain historical old-version
       facts; pending old work retains its original payload and route. Event-level obligations without a committed
