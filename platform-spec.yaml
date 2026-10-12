@@ -20995,6 +20995,9 @@ run_model:
       journal publication remains owed, regardless of later source progress. If its exact result is already committed,
       only that physical publication's unfinished recipient partition continues; the copied input and journal remain
       admitted accounting evidence and settle through the normal pipeline without publishing a second result.
+      Read-only retained input accounting is distinguished from fresh execution before current-loop generation
+      admission: consuming the committed result may already have advanced that loop. Exact current-child authority,
+      input identity and cancellation remain mandatory; unpublished fresh work still requires its current generation.
       Terminal result recipients remain terminal evidence and are not replayed. Initial activation and successor
       recovery rederive this decision from the same bound cut, preserve projected reply bindings, and independently
       enforce exact recipient identity at publication and readback. No source receipt is fabricated, no pending input

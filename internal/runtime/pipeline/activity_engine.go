@@ -277,11 +277,12 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		mockResponse = &admitted
 	}
 	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
-			return d.publishActivityFailure(ctx, intent, err)
-		}
+		// Accounting for a captured result is not fresh execution in the current loop.
 		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
 			return err
+		}
+		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
+			return d.publishActivityFailure(ctx, intent, err)
 		}
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
