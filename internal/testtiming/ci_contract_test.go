@@ -116,8 +116,10 @@ func TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres(t *testing.T) {
 			continue
 		}
 		found = true
-		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPossessionObservationExternalProcessReleaseAndCrashBothStores)$' -count=1"
-		if !strings.Contains(step.Run, want) {
+		// Keep the mixed root's SQLite release/crash cases; only its PostgreSQL
+		// children and the four PostgreSQL-only roots require excluded resources.
+		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^TestPossessionObservationExternalProcessReleaseAndCrashBothStores$/^postgres$' -count=1"
+		if strings.TrimSpace(step.Run) != want {
 			t.Fatalf("SQLite-only qualification no longer selects every SQLite package root: %s", step.Run)
 		}
 	}
