@@ -11,8 +11,11 @@ the old42-row audit as current planning, preserving every original S/N/Q row.
 #2482 actually merged `c3f38293e16cebc09b552447cb6235f600692d12` onOct2;
 #2514 merged `37ccd8cfc73d4ebb9707991948d8b53470264333`. Their merged code is
 in this baseline, not copied from an anticipated candidate. The parked
-dependency is obsolete. **Design direction accepted; CODING GATE CLOSED**
-pending the independent short re-gate on this complete amendment.
+dependency is obsolete. Reviewer-g6116259035 approved coding as a first slice.
+Implementation rebased onto green master cc369e5eb5 before characterization.
+**Extraction is now paused at that gate's public-proof stop condition:** the
+compiled source-free doctor baseline loses its installed capability inventory.
+See the bounded checkpoint/addendum below; no production extraction has begun.
 
 Reuse #2509: one PR, two complete separately owned maintenance families.
 Existing tests remain unchanged; characterize before private extraction.
@@ -388,3 +391,82 @@ alignment, current overlap/size estimate and actual CI owner map. Please record
 exact CI-Tier/CI-Units and minimal Local/supplement selection. **The required
 independent coding outcome is pending, not self-approved. Stop here before
 characterization or implementation.**
+
+## Coding-Gate Checkpoint And Public-Proof Stop (2026-10-12)
+
+The historical request above was satisfied by independent6116259035, with
+CI-Tier lifecycle, no CI-Units, Local-Tier focused. The approved boundary
+remains two complete private S/N maintenance owners, no semantic correction.
+Rebased audit commit4f757fa93 consumes green master cc369e5eb5; targets remain
+byte-identical to that source. Refreshed census still finds28 schema-reference
+files and25 NormalizeSubjects calls across the same ten files. Paginated
+C2617 files and current E2612/D2624 heads preserve the target non-overlap;
+shared operational consumer/spec/plan boundaries are not asserted absent.
+
+New pre-extraction characterization is confined to three test files. SD/SV/SP
+assert exact definition/value errors, graph membership cleanup, safe recursive
+ordering, enum/oneOf/property-name constraints and immutable projection/hash
+readbacks. CS/TS assert requirement/status/identity/error phases, clone and
+recovery/disabled-binding tuples. CA uses actual compiled agent-free public
+serve on both stores, not a fake-RPC or seeded-row shortcut. All existing tests
+and production/spec bytes remain unchanged.
+
+Public baseline accounting corrections (not production defects):
+
+- Default verify on an absent first-use store reports ok=true but
+  admission_complete=false, plus selected-store/possession observations. The
+  new test asserts that exact supported distinction, not fictitious readiness.
+- DORMANT diagnostics identify declaring FlowPath (`.` and `beta`), not alias;
+  webhook lookup still uses exact aliases alpha/beta. Preserve both identities.
+- Public swarm test intentionally creates private SQLite (test_session.go107)
+  and does not adopt deployment PostgreSQL configuration. Q03's compiled
+  MockOnly host-worker/real HTTP MCP/read/emit settlement credit is separate
+  from the required both-store direct/durable output and journal/replay proof.
+  Its root is TestAdmissionFactoringRegisteredToolExecution, without a false
+  BothStores suffix. No backend/transport policy change is proposed.
+
+**D01: required Q02 public checkpoint is unreachable on unchanged production.**
+TestAdmissionFactoringCompiledCapabilitySurfacesBothStores/source-free-doctor
+fails3/3: compiled doctor returns exit0/ok=true, zero capability_subjects and
+no pack_inventory. The hosted/provider-free prerequisite path succeeds; the
+hostile invocation-tree source is not loaded. Independently runnable SQLite
+and PostgreSQL siblings pass3/3 each: absent declarations remain nonexecuting,
+public secrets set cannot hot-activate them, and retained restart evaluates
+both exact targets and creates two standing generation runs.
+
+Execution path and exact owners:
+
+1. doctor.go142 calls appendDoctorPackInventoryReadback into configReport.
+2. doctor.go238-252 builds the existing admitted inventory and calls the
+   canonical installed-subject producer/NormalizeSubjects.
+3. doctor.go215 constructs a separate report via runLocalClaudeCLIPreflight.
+4. local_preflight.go140-155 exits SourceFree before source-bound capability
+   loading, correctly avoiding a project/credential readiness interpretation.
+5. doctor.go229 copies only SchemaInventory, dropping PackInventory and
+   CapabilitySubjects on the successful path. Early errors instead return
+   configReport, so the missing inventory is report-composition-dependent.
+
+This is a consumer presentation/composition defect in the immediate admitted
+capability readback parent, not another S/N normalizer or a behavior-preserving
+extraction. It cannot be silently absorbed under the existing gate. Proposed
+bounded repair, **NOT IMPLEMENTED/APPROVED here**: preserve admitted installed
+inventory through the existing final report composition, without loading
+project source, evaluating effective target credentials, changing prerequisites,
+creating another status owner or touching other lanes. Reviewer must either
+approve that consumer correction in this PR with explicit negative public
+proof, or assign it separately and decide how Q02 is unlocked. Do not waive
+the inventory assertion or credit a fake/local helper as public proof.
+
+Planned D01 controls if authorized: compiled doctor JSON and text with valid
+and hostile invocation trees; exact installed AVAILABLE target-free descriptor
+inventory and clone isolation; missing backend prerequisite cannot invent
+effective subjects; existing source-free doctor/admission refusals retained;
+same compiled public source-bound both-store readiness/restart controls.
+
+Tracker/watchlist decision: record the public-counterexample stop on #2509
+and refine the existing maintenance/pack-interface nodes; no new issue/node
+or POTENTIAL_ISSUES entry without the independent disposition. S/N chosen
+class remains approved but extraction frozen. Parents2447/2407/2250 stay OPEN.
+Raw compiled counterexample/positive controls and owner-characterization
+receipts remain in the existing external evidence directory. No local tier,
+hosted qualification, candidate extraction or closure is claimed.
