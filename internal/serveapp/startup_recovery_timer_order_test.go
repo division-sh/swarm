@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -23,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/startuphandoff"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -32,6 +34,7 @@ type startupTimerPublicationBarrier struct {
 	release   chan struct{}
 	once      sync.Once
 	eventType string
+	handoff   *startuphandoff.Proof
 }
 
 type startupClockReceiptFault struct {
@@ -56,6 +59,9 @@ func (s *startupClockReceiptFault) AdmitGenericScheduleOutcome(ctx context.Conte
 func (b *startupTimerPublicationBarrier) unblock() { b.once.Do(func() { close(b.release) }) }
 
 func (b *startupTimerPublicationBarrier) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	if b.handoff != nil {
+		b.handoff.NotifyLifecycle(ctx, signal)
+	}
 	eventType := b.eventType
 	if eventType == "" {
 		eventType = "platform.stage_timer"
@@ -75,7 +81,7 @@ func (b *startupTimerPublicationBarrier) NotifyLifecycle(ctx context.Context, si
 
 func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, sourceCase := range []string{"workflow_timer", "root_clock", "child_clock", "partial_clock_receipt"} {
+		for _, sourceCase := range []string{"workflow_timer", "adopted_workflow_timer", "root_clock", "child_clock", "partial_clock_receipt"} {
 			t.Run(backend+"/"+sourceCase, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
@@ -96,13 +102,15 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if err != nil {
 					t.Fatal(err)
 				}
-				barrier := &startupTimerPublicationBarrier{entered: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{})}
+				proof := startuphandoff.New()
+				barrier := &startupTimerPublicationBarrier{entered: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{}), handoff: proof}
 				var candidates []serveRuntimeBundleContext
 				manager, err := runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
 				if err != nil {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
+					proof.Release()
 					barrier.unblock()
 					cancel()
 					if err := manager.QuiesceAllRuntimeContexts(context.Background()); err != nil {
@@ -123,7 +131,8 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					}
 				})
 				root := filepath.Join(repoRootForTest(), "internal/releasee2e/testdata/full_lifecycle/standing_telegram")
-				if sourceCase != "workflow_timer" {
+				workflowCase := sourceCase == "workflow_timer" || sourceCase == "adopted_workflow_timer"
+				if !workflowCase {
 					root = canonicalrouting.CopyClockDeployment(t, sourceCase == "child_clock")
 					barrier.eventType = "poll.tick"
 					if sourceCase == "child_clock" {
@@ -145,6 +154,8 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					t.Fatal(err)
 				}
 				persistence := projectServeRuntimePersistence(stores)
+				persistence.deps.PipelineObligations = proof.RecoveryStore(persistence.deps.PipelineObligations)
+				persistence.deps.DeliveryStore = proof.DeliveryStore(persistence.deps.DeliveryStore)
 				var receiptFault *startupClockReceiptFault
 				if sourceCase == "partial_clock_receipt" {
 					receiptFault = &startupClockReceiptFault{Store: persistence.deps.GenericScheduleStore, fault: errors.New("lost second real deployment clock receipt")}
@@ -192,27 +203,28 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if frontierRun == "" {
 					t.Fatal("startup frontier lacks its actual selected generation receipt")
 				}
-				checked := false
+				proof.WatchType("platform.stage_timer")
+				if !workflowCase {
+					proof.WatchType(barrier.eventType)
+				}
+				var completeAdoption func() error
+				adoptionCompleted := make(chan struct{})
 				candidate.runtime.Options.BootProgress = func(event runtime.BootProgressEvent) {
-					if sourceCase != "workflow_timer" && event.Step == 12 && event.Status == "ok" {
-						checked = true
+					if completeAdoption != nil && event.Step == 10 && event.Status == "ok" {
+						if err := completeAdoption(); err != nil {
+							t.Errorf("restore adopted standing timer under startup latch: %v", err)
+						} else {
+							close(adoptionCompleted)
+						}
+					}
+					if !workflowCase && event.Step == 12 && event.Status == "ok" {
 						requireClockConstructionFrontier(t, candidate.runtime, frontierRun, sourceCase, "")
 						if count, err := storetest.CountInstanceClockActivations(ctx, projectServeRuntimePersistence(stores).deps.EventStore); err != nil || count != 0 {
 							t.Errorf("pre-construction clock rows=%d err=%v", count, err)
 						}
-						select {
-						case signal := <-barrier.entered:
-							t.Errorf("clock executed before construction/attachment: %+v", signal)
-						case <-time.After(550 * time.Millisecond):
-						}
 					}
-					if sourceCase == "workflow_timer" && event.Step == 10 && event.Status == "ok" {
-						checked = true
-						select {
-						case signal := <-barrier.entered:
-							t.Errorf("standing timer published before pipeline recovery: event_id=%s type=%s run_id=%s", signal.EventID, signal.EventType, activations[0].RunID)
-						case <-time.After(500 * time.Millisecond):
-						}
+					if event.Step == 16 && event.Status == "ok" {
+						proof.MarkContinuationsSettled()
 					}
 					if event.Step == 16 && event.Status == "FAILED" {
 						barrier.unblock()
@@ -222,13 +234,89 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if err != nil {
 					t.Fatal(err)
 				}
-				if sourceCase != "workflow_timer" {
+				if !workflowCase {
 					requireClockConstructionFrontier(t, candidate.runtime, frontierRun, sourceCase, pipeline.FlowAttachmentPlanned)
 					if count, err := storetest.CountInstanceClockActivations(ctx, projectServeRuntimePersistence(stores).deps.EventStore); err != nil || count != 0 {
 						t.Fatalf("prepared attachment acquired a clock before release: count=%d err=%v", count, err)
 					}
 				}
-				releaseErr := release()
+				if sourceCase == "adopted_workflow_timer" {
+					var adopted []runtime.StandingActivation
+					_, adopted, completeAdoption, err = candidate.runtime.PrepareStandingTargets(ctx)
+					if err != nil || len(adopted) == 0 {
+						t.Fatalf("adopt constructed standing generation: %+v err=%v", adopted, err)
+					}
+					for _, activation := range adopted {
+						if activation.Created || !activation.RestartDisposition.Executable() || activation.RunID != frontierRun {
+							t.Fatalf("adoption did not retain exact executable generation: %+v", activation)
+						}
+					}
+				}
+				var dormant []pipeline.WorkflowTimerActivation
+				timerReader, ok := persistence.deps.EventStore.(pipeline.WorkflowTimerActivationPersistence)
+				if !ok {
+					t.Fatal("selected timer activation owner is required")
+				}
+				if workflowCase {
+					child, err := flowidentity.StandingForGeneration(candidate.loaded.source, "telegram-ingress", frontierRun)
+					if err != nil {
+						t.Fatal(err)
+					}
+					dormant, err = timerReader.ListWorkflowTimerActivations(ctx, frontierRun, child.EntityID, true)
+					if err != nil || len(dormant) != 1 {
+						t.Fatalf("initial/adopted registration omitted durable timer: %+v err=%v", dormant, err)
+					}
+					for _, timer := range dormant {
+						proof.WatchID(timeridentity.WorkflowTimerOccurrenceEventID(timeridentity.WorkflowTimerOccurrenceRef{Activation: timer.Ref, DueAt: timer.FireAt}))
+					}
+				}
+				finished := make(chan error, 1)
+				joined := false
+				go func() { finished <- release() }()
+				defer func() {
+					proof.Release()
+					barrier.unblock()
+					cancel()
+					if !joined {
+						select {
+						case <-finished:
+						case <-time.After(20 * time.Second):
+							t.Error("composed startup did not join after releasing held handoffs")
+						}
+					}
+				}()
+				witnessCtx, witnessCancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer witnessCancel()
+				for _, handoff := range []*startuphandoff.Barrier{proof.Recovery, proof.Continuation} {
+					if err := proof.Wait(witnessCtx, handoff); err != nil {
+						t.Fatal(err)
+					}
+					if sourceCase == "adopted_workflow_timer" {
+						select {
+						case <-adoptionCompleted:
+						default:
+							t.Fatal("adopted timer restoration did not complete before recovery")
+						}
+					}
+					if workflowCase {
+						for _, original := range dormant {
+							current, found, err := timerReader.LoadWorkflowTimerActivation(ctx, original.Ref.ActivationID)
+							if err != nil || !found || current.Ref != original.Ref || !current.FireAt.Equal(original.FireAt) || current.Status != original.Status {
+								t.Fatalf("held standing registration changed due work: before=%+v after=%+v found=%t err=%v", original, current, found, err)
+							}
+						}
+					} else if count, err := storetest.CountInstanceClockActivations(ctx, projectServeRuntimePersistence(stores).deps.EventStore); err != nil || count != 0 {
+						t.Fatalf("clock was admitted before both handoffs: rows=%d err=%v", count, err)
+					}
+					handoff.Release()
+				}
+				var releaseErr error
+				select {
+				case releaseErr = <-finished:
+					joined = true
+				case <-witnessCtx.Done():
+					t.Fatal(witnessCtx.Err())
+				}
 				if receiptFault != nil {
 					if !errors.Is(releaseErr, receiptFault.fault) || receiptFault.calls != 2 || len(receiptFault.admitted) != 2 {
 						t.Fatalf("composed partial arming lost its failure/evidence: calls=%d activations=%+v err=%v", receiptFault.calls, receiptFault.admitted, releaseErr)
@@ -250,16 +338,23 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if releaseErr != nil {
 					t.Fatalf("real composed startup recovery: %v", releaseErr)
 				}
-				if sourceCase != "workflow_timer" {
+				if !workflowCase {
 					requireClockConstructionFrontier(t, candidate.runtime, frontierRun, sourceCase, pipeline.FlowAttachmentReady)
-				}
-				if !checked {
-					t.Fatal("pipeline recovery entrance was not observed")
 				}
 				select {
 				case signal := <-barrier.entered:
+					if err := proof.CheckPublished(signal.EventID); err != nil {
+						t.Fatal(err)
+					}
+					if workflowCase {
+						original := dormant[0]
+						want := timeridentity.WorkflowTimerOccurrenceEventID(timeridentity.WorkflowTimerOccurrenceRef{Activation: original.Ref, DueAt: original.FireAt})
+						if signal.EventID != want {
+							t.Fatalf("standing late publication changed occurrence: got=%s want=%s", signal.EventID, want)
+						}
+					}
 					t.Logf("standing timer released after recovery: event_id=%s type=%s run_id=%s", signal.EventID, signal.EventType, frontierRun)
-				case <-time.After(5 * time.Second):
+				case <-witnessCtx.Done():
 					t.Fatal("standing timer did not retain future execution authority")
 				}
 				barrier.unblock()
