@@ -1283,18 +1283,20 @@ func TestServeRebindsChannelRecoveryAfterRuntimeContextLoadBeforeChannelPublicat
 	}
 	source := string(raw)
 	teardownBarrier := strings.Index(source, "activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive")
-	apiServing := strings.Index(source, "apiServerLease, err := processWorkOwner.Begin(ctx)")
-	mcpServing := strings.Index(source, "mcpServerLease, err := processWorkOwner.Begin(ctx)")
+	// The retained API listener serves only standby until this installation.
+	mcpAdmission := strings.Index(source, "mcpServerLease, err := processWorkOwner.Begin(ctx)")
+	apiServing := strings.Index(source, "if err := apiProbe.Install(ctx, apiHandler)")
+	mcpServing := strings.Index(source, "serveHTTPServer(\"mcp\", mcpServer, mcpListener, runtimeFailure)")
 	runtimeActivation := strings.Index(source, "releaseRuntimeContexts, err = prepareServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)")
 	localReconciliation := strings.Index(source, "}, channelOnboarding); err != nil")
 	channelPublication := strings.Index(source, "if err := channelActivationRefresher.publishChannelActivations(ctx)")
 	businessRelease := strings.Index(source, "if err := releaseRuntimeContexts()")
 	effectRecovery := strings.Index(source, "if err := channelOnboarding.Recover(ctx)")
-	if teardownBarrier < 0 || apiServing < 0 || mcpServing < 0 || runtimeActivation < 0 || localReconciliation < 0 || channelPublication < 0 || businessRelease < 0 || effectRecovery < 0 {
-		t.Fatalf("serve startup lifecycle markers missing: teardown=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
+	if teardownBarrier < 0 || mcpAdmission < 0 || apiServing < 0 || mcpServing < 0 || runtimeActivation < 0 || localReconciliation < 0 || channelPublication < 0 || businessRelease < 0 || effectRecovery < 0 {
+		t.Fatalf("serve startup lifecycle markers missing: teardown=%d mcp_admission=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, mcpAdmission, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
 	}
-	if !(teardownBarrier < apiServing && apiServing < mcpServing && mcpServing < runtimeActivation && runtimeActivation < localReconciliation && localReconciliation < channelPublication && channelPublication < businessRelease && businessRelease < effectRecovery) {
-		t.Fatalf("serve startup order teardown=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
+	if !(teardownBarrier < mcpAdmission && mcpAdmission < apiServing && apiServing < mcpServing && mcpServing < runtimeActivation && runtimeActivation < localReconciliation && localReconciliation < channelPublication && channelPublication < businessRelease && businessRelease < effectRecovery) {
+		t.Fatalf("serve startup order teardown=%d mcp_admission=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, mcpAdmission, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
 	}
 }
 
