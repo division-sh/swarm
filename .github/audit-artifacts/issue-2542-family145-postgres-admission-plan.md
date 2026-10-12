@@ -4833,3 +4833,25 @@ three removals/zero additions; uncertainty67 and supplied-pool calls61 unchanged
 Existing parent/carrier and M07/D3/Docker/M01/drain obligations remain live and
 unwaived. Local only, no push/PR/tier/server2. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/pinned-wire-*.
+
+## Reviewer F1: Compose Existing Receiver Entity-Conflict Guard
+
+Reviewer-b reproduced the independently executable entity-conflict guard RED at
+0c54f9814: the selected five-root finite collection omitted its prior strict
+whole-body substitution rule. That rule now composes only the exact reviewed
+receiver settlement-read block with the existing entity-type fault replacement.
+Inverse-normalize one exact native block to its original literal block, then use
+the unchanged whole-body equality check. The other conflict consumer is unchanged.
+Positive current-row control and hostile missing/duplicate/foreign event/owner/
+context/destination/stale SQL block controls reject; exact fault run/entity,
+construction/read cuts, retained route and unrelated sibling assertions remain.
+The new SQL/context/cut proof and all immutable/current historical receipts remain.
+
+Complete requested cheap collection (all TestFamily145, TestHistoricalMechanical,
+TestReviewedSnapshotsAreFiniteAndIdempotent roots) PASS11.733s. Add this complete
+collection to every shared-corpus checkpoint/pre-push sweep, not merely each new
+specialized dispatcher branch. Receipt canonical-claim-composed-full-guards.jsonl.
+Runtime/owner/corpus code is unchanged in this repair: reviewed race, census,
+boundaries and physical-clock receipts carry under the explicit ruling; no duplicate
+tier/race/census run or waiver is claimed. Baseline remains8305/5921, zero additions.
+Signed-head complexity follows. Local only; no push/PR/server2.
