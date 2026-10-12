@@ -14,41 +14,41 @@ import (
 
 // The sealed frame consumes fixed-cut event/delivery membership separately from
 // child correspondence. Neither retained metadata nor a fired timer rearms work.
-func prepareRunForkPublishedBarrierTransfer(snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, childRunID string, selected contracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) (genericschedule.PublishedJoinContinuation, events.DeliveryRoute, error) {
+func prepareRunForkPublishedBarrierTransfer(snapshot *runForkRevisionSnapshot, barrier fanoutbarrier.Barrier, childRunID string, selected contracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) (genericschedule.JoinContinuation, events.DeliveryRoute, error) {
 	if snapshot == nil || snapshot.Revision <= 0 || snapshot.RunID != barrier.Registration.IntentKey.RunID {
-		return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("published barrier transfer requires its exact bound source cut")
+		return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("published barrier transfer requires its exact bound source cut")
 	}
 	if barrier.TransferredOccurrence != nil {
 		source, err := genericschedule.NewTransferredFanOutBarrierOccurrence(barrier)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}
 		original, found, err := runForkTransferredJoinEvent(snapshot, source)
 		if err != nil || !found {
-			return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("transferred barrier lacks its exact committed publication: %w", err)
+			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, fmt.Errorf("transferred barrier lacks its exact committed publication: %w", err)
 		}
 		route, err := requireRunForkPublishedBarrierDelivery(snapshot, barrier, original, true)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}
 		child, err := projectRunForkBarrierContinuationCommand(barrier, childRunID, selected, generation, source.Command.Due.Absolute, at)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+			return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 		}
 		continuation, err := genericschedule.ProjectTransferredJoinContinuation(source, original, child)
 		return continuation, route, err
 	}
 	activation, err := runForkBarrierCapturedActivation(snapshot, barrier.ScheduleActivationID)
 	if err != nil {
-		return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+		return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 	}
 	original, route, err := runForkPublishedFanOutBarrierEvidence(snapshot, barrier, activation)
 	if err != nil {
-		return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+		return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 	}
 	child, err := projectRunForkBarrierContinuationCommand(barrier, childRunID, selected, generation, activation.Command.Due.Absolute, at)
 	if err != nil {
-		return genericschedule.PublishedJoinContinuation{}, events.DeliveryRoute{}, err
+		return genericschedule.JoinContinuation{}, events.DeliveryRoute{}, err
 	}
 	continuation, err := genericschedule.ProjectPublishedJoinContinuation(activation, original.Event(), child)
 	return continuation, route, err

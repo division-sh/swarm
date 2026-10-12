@@ -200,11 +200,23 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 			return false, nil
 		}
 	}
+	pending, err := plan.PendingJoinOccurrences()
+	if err != nil {
+		return false, err
+	}
+	pendingIDs := make(map[string]bool, len(pending))
+	for _, source := range pending {
+		pendingIDs[source.Publication.EventID] = true
+	}
 	for _, source := range plan.TransferredJoins {
 		publication, found := plan.HistoricalJoinPublication(source.Publication.EventID)
 		if !found {
-			// Retained intention is readable, but not committed source publication.
-			return false, nil
+			if !pendingIDs[source.Publication.EventID] {
+				return false, nil
+			}
+			// Native planning validates the committed cause through the retained
+			// binding. This postpones materialization only; no event is invented.
+			continue
 		}
 		if err := source.ValidateEvent(publication.Event()); err != nil {
 			return false, err

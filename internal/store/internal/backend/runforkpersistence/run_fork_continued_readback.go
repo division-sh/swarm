@@ -89,7 +89,7 @@ type runForkContinuedLineageOwner struct {
 
 func loadRunForkContinuedLineageOwnerTx(ctx context.Context, tx *sql.Tx, childRun, sourceRun, sourceEvent string) (runForkContinuedLineageOwner, bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT),CAST(source_run_id AS TEXT),'selected' FROM run_fork_selected_contract_executions
-		WHERE fork_run_id=$1 AND source_event_id=$2
+		WHERE fork_run_id=$1 AND COALESCE(source_obligation_event_id,source_event_id)=$2
 		UNION ALL
 		SELECT DISTINCT CAST(fork_event_id AS TEXT),CAST(source_run_id AS TEXT),'generic' FROM run_fork_delivery_event_replays
 		WHERE fork_run_id=$1 AND source_event_id=$2`, childRun, sourceEvent)

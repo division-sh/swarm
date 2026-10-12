@@ -20,7 +20,7 @@ func TestPhysicalActivityResultImmediateSourceIntegrityBothStores(t *testing.T) 
 			db := forkOperationTestDatabase(t, backend)
 			if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_executions (
 				fork_run_id TEXT, source_run_id TEXT, source_event_id TEXT, fork_event_id TEXT,
-				event_name TEXT, selection_authority TEXT, created_at TIMESTAMP)`); err != nil {
+				event_name TEXT, selection_authority TEXT, created_at TIMESTAMP, source_obligation_event_id TEXT)`); err != nil {
 				t.Fatal(err)
 			}
 			for _, withLoop := range []bool{false, true} {
@@ -82,7 +82,7 @@ func TestPhysicalActivityResultImmediateSourceIntegrityBothStores(t *testing.T) 
 								id := activityidentity.ForkLineageEventID(binding.ForkRunID, parent.ID())
 								stamp, at := "selected-owner", time.Now().UTC().Truncate(time.Microsecond)
 								if fault != "missing_lineage" {
-									if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_executions VALUES ($1,$2,$3,$4,$5,$6,$7)`, binding.ForkRunID, parent.RunID(), parent.ID(), id, string(parent.Type()), stamp, at); err != nil {
+									if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_executions (fork_run_id,source_run_id,source_event_id,fork_event_id,event_name,selection_authority,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, binding.ForkRunID, parent.RunID(), parent.ID(), id, string(parent.Type()), stamp, at); err != nil {
 										t.Fatal(err)
 									}
 								}

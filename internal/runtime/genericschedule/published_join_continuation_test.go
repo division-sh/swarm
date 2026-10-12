@@ -282,7 +282,7 @@ func TestPublishedJoinContinuationRequiresAcceptedOriginal(t *testing.T) {
 }
 
 func TestPublishedJoinContinuationSealedValueAndEventIdentity(t *testing.T) {
-	var empty PublishedJoinContinuation
+	var empty JoinContinuation
 	if empty.Present() || !reflect.DeepEqual(empty.SourceEvent(), events.Event{}) || !reflect.DeepEqual(empty.ChildCommand(), AdmissionCommand{}) {
 		t.Fatal("zero continuation is not absent")
 	}

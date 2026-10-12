@@ -44,7 +44,7 @@ func (p PublishedJoinOccurrence) Command() genericschedule.AdmissionCommand {
 	return p.activation.Command
 }
 
-func (p PublishedJoinOccurrence) Continuation(child genericschedule.AdmissionCommand) (genericschedule.PublishedJoinContinuation, error) {
+func (p PublishedJoinOccurrence) Continuation(child genericschedule.AdmissionCommand) (genericschedule.JoinContinuation, error) {
 	if p.transferred != nil {
 		return genericschedule.ProjectTransferredJoinContinuation(*p.transferred, p.event, child)
 	}

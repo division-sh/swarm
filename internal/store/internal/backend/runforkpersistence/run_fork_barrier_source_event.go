@@ -82,11 +82,11 @@ func (a runForkSourceStateAdmission) publishedBarrier(ctx context.Context, tx *s
 	if err != nil {
 		return event, err
 	}
-	event.PublishedJoin, event.PublishedJoinRoute, event.Payload = continuation, route, projected.Payload()
+	event.JoinContinuation, event.JoinRoute, event.Payload = continuation, route, projected.Payload()
 	return event, nil
 }
 
-func requireMaterializedBarrierPublication(event runfork.RunForkSelectedContractSourceEvent, continuation genericschedule.PublishedJoinContinuation, child fanoutbarrier.Barrier) error {
+func requireMaterializedBarrierPublication(event runfork.RunForkSelectedContractSourceEvent, continuation genericschedule.JoinContinuation, child fanoutbarrier.Barrier) error {
 	original := continuation.SourceEvent()
 	if original.ID() != event.SourceEventID || string(original.Type()) != event.EventName || original.ExecutionMode() != event.ExecutionMode || !bytes.Equal(original.Payload(), event.Payload) {
 		return fmt.Errorf("selected barrier source contradicts original publication")

@@ -111,7 +111,11 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				return err
 			}
 			stateAdmission.carriage = original
-			events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
+			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(txctx, tx, stateAdmission, ids)
+			if err != nil {
+				return err
+			}
+			events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, physicalIDs)
 			if err != nil {
 				return fmt.Errorf("load selected-contract source events: %w", err)
 			}
@@ -137,6 +141,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				}
 				out[idx] = prepared
 			}
+			out = append(out, pendingInputs...)
 			return nil
 		})
 		return struct{}{}, err
@@ -241,7 +246,7 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 	}
 	for _, sourceEventID := range allowedEvents {
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_executions WHERE fork_run_id = $1 AND source_event_id = $2)`, forkRunID, sourceEventID).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_executions WHERE fork_run_id = $1 AND COALESCE(source_obligation_event_id,source_event_id) = $2)`, forkRunID, sourceEventID).Scan(&exists); err != nil {
 			return fmt.Errorf("check selected-contract execution lineage completeness: %w", err)
 		}
 		if !exists {
@@ -261,7 +266,7 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 		if snapshot.Status != runtimedelivery.StatusDelivered {
 			return runForkReplayResumeError("fork_selected_contract_agent_delivery_incomplete", runfork.RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: fork_selected_contract_agent_delivery_incomplete: delivery %s for %s/%s is %s", snapshot.DeliveryID, snapshot.SubscriberClass, snapshot.SubscriberID, snapshot.Status))
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT source_event_id FROM run_fork_selected_contract_executions WHERE fork_event_id = $1 AND fork_run_id = $2`, snapshot.EventID, forkRunID)
+		rows, err := tx.QueryContext(ctx, `SELECT COALESCE(source_obligation_event_id,source_event_id) FROM run_fork_selected_contract_executions WHERE fork_event_id = $1 AND fork_run_id = $2`, snapshot.EventID, forkRunID)
 		if err != nil {
 			return fmt.Errorf("check selected-contract delivery lineage: %w", err)
 		}
@@ -319,7 +324,7 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 			UNION
 			SELECT e.event_id FROM events e
 			JOIN run_fork_selected_contract_executions x ON x.fork_event_id = e.event_id AND x.fork_run_id = $1
-			WHERE e.run_id = $1 AND x.source_event_id IN (SELECT value FROM json_each($2))
+			WHERE e.run_id = $1 AND COALESCE(x.source_obligation_event_id,x.source_event_id) IN (SELECT value FROM json_each($2))
 			UNION
 			SELECT e.event_id FROM events e
 			JOIN fan_out_outcomes o ON o.event_id=e.event_id AND o.run_id=e.run_id

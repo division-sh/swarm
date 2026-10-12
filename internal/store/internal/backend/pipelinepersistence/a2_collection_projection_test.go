@@ -49,7 +49,7 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
 		runsDDL,
-		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
+		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT, source_obligation_event_id " + idType + ")",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE entity_mutations (mutation_id TEXT,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,old_value " + jsonType + ",new_value " + jsonType + ",caused_by_event TEXT,writer_type TEXT,writer_id TEXT,handler_step TEXT,created_at TIMESTAMP)",
 		"CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, fields " + jsonType + ")",

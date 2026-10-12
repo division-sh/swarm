@@ -174,9 +174,9 @@ func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding r
 
 func readSelectedForkInputLineageTx(ctx context.Context, tx *sql.Tx, childRunID, sourceEventID, eventID string) (runfork.RunForkSelectedContractExecutionLineage, bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(fork_run_id AS TEXT), CAST(source_run_id AS TEXT),
-		CAST(source_event_id AS TEXT), CAST(fork_event_id AS TEXT), event_name, selection_authority, created_at
+		CAST(COALESCE(source_obligation_event_id, source_event_id) AS TEXT), CAST(fork_event_id AS TEXT), event_name, selection_authority, created_at
 		FROM run_fork_selected_contract_executions
-		WHERE (fork_run_id=$1 AND source_event_id=$2) OR fork_event_id=$3`, childRunID, sourceEventID, eventID)
+		WHERE (fork_run_id=$1 AND COALESCE(source_obligation_event_id, source_event_id)=$2) OR fork_event_id=$3`, childRunID, sourceEventID, eventID)
 	if err != nil {
 		return runfork.RunForkSelectedContractExecutionLineage{}, false, err
 	}
@@ -242,8 +242,8 @@ func validateSelectedForkPublishedInputFrame(binding runfork.RunForkSelectedCont
 	if !lineage.CreatedAt.Equal(event.CreatedAt()) {
 		return fmt.Errorf("selected input lineage changed its retained publication time")
 	}
-	if sourceEvent.PublishedJoin.Present() {
-		return sourceEvent.PublishedJoin.ValidateEvent(event, lineage.SelectionAuthority)
+	if sourceEvent.JoinContinuation.Present() {
+		return sourceEvent.JoinContinuation.ValidateEvent(event, lineage.SelectionAuthority)
 	}
 	if event.Producer().Type() != events.EventProducerPlatform || event.Producer().ID() != lineage.SelectionAuthority || event.TaskID() != "" || event.ParentEventID() != "" || event.ChainDepth() != 0 {
 		return fmt.Errorf("selected input publication changed its original publication frame")

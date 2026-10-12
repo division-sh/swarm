@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func runForkFanOutBarrierTransferredOccurrence(source fanoutbarrier.Barrier, schedule *genericschedule.Activation, publication genericschedule.PublishedJoinContinuation, child fanoutbarrier.Registration) (*fanoutbarrier.TransferredOccurrence, error) {
+func runForkFanOutBarrierTransferredOccurrence(source fanoutbarrier.Barrier, schedule *genericschedule.Activation, publication genericschedule.JoinContinuation, child fanoutbarrier.Registration) (*fanoutbarrier.TransferredOccurrence, error) {
 	if source.Status != fanoutbarrier.StatusClosedPending || source.Summary == nil || !publication.Present() {
 		return nil, fmt.Errorf("published barrier materialization requires exact unfinished work")
 	}

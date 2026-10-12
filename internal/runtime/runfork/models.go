@@ -1435,19 +1435,19 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	PublishedActivityResult  activityresult.PublishedContinuation      `json:"-"`
-	InputPublication         InputPublication                          `json:"-"`
-	PublishedJoin            genericschedule.PublishedJoinContinuation `json:"-"`
-	PublishedJoinRoute       events.DeliveryRoute                      `json:"-"`
-	ContinuedRecipientRoutes []events.DeliveryRoute                    `json:"-"`
-	ContinuedReplyRequests   []replycontext.Record                     `json:"-"`
-	ContinuedReplyReturn     *replycontext.Record                      `json:"-"`
-	SourceEventID            string                                    `json:"source_event_id"`
-	EventName                string                                    `json:"event_name"`
-	ExecutionMode            executionmode.Mode                        `json:"execution_mode"`
-	Scope                    string                                    `json:"scope,omitempty"`
-	RoutingSource            events.RoutingSource                      `json:"routing_source"`
-	Payload                  json.RawMessage                           `json:"payload,omitempty"`
+	PublishedActivityResult  activityresult.PublishedContinuation `json:"-"`
+	InputPublication         InputPublication                     `json:"-"`
+	JoinContinuation         genericschedule.JoinContinuation     `json:"-"`
+	JoinRoute                events.DeliveryRoute                 `json:"-"`
+	ContinuedRecipientRoutes []events.DeliveryRoute               `json:"-"`
+	ContinuedReplyRequests   []replycontext.Record                `json:"-"`
+	ContinuedReplyReturn     *replycontext.Record                 `json:"-"`
+	SourceEventID            string                               `json:"source_event_id"`
+	EventName                string                               `json:"event_name"`
+	ExecutionMode            executionmode.Mode                   `json:"execution_mode"`
+	Scope                    string                               `json:"scope,omitempty"`
+	RoutingSource            events.RoutingSource                 `json:"routing_source"`
+	Payload                  json.RawMessage                      `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {

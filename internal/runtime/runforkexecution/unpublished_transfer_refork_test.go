@@ -49,6 +49,8 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 			releaseParent := func() { releaseOnce.Do(func() { close(release) }) }
 			defer releaseParent()
 			parentOwner := owner
+			parentPorts := *owner.ports
+			parentOwner.ports = &parentPorts
 			parentOwner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: func(runID string) {
 				activated <- runID
 				select {
@@ -159,7 +161,24 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 			case <-time.After(15 * time.Second):
 				t.Fatal("late parent activation did not finish")
 			}
-			waitUnpublishedReforkRunCompletion(t, ctx, selected, parentRun)
+			parentDeadline := time.Now().Add(15 * time.Second)
+			var parentState storetest.SelectedExecutionStorage
+			for time.Now().Before(parentDeadline) {
+				parentState, err = storetest.ReadSelectedExecutionStorage(ctx, selected, parentRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if parentState.State == "closed" {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if !result.Activation.SourceFrozen || parentState.State != "closed" || parentState.RunStatus != "forked" {
+				t.Fatalf("late execution must retain the explicit frozen-source outcome: activation=%+v parent=%+v", result.Activation, parentState)
+			}
+			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists {
+				t.Fatalf("retired frozen parent invented its pending publication: exists=%t error=%v", exists, err)
+			}
 			childAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, child)
 			if err != nil || !reflect.DeepEqual(childBefore, childAfter) {
 				t.Fatalf("late parent publication changed its settled child: %v", err)
@@ -177,6 +196,7 @@ func TestIssue642UnpublishedTransferredArrivalReforkBothStores(t *testing.T) {
 func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selected startupownership.Store, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
+	var last storetest.SelectedExecutionStorage
 	for time.Now().Before(deadline) {
 		state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, runID)
 		if err != nil {
@@ -185,7 +205,10 @@ func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selec
 		if state.RunStatus == "completed" && state.State == "closed" {
 			return
 		}
+		last = state
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("continued unpublished obligation did not complete within the existing bound")
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	t.Fatalf("continued unpublished obligation did not complete within the existing bound: state=%+v executions=%+v runs=%+v snapshot_error=%v", last,
+		snapshot["run_fork_selected_contract_runtime_executions"], snapshot["runs"], err)
 }

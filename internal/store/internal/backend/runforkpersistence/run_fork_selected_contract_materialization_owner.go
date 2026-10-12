@@ -218,7 +218,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		sourceModes, err := selectedContractWorkflowSourceModes(txctx, tx, port.postgres, plan.SourceRunID, req.FrontierAdmission)
+		sourceModes, err := selectedContractWorkflowSourceModes(txctx, tx, port.postgres, plan, req.FrontierAdmission)
 		if err != nil {
 			return err
 		}
@@ -461,7 +461,7 @@ func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID
 	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
 }
 
-func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, sourceRunID string, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {
+func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {
 	_, ids, _, bindingErr := runfork.RunForkContractFrontierEvidenceBinding(frontier)
 	if bindingErr != nil {
 		return nil, bindingErr
@@ -470,12 +470,24 @@ func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgr
 	if len(ids) == 0 {
 		return modes, nil
 	}
+	physicalIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		pending, found, err := plan.PendingJoinOccurrence(id)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			modes[id] = pending.Command.ExecutionMode
+		} else {
+			physicalIDs = append(physicalIDs, id)
+		}
+	}
 	var records []eventrecord.Record
 	var err error
 	if postgres {
-		records, err = eventrecordpostgres.LoadMany(ctx, tx, ids)
+		records, err = eventrecordpostgres.LoadMany(ctx, tx, physicalIDs)
 	} else {
-		records, err = eventrecordsqlite.LoadMany(ctx, tx, ids)
+		records, err = eventrecordsqlite.LoadMany(ctx, tx, physicalIDs)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract workflow source associations: %w", err)
@@ -486,7 +498,7 @@ func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgr
 			return nil, fmt.Errorf("decode selected-contract workflow source association: %w", err)
 		}
 		event := admitted.Event()
-		if event.RunID() != sourceRunID {
+		if event.RunID() != plan.SourceRunID {
 			return nil, fmt.Errorf("selected-contract workflow source event %s belongs to another run", event.ID())
 		}
 		if _, duplicate := modes[event.ID()]; duplicate {

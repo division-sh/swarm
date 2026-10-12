@@ -55,6 +55,23 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
 	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
+	pendingJoins, err := req.Plan.PendingJoinOccurrences()
+	if err != nil {
+		return runfork.RunForkContractFrontierAdmission{}, err
+	}
+	for _, pending := range pendingJoins {
+		for _, existing := range frontier {
+			if existing.SourceEventID == pending.Publication.EventID {
+				return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("pending join competes with physical delivery frontier")
+			}
+		}
+		path := pending.Command.FlowInstance
+		if path == "" || path == req.Plan.SourceRunID {
+			path = semanticview.RootExecutionFlowID(req.Source)
+		}
+		frontier = append(frontier, runfork.RunForkContractFrontierEvent{SourceEventID: pending.Publication.EventID,
+			EventName: pending.Command.EventType, SourceClassifications: []string{"retained_pending_join"}, SourceFlowInstances: []string{path}})
+	}
 	if firstTurnPresent {
 		event, _ := firstTurn.Event()
 		for _, existing := range frontier {
@@ -73,6 +90,19 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
+		pending, present, err := req.Plan.PendingJoinOccurrence(frontier[i].SourceEventID)
+		if err != nil {
+			return runfork.RunForkContractFrontierAdmission{}, err
+		}
+		if present {
+			recipient, err := admitPendingJoinFrontier(req.Source, req.Plan, pending)
+			if err != nil {
+				return runfork.RunForkContractFrontierAdmission{}, err
+			}
+			frontier[i].DerivedRecipients = []forkrecipient.Evidence{recipient}
+			frontier[i].WorkflowNodeSubscribers = []string{recipient.HandlerNode().Key()}
+			continue
+		}
 		if publication, found := req.Plan.HistoricalJoinPublication(frontier[i].SourceEventID); found {
 			recipient, err := admitPublishedJoinFrontier(req.Source, req.Plan, publication)
 			if err != nil {

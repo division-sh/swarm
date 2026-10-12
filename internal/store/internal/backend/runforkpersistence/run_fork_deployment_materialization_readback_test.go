@@ -104,7 +104,7 @@ func TestForkDeploymentReadbackPreservesPreactivationPendingAndInitialStatusBoth
 				`CREATE TABLE fan_out_outcomes (
 					run_id TEXT,deployment_feed_id TEXT,ordinal INTEGER,outcome_kind TEXT,event_id TEXT,
 					source_event_id TEXT,inherited_disposition TEXT,failure TEXT,created_at TIMESTAMP)`,
-				`CREATE TABLE run_fork_selected_contract_executions (fork_event_id TEXT,source_run_id TEXT,fork_run_id TEXT,source_event_id TEXT)`,
+				`CREATE TABLE run_fork_selected_contract_executions (fork_event_id TEXT,source_run_id TEXT,fork_run_id TEXT,source_event_id TEXT,source_obligation_event_id TEXT)`,
 				`CREATE TABLE run_fork_delivery_event_replays (fork_event_id TEXT,source_run_id TEXT,fork_run_id TEXT,source_event_id TEXT)`,
 				`CREATE TABLE events (event_id TEXT,run_id TEXT)`,
 			} {

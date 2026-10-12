@@ -17807,22 +17807,34 @@ platform_tables:
       description: Source-to-fork lineage table for mutating selected-contract fixed-event fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
         frontier event each fork event executed from. Source events, deliveries, receipts, dead letters, retry state, and
-        post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors.
+        post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors. For a retained
+        unpublished join, source_run_id remains the immediate source, source_obligation_event_id identifies its pending
+        coordinate, and source_event_id plus committed_cause_run_id retain the actual committed cause. No intermediate
+        event is invented. The physical-event FK remains mandatory and the cause pair is constrained atomically.
       ddl: |
         CREATE TABLE run_fork_selected_contract_executions (
             execution_id       UUID PRIMARY KEY,
             fork_run_id        UUID NOT NULL REFERENCES runs(run_id),
             source_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_event_id    UUID NOT NULL REFERENCES events(event_id),
+            source_obligation_event_id UUID,
+            committed_cause_run_id UUID REFERENCES runs(run_id),
             fork_event_id      UUID NOT NULL REFERENCES events(event_id),
             event_name         TEXT NOT NULL CHECK (NULLIF(TRIM(event_name), '') IS NOT NULL),
             selection_authority TEXT NOT NULL CHECK (NULLIF(TRIM(selection_authority), '') IS NOT NULL),
             created_at         TIMESTAMPTZ NOT NULL,
-            UNIQUE (fork_run_id, source_event_id),
+            CHECK ((source_obligation_event_id IS NULL AND committed_cause_run_id IS NULL) OR (source_obligation_event_id IS NOT NULL AND committed_cause_run_id IS NOT NULL AND source_obligation_event_id <> source_event_id)),
+            FOREIGN KEY (source_event_id, committed_cause_run_id) REFERENCES events(event_id, run_id),
             UNIQUE (fork_event_id),
             INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),
             INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)
         );
+        CREATE UNIQUE INDEX idx_run_fork_selected_contract_executions_input
+            ON run_fork_selected_contract_executions (fork_run_id, source_event_id)
+            WHERE source_obligation_event_id IS NULL;
+        CREATE UNIQUE INDEX idx_run_fork_selected_contract_executions_pending_input
+            ON run_fork_selected_contract_executions (fork_run_id, source_obligation_event_id)
+            WHERE source_obligation_event_id IS NOT NULL;
     run_fork_selected_contract_branch_divergences:
       description: Durable source/fork branch divergence evidence for selected-contract event, original-start or deployment-revision fork execution. This
         table is written only by the selected-contract execution owner when the source has advanced after the fork point
@@ -21350,14 +21362,19 @@ run_model:
         through each actual fork boundary; it never flattens the child source to the committed ancestor. Canonical
         decoding rejects missing, noncanonical or contradictory cause coordinates. Historical reconstruction requires either
         the exact physical arm or that transferred fact, never both, and validates the actual revisioned event and durable
-        delivery when published. Before publication the fact does not invent event membership or discharge the
-        existing publication-continuation capability blocker. This distinction survives
+        delivery when published. Before publication the fact never invents event membership. Pending continuation
+        requires the immediate source's exact fixed-cut obligation, its recursive captured binding to a still-retained
+        committed cause, and the child's canonical materialization. One shared continuation owner distinguishes
+        this pending variant from physical publication; both still require current child execution authority.
+        Pending publication records the actual cause through the physical-event and composite run/event constraints
+        while projecting the immediate source obligation as its logical lineage coordinate. This distinction survives
         settlement, restart and further forks through complete inventory, native accumulator readback and preparation
         certificates. Native readback binds each transferred reference to the containing canonical instance header''s
         exact entity, instance path and flow template through the stage-entry identity owner before inventory
         comparison. A retained historical stage need not equal the header''s later current stage or revision.
-        Self-consistent transfer coordinates beneath a different physical owner fail closed. Further continuation
-        requires the exact historical unfinished delivery; provenance alone grants
+        Self-consistent transfer coordinates beneath a different physical owner fail closed. Physical continuation
+        requires the exact historical unfinished delivery; pending continuation carries that committed cause's frozen
+        route through each actual fork binding without loading a later intermediate event. Provenance alone grants
         neither execution nor rearm. Event history retains the same complete selected-lineage owner relation as live
         readback, including duplicate-owner rejection. No additional timer or history family is created.
         Current selected authority still gates publication, original event/lineage readback precedes duplicate

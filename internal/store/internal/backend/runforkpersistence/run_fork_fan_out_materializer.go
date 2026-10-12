@@ -25,7 +25,7 @@ import (
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, *genericschedule.PublishedJoinContinuation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, *genericschedule.JoinContinuation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
 }
 
@@ -472,7 +472,7 @@ func materializeRunForkObligationBarrier(ctx context.Context, attempt *mutationp
 	if captured, found := schedules[barrier.ScheduleActivationID]; found {
 		schedule = &captured
 	}
-	var published *genericschedule.PublishedJoinContinuation
+	var published *genericschedule.JoinContinuation
 	if barrier.Status == fanoutbarrier.StatusClosedPending && (barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
 		continuation, _, err := prepareRunForkPublishedBarrierTransfer(snapshot, *barrier, childRun, selected, generation, at)
 		if err != nil {

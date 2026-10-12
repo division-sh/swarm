@@ -281,6 +281,9 @@ func planRunForkSnapshot(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	if err := requireRunForkTransferredJoinCauses(ctx, tx, plan); err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)

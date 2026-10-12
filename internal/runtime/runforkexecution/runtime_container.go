@@ -694,8 +694,8 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 			return err
 		}
 		attachment.guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
-		if sourceEvent.PublishedJoin.Present() {
-			if err := attachment.guard.ExpectPublishedJoinDelivery(evt, sourceEvent.PublishedJoinRoute); err != nil {
+		if sourceEvent.JoinContinuation.Present() {
+			if err := attachment.guard.ExpectPublishedJoinDelivery(evt, sourceEvent.JoinRoute); err != nil {
 				return err
 			}
 		}

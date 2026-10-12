@@ -659,7 +659,11 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				return err
 			}
 			stateAdmission.carriage = original
-			records, err := eventrecordpostgres.LoadMany(ctx, tx, ids)
+			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(ctx, tx, stateAdmission, ids)
+			if err != nil {
+				return err
+			}
+			records, err := eventrecordpostgres.LoadMany(ctx, tx, physicalIDs)
 			if err != nil {
 				return fmt.Errorf("load selected-contract source events: %w", err)
 			}
@@ -697,6 +701,7 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				}
 				out[idx] = prepared
 			}
+			out = append(out, pendingInputs...)
 			return nil
 		})
 		return struct{}{}, err
@@ -778,10 +783,17 @@ func normalizeSelectedForkExecutionLineage(lineage runfork.RunForkSelectedContra
 	return lineage, nil
 }
 
-func insertPostgresSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage) error {
+func insertPostgresSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
 	lineage, err := normalizeSelectedForkExecutionLineage(lineage)
 	if err != nil {
 		return err
+	}
+	cause, pending, err := admitSelectedPendingJoinLineage(ctx, tx, lineage, publication, routes, true)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return insertSelectedPendingJoinLineage(ctx, tx, lineage, cause)
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_executions (
@@ -805,10 +817,17 @@ func insertPostgresSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage) error {
+func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
 	lineage, err := normalizeSelectedForkExecutionLineage(lineage)
 	if err != nil {
 		return err
+	}
+	cause, pending, err := admitSelectedPendingJoinLineage(ctx, tx, lineage, publication, routes, false)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return insertSelectedPendingJoinLineage(ctx, tx, lineage, cause)
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_executions (
@@ -1157,7 +1176,7 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 			SELECT 1
 			FROM run_fork_selected_contract_executions x
 			WHERE x.fork_run_id = $1::uuid
-			  AND x.source_event_id = allowed.source_event_id
+			  AND COALESCE(x.source_obligation_event_id,x.source_event_id) = allowed.source_event_id
 		)
 	`, forkRunID, pq.Array(allowedEvents)).Scan(&missingLineage); err != nil {
 		return fmt.Errorf("check selected-contract execution lineage completeness: %w", err)
@@ -1189,7 +1208,7 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 				SELECT 1 FROM run_fork_selected_contract_executions x
 				WHERE x.fork_event_id = $1::uuid
 				  AND x.fork_run_id = $2::uuid
-				  AND x.source_event_id = ANY($3::uuid[])
+				  AND COALESCE(x.source_obligation_event_id,x.source_event_id) = ANY($3::uuid[])
 			)
 		`, snapshot.EventID, forkRunID, pq.Array(allowedEvents)).Scan(&selected); err != nil {
 			return fmt.Errorf("check selected-contract delivery lineage: %w", err)
@@ -1237,7 +1256,7 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 			INNER JOIN run_fork_selected_contract_executions x
 				ON x.fork_event_id = e.event_id
 			   AND x.fork_run_id = $1::uuid
-			   AND x.source_event_id = ANY($2::uuid[])
+			   AND COALESCE(x.source_obligation_event_id,x.source_event_id) = ANY($2::uuid[])
 			WHERE e.run_id = $1::uuid
 			UNION
 			SELECT e.event_id FROM events e

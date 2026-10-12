@@ -15,32 +15,32 @@ import (
 
 // Already published work uses the original cut's event and delivery, never a
 // newly admitted generic schedule or current source-run delivery lookup.
-func prepareRunForkPublishedArrivalTransfer(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan, childRunID, sourceEventID string) (genericschedule.PublishedJoinContinuation, error) {
+func prepareRunForkPublishedArrivalTransfer(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan, childRunID, sourceEventID string) (genericschedule.JoinContinuation, error) {
 	if snapshot == nil || snapshot.RunID != plan.SourceRunID || snapshot.Revision != plan.ForkPoint.Revision {
-		return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer requires its exact bound cut")
+		return genericschedule.JoinContinuation{}, fmt.Errorf("published arrival transfer requires its exact bound cut")
 	}
 	projected, err := prepareRunForkArrivalJoinSchedules(plan, childRunID)
 	if err != nil {
-		return genericschedule.PublishedJoinContinuation{}, err
+		return genericschedule.JoinContinuation{}, err
 	}
-	var continuation genericschedule.PublishedJoinContinuation
+	var continuation genericschedule.JoinContinuation
 	for _, row := range projected {
 		if row.source.CurrentEventID != sourceEventID {
 			continue
 		}
 		if continuation.Present() {
-			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
+			return genericschedule.JoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
 		}
 		admitted, err := runForkPublishedJoinEvidence(snapshot, row.source)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 		if _, err := requireRunForkPublishedArrivalDelivery(snapshot, row.source, admitted.Event()); err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 		continuation, err = genericschedule.ProjectPublishedJoinContinuation(row.source, admitted.Event(), row.command)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 	}
 	for _, source := range plan.TransferredJoins {
@@ -48,26 +48,26 @@ func prepareRunForkPublishedArrivalTransfer(snapshot *runForkRevisionSnapshot, p
 			continue
 		}
 		if continuation.Present() {
-			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
+			return genericschedule.JoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
 		}
 		original, found, err := runForkTransferredJoinEvent(snapshot, source)
 		if err != nil || !found {
-			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("transferred arrival lacks its exact committed publication: %w", err)
+			return genericschedule.JoinContinuation{}, fmt.Errorf("transferred arrival lacks its exact committed publication: %w", err)
 		}
 		if _, err := requireRunForkPublishedJoinDelivery(snapshot, source.Command, original, true); err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 		command, err := projectRunForkTransferredJoinCommand(plan, childRunID, source)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 		continuation, err = genericschedule.ProjectTransferredJoinContinuation(source, original, command)
 		if err != nil {
-			return genericschedule.PublishedJoinContinuation{}, err
+			return genericschedule.JoinContinuation{}, err
 		}
 	}
 	if !continuation.Present() {
-		return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer lacks its retained source occurrence")
+		return genericschedule.JoinContinuation{}, fmt.Errorf("published arrival transfer lacks its retained source occurrence")
 	}
 	return continuation, nil
 }
@@ -233,7 +233,7 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	if err != nil {
 		return event, err
 	}
-	event.PublishedJoin, event.PublishedJoinRoute, event.Payload = continuation, route, projected.Payload()
+	event.JoinContinuation, event.JoinRoute, event.Payload = continuation, route, projected.Payload()
 	return event, nil
 }
 

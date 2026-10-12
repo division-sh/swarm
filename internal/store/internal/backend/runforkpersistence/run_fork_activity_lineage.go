@@ -60,7 +60,7 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 		}
 		eventsByID[record.EventID] = admitted.Event()
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(source_event_id AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
+	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(COALESCE(source_obligation_event_id,source_event_id) AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
 	if err != nil {
 		return nil, err
 	}

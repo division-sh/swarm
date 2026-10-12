@@ -7,10 +7,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func admitPendingJoinFrontier(source semanticview.Source, plan runfork.RunForkPlan, pending genericschedule.TransferredJoinOccurrence) (forkrecipient.Evidence, error) {
+	recipient, target, handler, found, err := pipeline.ResolvePendingJoinOccurrenceDeliveryTarget(source, pending)
+	if err != nil || !found {
+		return forkrecipient.Evidence{}, fmt.Errorf("resolve pending join declaration: found=%v: %w", found, err)
+	}
+	path := target.FlowInstance
+	if handler.Node().FlowPath() == semanticview.RootExecutionFlowID(source) && path == plan.SourceRunID {
+		path = semanticview.RootExecutionFlowID(source)
+	}
+	event, exact := handler.EventOverride()
+	if !exact {
+		return forkrecipient.Evidence{}, fmt.Errorf("pending join requires its exact bound handler")
+	}
+	return forkrecipient.NewLocal(forkrecipient.Input{Recipient: recipient, Path: path, HandlerNode: handler.Node(), HandlerEvent: event, RouteSource: "retained_join"})
+}
 
 // A published occurrence's typed handle selects its original arm. Name-based
 // pubsub cannot turn it into a new output or bind it to a later stage entry.

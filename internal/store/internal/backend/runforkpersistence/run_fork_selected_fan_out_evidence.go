@@ -91,7 +91,7 @@ func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true); err != nil {
 			return err
 		}
-		if err := insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
+		if err := insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, true); err != nil {
@@ -112,7 +112,7 @@ func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.C
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false); err != nil {
 			return err
 		}
-		if err := insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage); err != nil {
+		if err := insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, false); err != nil {

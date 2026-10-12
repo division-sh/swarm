@@ -6,7 +6,7 @@ const SelectedForkLineageSQL = `LEFT JOIN (
 	SELECT candidate.*,
 		COUNT(*) OVER (PARTITION BY candidate.fork_event_id) AS lineage_owner_count
 	FROM (
-		SELECT fork_event_id, source_run_id, source_event_id, selection_authority
+		SELECT fork_event_id, source_run_id, COALESCE(source_obligation_event_id, source_event_id) AS source_event_id, selection_authority
 		FROM run_fork_selected_contract_executions
 		UNION ALL
 		SELECT fork_event_id, source_run_id, source_event_id, selection_authority

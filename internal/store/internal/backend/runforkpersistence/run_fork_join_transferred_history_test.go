@@ -2,6 +2,7 @@ package runforkpersistence
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -176,8 +177,16 @@ func TestTransferredJoinInventoryBindsCompleteEvidence(t *testing.T) {
 	}
 	plan := runfork.RunForkPlan{SourceRunID: snapshot.RunID, ForkPoint: inventory.Point, TransferredJoins: []genericschedule.TransferredJoinOccurrence{source}}.WithHistoricalEvents(snapshot.Revision, nil)
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
-	if materializable, err := runForkTimerHistoryMaterializable(plan); err != nil || materializable {
-		t.Fatalf("unpublished transfer discharged its capability blocker: allowed=%v err=%v", materializable, err)
+	before := plan.ReplayResumeAdmission
+	if materializable, err := runForkTimerHistoryMaterializable(plan); err != nil || !materializable {
+		t.Fatalf("complete pending transfer cannot defer only materialization: allowed=%v err=%v", materializable, err)
+	}
+	if !reflect.DeepEqual(before, plan.ReplayResumeAdmission) || len(plan.ReplayResumeAdmission.UnsupportedBlockers) != 1 {
+		t.Fatal("prospective materialization minted execution or discharged native source history")
+	}
+	claimed := plan.WithHistoricalEvents(snapshot.Revision, []string{source.Publication.EventID})
+	if materializable, err := runForkTimerHistoryMaterializable(claimed); err == nil || materializable {
+		t.Fatal("claimed physical publication without exact publication evidence was admitted")
 	}
 	fingerprint := func(plan runfork.RunForkPlan) string {
 		t.Helper()
