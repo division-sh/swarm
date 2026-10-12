@@ -11,12 +11,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -29,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/startuphandoff"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -132,6 +135,8 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
+			proof := startuphandoff.New()
+			defer proof.Release()
 			process := worklifetime.NewProcess()
 			source := semanticview.Wrap(bundle)
 			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -150,8 +155,8 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				WorkflowPersistence:         workflowPersistence,
 				ManagerStore:                selected,
 				ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
-				DeliveryStore:               selected,
-				PipelineObligations:         selected.PipelineObligations(),
+				DeliveryStore:               proof.DeliveryStore(selected),
+				PipelineObligations:         proof.RecoveryStore(selected.PipelineObligations()),
 
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck:          false,
@@ -160,6 +165,12 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 					RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 					SourceArtifactFact: sourceFact,
 					ProcessWorkOwner:   process,
+					TestLifecycleProbe: proof,
+					BootProgress: func(event swarmruntime.BootProgressEvent) {
+						if event.Step == 16 && event.Status == "ok" {
+							proof.MarkContinuationsSettled()
+						}
+					},
 				},
 			}))
 			if err != nil {
@@ -171,10 +182,6 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 					t.Errorf("close workflow timer generation: %v", err)
 				}
 			})
-			if err := rt.Start(ctx); err != nil {
-				t.Fatalf("Start runtime: %v", err)
-			}
-
 			routingSource, err := events.NewRootRoutingSource(entityID)
 			if err != nil {
 				t.Fatalf("build generic schedule routing source: %v", err)
@@ -188,6 +195,64 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				EntityID:      entityID,
 				Payload:       semanticvalue.EmptyObject(),
 				RoutingSource: routingSource,
+			}
+			// Native admission without lifecycle projection leaves this exact due
+			// occurrence dormant until Runtime.Start restores it after both handoffs.
+			dueCommand := baseCommand
+			dueCommand.ScheduleKey, dueCommand.TaskID = "overdue-control", "overdue-control"
+			dueCommand.ExecutionMode = executionmode.Live
+			dueCommand.Due = runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond))
+			seed, err := selected.AdmitGenericScheduleOutcome(ctx, dueCommand)
+			if err != nil || !seed.Acknowledged {
+				t.Fatalf("seed native overdue control: %+v err=%v", seed, err)
+			}
+			original := seed.Result.Activation
+			eventID := runtimegenericschedule.OccurrenceEventID(original.ID, original.CurrentDueAt)
+			proof.WatchID(eventID)
+			startCtx, cancelStart := context.WithCancel(ctx)
+			defer cancelStart()
+			started := make(chan error, 1)
+			go func() { started <- rt.Start(startCtx) }()
+			witnessCtx, witnessCancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer witnessCancel()
+			for _, barrier := range []*startuphandoff.Barrier{proof.Recovery, proof.Continuation} {
+				if err := proof.Wait(witnessCtx, barrier); err != nil {
+					t.Fatal(err)
+				}
+				current, found, err := selected.LoadGenericScheduleActivation(ctx, original.ID)
+				if err != nil || !found || current.ID != original.ID || current.ImmutableHash != original.ImmutableHash || !current.CurrentDueAt.Equal(original.CurrentDueAt) || current.Status != runtimegenericschedule.StatusActive || !current.CurrentDueAt.Before(time.Now()) {
+					t.Fatalf("held handoff changed overdue control: before=%+v after=%+v found=%t err=%v", original, current, found, err)
+				}
+				barrier.Release()
+			}
+			select {
+			case err := <-started:
+				if err != nil {
+					t.Fatalf("Start runtime: %v", err)
+				}
+			case <-witnessCtx.Done():
+				t.Fatal(witnessCtx.Err())
+			}
+			select {
+			case signal := <-proof.Published:
+				if signal.EventID != eventID {
+					t.Fatalf("overdue control changed occurrence: %+v", signal)
+				}
+			case <-witnessCtx.Done():
+				t.Fatal("overdue control never published after both handoffs")
+			}
+			if err := rt.Scheduler.Wait(witnessCtx); err != nil {
+				t.Fatal(err)
+			}
+			if err := proof.CheckPublished(eventID); err != nil {
+				t.Fatal(err)
+			}
+			settled, found, err := selected.LoadGenericScheduleActivation(ctx, original.ID)
+			if err != nil || !found || settled.Status != runtimegenericschedule.StatusFired || settled.ID != original.ID || !settled.CurrentDueAt.Equal(original.CurrentDueAt) {
+				t.Fatalf("overdue control lost exact settlement: %+v found=%t err=%v", settled, found, err)
+			}
+			if evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID); !evidence.RecordFound || evidence.RunEventCount != 1 || evidence.PipelineReceiptCount != 1 {
+				t.Fatalf("overdue control lacks exact native publication: %+v", evidence)
 			}
 			proveOneShot := func(mode executionmode.Mode) {
 				t.Helper()
@@ -713,159 +778,289 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			_, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if !postgres {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
-			runID := uuid.NewString()
-			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "3s")
-			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+			for _, exit := range []string{"exhausted", "blocked", "error", "cancel_recovery", "cancel_continuation"} {
+				t.Run(exit, func(t *testing.T) {
+					_, selected, postgres := backend.open(t)
+					workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
+					if !postgres {
+						workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
+					}
+					runID := uuid.NewString()
+					bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
+					ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
+					storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
-			// This proof owns restoration through Runtime.Start, not the separate
-			// overdue-timer versus pipeline-recovery ordering tracked by #2234.
-			source := semanticview.Wrap(bundle)
-			module := newRuntimeTestWorkflowModule(t, source)
-			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
-			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
-				process := worklifetime.NewProcess()
-				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
-					Config: &config.Config{
-						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
-						LLM:     config.LLMConfig{Backend: "anthropic"},
-					},
+					// Native construction persists the due occurrence without arming the
+					// seed runtime. The restarted runtime owns both held startup handoffs.
+					proof := startuphandoff.New()
+					defer proof.Release()
+					recoveryFault := errors.New("startup native recovery observation failed")
+					if exit == "error" {
+						proof.RecoveryError = recoveryFault
+					}
+					source := semanticview.Wrap(bundle)
+					module := newRuntimeTestWorkflowModule(t, source)
+					bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
+					newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
+						process := worklifetime.NewProcess()
+						rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+							Config: &config.Config{
+								Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
+								LLM:     config.LLMConfig{Backend: "anthropic"},
+							},
 
-					EventStore:                  selected,
-					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
-					EventPayloadAdmissionBinder: selected,
-					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:      selected,
-					WorkflowPersistence:         workflowPersistence,
-					ManagerStore:                selected,
-					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
-					TimerObligationReader:       selected,
-					DeliveryStore:               selected,
-					PipelineObligations:         selected.PipelineObligations(),
+							EventStore:                  selected,
+							EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+							EventPayloadAdmissionBinder: selected,
+							AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+							RunLifecycleCandidates:      selected,
+							WorkflowPersistence:         workflowPersistence,
+							ManagerStore:                selected,
+							ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+							TimerObligationReader:       selected,
+							DeliveryStore:               proof.DeliveryStore(selected),
+							PipelineObligations:         proof.RecoveryStore(selected.PipelineObligations()),
 
-					Options: swarmruntime.RuntimeOptions{
-						SelfCheck:          false,
-						WorkflowModule:     module,
-						LLMRuntime:         workflowTimerStartupLLM{},
-						RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-						SourceArtifactFact: sourceFact,
-						ProcessWorkOwner:   process,
-						BootProgress: func(event swarmruntime.BootProgressEvent) {
-							bootProgress = append(bootProgress, event)
-						},
-					},
-				}))
-				if err != nil {
-					t.Fatalf("NewRuntime: %v", err)
-				}
-				return rt, process
-			}
-			shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
-				t.Helper()
-				if err := closeExternalRuntimeTestGeneration(rt, process, nil); err != nil {
-					t.Fatalf("close %s runtime: %v", label, err)
-				}
-			}
+							Options: swarmruntime.RuntimeOptions{
+								SelfCheck:          false,
+								WorkflowModule:     module,
+								LLMRuntime:         workflowTimerStartupLLM{},
+								RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+								SourceArtifactFact: sourceFact,
+								ProcessWorkOwner:   process,
+								TestLifecycleProbe: proof,
+								BootProgress: func(event swarmruntime.BootProgressEvent) {
+									bootProgress = append(bootProgress, event)
+									if event.Step == 16 && event.Status == "ok" {
+										proof.MarkContinuationsSettled()
+									}
+								},
+							},
+						}))
+						if err != nil {
+							t.Fatalf("NewRuntime: %v", err)
+						}
+						return rt, process
+					}
+					shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
+						t.Helper()
+						if err := closeExternalRuntimeTestGeneration(rt, process, nil); err != nil {
+							t.Fatalf("close %s runtime: %v", label, err)
+						}
+					}
 
-			seedRuntime, seedProcess := newRuntime()
-			rootIdentity := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
-			rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: rootIdentity.Route()}
-			occurredAt := time.Now().UTC().Add(-time.Second)
-			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
-			construction757Ctx := seedCtx
-			construction757At := occurredAt
-			construction757Instance, construction757Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction757Ctx, rootOwner, runtimepipeline.WorkflowInstance{
-				InstanceID:      rootIdentity.InstanceID,
-				StorageRef:      rootIdentity.InstancePath,
-				EntityID:        rootIdentity.EntityID,
-				WorkflowName:    ".",
-				WorkflowVersion: source.WorkflowVersion(),
-				CurrentState:    "waiting",
-				Fields:          map[string]any{},
-				EntityType:      "test_entity",
-			}, construction757At)
-			if err != nil {
-				t.Fatalf("prepare fixture initial lifecycle: %v", err)
-			}
-			construction757Command, err := flowactivationfixture.Command(construction757Ctx, construction757Instance, construction757Lifecycle, construction757At)
-			if err != nil {
-				t.Fatalf("prepare fixture activation command: %v", err)
-			}
-			result, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction757Ctx, construction757Command)
-			if err == nil && !result.Acknowledged {
-				t.Fatal("fixture activation was not acknowledged")
-			}
-			if result.Acknowledged && result.Created {
-				if finalizeErr := seedRuntime.Pipeline.FinalizeInitialEntryLifecycle(construction757Ctx, result.Lifecycle); finalizeErr != nil {
-					t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
-				}
-			}
-			if err != nil {
-				t.Fatalf("materialize workflow timer before restart: %v", err)
-			}
-			if !result.Created {
-				t.Fatalf("initial materialization result = %v, want created", result)
-			}
-			shutdown("seed", seedRuntime, seedProcess)
+					seedRuntime, seedProcess := newRuntime()
+					if err := seedRuntime.Scheduler.PrepareStartup(); err != nil {
+						t.Fatal(err)
+					}
+					rootIdentity := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
+					rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: rootIdentity.Route()}
+					occurredAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+					seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
+					construction757Ctx := seedCtx
+					construction757At := occurredAt
+					construction757Instance, construction757Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction757Ctx, rootOwner, runtimepipeline.WorkflowInstance{
+						InstanceID:      rootIdentity.InstanceID,
+						StorageRef:      rootIdentity.InstancePath,
+						EntityID:        rootIdentity.EntityID,
+						WorkflowName:    ".",
+						WorkflowVersion: source.WorkflowVersion(),
+						CurrentState:    "waiting",
+						Fields:          map[string]any{},
+						EntityType:      "test_entity",
+					}, construction757At)
+					if err != nil {
+						t.Fatalf("prepare fixture initial lifecycle: %v", err)
+					}
+					construction757Command, err := flowactivationfixture.Command(construction757Ctx, construction757Instance, construction757Lifecycle, construction757At)
+					if err != nil {
+						t.Fatalf("prepare fixture activation command: %v", err)
+					}
+					result, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction757Ctx, construction757Command)
+					if err == nil && !result.Acknowledged {
+						t.Fatal("fixture activation was not acknowledged")
+					}
+					if result.Acknowledged && result.Created {
+						if finalizeErr := seedRuntime.Pipeline.FinalizeInitialEntryLifecycle(construction757Ctx, result.Lifecycle); finalizeErr != nil {
+							t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+						}
+					}
+					if err != nil {
+						t.Fatalf("materialize workflow timer before restart: %v", err)
+					}
+					if !result.Created {
+						t.Fatalf("initial materialization result = %v, want created", result)
+					}
+					shutdown("seed", seedRuntime, seedProcess)
+					timers, err := selected.ListWorkflowTimerActivations(ctx, runID, rootIdentity.EntityID, true)
+					if err != nil || len(timers) != 1 {
+						t.Fatalf("seed exact dormant timer: timers=%+v err=%v", timers, err)
+					}
+					original := timers[0]
+					if !original.FireAt.Equal(occurredAt.Add(25*time.Millisecond)) || !original.FireAt.Before(time.Now()) {
+						t.Fatalf("seed timer is not exact/already due: %+v", original)
+					}
+					occurrence := timeridentity.WorkflowTimerOccurrenceRef{Activation: original.Ref, DueAt: original.FireAt}
+					eventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
+					proof.WatchID(eventID)
+					if evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID); evidence.RecordFound {
+						t.Fatalf("seeding runtime consumed overdue occurrence: %+v", evidence)
+					}
+					pending := eventtest.ExistingRunRootIngress(uuid.NewString(), "generic.tick", "api.v1", "startup-recovery", []byte(`{}`), 0, runID, events.EnvelopeForEntityID(events.EventEnvelope{}, runID), occurredAt.Add(time.Second))
+					storetest.CommitSemanticEventWithRoutes(t, ctx, selected, pending, nil, runtimepipelineobligation.ScopeSubscribed)
 
-			restarted, restartedProcess := newRuntime()
-			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
-			if err := restarted.Start(ctx); err != nil {
-				if closeErr := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); closeErr != nil {
-					t.Fatalf("close failed restart: %v", closeErr)
-				}
-				t.Fatalf("Start restarted runtime: %v", err)
-			}
-			defer func() {
-				if err := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); err != nil {
-					t.Errorf("close restarted generation: %v", err)
-				}
-			}()
-			assertBootDetail := func(name, fragment string) {
-				t.Helper()
-				for _, event := range bootProgress {
-					if event.Name == name {
-						if !strings.Contains(event.Detail, fragment) {
-							t.Fatalf("%s detail = %q, want %q", name, event.Detail, fragment)
+					restarted, restartedProcess := newRuntime()
+					capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
+					var held runtimepipelineobligation.ClaimedWork
+					if exit == "blocked" {
+						held, err = selected.PipelineObligations().ClaimEvent(ctx, pending.ID(), runtimepipelineobligation.PurposeRecovery)
+						if err != nil {
+							t.Fatalf("hold exact native recovery claim: %v", err)
+						}
+						defer func() {
+							if err := selected.PipelineObligations().Release(context.WithoutCancel(ctx), held.Claim); err != nil {
+								t.Error(err)
+							}
+						}()
+					}
+					startCtx, cancelStart := context.WithCancel(ctx)
+					started := make(chan error, 1)
+					joined := false
+					defer func() {
+						cancelStart()
+						proof.Release()
+						if !joined {
+							select {
+							case <-started:
+							case <-time.After(20 * time.Second):
+								t.Error("startup failed to join after barrier release")
+							}
+						}
+						if err := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); err != nil {
+							t.Errorf("close restarted generation: %v", err)
+						}
+					}()
+					go func() { started <- restarted.Start(startCtx) }()
+					witnessCtx, witnessCancel := context.WithTimeout(t.Context(), 20*time.Second)
+					defer witnessCancel()
+					if err := proof.Wait(witnessCtx, proof.Recovery); err != nil {
+						t.Fatal(err)
+					}
+					assertDormant := func() {
+						t.Helper()
+						current, found, err := selected.LoadWorkflowTimerActivation(ctx, original.Ref.ActivationID)
+						if err != nil || !found || current.Ref != original.Ref || !current.FireAt.Equal(original.FireAt) || current.Status != original.Status {
+							t.Fatalf("held handoff changed exact durable due work: original=%+v current=%+v found=%v err=%v", original, current, found, err)
+						}
+						if err := proof.CheckWithheld(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					assertDormant()
+					if exit != "blocked" && proof.Observe().Partial == 0 {
+						t.Fatal("native recovery never crossed a partial batch before exhaustion")
+					}
+					if exit == "cancel_recovery" {
+						cancelStart()
+					}
+					proof.Recovery.Release()
+					if exit == "exhausted" || exit == "cancel_continuation" {
+						if err := proof.Wait(witnessCtx, proof.Continuation); err != nil {
+							t.Fatal(err)
+						}
+						assertDormant()
+						if !proof.Observe().RecoverySettled {
+							t.Fatal("continuation entered before native recovery settlement")
+						}
+						if exit == "cancel_continuation" {
+							cancelStart()
+						}
+						proof.Continuation.Release()
+					}
+					var startErr error
+					select {
+					case startErr = <-started:
+						joined = true
+					case <-witnessCtx.Done():
+						t.Fatal(witnessCtx.Err())
+					}
+					if exit != "exhausted" {
+						switch exit {
+						case "blocked":
+							if startErr == nil || !strings.Contains(startErr.Error(), "pipeline recovery blocked before explicit exhaustion") {
+								t.Fatalf("blocked native recovery admitted startup: %v", startErr)
+							}
+						case "error":
+							if !errors.Is(startErr, recoveryFault) {
+								t.Fatalf("recovery error lost: %v", startErr)
+							}
+						default:
+							if !errors.Is(startErr, context.Canceled) {
+								t.Fatalf("canceled startup lost cause: %v", startErr)
+							}
+						}
+						assertDormant()
+						if restarted.WorkOccurrence().ActiveCount() != 0 {
+							t.Fatalf("failed startup retained work: %d", restarted.WorkOccurrence().ActiveCount())
 						}
 						return
 					}
-				}
-				t.Fatalf("boot progress omitted %s", name)
-			}
-			assertBootDetail("recovery_snapshot_inspection", "timer obligations")
-			assertBootDetail("schedule_restoration", "workflow timers restored")
-			var managerRecoveryIndex, scheduleRestoreIndex = -1, -1
-			for i, event := range bootProgress {
-				switch event.Name {
-				case "manager_recovery_if_enabled":
-					managerRecoveryIndex = i
-				case "schedule_restoration":
-					scheduleRestoreIndex = i
-				}
-			}
-			if managerRecoveryIndex < 0 || scheduleRestoreIndex < 0 || managerRecoveryIndex >= scheduleRestoreIndex {
-				t.Fatalf("boot order manager=%d schedule=%d, want manager recovery before runnable timer restoration", managerRecoveryIndex, scheduleRestoreIndex)
-			}
+					if startErr != nil {
+						t.Fatalf("Start restarted runtime: %v", startErr)
+					}
+					assertBootDetail := func(name, fragment string) {
+						t.Helper()
+						for _, event := range bootProgress {
+							if event.Name == name {
+								if !strings.Contains(event.Detail, fragment) {
+									t.Fatalf("%s detail = %q, want %q", name, event.Detail, fragment)
+								}
+								return
+							}
+						}
+						t.Fatalf("boot progress omitted %s", name)
+					}
+					assertBootDetail("recovery_snapshot_inspection", "timer obligations")
+					assertBootDetail("schedule_restoration", "workflow timers restored")
+					var managerRecoveryIndex, scheduleRestoreIndex = -1, -1
+					for i, event := range bootProgress {
+						switch event.Name {
+						case "manager_recovery_if_enabled":
+							managerRecoveryIndex = i
+						case "schedule_restoration":
+							scheduleRestoreIndex = i
+						}
+					}
+					if managerRecoveryIndex < 0 || scheduleRestoreIndex < 0 || managerRecoveryIndex >= scheduleRestoreIndex {
+						t.Fatalf("boot order manager=%d schedule=%d, want manager recovery before runnable timer restoration", managerRecoveryIndex, scheduleRestoreIndex)
+					}
 
-			deadline := time.Now().Add(8 * time.Second)
-			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, rootOwner)
-				if err != nil {
-					t.Fatalf("load restored workflow instance: %v", err)
-				}
-				if found && instance.CurrentState == "done" {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("workflow timer was not restored and fired; found=%v state=%q", found, instance.CurrentState)
-				}
-				time.Sleep(20 * time.Millisecond)
+					select {
+					case signal := <-proof.Published:
+						if signal.EventID != eventID {
+							t.Fatalf("late fire changed occurrence: %+v want=%s", signal, eventID)
+						}
+					case <-witnessCtx.Done():
+						t.Fatal("exact already-due timer never published after both handoffs")
+					}
+					if err := restarted.Scheduler.Wait(witnessCtx); err != nil {
+						t.Fatal(err)
+					}
+					if err := proof.CheckPublished(eventID); err != nil {
+						t.Fatal(err)
+					}
+					instance, found, err := restarted.Pipeline.Load(ctx, rootOwner)
+					if err != nil || !found || instance.CurrentState != "done" {
+						t.Fatalf("workflow timer was not restored and fired; found=%v state=%q err=%v", found, instance.CurrentState, err)
+					}
+					settled, found, err := selected.LoadWorkflowTimerActivation(ctx, original.Ref.ActivationID)
+					if err != nil || !found || settled.Ref != original.Ref || !settled.FireAt.Equal(original.FireAt) || settled.Status != "fired" {
+						t.Fatalf("late fire changed activation/due identity: %+v found=%v err=%v", settled, found, err)
+					}
+					if evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID); !evidence.RecordFound || evidence.PipelineReceiptCount != 1 {
+						t.Fatalf("late occurrence lacks its single native pipeline receipt: %+v", evidence)
+					}
+				})
 			}
 		})
 	}
