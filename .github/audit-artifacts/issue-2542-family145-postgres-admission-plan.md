@@ -3065,3 +3065,63 @@ stays original owners and narrower component capabilities; no new abstraction,
 tracking issue, push, PR, tier/full, budget, server2, timeout or waiver. All parent
 and M01/Docker/drain/D3/M07/rollback holds remain open. The wider recovery container
 is a mixed mechanical/semantic dependency, not a ready constructor-only rewrite.
+
+### Complete Conversation-Fork Atomic Fixture Dependency
+
+The next ready group closes newConversationForkCommitFixture, both cardinality
+helpers and all three original test consumers across the two conversation-fork
+API files. No raw pool, getter, dynamic table query, DDL or supplied-pool
+reconstruction remains in either file. The source-aware native run/agent/session/
+turn setup is preserved unchanged; only location construction and fixed physical
+read/fault authority migrate. The PostgreSQL and SQLite constructors retain their
+original opening point and the existing single native close ledger before later
+handler/listener cleanup. The primary stays alive when the original test kept it
+alive; the replay peer has independent construction at the same original location.
+
+| Canonical owner | Complete changed consumption / exact contract |
+| --- | --- |
+| runforkpersistence | Physical COUNT(*) of every conversation_forks row, including expired/deleted history; no session, status, expiry or eligibility predicate. Both count helpers and all original callers consume this fixed port. |
+| API-idempotency | Physical COUNT(*) of every API completion row independently of the fork read; global expires_at descending/LIMIT1 with the original SQLite string or PostgreSQL time scan. The consumer retains its exact SQLite time.Parse layout and TTL arithmetic. No actor/key/method/expiry narrowing or canonical reconstruction. |
+| API-idempotency original selected writer | Exactly the original fail_fork_completion BEFORE INSERT trigger, payload and two-backend installation/removal statements. The production completion INSERT still fails after the fork INSERT inside its original domain transaction. Scoped deferred cleanup runs before later successful concurrency/TTL operations; no generic trigger, table or callback port. |
+| Original native location and read/mutation coordinators | Invalid/raw/cancelled/closed ownership supplies no successful cut or partial result. Empty counts remain zero, absent expiry remains sql.ErrNoRows and removal of an absent fault fails. Actual install/removal queue behind the same channel-held SQLite writer, cancel without beginning another transaction and join before cleanup. |
+| Finite source/caller/assertion controls | Five complete historical function transitions /1170 recipes, preserving every prior Before/After and the24 historical mechanical receipts. All original business assertions, exact native argument cuts, eight concurrent workers, source clocks, expiry representation and complete CREATE/DROP statements are source-compared and hostile-controlled. Complete file scans reject surviving pool/SQL/borrowed-coordinator authority. |
+
+| Manifestation | Disposition / named executed proof |
+| --- | --- |
+| Healthy and omitted first return replay the one committed resource | reproduced and fixed: TestConversationForkCommitBeforeAPICompletionProbe, four original backend/phase cells under race PASS8.830s, original IDs/list/cardinality/no-new-owner-call assertions preserved |
+| Precommit refusal, actual completion-insert rollback, concurrency, conflicts, distinct identity and exact TTL boundary | reproduced and fixed: TestConversationForkAtomicCreationControls, all twelve original semantic cells on both stores under race PASS11.970s; no trigger moved to a different insertion or synthetic completion |
+| Real HTTP EOF after successful persistence, independent peer/listener replay and changed-request refusal | reproduced and fixed: TestConversationForkLostHTTPResponseReplays, original both-store race receipt PASS5.750s, final independent-peer/cardinality and original-declaration invocation controls PASS12.040s; no SIGKILL/process-restart or COMMIT acknowledgment claim |
+| Empty/absent/raw/foreign/cancelled/closed read/fault ownership | execution-proven through the same corrected path: TestConversationForkCommitPortsRefuseRawCancelledAbsentAndClosedOwnersBothStores, both stores under race PASS9.130s |
+| Writer admission, cancellation and joined cleanup for both fault phases | execution-proven through the same corrected path: TestConversationForkCompletionFaultsRespectOriginalSQLiteWriterAdmission, install/remove under race PASS7.900s; original channel/queue/transaction-counter controls reused |
+| Entire construction/helper/caller chain, business assertions, SQL/DDL and independent read cuts | execution-proven through the same corrected path: TestFamily145ConversationForkEntireFixtureRetainsAssertionsAndFaultCuts, hostile controls PASS0.079s; final complete family145/historical/finite/idempotency and exact rename controls PASS10.110s |
+
+Original three-root race aggregate PASS27.609s, final peer controls PASS13.081s;
+the other two original roots are unaffected by the final added peer assertions.
+Boundary/event/delivery/lifecycle/revision/writer guards PASS4.840s; affected
+seven-package U1000 clean, dry-run Changes=[]. All receipts are on vemew, GOFLAGS
+empty, GOMAXPROCS2/count1, ordinary tests Go1.25.0 while #2622 remains open,
+U1000 Go1.26.8. Wider unchanged receipts carry. The first downward ratchet was
+RED183.570s: invoking a concrete SQLite native reopening factory in a translated
+closure moved construction debt into the shared constructor declaration. The
+repair retains the exact native reopening factories as two typed callbacks and
+invokes each only at its original response-loss consumer. Existing construction
+occurrences remain in their original declaration with zero deletion credit;
+there is no ratchet exception, generic wrapper, fingerprint change or donor.
+Runtime/read/fault owners and their qualified behavior are unchanged. The final
+native peer check is rerun for that exact source shape before the downward scan.
+
+Final downward ratchet PASS29.250s removed37/added0:8918 ->8881; confirmed raw
+operation debt6426 ->6399. Excluded uncertainty67 and collector/policy are
+unchanged. Broader54772/39059 is not debt. Two supplied-pool PostgreSQL calls
+are removed (the constructor and HTTP replay), leaving88 (86 external +2
+private), provisional M0/D51/S37 and46 cumulative qualified openings. The two
+concrete native replay invocations remain counted at their original consumer
+with zero construction-deletion credit. Native peer proof is distinguished from
+process-restart qualification. Retirement guards PASS6.362s, final affected
+U1000 clean and dry-run Changes=[]. Signed-head complexity is recorded with the
+receipts; there is no classifier or baseline increase.
+The wider raw-store/construction family and #2542/#2151 remain open. Existing
+watchlist/architecture disposition is unchanged: narrower original owner ports,
+no new abstraction, framework or issue. M01/Docker/drain/D3/M07/rollback holds
+remain unwaived. No push, PR, server2, local tier/full, budget/timeout raise,
+classifier relaxation, arbitrary relocation or compatibility path is introduced.
