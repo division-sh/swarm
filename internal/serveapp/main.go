@@ -1208,7 +1208,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live {
 		primaryPackLoad := bundlePackLoads[0]
-		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source)
+		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source, apiListener)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {

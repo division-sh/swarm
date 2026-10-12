@@ -8563,7 +8563,12 @@ func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wa
 	if err != nil {
 		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels, semanticview.Wrap(bundle))
+	apiListener, err := cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = apiListener.Close() }()
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels, semanticview.Wrap(bundle), apiListener)
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}

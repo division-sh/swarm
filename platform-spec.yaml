@@ -25843,7 +25843,10 @@ cli_specification:
         when the selected contract source declares agents, matching runtime's declared-agent credential gate;
         contract-required secrets consume `tool_model.credential_store` / `swarm secrets check`; Docker/image/workspace CLI
         capability consumes the workspace lifecycle owner; listener and gateway validation consume the serve startup/listener
-        owners. Doctor-only or run-only duplicate interpreters are non-authoritative.
+        owners. Serve/run preflight consumes the retained API probe listener as existing binding evidence;
+        it MUST NOT close, reopen or rebind that address. Still-unbound MCP and standalone listener observations
+        continue through the shared listener owner and reject genuine foreign holders. Doctor-only or run-only
+        duplicate interpreters are non-authoritative.
       dependency_reporting_rule: >
         Workspace prerequisite findings MUST preserve dependency truth. If the Docker daemon probe fails, configured-image and
         CLI-in-image findings are `skipped`/not measured and MUST NOT emit derivative blockers. If the configured-image probe
