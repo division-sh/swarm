@@ -6,6 +6,30 @@ import (
 	"errors"
 )
 
+func ReadWorkflowTimerEventIdentityTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, eventName string) (string, error) {
+	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
+	if postgres {
+		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
+	}
+	var eventID string
+	if err := tx.QueryRowContext(ctx, query, runID, eventName).Scan(&eventID); err != nil {
+		return "", err
+	}
+	return eventID, nil
+}
+
+func ReadLatestWorkflowTimerRuntimeLogTextTx(ctx context.Context, tx *sql.Tx, postgres bool) (string, error) {
+	query := `SELECT CAST(payload AS TEXT) FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
+	}
+	var payload string
+	if err := tx.QueryRowContext(ctx, query).Scan(&payload); err != nil {
+		return "", err
+	}
+	return payload, nil
+}
+
 func CountGateSourceNamedEventsTx(ctx context.Context, tx *sql.Tx, name, source string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = $1 AND source_event_id = $2`, name, source).Scan(&count)

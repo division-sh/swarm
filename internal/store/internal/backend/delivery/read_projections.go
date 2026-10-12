@@ -35,6 +35,54 @@ func ReadGateNodeFailureTx(ctx context.Context, tx *sql.Tx, eventID, nodeID stri
 	return failure, err
 }
 
+type WorkflowTimerNodeFailureStorage struct {
+	Status  string
+	Failure []byte
+}
+
+func ReadWorkflowTimerNodeFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
+	query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var out WorkflowTimerNodeFailureStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&out.Status, &out.Failure); err != nil {
+		return WorkflowTimerNodeFailureStorage{}, err
+	}
+	return out, nil
+}
+
+type WorkflowTimerDeliveryTraceStorage struct {
+	Lines     []string
+	ScanError string
+}
+
+func ReadWorkflowTimerDeliveryTraceTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (out WorkflowTimerDeliveryTraceStorage, err error) {
+	query := `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at`
+	if postgres {
+		query = `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at`
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return out, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = WorkflowTimerDeliveryTraceStorage{}
+		}
+	}()
+	for rows.Next() {
+		var eventName, subscriberID, status string
+		if err := rows.Scan(&eventName, &subscriberID, &status); err != nil {
+			out.ScanError = err.Error()
+			return out, nil
+		}
+		out.Lines = append(out.Lines, eventName+" subscriber="+subscriberID+" status="+status)
+	}
+	return out, rows.Err()
+}
+
 func ReadGateSubscriberFailureOrEmptyObjectTx(ctx context.Context, tx *sql.Tx, eventID, subscriberID string) (string, error) {
 	var failure string
 	err := tx.QueryRowContext(ctx, `SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2`, eventID, subscriberID).Scan(&failure)

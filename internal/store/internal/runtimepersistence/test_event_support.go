@@ -30,6 +30,20 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+func ReadWorkflowTimerEventIdentityForTest(ctx context.Context, selected any, runID, eventName string) (string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadWorkflowTimerEventIdentityTx(ctx, tx, postgres, runID, eventName)
+	})
+}
+
+func ReadLatestWorkflowTimerRuntimeLogTextForTest(ctx context.Context, selected any) (string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadLatestWorkflowTimerRuntimeLogTextTx(ctx, tx, postgres)
+	})
+}
+
 // Connector reads retain physical event scope; no dispatch eligibility or clock is inferred.
 func ReadConnectorNormalizedProviderEventIDForTest(ctx context.Context, selected any, runID, entityID, eventName, providerEventID string) (string, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {

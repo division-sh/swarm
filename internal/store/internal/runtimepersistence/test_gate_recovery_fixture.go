@@ -80,6 +80,23 @@ func ReadGateNodeFailureForTest(ctx context.Context, selected any, eventID, node
 	})
 }
 
+type WorkflowTimerNodeFailureStorage = delivery.WorkflowTimerNodeFailureStorage
+type WorkflowTimerDeliveryTraceStorage = delivery.WorkflowTimerDeliveryTraceStorage
+
+func ReadWorkflowTimerNodeFailureForTest(ctx context.Context, selected any, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (WorkflowTimerNodeFailureStorage, error) {
+		return delivery.ReadWorkflowTimerNodeFailureTx(ctx, tx, postgres, eventID, nodeID)
+	})
+}
+
+func ReadWorkflowTimerDeliveryTraceForTest(ctx context.Context, selected any, runID string) (WorkflowTimerDeliveryTraceStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (WorkflowTimerDeliveryTraceStorage, error) {
+		return delivery.ReadWorkflowTimerDeliveryTraceTx(ctx, tx, postgres, runID)
+	})
+}
+
 func ReadGateSubscriberFailureOrEmptyObjectForTest(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		return delivery.ReadGateSubscriberFailureOrEmptyObjectTx(ctx, tx, eventID, subscriberID)

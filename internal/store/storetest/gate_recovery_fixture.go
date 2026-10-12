@@ -43,6 +43,25 @@ func ReadGateNodeFailure(ctx context.Context, selected any, eventID, nodeID stri
 	return private.ReadGateNodeFailureForTest(ctx, selected, eventID, nodeID)
 }
 
+type WorkflowTimerNodeFailureStorage = private.WorkflowTimerNodeFailureStorage
+type WorkflowTimerDeliveryTraceStorage = private.WorkflowTimerDeliveryTraceStorage
+
+func ReadWorkflowTimerNodeFailure(ctx context.Context, selected any, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
+	return private.ReadWorkflowTimerNodeFailureForTest(ctx, selected, eventID, nodeID)
+}
+
+func ReadWorkflowTimerDeliveryTrace(ctx context.Context, selected any, runID string) (WorkflowTimerDeliveryTraceStorage, error) {
+	return private.ReadWorkflowTimerDeliveryTraceForTest(ctx, selected, runID)
+}
+
+func ReadWorkflowTimerEventIdentity(ctx context.Context, selected any, runID, eventName string) (string, error) {
+	return private.ReadWorkflowTimerEventIdentityForTest(ctx, selected, runID, eventName)
+}
+
+func ReadLatestWorkflowTimerRuntimeLogText(ctx context.Context, selected any) (string, error) {
+	return private.ReadLatestWorkflowTimerRuntimeLogTextForTest(ctx, selected)
+}
+
 func ReadGateSubscriberFailureOrEmptyObject(ctx context.Context, selected any, eventID, subscriberID string) (string, error) {
 	return private.ReadGateSubscriberFailureOrEmptyObjectForTest(ctx, selected, eventID, subscriberID)
 }

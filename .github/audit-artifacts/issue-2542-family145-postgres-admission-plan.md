@@ -4539,3 +4539,43 @@ existing M07/D3/Docker/M01/drain qualification holds remain open; these focused
 passes do not waive or attribute those holds. No push/PR, tier or server2.
 Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/workflow-timer-physical-*.
+
+## Shared Gate Dependency: Complete Workflow-Timer Event/Diagnostic Read Tail
+
+The entire workflow_timer_supported_surface_external_test.go caller file is now
+raw-SQL/dialect-free. Four remaining consumers use fixed event-record and closed
+delivery observations: exact run/name event identity, the existing run/name event
+count, exact event/node status plus physical failure bytes, and ordered run event
+LEFT JOIN delivery diagnostics. The latest physical runtime-log text remains a
+separate whole-store read, without a run filter. The diagnostic retains original
+partial scan-error text, early return, formatting and optional log behavior;
+iteration/close errors now fail explicitly instead of silently returning a
+completed trace. No partial failure is used as affirmative runtime evidence.
+Every original predicate, cast, COALESCE default, ordering and destination is
+source-pinned. The public bridge exposes neither SQL nor a coordinator/selector.
+Event imports remain solely in the existing test_event_support.go bridge, and
+delivery SQL stays in its classified read_projections.go owner.
+
+All seven original timer whole roots passed both stores under race33.191s,
+including admitted receipt recovery, retry/rollback, restart, cancellation and
+actual connect dispatch. Native race proof PASS27.183s verifies pending {} and
+actual settled failure bytes, an unrouted event retained by LEFT JOIN, exact
+chronological formatting, newest unscoped diagnostic text, five separately
+admitted read commits, foreign run/name/node exclusion, cancelled/raw/closed
+refusals and complete unchanged data/history/lease/clocks. Deliberately changing
+LEFT JOIN to JOIN fails the positive native root on both stores (RED14.563s);
+the unchanged restored owner then passes. These are storage-owner controls, not
+substitute process-restart receipts.
+
+Finite/hostile/current/historical proof collection PASS6.597s; six persistence
+boundaries PASS3.525s; U1000 clean. Corpus1228/442, transition digest
+9e2db995f9d2a34fae93a8d21bae1ba8705c57f0ec0fb42cbfc167f91d466585;
+all immutable mechanical inputs and current historical digest unchanged.
+Downward census PASS181.347s:8358 ->8345 findings,5969 ->5957 raw sites,
+thirteen removals/zero additions; uncertainty67 and supplied-pool calls61
+unchanged. The original139-reference/27-file carrier inventory now has36
+candidate db/dialect references across8 files, not36 bugs or census sites.
+Shared carrier/openers, other gate/A2 consumers, parent completion and all
+M07/D3/Docker/M01/drain qualification holds remain open and unwaived.
+Local-only; no push/PR/tier/server2. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/timer-event-*.
