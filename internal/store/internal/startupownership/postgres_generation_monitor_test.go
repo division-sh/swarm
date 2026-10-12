@@ -33,6 +33,11 @@ type generationMonitorConnector struct {
 	entered, resume chan struct{}
 	enterOnce       sync.Once
 	resumeOnce      sync.Once
+	monitored       atomic.Pointer[generationMonitorConn]
+	holdClose       bool
+	closeEntered    chan struct{}
+	closeResume     chan struct{}
+	closeResumeOnce sync.Once
 }
 
 func (c *generationMonitorConnector) stall(phase string) {
@@ -44,20 +49,35 @@ func (c *generationMonitorConnector) stall(phase string) {
 
 func (c *generationMonitorConnector) unblock() { c.resumeOnce.Do(func() { close(c.resume) }) }
 
+func (c *generationMonitorConnector) unblockClose() {
+	c.closeResumeOnce.Do(func() { close(c.closeResume) })
+}
+
 func (c *generationMonitorConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	conn, err := c.Connector.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &generationMonitorConn{Conn: conn, owner: c}, nil
+	return &generationMonitorConn{Conn: conn, owner: c, closed: make(chan struct{})}, nil
 }
 
 type generationMonitorConn struct {
 	driver.Conn
-	owner *generationMonitorConnector
+	owner  *generationMonitorConnector
+	closed chan struct{}
 }
 
 func (c *generationMonitorConn) IsValid() bool { return c.Conn.(driver.Validator).IsValid() }
+
+func (c *generationMonitorConn) Close() error {
+	if c.owner.monitored.Load() == c && c.owner.holdClose {
+		close(c.owner.closeEntered)
+		<-c.owner.closeResume
+	}
+	err := c.Conn.Close()
+	close(c.closed)
+	return err
+}
 
 func (c *generationMonitorConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
@@ -74,6 +94,9 @@ func (c *generationMonitorConn) QueryContext(ctx context.Context, query string, 
 }
 
 func (c *generationMonitorConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if c.owner.armed.Load() {
+		c.owner.monitored.Store(c)
+	}
 	c.owner.stall("begin")
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
 	if err != nil {
@@ -113,7 +136,8 @@ func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession,
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := &generationMonitorConnector{Connector: native, phase: phase, entered: make(chan struct{}), resume: make(chan struct{})}
+	control := &generationMonitorConnector{Connector: native, phase: phase, entered: make(chan struct{}), resume: make(chan struct{}),
+		closeEntered: make(chan struct{}), closeResume: make(chan struct{})}
 	db := sql.OpenDB(control)
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
@@ -134,6 +158,7 @@ func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession,
 		}
 	})
 	t.Cleanup(control.unblock)
+	t.Cleanup(control.unblockClose)
 	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +199,7 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 			}
 			t.Run(disposition+"_"+phase, func(t *testing.T) {
 				session, observer, control := newPostgresGenerationMonitor(t, phase)
+				control.holdClose = disposition == "deadline"
 				fenced := make(chan struct{})
 				var fenceOnce sync.Once
 				if err := session.lease.InstallLocalFenceOwner(func() { fenceOnce.Do(func() { close(fenced) }) }); err != nil {
@@ -219,11 +245,28 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || acquired {
 					t.Fatalf("outstanding proof lost native successor exclusion: acquired=%t err=%v", acquired, err)
 				}
+				joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelJoin()
 				control.unblock()
+				if disposition == "deadline" {
+					select {
+					case <-control.closeEntered:
+					case err := <-done:
+						t.Fatalf("monitor returned before native Close admission: %v", err)
+					case <-joinCtx.Done():
+						t.Fatal("monitor did not reach exact native disposal")
+					}
+					select {
+					case err := <-done:
+						t.Fatalf("monitor returned before native Close joined: %v", err)
+					default:
+					}
+					control.unblockClose()
+				}
 				var err error
 				select {
 				case err = <-done:
-				case <-time.After(5 * time.Second):
+				case <-joinCtx.Done():
 					t.Fatal("monitor did not join released native work")
 				}
 				if disposition == "deadline" {
@@ -240,7 +283,20 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				if err := session.lease.Release(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
+				query := "SELECT pg_try_advisory_lock(hashtext($1))"
+				if disposition == "deadline" {
+					select {
+					case <-control.monitored.Load().closed:
+					default:
+						t.Fatal("joined disposal did not complete actual native Close")
+					}
+					// Terminate/Close has no server acknowledgement. Native blocking
+					// acquisition observes remote handoff without polling or retries.
+					query = "SELECT true FROM pg_advisory_lock(hashtext($1))"
+				} else if !session.lease.ReleasedCleanly() {
+					t.Fatal("neutral cancellation lost acknowledged normal unlock")
+				}
+				if err := observer.QueryRowContext(joinCtx, query, runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
 					t.Fatalf("joined disposal retained native possession: acquired=%t err=%v", acquired, err)
 				}
 				if _, err := observer.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", runtimeSharedStoreOwnershipLock); err != nil {
