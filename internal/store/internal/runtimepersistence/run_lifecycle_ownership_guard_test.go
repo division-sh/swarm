@@ -354,7 +354,7 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		"internal/store/internal/backend/mutationprotocol/event_counts_test.go": {
 			"CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))", []string{"INSERT INTO runs (run_id) VALUES ($1)"}},
 		"internal/store/internal/backend/agentpersistence/selected_grant_point_test.go": {
-			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2,$3)"}},
 		"internal/store/internal/backend/delivery/selected_execution_fence_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)", "UPDATE runs SET bundle_hash=$1"}},
 		"internal/store/internal/backend/delivery/selected_successor_handoff_test.go": {

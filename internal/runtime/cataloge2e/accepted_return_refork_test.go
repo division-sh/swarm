@@ -45,7 +45,13 @@ func TestIssue642AcceptedReturnRepeatedPhysicalReforkBothStores(t *testing.T) {
 			sourceRun, cut := catalogRuntimeRunID, rows[0].AcceptedReplyEventID
 			for hop := 0; hop < 3; hop++ {
 				if hop != 0 {
-					owner = selectedContractExecutionOwnerForCatalogHarness(t, h)
+					// Supplying the native role constructs a successor instead of
+					// returning the harness's first (now retired) cached owner.
+					if h.sqlite != nil {
+						owner = selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, h.sqlite)
+					} else {
+						owner = selectedContractExecutionOwnerForCatalogHarnessWithReplay(t, h, h.pg)
+					}
 				}
 				sourceRun, cut = executeAcceptedReturnRefork(t, h, selected, owner, loader, selection, options, sourceRun, cut)
 			}
