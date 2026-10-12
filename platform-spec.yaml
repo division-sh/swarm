@@ -11471,7 +11471,12 @@ tool_model:
       every statically knowable mapped value against the output schema; and parses every result-projection source and
       target path with overlap rejection, proves both paths against the admitted source and output schemas, and proves that
       every required output leaf is constructed. One canonical schema-assignability owner governs channel relations,
-      result projection, and response-mapping proof. Malformed execution semantics cannot acquire
+      result projection, and response-mapping proof. Assignability preserves admitted object-property context when
+      proving identity: independently admitted identical schemas, including oneOf properties with sibling equality,
+      are assignable without projecting those properties as standalone roots. Other enclosing members still require
+      recursive proof. Omitted or true additionalProperties admits unrestricted values; a target property of kind any
+      can still restrict values through enum, oneOf or sibling equality and must consume the complete finite relation.
+      This does not admit arbitrary implication between nonidentical unions. Malformed execution semantics cannot acquire
       tool authority, and direct and durable execution mechanically invoke these same admitted values without reparsing,
       trimming, or normalizing authored syntax after a provider effect. Both direct and durable HTTP execution validate
       every provider result against its admitted output schema before recording success when that schema is declared,
@@ -11996,6 +12001,8 @@ tool_model:
       - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
+      - prove identity of independently admitted identical schemas in their admitted context, including declared oneOf properties with sibling equality; continue proving other enclosing members recursively and reject standalone equality-bearing roots
+      - prove unrestricted omitted or true additional source values against the complete target property schema; kind any does not remove admitted enum, oneOf or sibling-equality constraints
       - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
       - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported
       - compile learned_destination through the same mapping topology and directional schema owner, permitting scalar-leaf projection only with complete required source/target coverage and no overlap or implicit identity
