@@ -1736,6 +1736,25 @@ func ReadDeploymentRuntimeLogStorageForTest(ctx context.Context, selected any, r
 	return readDeploymentStorageForTest(ctx, selected, runID, eventrecord.ReadDeploymentRuntimeLogStorageTx)
 }
 
+type ClosedReceiverEmissionStorage = eventrecord.ClosedReceiverEmissionStorage
+
+func ReadClosedReceiverEmissionStorageForTest(ctx context.Context, selected any, runID, eventName string) (ClosedReceiverEmissionStorage, error) {
+	if eventName != "task.completed" && eventName != "task.finalized" {
+		return ClosedReceiverEmissionStorage{}, fmt.Errorf("closed receiver emission observation requires a chain event")
+	}
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (ClosedReceiverEmissionStorage, error) {
+		return eventrecord.ReadClosedReceiverEmissionStorageTx(ctx, tx, postgres, runID, eventName)
+	})
+}
+
+func ReadClosedReceiverRuntimeLogStorageForTest(ctx context.Context, selected any, runID string) ([]string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadClosedReceiverRuntimeLogStorageTx(ctx, tx, postgres, runID)
+	})
+}
+
 func ReadDeploymentRecentEventStorageForTest(ctx context.Context, selected any, runID string) ([]DeploymentRecentEventStorage, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, eventrecord.ReadDeploymentRecentEventStorageTx)
 }

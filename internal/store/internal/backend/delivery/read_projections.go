@@ -2774,3 +2774,118 @@ func ReadDeploymentDeliveryStatusStorageTx(ctx context.Context, tx *sql.Tx, runI
 	}
 	return out, nil
 }
+
+type ClosedReceiverReadinessStorage struct{ Actors, Events, Deliveries int }
+
+func ReadClosedReceiverReadinessStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, bridgeNodeID string) (ClosedReceiverReadinessStorage, error) {
+	query := `
+		SELECT
+			(SELECT COUNT(DISTINCT o.agent_id)
+			 FROM runtime_external_effect_operations o
+			 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
+			 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
+			(SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name IN ('task.completed','task.finalized')),
+			(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+			 WHERE e.run_id = ? AND d.status = 'delivered'
+			   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
+			     OR (d.subscriber_type = 'node' AND d.subscriber_id = ?)))
+	`
+	args := []any{runID, runID, bridgeNodeID}
+	if postgres {
+		query = `
+			SELECT
+				(SELECT COUNT(DISTINCT o.agent_id)
+				 FROM runtime_external_effect_operations o
+				 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
+				 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
+				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name IN ('task.completed','task.finalized')),
+				(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+				 WHERE e.run_id = $1::uuid AND d.status = 'delivered'
+				   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
+				     OR (d.subscriber_type = 'node' AND d.subscriber_id = $2)))
+		`
+		args = []any{runID, bridgeNodeID}
+	}
+	var out ClosedReceiverReadinessStorage
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&out.Actors, &out.Events, &out.Deliveries)
+	return out, err
+}
+
+type ClosedReceiverDeliveryStorage struct {
+	EventName, FlowInstance, EntityID, TargetRoute        string
+	SubscriberType, SubscriberID, Status, Reason, Failure WorkloadNullableText
+}
+
+func ReadClosedReceiverDeliveryStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]ClosedReceiverDeliveryStorage, error) {
+	query := `
+		SELECT e.event_name, COALESCE(e.flow_instance, ''), COALESCE(CAST(e.entity_id AS TEXT), ''),
+		       CAST(e.target_route AS TEXT), d.subscriber_type, d.subscriber_id, d.status,
+		       COALESCE(d.reason_code, ''), COALESCE(CAST(d.failure AS TEXT), '')
+		FROM events e
+		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		WHERE e.run_id = ?
+		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id`
+	if postgres {
+		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ClosedReceiverDeliveryStorage
+	for rows.Next() {
+		var row ClosedReceiverDeliveryStorage
+		var subscriberType, subscriberID, status, reason, failure sql.NullString
+		if err := rows.Scan(&row.EventName, &row.FlowInstance, &row.EntityID, &row.TargetRoute, &subscriberType, &subscriberID, &status, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.SubscriberType, row.SubscriberID, row.Status = WorkloadNullableText(subscriberType), WorkloadNullableText(subscriberID), WorkloadNullableText(status)
+		row.Reason, row.Failure = WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type ClosedReceiverAgentRouteStorage struct{ AgentID, Owner, Source, Presence, Scope, InstanceID, InstancePath string }
+
+func ReadClosedReceiverAgentRouteStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]ClosedReceiverAgentRouteStorage, error) {
+	query := `
+		SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+		       d.agent_route_presence, d.agent_flow_scope_key,
+		       d.agent_flow_instance_id, d.agent_flow_instance_path
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		WHERE e.run_id = ? AND d.subscriber_type = 'agent'
+		ORDER BY d.subscriber_id`
+	if postgres {
+		query = `
+			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			       d.agent_route_presence, d.agent_flow_scope_key,
+			       d.agent_flow_instance_id, d.agent_flow_instance_path
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			WHERE e.run_id = $1::uuid AND d.subscriber_type = 'agent'
+			ORDER BY d.subscriber_id`
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ClosedReceiverAgentRouteStorage
+	for rows.Next() {
+		var row ClosedReceiverAgentRouteStorage
+		if err := rows.Scan(&row.AgentID, &row.Owner, &row.Source, &row.Presence, &row.Scope, &row.InstanceID, &row.InstancePath); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

@@ -5344,3 +5344,64 @@ observation migration; no production contract/platform semantic change, new
 framework, issue or watchlist node. M01/Docker/drain/D3/M07/integration holds remain
 explicit and unwaived. Local only, no push/PR/tier/server2. Receipts
 ~/.cache/swarm-2542-family145/deployment-resource-observation-*.
+
+## Whole Closed Receiver Acting-Agent Authority Chain
+
+Retired the ENTIRE closed-receiver raw pool/dialect chain: the one two-backend
+constructor, atomic readiness witness, complete acting-agent/causal event/receipt
+assertions and all five independent diagnostic sections. This file now contains
+NO SQL, pool, raw getter, supplied-pool admission or dialect interpretation.
+Native selected fixtures register close ownership before the unchanged runtime
+occurrence/generation join. The redundant second SQLite workflow constructor is
+deleted; one genuine workflow owner remains. Source, configuration, actual live
+controller/LLM, publication and joined cleanup are inverse-proven unchanged.
+
+Existing effectpersistence owns the GLOBAL operation/attempt/surface witness;
+agentpersistence owns the GLOBAL two-agent metadata diagnostic. Neither gains a
+run, state, eligibility or latest-attempt filter. Eventrecord owns exact emitted
+event/producer/type/source fields and native runtime-log text; pipelinepersistence
+owns run-scoped successful receipts and complete ordered receipt diagnostics.
+The existing CLOSED delivery projection owner owns the original atomic three-
+subquery readiness statement, complete event/delivery left join and agent-route
+metadata join. All14 original dialect SQL literals have exact owner correspondence;
+the SQLite emission's fixed concatenation is rendered as the same whole statement.
+The obsolete unsuccessful PostgreSQL '?' route query is not repeated before the
+real PostgreSQL query; it never contributed evidence. No query/predicate/NULL/
+order or successful observation cut is narrowed or combined.
+
+The existing private readFanOutSemanticStorage adapter opens the ORIGINAL native
+coordinator; no new read/transaction framework. Public bridges return detached
+fields only. Dialect spelling remains below the private boundary. Emission names
+are restricted to the two original chain events and readiness refuses a missing
+bridge-node identity. Diagnostics retain every complete field, String/Valid bit,
+native JSON/text representation and five separate cuts. Failed sections return
+explicit errors without provisional rows. Original10s readiness,20ms poll, all
+authority/settlement/cardinality/lineage assertions and receipt threshold stay.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Raw PostgreSQL construction, SQLite getter and redundant workflow construction | reproduced and fixed | Original live acting-agent/node-chain root race before PASS14.737s, native after PASS18.746s; exact whole-body inverse except construction/carrier and added positive diagnostics; cleanup/source/publication hostile controls |
+| Acting-agent surfaces, settled effects, agent-to-node causal chain and successful receipts | reproduced and fixed | Original strict assertions on BOTH stores; actual source-event field erased only in the domain SELECT gives RED13.251s on both, exact restore GREEN19.772s |
+| All five error-only diagnostic sections and every detached field | execution-proven through the same corrected path | Original journey additionally invokes the complete diagnostic chain unconditionally, asserting all three event/receipt facts plus both agents/routes; all five ports execute, positive race PASS19.859s and restored run above; full SQL/field/order inventory and hostile controls |
+| Atomic readiness versus independent later cuts, missing rows and unavailable ownership | reproduced and fixed | Two native both-store roots race PASS15.439s:10 begins/8 read commits/zero writes or active transactions; strict missing emission, raw/invalid/foreign-name/missing-node/cancelled/closed refusals and complete history/clock equality |
+
+Finite proof preserves all business assertions, each field/context/cut and the
+entire construction/source/lifetime inverse. The initial finite REDs caught an
+AST-format newline assumption and the now-typed timeout diagnostic's carrier
+argument; exact inverse normalization repairs both, without dropping assertions.
+Complete137-root cheap Family145/historical collection PASS18.866s; all six
+persistence boundaries PASS4.530s; affected runtime/private/domain/script U1000
+clean, including the final guard-only delta. No retries, skipped cells, timeout
+increase, raw setup, new compatibility path or production runtime semantics.
+
+Corpus1281/504, digest
+d877af2c49b07e6e7285fa3001c369e7983761f77d790134a9b1028ef404c04b;
+all24 historical receipts and previous successors retained. Downward census
+PASS152.042s:8047 ->7987 findings,5703 ->5658 raw sites,60/45 removals,
+ZERO additions, uncertainty67; supplied-pool calls57 ->56 (55 outside+1 private).
+Final unchanged ratchet and signed-head complexity precede the stacking report.
+Binding raw_sql_policy and existing #2542/#2151 ownership/watchlist context remain
+sufficient: no new issue, spec architecture change or exemption. Parent and
+M01/Docker/drain/D3/M07/integration holds stay open and unwaived. Local only,
+no push/PR/tier/server2; receipts
+~/.cache/swarm-2542-family145/closed-receiver-authority-*.

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 500 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b5346c668cf2c635979bd8409c3179bf5130f00a1e1602bc047e2613167a18b8" {
+	if err != nil || len(rows) != 504 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d877af2c49b07e6e7285fa3001c369e7983761f77d790134a9b1028ef404c04b" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -73,6 +73,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if family145DeploymentReadCuts[row.Function] != nil {
 			if err := family145DeploymentReadProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/runtime/eventbus_receiver_authority_e2e_test.go" {
+			if err := family145ClosedReceiverProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
