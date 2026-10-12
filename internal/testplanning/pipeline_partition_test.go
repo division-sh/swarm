@@ -17,6 +17,15 @@ import (
 
 const pipelineProofPackage = "github.com/division-sh/swarm/internal/runtime/pipeline"
 
+func partialAttachmentProofChildren() []string {
+	return []string{
+		"sqlite/missing_source/shutdown_false", "sqlite/missing_sibling/shutdown_false",
+		"sqlite/missing_source/shutdown_true", "sqlite/missing_sibling/shutdown_true",
+		"postgres/missing_source/shutdown_false", "postgres/missing_sibling/shutdown_false",
+		"postgres/missing_source/shutdown_true", "postgres/missing_sibling/shutdown_true",
+	}
+}
+
 func pipelinePartitionUnits() []ProofUnit {
 	return []ProofUnit{
 		{ID: "pipeline-activation", Run: `^Test(A2|CompiledTransition|Guard|PipelineCompiled|WorkflowCurrentTransition|JoinCapturedLoop).*$`},
@@ -44,12 +53,7 @@ func validatePipelineEnvelopes(policy Policy) error {
 		want := UnitPolicy{Packages: []string{pipelineProofPackage}, Run: expected.Run, Skip: expected.Skip,
 			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "broad"}
 		if expected.ID == "pipeline-rest" {
-			want.RequiredChildren = map[string][]string{"TestCommittedAgentReadinessPartialAttachmentBothStores": {
-				"sqlite/missing_source/shutdown_false", "sqlite/missing_sibling/shutdown_false",
-				"sqlite/missing_source/shutdown_true", "sqlite/missing_sibling/shutdown_true",
-				"postgres/missing_source/shutdown_false", "postgres/missing_sibling/shutdown_false",
-				"postgres/missing_source/shutdown_true", "postgres/missing_sibling/shutdown_true",
-			}}
+			want.RequiredChildren = map[string][]string{"TestCommittedAgentReadinessPartialAttachmentBothStores": partialAttachmentProofChildren()}
 		}
 		if !reflect.DeepEqual(policy.Units[expected.ID], want) {
 			return fmt.Errorf("%s changed whole-root execution envelope", expected.ID)
@@ -162,6 +166,19 @@ func TestPipelinePartitionPreservesNativePlansAndAllOtherRoots(t *testing.T) {
 					}
 					if err := BindExecution(&plan, inventory, parity, selected); err != nil {
 						t.Fatal(err)
+					}
+					if i == 0 {
+						// The new native child obligations also bind the original
+						// unpartitioned current-source package, not just its new unit.
+						for unitIndex := range plan.Units {
+							for requiredIndex := range plan.Units[unitIndex].RequiredTests {
+								required := &plan.Units[unitIndex].RequiredTests[requiredIndex]
+								if required.Package == pipelineProofPackage && required.Name == "TestCommittedAgentReadinessPartialAttachmentBothStores" {
+									required.Children = partialAttachmentProofChildren()
+									slices.Sort(required.Children)
+								}
+							}
+						}
 					}
 					plans[i] = plan
 				}
