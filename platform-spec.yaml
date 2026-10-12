@@ -1994,6 +1994,12 @@ contract_formats:
             to recover semantic authority from a recursively nested string field. Explicit exhaustive persistence and
             diagnostic codecs are boundary projections only; they cannot become behavioral equality or dispatch authority.
           generation_linearization: |
+            Read-only subscribed-route preparation and exact-attempt live route installation coordinate through the
+            RouteTable owner so an accepted asynchronous same-source install cannot repeatedly invalidate descriptor
+            evaluation. Installation waits for preparation before requesting the generation writer. Preparation does not
+            hold the application generation lease across descriptor callbacks, and retirement/reset/source changes remain
+            genuine invalidators. A delayed installer must still bind the current EventBus table and source epoch; a replaced
+            table cannot receive a live publication. Public acknowledgment remains durable acceptance, not activation completion.
             Snapshot generation validation and lifecycle/reply application are one exclusive linearized operation. The
             EventBus holds generation ownership for every base and transaction-staged RouteTable whose snapshot participated
             in the evaluation until all admitted lifecycle and reply mutations finish. Route installation and retirement

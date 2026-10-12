@@ -101,6 +101,7 @@ func (s subscriberRouteSource) code() string {
 
 type RouteTable struct {
 	mu                          sync.RWMutex
+	preparationMu               sync.RWMutex
 	generationMu                sync.RWMutex
 	generation                  uint64
 	source                      semanticview.Source
