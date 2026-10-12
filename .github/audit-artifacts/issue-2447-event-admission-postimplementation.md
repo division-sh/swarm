@@ -227,6 +227,11 @@ catalog/type admission and provider continuations/Responses SSE; grouping
 confidence medium, effort/PR-count low. This extraction introduces no new tail.
 Open #2614/#2616/#2617/#2624 have not landed into this base; final source/consumer
 file census must be rechecked before push/integration. No target overlap found.
+Pre-push refresh: no PRODUCTION owner/new-test overlap, including newly open
+#2637. The added qualification catalog shares a file with #2624/#2616/#2617;
+our two event-catalog IDs and runtime-purpose references are a separate metadata
+contribution, not constructor/route ownership. Coordination is posted to those
+PRs; integrate any landed catalog rows without replacing their evidence.
 
 Model feedback: mutable admission intermediates are distinct from retained
 compiled acceptance authority; opaque construction remains open #2349. Tracking
