@@ -3,10 +3,13 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -21,6 +24,33 @@ func TestStartPostgres_Smoke(t *testing.T) {
 	}
 	if one != 1 {
 		t.Fatalf("expected 1, got %d", one)
+	}
+}
+
+func TestStartEmptyPostgresProcessLeaseProofRetainsCanonicalSandboxParameters(t *testing.T) {
+	dsn, parameters, waiting := StartEmptyPostgresProcessLeaseProof(t)
+	connection, err := testpostgres.ParseConnection(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := connection.Parameters(); !reflect.DeepEqual(parameters, want) {
+		t.Fatal("typed sandbox parameters differ from its canonical serialized connection")
+	}
+	source, err := testpostgres.ConnectionFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parameters.Database == source.Parameters().Database {
+		t.Fatal("sandbox parameters point at the source database instead of the isolated sandbox")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if held, err := waiting(ctx); err != nil || held {
+		t.Fatalf("fresh sandbox wait witness: %t %v", held, err)
+	}
+	cancel()
+	if _, err := waiting(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait witness lost cancellation: %v", err)
 	}
 }
 
