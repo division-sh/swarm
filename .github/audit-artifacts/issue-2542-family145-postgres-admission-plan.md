@@ -3921,3 +3921,53 @@ source/collector and parent qualification holds are unchanged. About123 candidat
 DB/dialect references remain in this shared family; final typed inventory must
 reconcile them. Signed-head complexity follows. No family/parent closure, push,
 PR or server2 claim. Receipts ~/.cache/swarm-2542-family145/gate-shared-m-*.
+
+## Shared Gate/A2 Dependency: Real Competing Revision Pairs
+
+Internal dependency component of the same whole family, not a separate stacking
+request. Both raw transactions and their two SQL carriers are retired. The
+selection contender retains run/entity/expected-revision predicates, both exact
+RowsAffected/error checks, the marker="second" replacement, nine real losses,
+selection capture and original delegate/settlement order. The prospective
+contender additionally retains exact header instance_path and companion
+flow_instance predicates, both exact cardinalities, and NO field replacement.
+Its changed-state/lifecycle modes, counters, revision evidence, onConflict and
+post-commit raced assignment are byte-pinned. These remain actual competing
+writers after real planning, not fabricated conflict returns or revision facts.
+
+Both fixed public operations consume the existing private workflow projection
+fault coordinator on the original selected native store. Their physical SQL is
+owned by pipelinepersistence. No reconstructed backend, generic/public callback,
+transaction token, new normal writer or compatibility path is introduced.
+The writer census explicitly names this paired fault class and both temporal
+cuts; it does not authorize these writes as normal mutation/fork evidence.
+
+The finite transformation pins each original method except its replaced raw
+transaction span; independently pins every SQL statement/argument, cardinality,
+error and order against the immutable original; and pins both caller bindings
+to the exact selected owner. Hostile lost-owner/state/capture/delegate and
+changed-SQL/revision/argument/cardinality controls reject. Existing historical
+Before inputs and24 mechanical receipts stay. Corpus1210/414, digest
+c4a208130d02d72b9f2b905d6eeb19bee4fd47257476ed990b18ecb2159548da.
+
+| Manifestation | Exact proof executed with Go1.26.8 |
+| --- | --- |
+| Selection contention preserves nine real losses, initial/final rules, attempt/delivery budgets and replay | TestSelectionRetryAfterRealCASConflictBothStores, both stores/race, PASS5.13s |
+| Prospective source/planning, terminal and writer refusals, publication rollback, real retry and revision sequence | TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores, both stores/race; original two-root group PASS35.148s |
+| Both real contenders use one original write and change ONLY the specified revisions/selection fields | TestCompetingRevisionPairsUseOriginalWriterAndKeepRealScopeBothStores PASS32.18s; every application table/column/type/NULL/clock checked; unrelated rows retained |
+| Foreign run/revision/path and cancellation refuse without writes | Same native four-cell root, complete before/after physical-storage equality |
+| Second statement really fails after the header update; all data/journal/clocks roll back | TestCompetingRevisionPairSecondFailureRollsBackHeader, four backend/shape cells, fixed live entity-revision trigger installed/removed through original coordinator, PASS |
+| Raw/uninitialized/nil/closed owners refuse | TestCompetingRevisionPairsRefuseRawAndClosedOwners PASS; no raw getter or test-only fallback |
+| Exact SQLite writer queue is observed before cancellation and join | TestCompetingRevisionPairsRespectOriginalSQLiteWriterAdmission PASS15.57s; deterministic holder channel plus original queued-writer counter, no sleep or speculative dispatch |
+| Exact source/SQL/caller/bridge correspondence and hostile controls | Complete cheap finite set: only new proof's import-alias expectation was RED; corrected exact existing private alias, new root PASS0.029s, every other finite root carried from19.659s run |
+| Six persistence boundaries, inventories and writer census | PASS3.760s; no allowance/guard relaxation; U1000 clean |
+
+All four native proof roots completed under race, aggregate91.192s. An initial
+new fixture compile error (Instance vs RunScopedFlowInstance) was corrected by
+using the native admitted identity's Route and existing run context; no fabricated
+source/authority was introduced. Real census8478 findings/6086 raw sites:
+8500 ->8478 findings,6100 ->6086 sites,22 removed/zero added. Uncertainty67 and
+source/collector unchanged; cold fixed-view compilation made this census248.762s,
+not a runtime timing qualification. Supplied-pool calls remain61. Gate/A2 carrier
+and parent closure remain open. Signed-head complexity follows; no push/PR/tier.
+Receipts ~/.cache/swarm-2542-family145/gate-pair-*.

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 412 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "41713a1c0ca01a7d9bb0f4a23da23d4512c106b87b8d1b9784e6ca5a9bdae21a" {
+	if err != nil || len(rows) != 414 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c4a208130d02d72b9f2b905d6eeb19bee4fd47257476ed990b18ecb2159548da" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -55,6 +55,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if family145CLIForkRow(row.File, row.Function) {
 			if err := family145CLIForkProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if owner := family145CompetingRevisionPairOwner(row.File, row.Function); owner != "" {
+			if err := family145CompetingRevisionPairProofError(owner, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

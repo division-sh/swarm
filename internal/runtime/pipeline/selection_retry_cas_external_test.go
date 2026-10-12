@@ -2,9 +2,7 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -27,7 +25,7 @@ import (
 
 type selectionCASPersistence struct {
 	pipeline.WorkflowPersistenceOwner
-	db        *sql.DB
+	selected  gateRecoverySelectedStore
 	fired     bool
 	selection handlerselection.HandlerRuleSelectionFact
 	err       error
@@ -42,26 +40,7 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 		}
 		// Model a different writer after the real engine's read, not a forged
 		// command revision or a synthetic CAS error returned by the test.
-		tx, err := p.db.BeginTx(ctx, nil)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		defer tx.Rollback()
-		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		if n, err := result.RowsAffected(); err != nil || n != 1 {
-			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing writer rows=%d: %v", n, err)
-		}
-		result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1, fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		if n, err := result.RowsAffected(); err != nil || n != 1 {
-			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field writer rows=%d: %v", n, err)
-		}
-		if err := tx.Commit(); err != nil {
+		if err := storetest.AdvanceSelectionRevisionPair(ctx, p.selected, command.State); err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		p.fired = true
@@ -98,7 +77,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}
+			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), selected: selected.events}
 			selected.persistence = pipeline.NewWorkflowPersistence(fault)
 			module := proposedEffectProofModule{source: source, nodes: nodes}
 			initialCoordinator := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module})

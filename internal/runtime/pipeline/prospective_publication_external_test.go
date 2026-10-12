@@ -2,10 +2,8 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +36,7 @@ type observedProspectivePersistence struct {
 	mode       string
 	calls      int
 	err        error
-	db         *sql.DB
+	selected   gateRecoverySelectedStore
 	raced      bool
 	armRace    bool
 	conflict   error
@@ -58,26 +56,7 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 		if p.armRace && !p.raced {
 			// Advance persisted state after the real planner has read it, without
 			// altering the prepared command or its prospective evidence.
-			tx, err := p.db.BeginTx(ctx, nil)
-			if err != nil {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-			}
-			defer tx.Rollback()
-			result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
-			if err != nil {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-			}
-			if count, err := result.RowsAffected(); err != nil || count != 1 {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing revision cut rows=%d err=%v", count, err)
-			}
-			result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1 WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
-			if err != nil {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-			}
-			if count, err := result.RowsAffected(); err != nil || count != 1 {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field revision cut rows=%d err=%v", count, err)
-			}
-			if err := tx.Commit(); err != nil {
+			if err := storetest.AdvanceProspectiveRevisionPair(ctx, p.selected, command.State); err != nil {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 			}
 			p.raced = true
@@ -133,7 +112,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					t.Fatal(err)
 				}
 				observed := &observedProspectiveBus{EventBus: canonical}
-				persistence := &observedProspectivePersistence{WorkflowPersistenceOwner: selected.events.(runtimepipeline.WorkflowPersistenceOwner), mode: name, db: selected.db}
+				persistence := &observedProspectivePersistence{WorkflowPersistenceOwner: selected.events.(runtimepipeline.WorkflowPersistenceOwner), mode: name, selected: selected.events}
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
 				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
