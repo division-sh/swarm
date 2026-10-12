@@ -279,11 +279,6 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				} else if !errors.Is(err, context.Canceled) || !session.lease.Current() {
 					t.Fatalf("neutral cancellation lost cause or healthy lease: %v", err)
 				}
-				control.armed.Store(false)
-				if err := session.lease.Release(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-				query := "SELECT pg_try_advisory_lock(hashtext($1))"
 				if disposition == "deadline" {
 					if session.lease.ReleasedCleanly() {
 						t.Fatal("terminal discard fabricated acknowledged normal unlock")
@@ -291,8 +286,15 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 					select {
 					case <-control.monitored.Load().closed:
 					default:
-						t.Fatal("joined disposal did not complete actual native Close")
+						t.Fatal("monitor returned before actual native Close completed")
 					}
+				}
+				control.armed.Store(false)
+				if err := session.lease.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				query := "SELECT pg_try_advisory_lock(hashtext($1))"
+				if disposition == "deadline" {
 					// Terminate/Close has no server acknowledgement. Native blocking
 					// acquisition observes remote handoff without polling or retries.
 					query = "SELECT true FROM pg_advisory_lock(hashtext($1))"
