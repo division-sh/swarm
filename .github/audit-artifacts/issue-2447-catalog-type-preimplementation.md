@@ -3,8 +3,9 @@
 Agent G,2026-10-12. Proposal:
 https://github.com/division-sh/swarm/issues/2447#issuecomment-6134301267
 Source f2d0538c741a87a1b0cd40fe025fd1fc6a1437fc,Go1.26.8.
-This is an IN-PROGRESS read-only audit, not a satisfied coding gate. No
-production/new-test/spec/workflow/plan/baseline edit. #2638 remains untouched.
+This original intake is historical; the integrated audit on merged master
+241bbbdde is in issue-2447-catalog-type-amendment.md. Coding remains frozen.
+No production/new-test/spec/workflow/plan/baseline edit; #2638 is now merged.
 Re-read IMPLEMENTER_GUIDELINES/SEMANTIC_DRIFT and current2447/2407 ledgers.
 
 ## Class And Binding Context
