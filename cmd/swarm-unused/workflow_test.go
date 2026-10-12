@@ -12,6 +12,7 @@ import (
 )
 
 func TestWorkflowNativeUnionIsRequired(t *testing.T) {
+	const nativeCadence = "(github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'"
 	b, err := os.ReadFile("../../.github/workflows/ci.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -40,8 +41,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		{"unused-linux", "linux", "ubuntu-latest", 19}, {"unused-darwin", "darwin", "macos-latest", 30},
 	} {
 		job, ok := workflow.Jobs[owner.job]
-		if !ok || job.If != "needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
-			t.Fatalf("native %s analysis must qualify every selected full plan on its native platform", owner.platform)
+		if !ok || job.If != nativeCadence || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {
+			t.Fatalf("native %s analysis must qualify master cadence and explicit full dispatch on its native platform", owner.platform)
 		}
 		checkout, collect, upload := false, false, false
 		for _, step := range job.Steps {
@@ -71,8 +72,8 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		}
 	}
 	union, ok := workflow.Jobs["unused-checks"]
-	if !ok || union.If != "needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'" || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Equal(union.Needs, []string{"ci-plan", "unused-linux", "unused-darwin"}) {
-		t.Fatal("selected full union must require both native collectors")
+	if !ok || union.If != nativeCadence || union.ContinueOnError != nil || union.TimeoutMinutes != 15 || !slices.Equal(union.Needs, []string{"ci-plan", "unused-linux", "unused-darwin"}) {
+		t.Fatal("native cadence union must require both collectors")
 	}
 	checkout, merge := false, false
 	downloads := map[string]bool{}
@@ -114,7 +115,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 				script := summary
 				for _, need := range aggregate.Needs {
 					value := "success"
-					if tier != "full" && strings.HasPrefix(need, "unused-") {
+					if strings.HasPrefix(need, "unused-") {
 						value = "skipped"
 					}
 					if need == owner {
@@ -126,10 +127,10 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 				script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.master_replay }}", "false")
 				script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
 				c := exec.Command("bash", "-c", script)
-				c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+				c.Env = append(os.Environ(), "IS_DRAFT=false", "EVENT_NAME=pull_request", "EVENT_REF=refs/pull/1/merge", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
 				b, err := c.CombinedOutput()
 				expected := "success"
-				if tier != "full" && strings.HasPrefix(owner, "unused-") {
+				if strings.HasPrefix(owner, "unused-") {
 					expected = "skipped"
 				}
 				if (err == nil) != (status == expected) {

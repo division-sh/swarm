@@ -77,7 +77,7 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 			script := summary
 			for _, need := range aggregate.Needs {
 				value := "success"
-				if tier != "full" && strings.HasPrefix(need, "unused-") {
+				if strings.HasPrefix(need, "unused-") {
 					value = "skipped"
 				}
 				if need == "complexity" {
@@ -89,7 +89,7 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.master_replay }}", "false")
 			script = strings.ReplaceAll(script, "${{ needs.ci-plan.outputs.soak_matrix }}", `{"include":[]}`)
 			c := exec.Command("bash", "-c", script)
-			c.Env = append(os.Environ(), "IS_DRAFT=false", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			c.Env = append(os.Environ(), "IS_DRAFT=false", "EVENT_NAME=pull_request", "EVENT_REF=refs/pull/1/merge", "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
 			out, err := c.CombinedOutput()
 			if (err == nil) != (status == "success") {
 				t.Fatalf("%s aggregate complexity status %q: %v %s", tier, status, err, out)

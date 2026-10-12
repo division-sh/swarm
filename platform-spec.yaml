@@ -24100,7 +24100,20 @@ test_specification:
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
         both-store restart, recovery and semantic families. Full owns every admitted executable root, both unchanged
-        900-second soak cells, and the hosted native Linux/Darwin unused-check union. All hosted tiers retain macOS
+        900-second soak cells. The hosted native Linux/Darwin unused-check union is additional cadence-only
+        qualification: master schedule at03:17Z and explicit full workflow_dispatch, including a candidate branch
+        for pre-merge proof. PR and push runs at every tier, including full and verified master replay, require
+        unused-linux, unused-darwin and unused-checks to be skipped. The collectors and union retain the existing
+        full-plan, non-replay and successful-dependency constraints; required-tests retains all three dependencies,
+        logs each result and expectation, and requires success on admitted cadence or skipped elsewhere.
+        Missing, unknown, cancelled, failed or unexpected results refuse qualification. Darwin retains its
+        authorized30-minute envelope, Linux19 and union15; native commands, variants and current-attempt artifacts
+        are unchanged. Failed cadence prevents a successful Master nightly proof; branch dispatch never grants
+        that master-only marker. The existing strict newest-completed master-nightly merge contract remains;
+        deployed gate/refusal attestation is required under #2535 before #2640's cutover, not inferred from YAML.
+        Orchestrator/CI-health triage routes U1000 to a small code-owner cleanup PR and analysis/runner failures to
+        #2535/#2353, retaining failed evidence. No other job family moves without a maintainer ruling.
+        All hosted tiers retain macOS
         SQLite possession. Every lower-tier omitted root explicitly names its minimum tier and retained full owner;
         it earns no execution credit. New ordinary roots enter core; an unowned special root blocks every tier.
       pipeline_root_partition: >-
@@ -24173,8 +24186,9 @@ test_specification:
         9db87f88b2d3b1cec1833c57b12edb974dbe6ba4 (56.170 seconds); that original timing verdict remains red.
         Only this exact package/root, ci-postgres-gateway-empty-v1/count-1/no-backend/full cell receives placement
         approval. Core/lifecycle promotions and foreign cells do not inherit it. All full-tier seconds remain
-        charged under unchanged command ceilings, reference and added-cost allowances. Native required Linux,
-        Darwin and real-union jobs remain unchanged; test-fixture optimization cannot substitute for those collectors.
+        charged under unchanged command ceilings, reference and added-cost allowances. Native Linux,
+        Darwin and real-union jobs follow the cadence-only placement in membership under #2640;
+        this metatest partition and its local behavior remain unchanged and cannot substitute for those collectors.
       fixture_codemod_qualification: >-
         The pipeline-observations codemod package has an exhaustive explicit special-package partition.
         codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader
@@ -24241,7 +24255,7 @@ test_specification:
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
         remains independent. Execution-credit artifacts use immutable exact run_id and run_attempt namespaces:
-        ci-plan, physical-batch proof receipts, and required Linux/Darwin native-unused products. Every workflow
+        ci-plan, physical-batch proof receipts, and cadence-required Linux/Darwin native-unused products. Every workflow
         consumer and protected publisher acquires only its own current namespace, never retained needs coordinates.
         Proof downloads preserve separate artifact directories so duplicate logical inputs remain observable.
         Native master replay instead acquires the observed successful PR run/attempt's single unexpired plan and
@@ -24564,7 +24578,7 @@ test_specification:
       profiles:
         core: J1 bounded SQLite smoke.
         lifecycle: J1 through J5, with host PostgreSQL and isolated stores and listeners.
-        full: J1 through J5 plus every admitted root, both unchanged 900-second soak cells and hosted Linux/Darwin native unused-check union. Local full cannot claim Darwin execution. Bounded parallelism is only between independent journeys.
+        full: J1 through J5 plus every admitted root and both unchanged 900-second soak cells. Hosted Linux/Darwin native unused-check union is required only for master nightly and explicit full dispatch, not PR/push qualification. Local full cannot claim Darwin execution. Bounded parallelism is only between independent journeys.
       forbidden:
       - runtime or store semantic changes made to satisfy the evidence profile
       - seeded runs, entities, instances, schedules, deliveries, cards, or direct store writes

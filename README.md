@@ -289,9 +289,11 @@ go run ./cmd/swarm-test --tier lifecycle # retained restart journeys
 go run ./cmd/swarm-test --full # exhaustive proof, including both 900s soaks
 ```
 
-`swarm-unused` defaults to native-only analysis on the current host. Full-tier
-CI merges native Linux and Darwin reachability with tests enabled across
-default, race, and `issue2413` configurations before enforcing U1000. The
+`swarm-unused` defaults to native-only analysis on the current host. Master
+nightly and explicit full dispatch CI merge native Linux and Darwin reachability
+with tests enabled across default, race, and `issue2413` configurations before
+enforcing U1000. PR and push CI skip these three native analysis jobs at every
+tier; the analyzer's contract tests remain in their existing proof tiers. The
 noncompiling `issue2438` configuration remains parked under E's
 [#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
