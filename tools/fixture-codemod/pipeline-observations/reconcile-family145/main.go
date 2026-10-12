@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "87aef9834c1517bc24f648f7cd9ece4346928b6c1dafc852154f57221b24f0ac"
+const targetDigest = "c50e4a5ebbfc7728125e09d605c180d31a245e78ccd7a56547cf7e959b1a0bef"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -72,6 +72,9 @@ var files = []string{
 	"internal/runtime/conformance/fan_out_resource_source_proof_test.go",
 	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go",
 	"internal/runtime/conformance/fan_out_serving_generation_replacement_test.go",
+	"internal/runtime/conformance/fan_out_serving_lifetime_conformance_test.go",
+	"internal/runtime/conformance/fan_out_serving_diagnostics_conformance_test.go",
+	"internal/runtime/conformance/fan_out_d3_supported_read_test.go",
 	"internal/runtime/conformance/fan_out_serving_capacity_conformance_test.go",
 	"internal/runtime/conformance/fan_out_serving_matrix_helpers_test.go",
 	"internal/runtime/conformance/fan_out_shared_serving_conformance_test.go",
@@ -229,6 +232,20 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/conformance/fan_out_serving_lifetime_conformance_test.go": {
+		"TestFanOutServingM06GenerationRetirementOnBothBackends":           true,
+		"TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends": true,
+		"readServingLifetimeState":                                         true,
+		"assertServingLifetimeClaimOwner":                                  true,
+		"waitServingMatrixTriggerReceipt":                                  true,
+	},
+	"internal/runtime/conformance/fan_out_serving_diagnostics_conformance_test.go": {
+		"TestIssue2394D3IncidentBothStores":                true,
+		"TestIssue2394D3EvidenceControlsBothStores":        true,
+		"TestIssue2394D3FailedReadEpisodeBothStores":       true,
+		"TestIssue2394D3CorruptHeaderNoPositiveBothStores": true,
+	},
+	"internal/runtime/conformance/fan_out_d3_supported_read_test.go":                            {"assertServingD3SupportedReadback": true},
 	"internal/runtime/pipeline/issue2564_publication_handoff_external_test.go":                  {"selected/*issue2564PublicationFixture": true},
 	"internal/runtime/pipeline/a2_join_hydration_external_test.go":                              {"TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_cancellation_external_test.go":                           {"TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores": true, "a2CancellationFootprint": true},

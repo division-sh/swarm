@@ -70,7 +70,7 @@ func assertServingD3SupportedReadback(t *testing.T, f *servingMatrixFixture, ctx
 			t.Fatal(err)
 		}
 	}
-	before := readServingLifetimeState(t, f.db, key.RunID)
+	before := readServingLifetimeState(t, f.selected, key.RunID)
 	bundle := f.runtimes[0].sourceArtifactFact.BundleHash()
 	var logs operatorread.OperatorRuntimeLogListResult
 	read(t, "runtime.logs", map[string]any{
@@ -125,6 +125,6 @@ func assertServingD3SupportedReadback(t *testing.T, f *servingMatrixFixture, ctx
 			t.Fatalf("CLI %v lost exact D3 evidence: %s", args, stdout.String())
 		}
 	}
-	assertServingLifetimeUnchanged(t, before, readServingLifetimeState(t, f.db, key.RunID))
+	assertServingLifetimeUnchanged(t, before, readServingLifetimeState(t, f.selected, key.RunID))
 	t.Log("real D3 detector/log -> authenticated HTTP -> CLI reads: exact source, grant, run, sample log and incident; no issuance mutation")
 }

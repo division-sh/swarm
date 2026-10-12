@@ -15,6 +15,20 @@ type SupplementalProgressStorage = private.SupplementalProgressStorage
 type SupplementalPressureStorage = private.SupplementalPressureStorage
 type SupplementalExpiredClaimStorage = private.SupplementalExpiredClaimStorage
 
+type ServingLifetimeMetadataStorage = private.ServingLifetimeMetadataStorage
+
+func ReadServingLifetimeMetadataStorage(ctx context.Context, selected any, runID string) (ServingLifetimeMetadataStorage, error) {
+	return private.ReadServingLifetimeMetadataStorageForTest(ctx, selected, runID)
+}
+
+func ReadServingLifetimeClaimOwnerStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadServingLifetimeClaimOwnerStorageForTest(ctx, selected, runID)
+}
+
+func CountServingLifetimeHistoryStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountServingLifetimeHistoryStorageForTest(ctx, selected, runID)
+}
+
 func ReadSupplementalCommittedOutcomeCardinality(ctx context.Context, selected any, run string) (SupplementalOutcomeCardinalityStorage, error) {
 	return private.ReadSupplementalCommittedOutcomeCardinalityForTest(ctx, selected, run)
 }

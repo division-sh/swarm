@@ -5080,3 +5080,41 @@ PostgreSQL admission families remain tracked, not hidden behind this deletion.
 No new watchlist node or issue; existing #2542/#2151 native-construction ownership
 mapping applies. Local only, no push/PR/tier/server2. Receipts
 ~/.cache/swarm-2542-family145/gate-carrier-retirement-*.
+
+## Shared Serving Dependency: Entire Lifetime Observation Chain
+
+All three shared readers and their21 calls across eight enclosing functions/four
+files now consume the original selected owner. The metadata query still reads
+cursor/status/claim_generation and SQL-NULL retry presence together. Outcomes,
+events and fan_out_obligations history remain THREE subsequent independent native
+read cuts, not a newly atomic aggregate. Claim-owner COALESCE and strict successful
+platform/pipeline receipt scope are unchanged; the five-second deadline, original
+sql.ErrNoRows gate, polling and all retirement/claim/no-mutation assertions remain.
+Existing outcome, physical-event and exact receipt owners are reused. New fixed
+metadata/claim projections stay in pipelinepersistence; the family-filtered count
+stays in runforkrevision. Public bridges expose no SQL/pool/selector/callback.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Raw shared lifetime metadata/count chain | reproduced and fixed | Both original M06 whole roots under race on both stores PASS53.588s; exact four original cuts/slots and assertions pinned by finite guards |
+| Raw claim-owner and trigger receipt helpers, all21 calls | execution-proven through the same corrected path | Exhaustive three-helper/eight-consumer source inventory; inverse propagation equality preserves the complete original caller bodies, including prior reviewed same-bundle constructor composition |
+| D3 diagnostic episode consumers | execution-proven through the same corrected path | Both original Incident/FailedReadEpisode roots under race on both stores PASS41.255s; exact live fault and restoration bodies untouched |
+| Missing metadata/claim/receipt and positive other-family history | reproduced and fixed | Native compiled construction, eight independent begins/two read commits/zero writes, absence/foreign/cancelled/raw/invalid/closed and complete-storage equality PASS14.270s |
+| Broader-history same-run leakage | reproduced and fixed | Remove only family='fan_out_obligations' from the actual owner: both stores RED10.427s; restore the exact predicate GREEN12.303s, receipts retained |
+| M07 process-loss and D3 SQL-order/corrupt-header faults | explicitly split / tracked separately | Only these three read-helper arguments change; exact inverse caller equality pins their fault/assertion bodies. Existing semantic qualification holds are NOT certified by this checkpoint |
+
+Finite corpus1253/471, digest
+c50e4a5ebbfc7728125e09d605c180d31a245e78ccd7a56547cf7e959b1a0bef.
+All immutable24 historical receipts remain. Complete cheap Family145/current/
+historical124-root collection PASS12.790s; six persistence boundaries PASS3.654s;
+U1000 clean. Downward census PASS151.379s:8272 ->8240 findings,5892 ->5863
+raw sites,32/29 removals,ZERO additions; uncertainty67 and supplied-pool calls60
+unchanged. Final unchanged ratchet PASS22.470s; signed-head complexity follows.
+
+Chosen class closes the whole shared observation chain, NOT servingMatrixFixture's
+remaining live SQL-fault capability or the full admission parent. That carrier
+stays live for its named D3/M07 faults; no reconstructed coordinator, teardown
+change, fault substitute or compatibility path was introduced. Existing #2542/
+#2151 construction/read ownership watchlist mapping remains sufficient, with
+M01/Docker/drain/D3/M07/integration holds unwaived. Local only, no push/PR/tier/
+server2. Receipts ~/.cache/swarm-2542-family145/serving-lifetime-read-chain-*.

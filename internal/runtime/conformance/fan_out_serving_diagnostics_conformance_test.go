@@ -117,8 +117,8 @@ func TestIssue2394D3IncidentBothStores(t *testing.T) {
 			trigger := f.submit(t, 0, runID, "d3-held-claim")
 			turn := waitServingMatrixHeld(t, pending)
 			defer turn.release()
-			waitServingMatrixTriggerReceipt(t, f.db, trigger)
-			assertServingLifetimeUnissued(t, readServingLifetimeState(t, f.db, runID))
+			waitServingMatrixTriggerReceipt(t, f.selected, trigger)
+			assertServingLifetimeUnissued(t, readServingLifetimeState(t, f.selected, runID))
 			select {
 			case attempt := <-pending.attempts:
 				t.Fatalf("D3 setup entered actual claim prematurely: %+v", attempt)
@@ -181,7 +181,7 @@ func TestIssue2394D3IncidentBothStores(t *testing.T) {
 			assertServingD3Quiet(t, logger)
 			assertServingD3Projection(t, f, ctx, turn.key, grant.GrantID)
 			assertServingD3SupportedReadback(t, f, ctx, turn.key, grant.GrantID)
-			assertServingLifetimeUnissued(t, readServingLifetimeState(t, f.db, runID))
+			assertServingLifetimeUnissued(t, readServingLifetimeState(t, f.selected, runID))
 			turn.release()
 			f.assertSettled(t, 0, runID, 1)
 			f.assertSettled(t, 1, siblingRun, siblingIntents)
@@ -290,7 +290,7 @@ func TestIssue2394D3EvidenceControlsBothStores(t *testing.T) {
 					trigger := f.submit(t, 0, runID, "d3-evidence-control")
 					turn := waitServingMatrixHeld(t, probe)
 					defer turn.release()
-					waitServingMatrixTriggerReceipt(t, f.db, trigger)
+					waitServingMatrixTriggerReceipt(t, f.selected, trigger)
 					switch control {
 					case "slow_claim_sql":
 						// Lock the existing mutation-order row without changing it.
@@ -405,7 +405,7 @@ func TestIssue2394D3FailedReadEpisodeBothStores(t *testing.T) {
 			trigger := f.submit(t, 0, runID, "d3-read-failure")
 			turn := waitServingMatrixHeld(t, probe)
 			defer turn.release()
-			waitServingMatrixTriggerReceipt(t, f.db, trigger)
+			waitServingMatrixTriggerReceipt(t, f.selected, trigger)
 			first := waitServingD3Log(t, logger)
 			if first.err != nil || first.runID != runID {
 				t.Fatalf("first real episode: %+v", first)
@@ -499,8 +499,8 @@ func TestIssue2394D3CorruptHeaderNoPositiveBothStores(t *testing.T) {
 				trigger := f.submit(t, 0, runID, "d3-corrupt-header")
 				turn := waitServingMatrixHeld(t, probe)
 				defer turn.release()
-				waitServingMatrixTriggerReceipt(t, f.db, trigger)
-				before := readServingLifetimeState(t, f.db, runID)
+				waitServingMatrixTriggerReceipt(t, f.selected, trigger)
+				before := readServingLifetimeState(t, f.selected, runID)
 				assertServingLifetimeUnissued(t, before)
 				restore := injectServingD3HeaderCorruption(t, f, backend, runID, corruption)
 				defer restore()
@@ -534,7 +534,7 @@ func TestIssue2394D3CorruptHeaderNoPositiveBothStores(t *testing.T) {
 						t.Fatalf("corrupt header produced a positive D3 incident: %+v", incident)
 					}
 				}
-				after := readServingLifetimeState(t, f.db, runID)
+				after := readServingLifetimeState(t, f.selected, runID)
 				if after.cursor != before.cursor || after.outcomes != before.outcomes || after.history != before.history || after.generation != before.generation {
 					t.Fatalf("corrupt-header observation changed issuance: before=%+v after=%+v", before, after)
 				}

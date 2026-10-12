@@ -17,6 +17,23 @@ type FanOutRunBlockedClaimStorage struct {
 	Released   bool
 }
 
+type ServingLifetimeMetadataStorage struct {
+	Cursor, Generation, Retry int
+	Status                    string
+}
+
+func ReadServingLifetimeMetadataStorageTx(ctx context.Context, tx *sql.Tx, runID string) (ServingLifetimeMetadataStorage, error) {
+	var out ServingLifetimeMetadataStorage
+	err := tx.QueryRowContext(ctx, `SELECT cursor,status,claim_generation,CASE WHEN retry_ready_at IS NULL THEN 0 ELSE 1 END FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Cursor, &out.Status, &out.Generation, &out.Retry)
+	return out, err
+}
+
+func ReadServingLifetimeClaimOwnerStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var owner string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claim_owner,'') FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&owner)
+	return owner, err
+}
+
 type FanOutSourceFootprintMetadataStorage struct {
 	Cursor, Cardinality int
 	Status              string

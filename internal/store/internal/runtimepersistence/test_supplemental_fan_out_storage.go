@@ -17,6 +17,26 @@ type SupplementalProgressStorage = pipelinepersistence.SupplementalProgressStora
 type SupplementalPressureStorage = pipelinepersistence.SupplementalPressureStorage
 type SupplementalExpiredClaimStorage = pipelinepersistence.SupplementalExpiredClaimStorage
 
+type ServingLifetimeMetadataStorage = pipelinepersistence.ServingLifetimeMetadataStorage
+
+func ReadServingLifetimeMetadataStorageForTest(ctx context.Context, selected any, runID string) (ServingLifetimeMetadataStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (ServingLifetimeMetadataStorage, error) {
+		return pipelinepersistence.ReadServingLifetimeMetadataStorageTx(ctx, tx, runID)
+	})
+}
+
+func ReadServingLifetimeClaimOwnerStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return pipelinepersistence.ReadServingLifetimeClaimOwnerStorageTx(ctx, tx, runID)
+	})
+}
+
+func CountServingLifetimeHistoryStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return runforkrevision.CountServingLifetimeHistoryStorageTx(ctx, tx, runID)
+	})
+}
+
 func ReadSupplementalCommittedOutcomeCardinalityForTest(ctx context.Context, selected any, run string) (SupplementalOutcomeCardinalityStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (SupplementalOutcomeCardinalityStorage, error) {
 		return pipelinepersistence.ReadSupplementalCommittedOutcomeCardinalityTx(ctx, tx, run)

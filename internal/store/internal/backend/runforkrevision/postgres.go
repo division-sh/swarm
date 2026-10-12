@@ -121,6 +121,12 @@ func ReadLatestRunRevisionStorageForTestTx(ctx context.Context, tx *sql.Tx, runI
 	return revision, err
 }
 
+func CountServingLifetimeHistoryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'`, runID).Scan(&count)
+	return count, err
+}
+
 type FanOutObligationHistoryStorage struct {
 	Key  string
 	Fact []byte
