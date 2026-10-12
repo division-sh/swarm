@@ -52,7 +52,7 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	if publicEvent.RunID != runID || len(publicEvent.Deliveries) != 1 || publicEvent.Deliveries[0].DeliveryID != deliveryID || publicEvent.Deliveries[0].Status != "delivered" || publicEvent.Deliveries[0].Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
 		t.Fatalf("public acquisition target/settlement: %+v", publicEvent)
 	}
-	row := readForkReceiverRows(t, rt, runID)["consumer"]
+	row := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), runID)["consumer"]
 	if row.ID != entityID || row.Flow != "consumer" || row.Type != "receipt" || row.State != "active" || !reflect.DeepEqual(row.Fields, map[string]any{"marker": "consumer-created"}) {
 		t.Fatalf("canonical receiver creation/marker: %+v", row)
 	}
@@ -126,7 +126,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-				seedRows := readForkReceiverRows(t, rt, seed.RunID)
+				seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				wantSeedRows := map[string]forkReceiverRow{
 					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "root", State: "active", Fields: map[string]any{"marker": "root-owned"}},
 					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "work", State: "waiting", Fields: map[string]any{}},
@@ -146,7 +146,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 					t.Fatal(err)
 				}
 				sourceRoute := requireSupplementalForkAcquisitionSettlement(t, rt, seed.RunID, frontier, tc.policy)
-				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+				sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				producer := sourceRows["producer"]
 				if len(sourceRows) != 3 || producer.ID != flowidentity.EntityID("producer") || producer.Type != "work" || producer.Fields["marker"] != "producer-owned" || producer.ID == flowidentity.EntityID("consumer") {
 					t.Fatalf("independent source producer/receiver ownership: %+v", sourceRows)
@@ -173,7 +173,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("acquisition fork changed compiled handler or immutable producer")
 				}
-				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+				childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 				if len(childRows) != 3 || !reflect.DeepEqual(childRows["consumer"], sourceRows["consumer"]) || !reflect.DeepEqual(childRows["producer"], producer) {
 					t.Fatalf("fork acquisition rehomed or duplicated a physical owner: source=%+v child=%+v", sourceRows, childRows)
 				}

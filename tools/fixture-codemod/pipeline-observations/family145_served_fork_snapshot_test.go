@@ -125,6 +125,13 @@ var family145ServedSnapshotCallers = map[string]int{
 }
 
 func family145ServedSnapshotCallerProofError(function, before, after string) error {
+	if family145ForkReceiverJoinedCallers[function] != 0 {
+		var err error
+		after, err = family145ForkReceiverJoinedCallerInverse(function, after)
+		if err != nil {
+			return err
+		}
+	}
 	const native = "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)"
 	want := family145ServedSnapshotCallers[function]
 	if want == 0 || strings.Count(after, native) != want {

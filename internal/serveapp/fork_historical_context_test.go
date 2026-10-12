@@ -47,7 +47,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT e.event_id, d.delivery_id FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 AND e.event_name='producer/work.ready'`, seed.RunID).Scan(&frontier, &deliveryID); err != nil {
 				t.Fatal(err)
 			}
-			sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+			sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
 			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,

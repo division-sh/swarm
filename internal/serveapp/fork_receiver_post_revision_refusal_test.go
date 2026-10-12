@@ -59,7 +59,7 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='consumer/receiver.finished' AND source_event_id=$2`, seed.RunID, frontier).Scan(&finished); err != nil {
 				t.Fatal(err)
 			}
-			sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+			sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 			requireForkReceiverEffect(t, rt, seed.RunID, frontier, "consumer", "consumer", "existing_entity", sourceRows["consumer"].ID)
 			requireForkReceiverPostRevisionPolicyRefusal(t, rt, selected, root, seed.RunID, frontier, finished)
 		})

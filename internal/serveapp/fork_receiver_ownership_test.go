@@ -99,36 +99,6 @@ func snapshotForkReceiverApplication(t *testing.T, read func(context.Context) (m
 	return snapshot
 }
 
-func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID string) map[string]forkReceiverRow {
-	t.Helper()
-	rows, err := rt.DB.Query(`SELECT es.entity_id,es.flow_instance,es.entity_type,fi.current_state,CAST(es.fields AS TEXT)
-		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-		WHERE es.run_id=$1 ORDER BY es.entity_id`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	out := map[string]forkReceiverRow{}
-	for rows.Next() {
-		var row forkReceiverRow
-		var raw string
-		if err := rows.Scan(&row.ID, &row.Flow, &row.Type, &row.State, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &row.Fields); err != nil {
-			t.Fatal(err)
-		}
-		if _, duplicate := out[row.Flow]; duplicate {
-			t.Fatalf("fixture has duplicate owner rows for %s", row.Flow)
-		}
-		out[row.Flow] = row
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
 func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runID string, paths ...string) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
@@ -257,7 +227,7 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 		t.Fatalf("lost exact selected handler/local event: %+v", route)
 	}
 	if target := route.Target.Route(); route.Target.Code() != kind || target.FlowID != path || target.FlowInstance != path || target.EntityID != entityID {
-		t.Fatalf("%s/%s: target=%+v kind=%s; want %s entity=%s; rows=%+v", runID, path, target, route.Target.Code(), kind, entityID, readForkReceiverRows(t, rt, runID))
+		t.Fatalf("%s/%s: target=%+v kind=%s; want %s entity=%s; rows=%+v", runID, path, target, route.Target.Code(), kind, entityID, readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), runID))
 	}
 	var status, outcome, failure string
 	var claim, outcomeClaim, outcomes int
@@ -388,7 +358,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	})
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-	seedRows := readForkReceiverRows(t, rt, seed.RunID)
+	seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 	seedCompanions := map[string]map[string][]string{}
 	for _, receiver := range receivers {
 		if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
@@ -428,7 +398,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatal("duplicate ingress rematerialized a source occurrence")
 		}
 	}
-	sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+	sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 	if option.executionOnly {
 		for _, receiver := range receivers {
 			if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
@@ -531,7 +501,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, siblingSeed.RunID, prefix+"producer/work.ready").Scan(&siblingFrontier); err != nil {
 			t.Fatal(err)
 		}
-		siblingRows := readForkReceiverRows(t, rt, siblingSeed.RunID)
+		siblingRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), siblingSeed.RunID)
 		for _, receiver := range receivers {
 			path := prefix + receiver.Path
 			if siblingRows[path].ID != sourceRows[path].ID || siblingRows[path].Flow != path {
@@ -609,7 +579,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("fork identity: %+v", fork)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+	childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 	// This persisted child event has passed backend source-event loading and
 	// container preparation/publication. Compare their composition, not helpers.
@@ -989,7 +959,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-				seedRows := readForkReceiverRows(t, rt, seed.RunID)
+				seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
 					t.Fatalf("receiver seed ownership: %+v", seedRows)
 				}
@@ -1003,7 +973,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 					t.Fatal(err)
 				}
-				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+				sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				consumer := sourceRows["consumer"]
 				if consumer.ID != seedRows["consumer"].ID || consumer.Fields["marker"] != "consumer-owned" || consumer.Fields["processed_token"] != "receiver-proof" || consumer.State != "active" {
 					t.Fatalf("source receiver effect ownership: %+v", sourceRows)
@@ -1039,7 +1009,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")
 				}
-				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+				childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 				if !reflect.DeepEqual(childRows["consumer"], consumer) || !reflect.DeepEqual(childRows["producer"], producer) {
 					t.Fatalf("business fork rehomed producer/receiver: source=%+v child=%+v", sourceRows, childRows)
 				}

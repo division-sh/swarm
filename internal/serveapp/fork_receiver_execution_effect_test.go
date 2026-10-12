@@ -50,7 +50,7 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		}
 	}
 	if entityID != "" {
-		row := readForkReceiverRows(t, rt, runID)[path]
+		row := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), runID)[path]
 		var entity operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || entity.Entity.CurrentState != row.State || !reflect.DeepEqual(entity.Fields, row.Fields) {

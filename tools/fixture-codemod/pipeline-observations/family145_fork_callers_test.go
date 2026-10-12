@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 532 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c06f9e4fabcc807fab5d57a665024c04b8673c79527edf72f4c7957f0648f8ee" {
+	if err != nil || len(rows) != 539 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "1da8d1f7eededb46874616a0eda0f9a407f887bf1bc5fa7be2e3df115f6b0dbe" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -140,6 +140,13 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if family145ServedSnapshotCallers[row.Function] != 0 {
 			if err := family145ServedSnapshotCallerProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
+			}
+			continue
+		}
+		if family145ForkReceiverJoinedCallers[row.Function] != 0 {
+			normalized, err := family145ForkReceiverJoinedCallerInverse(row.Function, row.After)
+			if err != nil || normalized != row.Before {
+				t.Fatalf("receiver joined caller changed original workload/identity/assertions: %s/%v", row.Function, err)
 			}
 			continue
 		}

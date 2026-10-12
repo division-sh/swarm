@@ -5757,3 +5757,48 @@ Existing tracker/watchlist/spec suffice; no runtime contract changes, waiver,
 compatibility, push, PR, tier or server2. All qualification holds survive.
 Rebase waits for the orchestrator's #2617 merge signal. Receipts:
 ~/.cache/swarm-2542-family145/standing-mixed-*.
+
+## Whole served fork joined receiver inventory chain (2026-10-12)
+
+The entire readForkReceiverRows duplicate SQL/scan/JSON owner is deleted. All
+15 live calls across8 declarations and5 files now reuse EXISTING
+readWorkspaceProofReceiverRows -> storetest.ReadReceiverJoinedInventoryStorage
+-> original selected read transaction -> pipelinepersistence's exact joined
+physical oracle. The requested owner is the actual served runtime's Bus.Store(),
+which returns its original selected event store, not a reconstructed adapter.
+No new port, selector, query, transaction, permission or production behavior.
+
+The existing physical query has identical columns, run predicate, entity/path
+join and entity ordering. The existing decoder retains complete field JSON,
+number/null semantics, map shape, duplicate-flow refusal and fail-closed reads.
+The source-pinned proof compares both queries (only formatting whitespace after
+commas is normalized), pins the decoder and preserves every caller body through
+an exact inverse composed with the earlier application-snapshot migration.
+Owned-source inventory rejects the retired helper/calls and requires all15 live
+bus-owner arguments; foreign owner/call/assertion controls fail. Dormant .txt
+future-contract artifacts are not live Go consumers and are unchanged.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Supplemental acquisition, source/child physical row preservation and constructor-owned acquisition | reproduced and fixed | Original TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores BOTH backends under race, preserving all original complete field/identity/route/no-redispatch assertions |
+| Exact historical identity, restored healthy fork and no-mutation refusals | reproduced and fixed | Original TestRunForkHistoricalIdentityPublicExecutionBothStores and capability-refusal root BOTH stores under race, PASS59.922s combined with the supplemental root |
+| Ordinary business mutation and terminal/post-revision refusal | reproduced and fixed | Original independent-business and post-revision-refusal roots BOTH stores under race, assertions unchanged |
+| Materializing mixed optional/required/constructor recipients and execution helper | execution-proven through the same corrected path | Original policy-permutation root selected materializing_mixed plus012 controls on BOTH stores under race; combined3-root additional-path receipt PASS81.445s, not every permutation claimed |
+| Physical join multiplicity, ordering, terminal rows, detached values, exact read coordinator and invalid/cancelled/closed/NULL/partial evidence | execution-proven through the same corrected path | BOTH original ReceiverJoinedInventory physical-owner roots under race PASS17.681s; existing workspace decoder hostile proof also passes |
+
+Actual source mutation replaces the journey's selected bus owner with nil:
+BOTH stores fail at the original seed read, and the actual-source guard fails.
+Exact restoration is GREEN with every assertion retained. Initial guard RED
+was only a formatting comparison defect (space following a comma), repaired
+without changing SQL, rows or execution. Complete cheap collection PASS15.585s,
+six boundaries and affected U1000 pass. Immutable Before/24 receipts/prior
+Successor survive:1296/539, digest
+1da8d1f7eededb46874616a0eda0f9a407f887bf1bc5fa7be2e3df115f6b0dbe.
+Downward census PASS32.936s:7880 ->7858 findings,5576 ->5556 raw sites,
+22/20 removed, ZERO added; supplied-pool56 and uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Other producer-evidence, companion, delivery and fault reads remain explicit
+parent debt, not this chosen-chain closure. Existing tracker/watchlist/spec
+suffice; all qualification holds remain. Local only; no push/PR/tier/server2.
+Rebase still waits for #2617's merge signal. Receipts:
+~/.cache/swarm-2542-family145/fork-receiver-joined-*.
