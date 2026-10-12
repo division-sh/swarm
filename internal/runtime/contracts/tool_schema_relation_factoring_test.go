@@ -171,6 +171,20 @@ func TestToolSchemaRelationFactoringConsumers(t *testing.T) {
 			t.Fatalf("catalog refinement: %v", err)
 		}
 	})
+	t.Run("catalog_nested_record_refusal", func(t *testing.T) {
+		catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{"Pair": {Fields: map[string]TypeFieldSpec{
+			"mode": {Type: "text", Refinements: SchemaRefinements{EqualTo: "peer"}},
+			"peer": {Type: "text", Refinements: SchemaRefinements{Pattern: "^other"}},
+		}}}}
+		source := detachedEqualityObject(t, "string", "mode", "approved", true)
+		if err := source.Validate(map[string]any{"mode": "approved", "peer": "approved"}); err != nil {
+			t.Fatal(err)
+		}
+		err := ValidateCatalogFieldSupply("proof", source.Projection(), EntityFieldDecl{Type: "Pair"}, catalog)
+		if err == nil || !strings.Contains(err.Error(), "proof.peer source enum value is outside target schema") {
+			t.Fatalf("contextual member identity bypassed incompatible catalog peer: %v", err)
+		}
+	})
 	t.Run("map_key_nested", func(t *testing.T) {
 		for _, path := range []string{"items", "additionalProperties", "property"} {
 			source := map[string]any{"type": "object", "propertyNames": broad.Projection()}
