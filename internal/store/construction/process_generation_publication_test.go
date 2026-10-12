@@ -3,7 +3,10 @@ package construction_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,7 +125,7 @@ func TestProcessGenerationPublicationAndJoinedReleaseBothStores(t *testing.T) {
 
 func TestGenerationEffectAdmissionRequiresCurrentProcessBothStores(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		for _, field := range []string{"lease_id", "owner_id", "boot_id"} {
+		for _, field := range []string{"lease_id", "owner_id", "boot_id", "grant_lease_id", "grant_owner_id", "grant_boot_id"} {
 			t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres]+"/"+field, func(t *testing.T) {
 				selected, db := generationPublicationFixture(t, postgres)
 				ctx := context.Background()
@@ -182,17 +185,54 @@ func TestGenerationEffectAdmissionRequiresCurrentProcessBothStores(t *testing.T)
 				if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, probe); err != nil || !current {
 					t.Fatalf("independent prepared probe stopped being current before process fault: current=%t, %v", current, err)
 				}
-				// Inject a well-formed crossed process stamp without touching the grant.
+				// A foreign grant under a healthy native owner still reaches the
+				// transactional validator; a changed process stamp fences that owner.
+				grantMismatch := strings.HasPrefix(field, "grant_")
 				placeholder := "?"
+				grantPlaceholder := "?"
 				if postgres {
 					placeholder = "$1"
+					grantPlaceholder = "$2"
 				}
-				if _, err := db.ExecContext(ctx, `UPDATE runtime_process_generation SET `+field+`=`+placeholder, uuid.NewString()); err != nil {
+				query := `UPDATE runtime_process_generation SET ` + field + `=` + placeholder
+				arguments := []any{uuid.NewString()}
+				if grantMismatch {
+					crossed := evidence
+					switch field {
+					case "grant_lease_id":
+						crossed.ProcessAuthorityID = uuid.NewString()
+					case "grant_owner_id":
+						crossed.ProcessOwnerID = uuid.NewString()
+					case "grant_boot_id":
+						crossed.ProcessBootID = uuid.NewString()
+					}
+					if err := crossed.Validate(); err != nil {
+						t.Fatal(err)
+					}
+					raw, err := json.Marshal(crossed)
+					if err != nil {
+						t.Fatal(err)
+					}
+					query = `UPDATE runtime_generation_grants SET snapshot=` + placeholder + ` WHERE grant_id=` + grantPlaceholder
+					arguments = []any{string(raw), crossed.GrantID}
+				}
+				if _, err := db.ExecContext(ctx, query, arguments...); err != nil {
 					t.Fatal(err)
 				}
+				if !grantMismatch {
+					// Discovery may race the monitor. Either proof owner must establish
+					// exactly the same terminal decision before later effect admission.
+					if err := capability.ProveCurrent(ctx); err == nil {
+						t.Error("native proof accepted the crossed process stamp")
+					}
+					if result, terminal := capability.TerminalResult(); !terminal || result != (startupownership.TerminalResult{Cause: startupownership.TerminalOwnershipUnprovable}) {
+						t.Errorf("crossed process did not fence its native owner: terminal=%t result=%#v", terminal, result)
+					}
+				}
 				for _, authority := range []effects.Authority{probe, registration} {
-					if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
-						t.Fatalf("crossed process admitted %s: current=%t, %v", authority.Kind, current, err)
+					wantCurrent := grantMismatch && authority.Kind == effects.AuthorityStartupProbe
+					if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current != wantCurrent {
+						t.Errorf("effect currentness after %s mismatch: %s current=%t want=%t, %v", field, authority.Kind, current, wantCurrent, err)
 					}
 				}
 				definition, ok := effects.RegistrationFor("provider_registration")
@@ -204,9 +244,19 @@ func TestGenerationEffectAdmissionRequiresCurrentProcessBothStores(t *testing.T)
 					Adapter: definition.Adapter, Transport: definition.Transport, RequestFingerprint: effects.Fingerprint([]byte("crossed-process")),
 					Lineage: map[string]string{"intent_id": intentID}, Now: time.Now().UTC(),
 				})
-				failure, ok := failures.EnvelopeFromError(err)
-				if !ok || failure.Detail.Code != "external_effect_authority_stale" || failure.Detail.Attributes["reason"] != "generation_grant_process_not_current" {
-					t.Fatalf("wrong mutation refusal: %v", err)
+				if grantMismatch {
+					failure, ok := failures.EnvelopeFromError(err)
+					if !ok || failure.Detail.Code != "external_effect_authority_stale" || failure.Detail.Attributes["reason"] != "generation_grant_process_not_current" {
+						t.Errorf("wrong transactional grant refusal: %v", err)
+					}
+					if err := capability.ProveCurrent(ctx); err != nil {
+						t.Errorf("foreign grant retired the healthy native owner: %v", err)
+					}
+					if result, terminal := capability.TerminalResult(); terminal {
+						t.Errorf("foreign grant fenced the healthy native owner: %#v", result)
+					}
+				} else if !errors.Is(err, startupownership.ErrProcessNotCurrent) {
+					t.Errorf("wrong terminal-owner mutation refusal: %v", err)
 				}
 				var operations, attempts int
 				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_operations`).Scan(&operations); err != nil {
