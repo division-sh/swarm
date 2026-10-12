@@ -21,6 +21,29 @@ func ReadGateNodeDeliveryStatusForTest(ctx context.Context, selected any, event,
 	})
 }
 
+type A2EarlyRefusalStorage = delivery.A2EarlyRefusalStorage
+
+func ReadA2EarlyRefusalForTest(ctx context.Context, selected any, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (A2EarlyRefusalStorage, error) {
+		return delivery.ReadA2EarlyRefusalTx(ctx, tx, postgres, eventID, nodeID)
+	})
+}
+
+func ReadGateNodeDeliveryIdentityForTest(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateNodeDeliveryIdentityTx(ctx, tx, postgres, eventID, nodeID)
+	})
+}
+
+func CountGateNodeSettledAttemptsForTest(ctx context.Context, selected any, eventID, nodeID string) (int, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountGateNodeSettledAttemptsTx(ctx, tx, postgres, eventID, nodeID)
+	})
+}
+
 func ReadGateEventFailureForTest(ctx context.Context, selected any, eventID string) (string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		return delivery.ReadGateEventFailureTx(ctx, tx, eventID)

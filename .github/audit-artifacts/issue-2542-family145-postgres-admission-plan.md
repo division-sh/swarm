@@ -4382,3 +4382,44 @@ immutable mechanical inputs remain unchanged. Supplied-pool calls61,
 carrier/openers, broader gate/A2/parent closure and qualification holds remain.
 No push/PR, tier, server2 or waiver. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/accumulator-evidence-*.
+
+## Shared Gate/A2 Dependency: Known-Target and Same-Commit Read Chain
+
+The entire raw observation tail in both known-target and same-commit join
+files is retired: neither file retains selected.db or selected.postgres.
+Fixed eventrecord worker-output and classified delivery claim/refusal readers
+retain the original SQLite/PostgreSQL literals, run/source/name conjunction,
+count/lexical-minimum coalescence, node/event conjunction, LEFT JOIN settled
+attempt aggregate, grouping, failure bytes, and disposition-independent
+settled count. No public SQL/column/status selector or changed normal source,
+handler, join, schedule, claim, receipt, identity or restart behavior is added.
+
+All three original journey roots passed both stores under race25.172s,
+including held worker-before-arm, early refusal before/after arm/restart and
+same-business-commit publication plus exact restart readbacks. Four native
+roots PASS19.663s: actual pending delivery preserves NULL/LEFT JOIN defaults;
+actual live attempt counts zero; genuinely settled failure preserves physical
+failure bytes/grouping/count/identity; independent reads use three native
+read commits; real agent settlement is excluded from node readers. A compiled
+source admits two same-parent outputs, another-parent output and a different
+event name: exact count=2/lexical minimum, foreign run/source zero, cancellation,
+raw/nil/uninitialized/closed refusals and complete unchanged data/history/lease/
+clock snapshots are checked. These storage controls are not new execution or
+process-restart claims; the original journey proofs supply those cuts.
+
+Finite transformation controls preserve every original business/refusal/replay
+assertion and read destination/order; exact literal SQL correspondence keeps
+both dialects, including placeholders and UUID casts. Initial controls found
+the wrong recipe-count expectation (two existing receipts gain Successors,
+only one new row) and a correspondence normalizer that collapsed both dialects;
+the controls now pin actual1218 recipes and preserve the original distinct
+literals, not relaxed matching. Final collection PASS8.641s; six persistence
+boundaries PASS3.845s; U1000 clean. Corpus1218/432, transition digest
+f4c00d4c33987fcc8b259ce81c2604494b1354ad980d86a63c6715d6bb9eec9e;
+immutable Before/After/mechanical receipts unchanged, current semantic
+Successors explicitly mapped. Downward census PASS153.057s, final unchanged
+census PASS25.753s:8393 ->8383 findings,6003 ->5993 raw sites, ten removed/
+zero added; uncertainty67 unchanged. Carrier/openers, broader gate/A2/parent
+and existing semantic/qualification holds remain open; supplied-pool calls61.
+No push/PR, tier, server2 or waiver. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/a2-known-target-claims-*.

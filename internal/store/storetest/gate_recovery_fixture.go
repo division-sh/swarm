@@ -63,6 +63,26 @@ func CountGateSourceNamedEvents(ctx context.Context, selected any, name, source 
 	return private.CountGateSourceNamedEventsForTest(ctx, selected, name, source)
 }
 
+type A2WorkerOutputStorage = private.A2WorkerOutputStorage
+
+func ReadA2WorkerOutputs(ctx context.Context, selected any, runID, sourceEventID string) (A2WorkerOutputStorage, error) {
+	return private.ReadA2WorkerOutputsForTest(ctx, selected, runID, sourceEventID)
+}
+
+type A2EarlyRefusalStorage = private.A2EarlyRefusalStorage
+
+func ReadA2EarlyRefusal(ctx context.Context, selected any, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
+	return private.ReadA2EarlyRefusalForTest(ctx, selected, eventID, nodeID)
+}
+
+func ReadGateNodeDeliveryIdentity(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
+	return private.ReadGateNodeDeliveryIdentityForTest(ctx, selected, eventID, nodeID)
+}
+
+func CountGateNodeSettledAttempts(ctx context.Context, selected any, eventID, nodeID string) (int, error) {
+	return private.CountGateNodeSettledAttemptsForTest(ctx, selected, eventID, nodeID)
+}
+
 func ReadGateRunEventNames(ctx context.Context, selected any, run string) ([]string, error) {
 	return private.ReadGateRunEventNamesForTest(ctx, selected, run)
 }

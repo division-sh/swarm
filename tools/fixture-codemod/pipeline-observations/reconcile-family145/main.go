@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "d629db1a91f494a270d514415c2941cdff8ca10b6f65bb9b50d6848e24231479"
+const targetDigest = "f4c00d4c33987fcc8b259ce81c2604494b1354ad980d86a63c6715d6bb9eec9e"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -121,6 +121,8 @@ var files = []string{
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go",
 	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go",
 	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go",
+	"internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+	"internal/runtime/pipeline/a2_same_commit_join_binding_external_test.go",
 	"internal/runtime/pipeline/selection_retry_cas_external_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
@@ -225,6 +227,8 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go":                     {"TestReceiverCompositionActivationReuseAndConflictBothStores": true},
 	"internal/runtime/pipeline/delivery_target_declared_key_supported_surface_external_test.go": {"TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores": true},
 	"internal/runtime/pipeline/a2_bound_reply_binding_external_test.go":                         {"testA2BoundReplyJourney": true, "a2CorruptBoundReplyEntry": true, "a2BoundReplySourceSnapshot": true},
+	"internal/runtime/pipeline/a2_known_target_binding_external_test.go":                        {"TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothStores": true, "a2KnownTargetEarlyRefusal": true},
+	"internal/runtime/pipeline/a2_same_commit_join_binding_external_test.go":                    {"TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores": true},
 	"internal/runtime/pipeline/a2_count_join_execution_external_test.go":                        {"TestA2CountJoinRealExecutionAndRestartOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_until_race_external_test.go":                             {"TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_close_rollback_external_test.go":                         {"TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores": true},

@@ -690,6 +690,15 @@ func CountGateSourceNamedEventsForTest(ctx context.Context, selected any, name, 
 	})
 }
 
+type A2WorkerOutputStorage = eventrecord.A2WorkerOutputStorage
+
+func ReadA2WorkerOutputsForTest(ctx context.Context, selected any, runID, sourceEventID string) (A2WorkerOutputStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, sourceEventID}, func(ctx context.Context, tx *sql.Tx) (A2WorkerOutputStorage, error) {
+		return eventrecord.ReadA2WorkerOutputsTx(ctx, tx, postgres, runID, sourceEventID)
+	})
+}
+
 func ReadGateRunEventNamesForTest(ctx context.Context, selected any, run string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadGateRunEventNamesTx(ctx, tx, run)

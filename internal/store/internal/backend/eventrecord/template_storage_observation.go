@@ -12,6 +12,23 @@ func CountGateSourceNamedEventsTx(ctx context.Context, tx *sql.Tx, name, source 
 	return count, err
 }
 
+type A2WorkerOutputStorage struct {
+	Count   int
+	EventID string
+}
+
+func ReadA2WorkerOutputsTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, sourceEventID string) (A2WorkerOutputStorage, error) {
+	query := `SELECT COUNT(*), COALESCE(MIN(CAST(event_id AS TEXT)), '') FROM events WHERE run_id=? AND source_event_id=? AND event_name='item.completed'`
+	if postgres {
+		query = `SELECT COUNT(*), COALESCE(MIN(event_id::text), '') FROM events WHERE run_id=$1::uuid AND source_event_id=$2::uuid AND event_name='item.completed'`
+	}
+	var out A2WorkerOutputStorage
+	if err := tx.QueryRowContext(ctx, query, runID, sourceEventID).Scan(&out.Count, &out.EventID); err != nil {
+		return A2WorkerOutputStorage{}, err
+	}
+	return out, nil
+}
+
 func ReadGateRunEventNamesTx(ctx context.Context, tx *sql.Tx, run string) (out []string, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT event_name FROM events WHERE run_id = $1 ORDER BY created_at`, run)
 	if err != nil {

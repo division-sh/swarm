@@ -304,6 +304,51 @@ func ReadGateNodeDeliveryStatusTx(ctx context.Context, tx *sql.Tx, event, node s
 	return out, nil
 }
 
+type A2EarlyRefusalStorage struct {
+	Status, Failure, Outcome string
+	SettledAttempts          int
+}
+
+func ReadA2EarlyRefusalTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
+	query := `SELECT d.status, CAST(COALESCE(d.failure, '{}') AS TEXT), COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
+		WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? GROUP BY d.status, d.failure`
+	if postgres {
+		query = `SELECT d.status, COALESCE(d.failure, '{}'::jsonb)::text, COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
+			FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
+			WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 GROUP BY d.status, d.failure`
+	}
+	var out A2EarlyRefusalStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&out.Status, &out.Failure, &out.SettledAttempts, &out.Outcome); err != nil {
+		return A2EarlyRefusalStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadGateNodeDeliveryIdentityTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
+	query := `SELECT delivery_id FROM event_deliveries WHERE event_id=? AND subscriber_type='node' AND subscriber_id=?`
+	if postgres {
+		query = `SELECT delivery_id FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2`
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func CountGateNodeSettledAttemptsTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (int, error) {
+	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
+					WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? AND a.closure_kind='settled'`
+	if postgres {
+		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
+						WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 AND a.closure_kind='settled'`
+	}
+	var count int
+	err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&count)
+	return count, err
+}
+
 func CountGateEventSubscriberDeliveriesTx(ctx context.Context, tx *sql.Tx, event, subscriber string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1 AND subscriber_id = $2`, event, subscriber).Scan(&count)
