@@ -3125,3 +3125,57 @@ watchlist/architecture disposition is unchanged: narrower original owner ports,
 no new abstraction, framework or issue. M01/Docker/drain/D3/M07/rollback holds
 remain unwaived. No push, PR, server2, local tier/full, budget/timeout raise,
 classifier relaxation, arbitrary relocation or compatibility path is introduced.
+
+### Complete Reset Transport-Completion-Loss Fixture
+
+The ready reset replay consumer now opens once through the existing native
+PostgreSQL construction owner. Its complete inline observation/fault dependency
+is migrated; the file has no raw pool, SQL, getter or reconstructed coordinator.
+Process capability, inventory planner, reset locks, quiescer, cleaner, empty
+runtime-context collaborator and counting lifecycle remain their original
+owners. This is the original PostgreSQL administrative component witness, not
+a newly claimed served/process-restart or SQLite transport-fault workload.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| API-idempotency | The actual original PostgreSQL lose_reset_api_completion BEFORE INSERT trigger and exact function/trigger DROP statements use the original selected writer. The domain operation must complete before API completion fails; no earlier fault or manufactured result substitutes for it. SQLite faults are refused rather than inventing a sibling fault posture. |
+| adminpersistence | The unfiltered physical record QueryRow and whole-store operation COUNT(*) remain separate native reads. Record bytes are detached but not decoded, normalized, phase-filtered or replaced by strong canonical operation lookup. The consumer retains JSON decoding and PhaseCompleted. |
+| Existing exact-run physical observation | The later run is counted ONLY by its exact run_id with the original COUNT(*) statement; no extra state/type/source predicate. Its count remains independent of the reset-operation reads. |
+| Existing native coordinator and cleanup owners | Invalid/raw/cancelled/closed reads discard evidence; empty count remains zero and missing record remains sql.ErrNoRows. Actual PostgreSQL install/removal each begin and commit exactly one write on the selected coordinator and leave zero active work. Once-only fault restoration runs at the original pre-record cut and also on assertion failure, before process-capability/store cleanup. |
+| Finite source/assertion/SQL controls | One complete family145 function transition records the exact current Successor on its existing family144 recipe. Every original Before/After and the24 mechanical receipts remain; total recipes stays1170. Exact trigger text, physical SELECTs, one-minute/48-hour request clocks, byte decoding, result equality, operation/run cardinalities and one lifecycle withdrawal are preserved. Added error detail also distinguishes actual completion failure from an earlier reset rejection. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Durable completed reset survives lost API completion, then replays without touching later work after cache expiry | reproduced and fixed: TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration, original PostgreSQL scope under race; initial6.690s root and final strengthened actual-cut/cancel-safe-restoration aggregate13.453s |
+| Empty/absent/raw/foreign/cancelled/closed record, count and fault ownership | execution-proven through the same corrected path: TestResetCompletionStorageAndFaultPortsRefuseUnavailableOwnersBothStores, both read backends under race, original9.260s and final stricter cancellation/once-only cleanup aggregate26.130s |
+| Actual original-coordinator installation/removal and missing-fault refusal | execution-proven through the same corrected path: the PostgreSQL child of that owner test, exact transaction begin/write-commit deltas and active=0; native SQLite fault refused before mutation |
+| Original replay/identity/cardinality/clock and query/fault/cleanup correspondence | execution-proven through the same corrected path: TestFamily145ResetCompletionRetainsDurableReplayAndExactTransportFault and finite hostile controls; source-format repair/receipt recorded below |
+
+Affected boundary/event/delivery/lifecycle/revision/writer guards PASS6.490s;
+seven-package U1000 clean. Existing location/cleanup and unaffected receipts
+carry. The first source-correspondence check was RED0.024s because its expected
+48-hour multiplication text had spacing unlike the canonical AST print; this
+does not waive the original clock, which remains source-compared and hostile-
+controlled. The native source/cleanup/clock and hostile assertion controls then
+passed, including discarded restoration and moving removal past record-read
+counterexamples. The combined finite run also caught an incorrectly expected
+1171 recipe count: the existing family144 row is reused via Successor, not a new
+row, so the exact count remains1170 without discarding any history. The count
+repair is qualified separately: finite/idempotency/current-source and whole
+family145 workload/hostile controls PASS5.369s; no repeat of unchanged native
+workloads. All other family145/historical/rename controls in the disclosed5.567s
+aggregate had already passed; only the explicit recipe-count root was red.
+
+Downward ratchet PASS186.980s removed12/added0:8881 ->8869, confirmed raw6399
+->6389, uncertainty67 and collector/policy unchanged. After the source-proof
+spacing/cleanup-control repair, warm ratchet PASS24.910s confirms0/0. Broader
+54774/39059 is not debt. Supplied pools88 ->87 (85 external +2 private),
+provisional M0/D50/S37 and47 qualified openings. Final count-corrected ratchet
+PASS24.750s confirms0/0; retirement guards PASS6.022s. Signed-head complexity
+receipts are recorded with this checkpoint; dry-run
+Changes=[] and native/private owner receipts carry unchanged. Ordinary runs
+Go1.25.0 while #2622 stays OPEN, U1000 Go1.26.8; all local on vemew.
+No production reset lifecycle, source admission, cache TTL or cleanup catalog
+changes. Broader #2542/#2151, M01/Docker/drain/D3/M07/rollback holds stay open;
+existing watchlist/architecture disposition needs no new node or issue. No push,
+PR, server2, tier/full, budget/timeout raise, compatibility path or new framework.
