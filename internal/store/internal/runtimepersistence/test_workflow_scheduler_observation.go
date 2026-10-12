@@ -16,6 +16,12 @@ func CountRunTimerStorageForTest(ctx context.Context, selected any, runID string
 	})
 }
 
+func CountRunEventTimerStorageForTest(ctx context.Context, selected any, runID, eventType string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return genericschedule.CountRunEventTimerStorageTx(ctx, tx, runID, eventType)
+	})
+}
+
 func SetA2ActivationJoinScheduleFailureForTest(ctx context.Context, selected any, enabled bool) error {
 	postgres, err := workflowProjectionNativePostgres(selected)
 	if err != nil {

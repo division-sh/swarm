@@ -13,6 +13,12 @@ func CountTimerRowsForRun(ctx context.Context, tx *sql.Tx, runID string) (int, e
 	return count, nil
 }
 
+func CountRunEventTimerStorageTx(ctx context.Context, tx *sql.Tx, runID, eventType string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id=$1 AND fire_event=$2`, runID, eventType).Scan(&count)
+	return count, err
+}
+
 // CountWorkflowSchedulerTimersForTest retains physical history, not active eligibility.
 func CountWorkflowSchedulerTimersForTest(ctx context.Context, tx *sql.Tx, postgres bool, entity, path string) (int64, error) {
 	query := `SELECT COUNT(*) FROM timers WHERE entity_id = ? AND flow_instance = ? AND owner_agent = ?`

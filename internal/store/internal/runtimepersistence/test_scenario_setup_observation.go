@@ -24,6 +24,12 @@ func CountRunMutationStorageForTest(ctx context.Context, selected any, runID str
 	})
 }
 
+func CountRunEventMutationStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return mutationlog.CountRunEventMutationStorageTx(ctx, tx, runID, eventID)
+	})
+}
+
 func ReadTemplateAccountDiagnosticsForTest(ctx context.Context, selected any) ([]TemplateAccountDiagnosticStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, nil, entitystore.ReadTemplateAccountDiagnosticsTx)
 }

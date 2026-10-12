@@ -4276,3 +4276,41 @@ closes creation-trigger wiring only, not the entire accumulator/gate/A2 family,
 shared carrier/openers or parent. Supplied-pool calls61 and previous qualification
 holds remain. No push/PR, tier, server2 or new gate. Signed-head complexity
 follows. Receipts ~/.cache/swarm-2542-family145/a2-creation-faults-*.
+
+## Shared Gate/A2 Dependency: Remaining Run/Event Count Cuts
+
+Lost-owner-result continuation history and membership timer history now use
+fixed mutationlog and genericschedule ports, retaining run_id/caused_by_event
+and run_id/fire_event conjunctions respectively. No status, entity, path, owner,
+ordering or active-only filter is added. Context, destination and the exact
+eight-mutation/one-timer assertions stay. Each port uses the original selected
+read coordinator. Both complete caller files now have no selected.db/postgres
+reference, not merely no raw operation at the changed line.
+
+Two original roots passed both stores under race35.741s, including actual
+continuation history=8 and lawful zero/nonzero-membership schedule cases.
+The existing native timer proof retains all six actual admission/cancellation
+scopes and adds independent run/event counts: five rows including cancelled
+history and other entity/path/owner, one foreign-run row and zero foreign-event
+rows. Native cancellation, raw/nil/uninitialized/closed refusals and read-commit
+counts are preserved/extended. No normal source/runtime behavior is weakened.
+
+The first new mutation-read control incorrectly assumed initial construction
+has a causing event. Its both-store NoRows RED is a fixture premise correction,
+not a production bug or waived proof. The corrected native control uses an
+actual admitted, unexecuted declared event and positive NULL-cause construction
+history: the event-specific count must remain zero, while original real-handler
+positive=8 remains in the executed journey. Complete application snapshots must
+remain unchanged. Native corrected group PASS17.457s. Deliberately widening
+caused_by_event to a non-null parameter witness reproduces both-store RED10.931s;
+exact predicate restoration GREEN13.911s. This is not a retry loop.
+
+Complete gate/current/historical finite guards PASS8.615s, six boundaries
+PASS3.419s, U1000 clean. Downward census PASS135.246s:8411 ->8407 findings,
+6020 ->6016 raw sites, four removed/zero added; uncertainty67 unchanged.
+Corpus1216/428, digest
+9e9f53c5df6f8aefc518f008749c6c954fee0414c7d6901df84d4bdc40d3baee;
+immutable mechanical inputs/combined digest unchanged. Carrier/openers and
+broader gate/A2/parent closure remain open, supplied-pool calls61 unchanged.
+No push/PR, tier, server2 or qualification waiver. Signed-head complexity
+follows. Receipts ~/.cache/swarm-2542-family145/gate-causal-counts-*.

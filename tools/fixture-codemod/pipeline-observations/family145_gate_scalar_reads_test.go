@@ -9,6 +9,12 @@ import (
 )
 
 var family145GateScalarReadCuts = map[string][]string{
+	"a2_join_commit_ack_loss_external_test.go|TestA2JoinCloseLostOwnerResultRecoversOnBothStores": {
+		"continuationDiffs, err := storetest.CountRunEventMutationStorage(ctx, selected.events, runID, completionID)",
+	},
+	"a2_membership_snapshot_admission_external_test.go|TestA2MembershipSnapshotValidationOnBothStores": {
+		"schedules, err := storetest.CountRunEventTimerStorage(f.ctx, selected.events, runID, wantEvent)",
+	},
 	"prospective_publication_external_test.go|TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores": {
 		"initialStorage, err := storetest.ReadWorkflowRunFieldsRevisionStorage(context.Background(), selected.events, runID)",
 		"initialFields, initialRevision := initialStorage.Fields, initialStorage.Revision",
@@ -63,6 +69,28 @@ var family145GateScalarReadCuts = map[string][]string{
 		"after, err := storetest.CountRunEventNameStorage(context.Background(), s.events, runID, \"selected\")",
 		"after, err = storetest.CountRunEventNameStorage(context.Background(), s.events, runID, \"selected\")",
 	},
+}
+
+func TestFamily145GateCausalCountsRetainExactPhysicalPredicatesAndNativeReaders(t *testing.T) {
+	for _, tc := range []struct{ physicalFile, physical, bridgeFile, bridge, ids, args string }{
+		{"mutationlog/selected_cleanup_observation.go", "CountRunEventMutationStorageTx", "test_scenario_setup_observation.go", "CountRunEventMutationStorageForTest", "runID, eventID", "runID, eventID"},
+		{"genericschedule/test_workflow_scheduler_observation.go", "CountRunEventTimerStorageTx", "test_workflow_scheduler_observation.go", "CountRunEventTimerStorageForTest", "runID", "runID, eventType"},
+	} {
+		physical := family145ConversationForkOwnerSource(t, "internal/backend/"+tc.physicalFile, tc.physical)
+		queries := family145ConnectorSQL(t, "package proof\n"+physical)
+		want := "SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2"
+		if tc.physical == "CountRunEventTimerStorageTx" {
+			want = "SELECT COUNT(*) FROM timers WHERE run_id=$1 AND fire_event=$2"
+		}
+		expected := family145ConnectorSQL(t, "package proof\nconst query = `"+want+"`")
+		if len(queries) != 1 || queries[0] != expected[0] || strings.Count(physical, ", "+tc.args+").Scan(&count)") != 1 {
+			t.Fatalf("%s changed original physical run/event conjunction, arguments or destination", tc.physical)
+		}
+		bridge := family145ConversationForkOwnerSource(t, "internal/runtimepersistence/"+tc.bridgeFile, tc.bridge)
+		if strings.Count(bridge, "return readFanOutSemanticStorage(ctx, selected, []string{"+tc.ids+"},") != 1 || strings.Count(bridge, tc.physical+"(ctx, tx, "+tc.args+")") != 1 {
+			t.Fatalf("%s escaped original selected reader or changed argument/context order", tc.bridge)
+		}
+	}
 }
 
 func TestFamily145ProspectiveProjectionSQLCorrespondsToAllOriginalCuts(t *testing.T) {

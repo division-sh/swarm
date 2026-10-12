@@ -10,6 +10,10 @@ func CountRunMutationStorage(ctx context.Context, selected any, runID string) (i
 	return private.CountRunMutationStorageForTest(ctx, selected, runID)
 }
 
+func CountRunEventMutationStorage(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	return private.CountRunEventMutationStorageForTest(ctx, selected, runID, eventID)
+}
+
 type ScenarioSetupRunStorage = private.ScenarioSetupRunStorage
 type PostgresScenarioSetupEntityStorage = private.PostgresScenarioSetupEntityStorage
 

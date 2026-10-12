@@ -260,9 +260,8 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			fired := exactJoinPersistedArm(t, final)
 			// Eight continuation diffs: four fields, stage, stage-entry and
 			// accumulation bookkeeping, and the settled join bucket.
-			var continuationDiffs int
-			if err := selected.db.QueryRowContext(ctx,
-				"SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2", runID, completionID).Scan(&continuationDiffs); err != nil {
+			continuationDiffs, err := storetest.CountRunEventMutationStorage(ctx, selected.events, runID, completionID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if final.Fields["final_expected"] != int64(2) || final.Fields["final_completed"] != int64(2) || final.Fields["final_reason"] != string(joinruntime.CloseReasonComplete) ||

@@ -116,8 +116,8 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 						t.Fatalf("zero members did not retain deferred completion: %#v", arms[0])
 					}
 				}
-				var schedules int
-				if err := selected.db.QueryRowContext(f.ctx, "SELECT COUNT(*) FROM timers WHERE run_id=$1 AND fire_event=$2", runID, wantEvent).Scan(&schedules); err != nil ||
+				schedules, err := storetest.CountRunEventTimerStorage(f.ctx, selected.events, runID, wantEvent)
+				if err != nil ||
 					schedules != 1 || arms[0].Status != wantStatus || len(f.observer.witnesses()) != len(commits)+1 {
 					t.Fatalf("membership entry/arm/schedule was not one selected business commit: schedules=%d status=%s err=%v", schedules, arms[0].Status, err)
 				}

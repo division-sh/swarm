@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "ac22957216f5d2cc752710e1aac28a9e73b3c891a0a53d25d0c505b19a980d18"
+const targetDigest = "9e9f53c5df6f8aefc518f008749c6c954fee0414c7d6901df84d4bdc40d3baee"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -231,7 +231,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_join_commit_ack_loss_external_test.go":                        {"TestA2JoinCloseLostOwnerResultRecoversOnBothStores": true},
 	"internal/runtime/pipeline/a2_activation_join_seam_external_test.go":                        {"TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores": true, "a2ActivationJoinScheduleFault": true},
 	"internal/runtime/pipeline/a2_join_result_types_external_test.go":                           {"TestA2JoinResultTypesRealExecutionAndRestartOnBothStores": true},
-	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true, "footprint/*a2MembershipAdmission": true},
+	"internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go":               {"failure/*a2MembershipAdmission": true, "footprint/*a2MembershipAdmission": true, "TestA2MembershipSnapshotValidationOnBothStores": true},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go":                     {"TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores": true},
 	"internal/runtime/pipeline/a2_accumulator_canonical_evidence_external_test.go":              {"TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores": true, "a2CanonicalAccumulatorEvidence": true},
 	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go":                     {"evidence/*a2AccumulatorPersistenceProof": true, "TestA2AccumulatorKeyedExecutionPersistenceOnBothStores": true, "TestA2AccumulatorPublicationFailureRollsBackOnBothStores": true},
