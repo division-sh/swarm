@@ -471,8 +471,8 @@ units:
       - github.com/division-sh/swarm/internal/runtime/conformance
     run: '^(Test($|[^FHIV].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$'
     required_children:
-      TestDeploymentSourceChangedPinPublicForkAndLostResponse: [root/sqlite, root/postgres, singleton/sqlite, singleton/postgres]
-      TestEventSourceChangedPinPublicForkAndLostResponse: [root/sqlite, root/postgres, singleton/sqlite, singleton/postgres]
+      TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction: [root/sqlite, root/postgres, singleton/sqlite, singleton/postgres]
+      TestEventSourceChangedPinPublicForkReplayAfterReconstruction: [root/sqlite, root/postgres, singleton/sqlite, singleton/postgres]
       TestSelectedDeploymentExternalEffectRecoveryBothStores: [authorized/sqlite, authorized/postgres, response_observed/sqlite, response_observed/postgres, settled/sqlite, settled/postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
