@@ -9631,7 +9631,10 @@ engine:
         release through the existing process-possession owner. This is a separately timed kernel
         observation outside the MVCC snapshot, not authority, holder identity, a retained lease,
         or evidence that future boot acquisition will succeed. It may momentarily contend with
-        another observer. Durable lineage is inspected independently in the consistent snapshot;
+        another observer. Healthy native contention is a completed unavailable observation;
+        its typed occupied classification remains distinct from identity, cancellation and
+        cleanup failures, which the public observation must not suppress.
+        Durable lineage is inspected independently in the consistent snapshot;
         a free kernel lock cannot override corrupt or repair-required lineage. SQLite uses only
         the existing safe engine-disjoint .possession coordinate: canonical path, supported local
         filesystem, owner-only mode on the possession coordinate, current-user-owned regular
