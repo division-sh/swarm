@@ -5,6 +5,8 @@ https://github.com/division-sh/swarm/issues/2447#issuecomment-6132342528
 Pre-audit: issue-2447-event-admission-preimplementation.md, original audit-only
 af7feee8f on merged ab1f10dac. Implementation/code-positive proof is local;
 hosted exact-head lifecycle and independent PR approval remain required.
+Cycle1 integration below supersedes original-base qualification/current-state
+wording only; the original raw receipts and source identities remain historical.
 
 ## Class, Ownership And Measured Outcome
 
@@ -162,7 +164,7 @@ No row relies only on shared-owner prose or loose identity membership.
 Q04 is internal native reconstruction, not public process restart; Q02 supplies
 the separate real public restart. No paid provider/Docker/soak/local full credit.
 
-## Receipts, Qualification And Remaining Risk
+## Original-Base Receipts, Qualification And Remaining Risk
 
 Evidence directory: /home/youmew/.local/state/agent-g-2447-event-admission-20261012.
 Raw outputs and failed controls are retained, not relabelled. Code/test qualified
@@ -248,3 +250,77 @@ explicit ordered refusal/provenance phases and executable counterexamples at
 is uncertain without its own census; one or more cross-family PRs, no invented
 estimate or closure promise. Exact-head independent review and hosted lifecycle
 remain the final merge gates; no merge approval is claimed in this audit.
+
+## Cycle1 Integrated Proof Addendum
+
+Reviewer6133290645 found code PASS at8aa9592e0, but required the real #2624
+catalog conflict, stale tracker/audit and watchlist state to be resolved before
+exact-head re-review. One signed rebase consumes master
+0bfc09a2fad8a19d8da24103ac0cb3e3fcd4cd2c. Fresh executable source is clean
+1bd6817fd40d01572acc7d5bc8dc98c75d86d461, linux/amd64,cgo1,gowork empty,
+go1.26.8. The final receipt-recording commit changes audit Markdown only;
+no fresh receipt is relabelled as executing that later Git identity. Hosted
+lifecycle must still qualify the actual pushed final head.
+
+The sole rebase conflict was the runtime-purpose proof list. A parsed YAML
+equality control removes exactly our two entries and two runtime references,
+then compares the entire remaining catalog to0bfc: equal. All seven process
+proof IDs, capability/backend evidence, close proofs and the retired maintenance
+purpose/command removal survive. The union has22 unique runtime refs. No source,
+schema, selected-store, publication, cancellation or process-lifetime code from
+master is replaced. Range-diff confirms all nine original patches otherwise
+match; the five implementation/test/golden files are byte-identical to8aa.
+
+Fresh source/consumer census confirms the same sole product YAML owner and
+exactly one production source-artifact loader call; disk convenience remains
+test-only. #2616/#2617 remain metadata-only overlaps, #2637 has no target overlap.
+The complete49-row F/C/Q/X table remains the closure boundary, not a widened
+process repair. F01-F26/C01-C12 execute in the fresh race owner/consumer and
+refinement controls; Q01-Q05 execute in the fresh supported receipt. Q02 public
+same-tree restart, Q03 real typed refusal/no partial events and Q04 internal
+DB-retained artifact reconstruction remain separately credited on both stores.
+X01-X06 retain their actual original-source compiling RED3 controls; no new
+mutation run is fabricated. Their owner/shared-helper/test bytes are unchanged,
+and all corresponding fresh positive controls pass after integration.
+
+Evidence directory: /home/youmew/.local/state/agent-g-2638-2624-integration.
+All commands use the admission wrapper, PG16 override where required, and
+unchanged assertions/timeouts. Zero failure/skip across every completed receipt:
+
+| Integrated receipt | Passing instances/root executions | SHA256 |
+|---|---:|---|
+| owner-consumers.jsonl, race3 | 5709/153 | 498b84c739ff8b6cc7c0c0e05515e0e4aba081b1de029ceeb427d3ed0a1c2c79 |
+| supported.jsonl, both stores | 14/6 | eb5c1614611b36541de2782f4a1feded7863bda17202244b74c01e8a74863a92 |
+| census-guards.jsonl, eight packages | 1335/274 | d2d66ac86b81d23e252d9f93363ef623335bc452f78503151246ee8006d43559 |
+| structural.jsonl, complete structural unit | 442/81 | 59ee6e34ca92f263f240ca8cd9b12b47d5af06e00daeecc01878775c6ebd9f1b |
+| guard-complement.jsonl | 9/9 | b0d34bbb57849126b7f0ff4b69949d6d185c8678152056b49fe1c0ea013a7d3c |
+
+Exact touched-package pre-push scope: contracts, tools, releasee2e, conformance,
+cliapp, apiv1, store and testplanning;
+`-run '^Test.*(Census|Inventory|Registry|Guard|Ownership|Static|PersistenceAuthority|PublicSurface)'`.
+The separate named complement executes all five non-keyword contract guards and
+four managed-effect/compute primitive controls. Set comparison confirms ALL34
+file-defined contract guard/static roots passed. The complete structural unit
+comes directly from the current test-proof-plan owner,81 roots; not local core.
+The authority registry and debt ratchet pass: actual10611 == inherited10611 on
+new base0bfc, collector1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90.
+No authority classification, debt/complexity baseline or guard is changed.
+
+Independent committed0bfc/1bd complexity passes with unchanged policy:
+cyclo>=30 254->253; cognitive>=30 551->549; maxima186/302 unchanged.
+All26 resulting callables remain cyclo<=13; production88+/54-/142gross/net34.
+The user size waiver remains controlling, not a new exception. No compression.
+
+Canonical lifecycle plan at1bd admits all five new roots exactly once plus
+existing payloadless public Q02: F/C contracts-first, native Q04 broad-05,
+compiled/public Q01/Q02/Q03 hitl-releasee2e-rest. All Q02-Q04 require both
+postgres/sqlite children. Every #2624 catalog fact is preserved. No plan, spec,
+workflow, tier, timeout, CI-Units or production consumer change in this PR.
+
+Tracker/watchlist decision: refresh existing boundary_owned_decomposition and
+invariant_suite_coverage with2624 consumed and integrated evidence, keeping
+2447/2407/2349 OPEN. No new issue/node/POTENTIAL_ISSUES or broader architecture
+claim. Prior #2353 residuals and old local reds remain recorded separately.
+Intended closure remains the WHOLE authored-admission maintenance family only;
+no merge/hosted green or broader parent closure is claimed. Request exact-head
+reviewer-g re-review and hosted lifecycle at the pushed head.
