@@ -529,7 +529,7 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 		return PreparedPublish{}, false, errors.New("committed publication requires its exact claim")
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed, false)
-	if !consequences.ready {
+	if !consequences.dispatchable() {
 		return consequences.prepared, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}
 	return consequences.prepared, true, err
@@ -946,6 +946,7 @@ type PreparedPublish struct {
 	receiver                  receiverDispatchProjection
 	committedHandoffs         []runtimedelivery.DurableHandoffProof
 	durableHandoffReady       bool
+	agentHandoff              committedAgentHandoff
 	authorScope               runtimeauthoractivity.Scope
 	hasAuthorScope            bool
 	authorDescriptor          runtimeauthoractivity.EventDescriptor
@@ -1494,12 +1495,24 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 	if prepared.exactDuplicate {
 		return nil
 	}
+	if prepared.agentHandoff == transferredAgentHandoff {
+		authority, err := eb.DeliveryAuthority()
+		if err != nil {
+			return err
+		}
+		if err := eb.validateAgentTransitionCoverage(prepared, prepared.committedHandoffs, authority); err != nil {
+			return err
+		}
+	}
 	handoffs, err := prepared.CommittedDeliveryHandoffs()
 	if err != nil {
 		return fmt.Errorf("read committed delivery handoffs: %w", err)
 	}
 	if err := eb.AcceptCommittedDeliveryHandoffs(handoffs); err != nil {
 		return err
+	}
+	if prepared.agentHandoff == transferredAgentHandoff {
+		return eb.completeCommittedAgentHandoff(ctx, prepared.Event, prepared.publicationClaim)
 	}
 	if prepared.targetFailure {
 		eb.logPublished(ctx, prepared.Event, 0)

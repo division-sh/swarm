@@ -3870,7 +3870,16 @@ handler_specification:
       postcommit route cleanup, releasing the entity lock before acquiring or joining retirement authority.
       After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
       one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
-      prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
+      prerequisites retains an exact recovery disposition and cannot be dispatched directly. A positively
+      owned agent-route transition is distinct from failed readiness: with valid newly acknowledged
+      inserted evidence, every executable recipient's exact nonempty event-bound normal-runtime handoff, no
+      independent prerequisite or cancellation error, and no remaining event-wide decision, the shared finalizer
+      may transfer those obligations to the current generation's existing coordinator. Transfer must actually
+      succeed before publication settlement makes the routes executable; direct delivery to the transitioning
+      actor remains barred until its exact topology wake. Internal recipients retain their own covered durable
+      routes. Missing or unrelated handoffs, duplicate or rejected publications, selected execution, unavailable
+      or retired coordinators and any independent failure remain refusals/recovery, not successful deferral.
+      A diagnostic-only
       notification failure cannot erase or reclassify an already committed publication. The exact delivery
       continuation is released or retained from its typed outcome even when later notification or cleanup fails.
       Immediate, intercepted, deferred and inbound-batch publication paths consume the same committed-consequence

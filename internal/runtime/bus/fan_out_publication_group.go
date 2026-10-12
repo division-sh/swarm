@@ -305,6 +305,9 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 		d.bus.logPublished(ctx, operation.intent.Event, 0)
 		return nil
 	}
+	if operation.agentHandoff == transferredAgentHandoff {
+		return d.bus.completeCommittedAgentHandoff(ctx, operation.intent.Event, claim)
+	}
 	if transferGroup && d.bus.canTransferFanOutDelivery(operation, plan) {
 		if err := settlement.collect(claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 			return err
