@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -32,6 +33,8 @@ import (
 type selectedHandlerFanOutCrashCheckpoint struct {
 	Key       fanoutobligation.IntentKey
 	Selection effects.SelectedContractForkAuthority
+	Grant     *startupownership.GrantEvidence `json:"grant,omitempty"`
+	Claim     *fanoutobligation.Claim         `json:"claim,omitempty"`
 }
 
 type selectedHandlerFanOutIntentCrash struct {
@@ -87,6 +90,20 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 			pipe := os.NewFile(3, "selected-handler-fan-out-checkpoint")
 			checkpoint := selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: key.RunID,
 				FanOut: &selectedHandlerFanOutCrashCheckpoint{Key: key, Selection: authority.SelectedFork}}
+			if os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_handler_fan_out_claim_acquired" {
+				grant := selectedHandlerFanOutGrant(t, owner, key.RunID)
+				serving, err := selected.(selectedHandlerFanOutBinder).BindSelectedFanOutGrant(grant)
+				if err != nil {
+					t.Fatal(err)
+				}
+				intent, claim, found, err := serving.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+					Owner: uuid.NewString(), BundleHash: grant.BundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: 30 * time.Second,
+				})
+				if err != nil || !found || intent.Cursor != 0 || claim.Key != key || claim.Generation != 1 {
+					t.Fatalf("native predecessor claim missed the unissued intent: intent=%+v claim=%+v found=%t error=%v", intent, claim, found, err)
+				}
+				checkpoint.FanOut.Grant, checkpoint.FanOut.Claim = &grant, &claim
+			}
 			if err := json.NewEncoder(pipe).Encode(checkpoint); err != nil {
 				t.Fatal(err)
 			}
@@ -116,6 +133,40 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 }
 
 func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testing.T) {
+	runSelectedHandlerFanOutRecovery(t, false)
+}
+
+func TestIssue642SelectedHandlerFanOutExpiredClaimFencesPredecessorBothStores(t *testing.T) {
+	runSelectedHandlerFanOutRecovery(t, true)
+}
+
+type selectedHandlerFanOutBinder interface {
+	BindSelectedFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
+	ListFanOutIntents(context.Context, fanoutobligation.ListQuery) (fanoutobligation.ListPage, error)
+}
+
+func selectedHandlerFanOutGrant(t *testing.T, owner SelectedContractExecutionOwner, runID string) startupownership.GrantEvidence {
+	t.Helper()
+	owner.ports.contexts.mu.Lock()
+	var grant startupownership.GenerationGrant
+	for _, entry := range owner.ports.contexts.entries {
+		if entry.binding.ForkRunID == runID && entry.retained != nil && entry.retained.retainedRuntime != nil {
+			grant = entry.retained.retainedRuntime.generationGrant
+		}
+	}
+	owner.ports.contexts.mu.Unlock()
+	if grant == nil {
+		t.Fatal("handler claim proof lacks its exact retained native grant")
+	}
+	evidence, err := grant.Evidence()
+	if err != nil || evidence.SelectedFork == nil || evidence.SelectedFork.ForkRunID != runID || evidence.State != startupownership.GrantAdmitted {
+		t.Fatalf("handler claim proof grant: %+v error=%v", evidence, err)
+	}
+	return evidence
+}
+
+func runSelectedHandlerFanOutRecovery(t *testing.T, claimed bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
@@ -131,7 +182,11 @@ func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testi
 				selected = s
 				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
-			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, "retained_handler_fan_out_intent_committed")
+			cut := "retained_handler_fan_out_intent_committed"
+			if claimed {
+				cut = "retained_handler_fan_out_claim_acquired"
+			}
+			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
 			if checkpoint.FanOut == nil || checkpoint.FanOut.Key.RunID != checkpoint.ForkRun {
 				t.Fatal("process death lost the exact handler intent")
 			}
@@ -139,6 +194,23 @@ func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testi
 			before, err := storetest.ReadFanOutIntentCompletionStorage(context.Background(), selected, key)
 			if err != nil || before.Status != string(fanoutobligation.StatusOpen) || before.Cardinality != 2 || before.Cursor != 0 || len(before.Outcomes) != 0 {
 				t.Fatalf("crash missed the committed, unissued handler intent: %+v error=%v", before, err)
+			}
+			if claimed {
+				claim := checkpoint.FanOut.Claim
+				if claim == nil || checkpoint.FanOut.Grant == nil || claim.Validate() != nil || claim.Key != key || claim.Generation != 1 {
+					t.Fatal("crash did not retain an actual native predecessor claim")
+				}
+				// Recovery eligibility follows real lease expiry. This is not a
+				// synthetic clock advance or an immediate dead-owner takeover.
+				if remaining := time.Until(claim.LeaseUntil); remaining > 0 {
+					timer := time.NewTimer(remaining)
+					defer timer.Stop()
+					select {
+					case <-t.Context().Done():
+						t.Fatal(context.Cause(t.Context()))
+					case <-timer.C:
+					}
+				}
 			}
 			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(context.Background(), selected, checkpoint.SourceRun)
 			if err != nil {
@@ -231,6 +303,9 @@ func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testi
 			}
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer stop()
+			if claimed {
+				requireSelectedHandlerFanOutPredecessorFenced(t, cleanup, selected, owner, checkpoint)
+			}
 			if err := owner.RetireSelectedContexts(cleanup); err != nil || process.ActiveCount() != baseline {
 				t.Fatalf("successor retirement leaked resources: leases=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 			}
@@ -243,5 +318,37 @@ func TestIssue642SelectedHandlerFanOutCrashRestartWithoutWakeBothStores(t *testi
 				t.Fatalf("successor changed source business history: %v", err)
 			}
 		})
+	}
+}
+
+func requireSelectedHandlerFanOutPredecessorFenced(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, checkpoint selectedForkCrashCheckpoint) {
+	t.Helper()
+	binder := selected.(selectedHandlerFanOutBinder)
+	before, err := storetest.ReadFanOutIntentCompletionStorage(ctx, selected, checkpoint.FanOut.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := binder.BindSelectedFanOutGrant(*checkpoint.FanOut.Grant); err == nil || stale != nil {
+		t.Fatalf("successor admitted predecessor process/executor grant: owner=%T error=%v", stale, err)
+	}
+	grant := selectedHandlerFanOutGrant(t, owner, checkpoint.ForkRun)
+	current, err := binder.BindSelectedFanOutGrant(grant)
+	if err != nil || current == nil {
+		t.Fatalf("exact successor grant positive control: owner=%T error=%v", current, err)
+	}
+	page, err := binder.ListFanOutIntents(ctx, fanoutobligation.ListQuery{RunID: checkpoint.ForkRun, Limit: 10})
+	if err != nil || len(page.Intents) != 1 || page.Intents[0].Key != checkpoint.FanOut.Key || page.Intents[0].ClaimGeneration != checkpoint.FanOut.Claim.Generation+1 {
+		t.Fatalf("successor did not replace the exact old claim once: %+v error=%v", page, err)
+	}
+	if _, err := current.LoadFanOutEvaluation(ctx, *checkpoint.FanOut.Claim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
+		t.Fatalf("current grant accepted stale predecessor evaluation: %v", err)
+	}
+	settlement, err := current.ReleaseFanOutClaim(ctx, *checkpoint.FanOut.Claim)
+	if settlement.Acknowledged || !errors.Is(err, fanoutobligation.ErrStaleClaim) {
+		t.Fatalf("stale predecessor released successor ownership: %+v error=%v", settlement, err)
+	}
+	after, err := storetest.ReadFanOutIntentCompletionStorage(ctx, selected, checkpoint.FanOut.Key)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("rejected predecessor changed committed progress/outcomes: before=%+v after=%+v error=%v", before, after, err)
 	}
 }
