@@ -72,16 +72,26 @@ func TestProviderSchemaEffectRefusalBothStores(t *testing.T) {
 			http.DefaultTransport = providerSchemaLocalTransport{base: original, target: target}
 			defer func() { http.DefaultTransport = original }()
 			ctx := providerSchemaStoreContext(t, fixture)
-			bad := []runtimellm.ToolDefinition{{Name: "inspect", Schema: map[string]any{"type": "unsupported-provider-type"}}}
-			conversation := providerSchemaStoreConversation(t, fixture, bad)
-			response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
-			want := runtimellm.ValidateProviderToolDefinitions(bad).Error()
-			if response != nil || err == nil || !strings.Contains(err.Error(), want) || sends.Load() != 0 {
-				failure, _ := failures.As(err)
-				for cause := error(failure); cause != nil; cause = errors.Unwrap(cause) {
-					t.Logf("refusal cause: %T %v", cause, cause)
+			for _, schema := range []any{
+				map[string]any{"type": "unsupported-provider-type"}, map[string]any{"type": " object "},
+				map[string]any(nil), map[string]any{"properties": map[string]any(nil)},
+				map[string]any{"type": []any{"object", "object"}}, map[string]any{"required": []any{"q", "q"}},
+				map[string]any{"type": "string"},
+			} {
+				bad := []runtimellm.ToolDefinition{{Name: "inspect", Schema: schema}}
+				conversation := providerSchemaStoreConversation(t, fixture, bad)
+				response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
+				want := `anthropic tool "inspect" input_schema must declare type "object"`
+				if canonical := runtimellm.ValidateProviderToolDefinitions(bad); canonical != nil {
+					want = canonical.Error()
 				}
-				t.Fatalf("final schema gate not reached: response=%v err=%v sends=%d want=%s", response, err, sends.Load(), want)
+				if response != nil || err == nil || !strings.Contains(err.Error(), want) || sends.Load() != 0 {
+					failure, _ := failures.As(err)
+					for cause := error(failure); cause != nil; cause = errors.Unwrap(cause) {
+						t.Logf("refusal cause: %T %v", cause, cause)
+					}
+					t.Fatalf("final schema gate not reached: schema=%v response=%v err=%v sends=%d want=%s", schema, response, err, sends.Load(), want)
+				}
 			}
 			attempts, err := ReadExternalAttemptStorageForTest(ctx, fixture.store)
 			if err != nil || len(attempts) != 0 {
@@ -95,8 +105,8 @@ func TestProviderSchemaEffectRefusalBothStores(t *testing.T) {
 			// the refusal. The selected lease must have been released exactly enough
 			// to admit this valid successor, without inventing a new session identity.
 			good := []runtimellm.ToolDefinition{{Name: "inspect", Schema: map[string]any{"type": "object", "properties": map[string]any{}}}}
-			conversation = providerSchemaStoreConversation(t, fixture, good)
-			response, err = conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
+			conversation := providerSchemaStoreConversation(t, fixture, good)
+			response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
 			if err != nil || response == nil || response.Message.Content != "done" || sends.Load() != 1 || conversation.Session.ID != fixture.sessionID {
 				t.Fatalf("valid reconstructed request failed: response=%v err=%v sends=%d session=%s", response, err, sends.Load(), conversation.Session.ID)
 			}

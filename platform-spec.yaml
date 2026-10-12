@@ -7609,6 +7609,15 @@ engine:
             Refusal returns no partial request, list, or confirmation and must occur before model execution or its worker
             launch; a target-local observation worker earns probe evidence only and cannot execute the model. Existing
             actor, token, identity, credential, memory, message, and lease authority retain their earlier gate precedence.
+          - Recognized provider-schema type tokens are exact wire values; do not trim for checking while sending different
+            bytes. Type arrays contain nonempty flat unique supported strings; required arrays contain unique exact
+            property names. Recognized schema nodes and keyword containers must have their declared non-null JSON shape,
+            including typed-nil Go values. An absent optional tool definition may use its existing presentation default;
+            a declared null schema or container may not. Preserve legitimate empty arrays where the recognized keyword
+            permits them, enum null values, valid bytes, and unknown-keyword behavior; no new dialect is inferred.
+          - Anthropic's selected/defaulted tool input_schema must be a non-null JSON object schema declaring exact type
+            object. Truly absent schema retains its existing object default; typed-nil, other root types, and a missing
+            root type fail before dispatch without normalization or partial request publication.
           - Platform tool results must be returned through the provider adapter in a normalized message form.
         session_lifecycle:
           rules:

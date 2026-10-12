@@ -430,6 +430,10 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 		if err := ValidateProviderToolSchema(t.Name, tool.InputSchema); err != nil {
 			return anthropicRequest{}, err
 		}
+		schema, _ := tool.InputSchema.(map[string]any)
+		if rootType, ok := schema["type"].(string); !ok || rootType != "object" {
+			return anthropicRequest{}, fmt.Errorf("anthropic tool %q input_schema must declare type \"object\"", t.Name)
+		}
 		tools = append(tools, tool)
 	}
 

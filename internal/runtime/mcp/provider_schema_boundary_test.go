@@ -93,18 +93,63 @@ func TestProviderSchemaGatewayAdmission(t *testing.T) {
 		}
 	})
 	t.Run("actor/selection-and-defaults", func(t *testing.T) {
-		executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{bad, {Name: "read_file"}, {Name: "typed_nil", Schema: map[string]any(nil)}}}
+		executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{bad, {Name: "read_file"}, {Name: "object", Schema: map[string]any{}}}}
 		gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
-		allowed := map[string]struct{}{"read_file": {}, "typed_nil": {}}
+		allowed := map[string]struct{}{"read_file": {}, "object": {}}
 		tools, err := gateway.mcpToolsForActorInContext(context.Background(), models.AgentConfig{ID: "actor"}, allowed, true)
 		if err != nil || executor.released != 1 {
 			t.Fatalf("hidden malformed schema invalidated list: %v", err)
 		}
-		want := `[{"name":"read_file","description":"Runtime tool","inputSchema":{"additionalProperties":true,"properties":{},"type":"object"}},{"name":"typed_nil","description":"Runtime tool","inputSchema":null}]`
+		want := `[{"name":"read_file","description":"Runtime tool","inputSchema":{"additionalProperties":true,"properties":{},"type":"object"}},{"name":"object","description":"Runtime tool","inputSchema":{}}]`
 		if raw, _ := json.Marshal(tools); string(raw) != want {
 			t.Fatalf("actor bytes=%s, want %s", raw, want)
 		}
 	})
+	for _, tc := range []struct {
+		name   string
+		schema any
+	}{
+		{"padded_type", map[string]any{"type": " object "}},
+		{"padded_nested", map[string]any{"properties": map[string]any{"q": map[string]any{"type": " string "}}}},
+		{"typed_nil_root", map[string]any(nil)},
+		{"nil_properties", map[string]any{"properties": map[string]any(nil)}},
+		{"nil_nested_schema", map[string]any{"items": map[string]any(nil)}},
+		{"nested_types", map[string]any{"type": []any{[]any{"object"}}}},
+		{"duplicate_types", map[string]any{"type": []any{"object", "object"}}},
+		{"nil_types", map[string]any{"type": []any(nil)}},
+		{"duplicate_required", map[string]any{"required": []any{"q", "q"}}},
+		{"nil_required", map[string]any{"required": []any(nil)}},
+		{"nil_enum", map[string]any{"enum": []any(nil)}},
+	} {
+		t.Run("wire/"+tc.name, func(t *testing.T) {
+			definition := llm.ToolDefinition{Name: "read_file", Schema: tc.schema}
+			want := llm.ValidateProviderToolSchema(definition.Name, tc.schema)
+			if want == nil {
+				t.Fatal("invalid wire fixture escaped canonical admission")
+			}
+			ctx, surface := providerSchemaGatewaySurface(t, managedcapabilities.ExecutionNormalAgent, []llm.ToolDefinition{definition}, false)
+			actor, _ := models.ActorFromContext(ctx)
+			for _, managed := range []bool{true, false} {
+				executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{definition}}
+				gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
+				var tools []ToolDef
+				var err error
+				if managed {
+					var evidence []managedcapabilities.DeliveryEvidence
+					tools, evidence, _, err = gateway.mcpToolsForCapabilitySurface(ctx, TurnContext{Actor: actor, CapabilitySurface: &surface})
+					if evidence != nil {
+						t.Fatal("invalid wire published list evidence")
+					}
+				} else {
+					tools, err = gateway.mcpToolsForActorInContext(ctx, actor, nil, true)
+				}
+				cause := errors.Unwrap(err)
+				if cause == nil || cause.Error() != want.Error() || tools != nil || executor.acquired != 1 || executor.released != 1 {
+					t.Fatalf("invalid wire admitted/leaked, managed=%v: tools=%v err=%v lease=%d/%d", managed, tools, err, executor.acquired, executor.released)
+				}
+			}
+		})
+	}
 	t.Run("fork/frozen", testProviderSchemaFrozenForkCatalog)
 }
 

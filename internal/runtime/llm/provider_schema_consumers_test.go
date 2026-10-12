@@ -41,18 +41,18 @@ func testProviderSchemaHTTPConstructor(t *testing.T, responses bool) {
 		}
 		return compatible.buildRequest(s, input, model)
 	}
-	schema := map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": " string "}}}
+	schema := map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}
 	session := &Session{ID: "session", AgentID: "agent", SystemPrompt: "system", Tools: []ToolDefinition{
 		{Name: " inspect ", Description: " description ", Schema: schema},
 		{Name: "empty", Schema: nil},
-		{Name: "typed-nil", Schema: map[string]any(nil)},
+		{Name: "object", Schema: map[string]any{"type": "object"}},
 	}}
 	before := providerSchemaJSON(t, session.Tools)
 	request, err := build(session, Message{Role: "user", Content: "hello"}, " model ")
 	requireProviderSchemaError(t, err, "")
-	want := `{"model":"model","messages":[{"role":"system","content":"system"},{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}}},{"type":"function","function":{"name":"empty","parameters":{"properties":{},"type":"object"}}},{"type":"function","function":{"name":"typed-nil","parameters":null}}]}`
+	want := `{"model":"model","messages":[{"role":"system","content":"system"},{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"inspect","description":"description","parameters":{"properties":{"q":{"type":"string"}},"type":"object"}}},{"type":"function","function":{"name":"empty","parameters":{"properties":{},"type":"object"}}},{"type":"function","function":{"name":"object","parameters":{"type":"object"}}}]}`
 	if responses {
-		want = `{"model":"model","instructions":"system","input":[{"role":"user","content":"hello"}],"tools":[{"type":"function","name":"inspect","description":"description","parameters":{"properties":{"q":{"type":" string "}},"type":"object"}},{"type":"function","name":"empty","parameters":{"properties":{},"type":"object"}},{"type":"function","name":"typed-nil","parameters":null}]}`
+		want = `{"model":"model","instructions":"system","input":[{"role":"user","content":"hello"}],"tools":[{"type":"function","name":"inspect","description":"description","parameters":{"properties":{"q":{"type":"string"}},"type":"object"}},{"type":"function","name":"empty","parameters":{"properties":{},"type":"object"}},{"type":"function","name":"object","parameters":{"type":"object"}}]}`
 	}
 	if got := providerSchemaJSON(t, request); got != want {
 		t.Fatalf("request bytes = %s, want %s", got, want)
@@ -121,7 +121,7 @@ func testProviderSchemaMockAdmission(t *testing.T) {
 	if probe.calls != 0 {
 		t.Fatalf("schema refusal reached memory %d times", probe.calls)
 	}
-	good := []ToolDefinition{{Name: " inspect ", Description: "unchanged", Schema: map[string]any{"type": " string "}}}
+	good := []ToolDefinition{{Name: " inspect ", Description: "unchanged", Schema: map[string]any{"type": "string"}}}
 	_, err = runtime.StartSession(memoryCtx, actor.ID, "system", good)
 	requireProviderSchemaError(t, err, "characterization memory boundary")
 	if probe.calls != 1 {

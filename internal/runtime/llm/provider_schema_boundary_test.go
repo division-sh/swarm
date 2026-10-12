@@ -77,13 +77,13 @@ func TestProviderSchemaBoundaryAdmission(t *testing.T) {
 
 func testProviderSchemaAnthropicBytes(t *testing.T) {
 	session := &Session{SystemPrompt: "system", Tools: []ToolDefinition{
-		{Name: " inspect ", Description: " description ", Schema: map[string]any{"type": " object ", "properties": map[string]any{"q": map[string]any{"type": "string"}}}},
-		{Name: "empty"}, {Name: "typed-nil", Schema: map[string]any(nil)},
+		{Name: " inspect ", Description: " description ", Schema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}},
+		{Name: "empty"}, {Name: "object", Schema: map[string]any{"type": "object"}},
 	}}
 	before := providerSchemaJSON(t, session.Tools)
 	request, err := (&AnthropicAPIRuntime{}).buildRequest(session, Message{Role: "user", Content: "hello"}, " model ")
 	requireProviderSchemaError(t, err, "")
-	want := `{"model":"model","max_tokens":1024,"system":"system","messages":[{"role":"user","content":"hello"}],"tools":[{"name":" inspect ","description":"description","input_schema":{"properties":{"q":{"type":"string"}},"type":" object "}},{"name":"empty","input_schema":{"properties":{},"type":"object"}},{"name":"typed-nil","input_schema":null}]}`
+	want := `{"model":"model","max_tokens":1024,"system":"system","messages":[{"role":"user","content":"hello"}],"tools":[{"name":" inspect ","description":"description","input_schema":{"properties":{"q":{"type":"string"}},"type":"object"}},{"name":"empty","input_schema":{"properties":{},"type":"object"}},{"name":"object","input_schema":{"type":"object"}}]}`
 	if got := providerSchemaJSON(t, request); got != want {
 		t.Fatalf("request bytes=%s, want %s", got, want)
 	}
@@ -173,10 +173,18 @@ func testProviderSchemaManagedHTTPRefusal(t *testing.T) {
 func TestProviderSchemaWorkspaceObservation(t *testing.T) {
 	for _, schema := range []map[string]any{
 		{"type": "unsupported-provider-type"}, {"properties": map[string]any{"bad": false}}, {"oneOf": []any{nil}},
+		{"type": " object "}, {"properties": map[string]any{"q": map[string]any{"type": " string "}}},
+		{"items": map[string]any(nil)}, {"properties": map[string]any(nil)},
+		{"type": []any{"object", []any{"null"}}}, {"type": []any{"object", "object"}},
+		{"type": []any(nil)}, {"required": []any{"q", "q"}}, {"required": []any(nil)}, {"enum": []any(nil)},
 	} {
 		t.Run(providerSchemaJSON(t, schema), func(t *testing.T) {
 			tool := ToolDefinition{Name: "bad", Schema: schema}
 			raw, _ := json.Marshal(schema)
+			var wireSchema map[string]any
+			if err := json.Unmarshal(raw, &wireSchema); err != nil {
+				t.Fatal(err)
+			}
 			definitions := []toolgateway.ListedDefinition{{Name: tool.Name, InputSchema: raw}}
 			_, surface := testManagedCLISurfaceContext(t, runtimeactors.AgentConfig{ID: "schema-callers"}, []ToolDefinition{tool})
 			for _, caller := range []struct {
@@ -190,7 +198,7 @@ func TestProviderSchemaWorkspaceObservation(t *testing.T) {
 				t.Run(caller.name, func(t *testing.T) {
 					failure, ok := failures.EnvelopeFromError(caller.err)
 					cause := errors.Unwrap(caller.err)
-					if !ok || failure.Detail.Code != "managed_capability_mcp_definition_mismatch" || failure.Detail.Attributes["reason"] != "invalid_input_schema" || cause == nil || cause.Error() != ValidateProviderToolSchema(tool.Name, schema).Error() {
+					if !ok || failure.Detail.Code != "managed_capability_mcp_definition_mismatch" || failure.Detail.Attributes["reason"] != "invalid_input_schema" || cause == nil || cause.Error() != ValidateProviderToolSchema(tool.Name, wireSchema).Error() {
 						t.Fatalf("matching invalid schema confirmed or lost cause: %v", caller.err)
 					}
 				})
