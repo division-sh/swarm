@@ -1,5 +1,10 @@
 # Issue #2630: Approved Two-Defect Audit Amendment
 
+Historical two-defect boundary: cycle-1 review found detached equality acceptance.
+The complete-closure claim is superseded by issue-2630-detached-equality-amendment.md
+and ruling5490306823; original obligations/receipts remain retained. Final audit
+requires 53 rows, not only the 44 below. #2447 remains frozen.
+
 Binding amendment: https://github.com/division-sh/swarm/issues/2630#issuecomment-6122944537.
 Original gate6122667610 remains binding. Repair-first; #2447 stays frozen.
 Coding base5182245ed. Signed baseline checkpoint50d38504c predates production edits.

@@ -41,3 +41,37 @@ func TestSchemaRelation2630ChannelGates(t *testing.T) {
 		}
 	})
 }
+
+func TestSchemaRelation2630ChannelDetachedEquality(t *testing.T) {
+	channel, trigger, connector := mockChannelSatisfier()
+	receipt, err := runtimecontracts.AdmitToolInputSchemaMap(map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"revision", "peer"},
+		"properties": map[string]any{
+			"revision": map[string]any{"type": "integer", "x-swarm-equalTo": "peer"},
+			"peer":     map[string]any{"type": "integer"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receipt.Validate(map[string]any{"revision": 1, "peer": 1}); err != nil {
+		t.Fatal(err)
+	}
+	channel.Manifest.OpaqueTypes["delivery_receipt"] = receipt
+	operation := channel.Manifest.Operations["edit"]
+	operation.Output["delivery_receipt.peer"] = packs.ChannelMapping{From: "result.peer"}
+	channel.Manifest.Operations["edit"] = operation
+	tool := connector.Tools["mock.edit"]
+	tool, err = tool.WithSchemas(tool.InputSchema(), receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Tools["mock.edit"] = tool
+	plan, err := packs.CompileChannel(loadChannelInterfaceRegistry(t), channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err == nil || !strings.Contains(err.Error(), "edit output result.revision -> delivery_receipt.revision") || !strings.Contains(err.Error(), "requires its enclosing object relation") {
+		t.Fatalf("public compiler must refuse detached output equality: %v", err)
+	}
+	if _, err := plan.Generation(); err == nil {
+		t.Fatal("refused channel acquired a generation")
+	}
+}
