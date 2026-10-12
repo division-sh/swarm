@@ -26,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -179,8 +178,8 @@ func providerSchemaStoreFixture(t *testing.T, backend string) completionSettleme
 		sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		store, db = sqlite, sqlite.backend.ConstructionHandle()
 	} else {
-		_, db, _ = testutil.StartPostgres(t)
-		store = admitTestPostgresStore(t, db)
+		fixture := openPostgresAuthorActivityReceiptFixture(t)
+		store, db = fixture.store.(completionSettlementTestStore), fixture.db
 	}
 	return newCompletionSettlementFixtureWithActor(t, store, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global",
 		runtimeactors.AgentConfig{ExecutionMode: "live", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic"})

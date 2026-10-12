@@ -292,3 +292,26 @@ provider root: [Anthropic input schema](https://platform.claude.com/docs/en/agen
 These support the bounded approved recognized laws, not a new vocabulary or
 blanket promise of complete vendor acceptance. Parent and architecture estimates
 remain unchanged; no newly discovered sixth consumer or new semantic owner.
+
+## Cycle-2 Fixture Construction Correction
+
+Hosted lifecycle run38221994209 at0636c9512 is retained RED evidence: the debt
+ratchet reports10689 actual sites against10688 recorded sites. The one added
+site is providerSchemaStoreFixture constructing PostgresStore from a raw DB;
+this is this PR's fixture debt, not an inherited failure or a semantic waiver.
+
+The PostgreSQL arm now consumes openPostgresAuthorActivityReceiptFixture, the
+existing native receipt fixture owning construction, schema admission, payload
+admission, catalog registration and cleanup. It exposes the same admitted store
+through completionSettlementTestStore, not a recovered concrete PostgresStore.
+The existing completion fixture still owns lifecycle/session/claim setup, and
+the existing typed storage observations still prove refusal and settlement.
+SQLite construction, all seven malformed cuts per store, zero-send/attempt/effect
+assertions, exact successor identities and two-turn cardinality are unchanged.
+No new constructor, observation port, collector exception or baseline edit.
+
+The new signed head requires fresh both-store provider effect/reconstruction
+proof with race3 and the actual debt ratchet against568dd9ab0 before the one
+batched push. Results and receipt digests are recorded in the PR-level addendum;
+hosted lifecycle must then qualify that head. The37-row semantic accounting,
+five production consumers and parent/watchlist decisions remain unchanged.
