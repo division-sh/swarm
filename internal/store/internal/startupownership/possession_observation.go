@@ -24,6 +24,10 @@ func (s *StartupSQLiteOwner) ProbePossession(ctx context.Context) (runtimestartu
 		return result, errors.New("SQLite possession observation requires an existing selected path")
 	}
 	available, err := probeSQLitePossession(ctx, s.path, s.backendIdentity)
+	// Only clean native contention is an observation; joined safety failures remain errors.
+	if occupied, ok := err.(*runtimestartupownership.AcquisitionError); ok && occupied.Failure == runtimestartupownership.AcquisitionTakeoverRequired {
+		err = nil
+	}
 	result.Available, result.FinishedAt = available, time.Now().UTC()
 	return result, errors.Join(err, result.Validate(), ctx.Err())
 }

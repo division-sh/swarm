@@ -145,7 +145,15 @@ func testPossessionObservationExternalProcessReleaseAndCrash(t *testing.T, backe
 					if err != nil {
 						t.Fatal(err)
 					}
-					probe = func(ctx context.Context) (bool, error) { return probeSQLitePossession(ctx, path, identity) }
+					owner := &StartupSQLiteOwner{path: path, backendIdentity: identity}
+					probe = func(ctx context.Context) (bool, error) {
+						available, err := probeSQLitePossession(ctx, path, identity)
+						observed, observationErr := owner.ProbePossession(ctx)
+						if observationErr != nil || observed.Validate() != nil || observed.Available != available {
+							t.Fatalf("public/native possession disagreement: native=%t %v public=%+v %v", available, err, observed, observationErr)
+						}
+						return available, err
+					}
 				} else {
 					var db *sql.DB
 					dsn, db, _ = testutil.StartEmptyPostgres(t)
@@ -257,6 +265,15 @@ func TestSQLitePossessionObservationDoesNotCreateOrRepairCoordinates(t *testing.
 			t.Fatalf("lost exact held classification: %v", err)
 		}
 	}
+	owner := &StartupSQLiteOwner{path: path, backendIdentity: identity}
+	if observed, err := owner.ProbePossession(ctx); err != nil || observed.Available || observed.Validate() != nil {
+		t.Fatalf("public held observation: %+v %v", observed, err)
+	}
+	cancelled, stop := context.WithCancel(ctx)
+	stop()
+	if observed, err := owner.ProbePossession(cancelled); observed.Available || !errors.Is(err, context.Canceled) {
+		t.Fatalf("public cancellation lost: %+v %v", observed, err)
+	}
 	if err := possession.ProveCurrent(ctx); err != nil {
 		t.Fatalf("probe unlocked holder: %v", err)
 	}
@@ -283,6 +300,9 @@ func TestSQLitePossessionObservationDoesNotCreateOrRepairCoordinates(t *testing.
 	}
 	if free, err := probeSQLitePossession(ctx, path, identity); free || err == nil || !strings.Contains(err.Error(), "identity changed") {
 		t.Fatalf("replacement after inspection looked free: %t %v", free, err)
+	}
+	if observed, err := owner.ProbePossession(ctx); observed.Available || err == nil || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("public replacement refusal lost: %+v %v", observed, err)
 	}
 }
 
@@ -334,6 +354,10 @@ func TestSQLitePossessionObservationRefusesUnsafeAndReplacedIdentities(t *testin
 				defer cancel()
 				if free, err := probeSQLitePossession(ctx, path, identity); free || err == nil {
 					t.Fatalf("unsafe identity admitted: %t %v", free, err)
+				}
+				owner := &StartupSQLiteOwner{path: path, backendIdentity: identity}
+				if observed, err := owner.ProbePossession(ctx); observed.Available || err == nil {
+					t.Fatalf("public unsafe identity admitted: %+v %v", observed, err)
 				}
 				after, afterErr := os.Lstat(file)
 				if (beforeErr != nil && (!errors.Is(beforeErr, os.ErrNotExist) || !errors.Is(afterErr, os.ErrNotExist))) ||
