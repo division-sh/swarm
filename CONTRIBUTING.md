@@ -54,8 +54,10 @@ its native path but cannot qualify the master-nightly marker.
 Native logs and current-run/attempt artifacts retain failures. The required
 summary lists each native result and refuses unsuccessful cadence; the master
 nightly marker cannot succeed. The merge orchestrator's strict nightly admission
-must reject the newest completed red, partial or stale master cadence rather
-than use an older green. Its deployed gate/configuration and refusal evidence
+selects the newest completed non-cancelled master cadence and must reject red,
+partial or stale evidence rather than use an older green. Whole cancelled runs
+are excluded from selection; cancelled partner jobs still cannot qualify the
+selected run. Its deployed gate/configuration and refusal evidence
 are attested separately under [#2535](https://github.com/division-sh/swarm/issues/2535)
 before the [#2640](https://github.com/division-sh/swarm/issues/2640) cutover merges;
 this workflow change does not install or relax an external merge gate.
