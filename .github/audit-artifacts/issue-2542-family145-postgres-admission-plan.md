@@ -4352,3 +4352,33 @@ carrier/openers and broader gate/A2/parent closure remain open; supplied-pool
 calls61 unchanged. No push/PR, tier, server2 or qualification waiver. Final
 finite and signed-head complexity receipts accompany the checkpoint.
 Receipts ~/.cache/swarm-2542-family145/bound-source-snapshot-*.
+
+## Shared Gate/A2 Dependency: Whole Accumulator Evidence Helper
+
+All five direct/indirect accumulator journey roots now consume the fixed
+pipeline projection reader for persisted revision/fields/accumulator and the
+existing mutation-count owner. The existing publication-count owner remains.
+The shared helper keeps three separately ordered native read cuts and its
+original canonical JSON hashing at the caller: no normalization in storage,
+merged transaction, extra status/entity filter or synthetic zero. Original
+keyed/unkeyed multiplicity, mutation/revision/output, numerical equivalence,
+optional presence, corrupted receipt refusal, rollback and recovery assertions
+are unchanged. The remaining claim/fault observations in the files are not
+claimed closed by this helper repair.
+
+Five original whole roots on both stores under race PASS91.728s. Native proof
+compares exact original SQL bytes/revision against genuinely constructed state,
+checks a single original-coordinator read commit, foreign run/path NoRows,
+no partial error evidence, cancellation, raw/nil/uninitialized/closed refusal,
+and complete unchanged application/history/lease/clock snapshots: PASS26.354s.
+The finite helper proof pins all original fields/hashes, scope, destinations,
+three cut ordering and physical SQL/scan bindings; hostile lost bindings or
+hashes refuse. Complete gate/current/historical collection PASS18.542s.
+Six persistence boundaries PASS10.424s; U1000 clean. Downward census
+PASS199.142s:8397 ->8393 findings,6007 ->6003 raw sites, four removals/zero
+additions; uncertainty67 unchanged. Corpus1217/429, transition digest
+d629db1a91f494a270d514415c2941cdff8ca10b6f65bb9b50d6848e24231479;
+immutable mechanical inputs remain unchanged. Supplied-pool calls61,
+carrier/openers, broader gate/A2/parent closure and qualification holds remain.
+No push/PR, tier, server2 or waiver. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/accumulator-evidence-*.

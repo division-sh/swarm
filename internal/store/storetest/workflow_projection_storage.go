@@ -13,6 +13,11 @@ type WorkflowDuplicateProjectionStorage = private.WorkflowDuplicateProjectionSto
 type WorkflowStateObservationRow = private.WorkflowStateObservationRow
 
 type WorkflowRunFieldsRevisionStorage = private.WorkflowRunFieldsRevisionStorage
+type WorkflowAccumulatorStorage = private.WorkflowAccumulatorStorage
+
+func ReadWorkflowAccumulatorStorage(ctx context.Context, selected any, runID, path string) (WorkflowAccumulatorStorage, error) {
+	return private.ReadWorkflowAccumulatorStorageForTest(ctx, selected, runID, path)
+}
 
 func ReadBoundReplySourceStorage(ctx context.Context, selected any, runID, path string) (map[string][][]any, error) {
 	return private.ReadBoundReplySourceStorageForTest(ctx, selected, runID, path)

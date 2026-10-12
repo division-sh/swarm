@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 429 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "34399ec5b1f61d84c7abb4c183b9423bf561a7942f02b951b420b3ea5dbbc1a0" {
+	if err != nil || len(rows) != 429 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d629db1a91f494a270d514415c2941cdff8ca10b6f65bb9b50d6848e24231479" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -70,6 +70,11 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 				t.Fatal(err)
 			}
 			continue
+		}
+		if row.File == "internal/runtime/pipeline/a2_accumulator_persistence_external_test.go" && row.Function == "evidence" {
+			if err := family145AccumulatorEvidenceProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if family145A2CreationFaultCuts[row.Function] != nil {
 			if err := family145A2CreationFaultProofError(family145GateScalarReadKey(row.File, row.Function), row.Before, row.After); err != nil {

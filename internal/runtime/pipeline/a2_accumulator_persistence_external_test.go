@@ -184,15 +184,18 @@ type a2AccumulatorPersistedEvidence struct {
 func (p *a2AccumulatorPersistenceProof) evidence(t *testing.T) a2AccumulatorPersistedEvidence {
 	t.Helper()
 	var evidence a2AccumulatorPersistedEvidence
-	var fields, buckets []byte
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, p.runID, p.runID).Scan(&evidence.Revision, &fields, &buckets); err != nil {
+	state, err := storetest.ReadWorkflowAccumulatorStorage(p.ctx, p.selected.events, p.runID, p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	evidence.Fields = a2AccumulatorJSONHash(t, fields)
-	evidence.Accumulator = a2AccumulatorJSONHash(t, buckets)
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, p.runID).Scan(&evidence.Mutations); err != nil {
+	evidence.Revision = state.Revision
+	evidence.Fields = a2AccumulatorJSONHash(t, state.Fields)
+	evidence.Accumulator = a2AccumulatorJSONHash(t, state.Accumulator)
+	mutations, err := storetest.CountRunMutationStorage(p.ctx, p.selected.events, p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	evidence.Mutations = mutations
 	publications, err := storetest.CountRunEventNameStorage(p.ctx, p.selected.events, p.runID, "item.recorded")
 	if err != nil {
 		t.Fatal(err)

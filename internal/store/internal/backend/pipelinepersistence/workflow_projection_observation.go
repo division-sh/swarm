@@ -18,6 +18,21 @@ type WorkflowRunFieldsRevisionStorage struct {
 	Revision int64
 }
 
+type WorkflowAccumulatorStorage struct {
+	Revision            int64
+	Fields, Accumulator []byte
+}
+
+func ReadWorkflowAccumulatorStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) (WorkflowAccumulatorStorage, error) {
+	var out WorkflowAccumulatorStorage
+	err := tx.QueryRowContext(ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).
+		Scan(&out.Revision, &out.Fields, &out.Accumulator)
+	if err != nil {
+		return WorkflowAccumulatorStorage{}, err
+	}
+	return out, nil
+}
+
 func ReadBoundReplyFlowHeadersStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) ([][]any, error) {
 	return readBoundReplyPhysicalRows(ctx, tx, `SELECT * FROM flow_instances WHERE run_id=$1 AND instance_path=$2 ORDER BY instance_path`, runID, path)
 }

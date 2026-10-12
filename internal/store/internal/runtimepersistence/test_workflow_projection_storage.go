@@ -36,6 +36,13 @@ type WorkflowEnginePhysicalCounts = pipelinepersistence.WorkflowEnginePhysicalCo
 type WorkflowStateObservationRow = pipelinepersistence.WorkflowStateObservationRow
 
 type WorkflowRunFieldsRevisionStorage = pipelinepersistence.WorkflowRunFieldsRevisionStorage
+type WorkflowAccumulatorStorage = pipelinepersistence.WorkflowAccumulatorStorage
+
+func ReadWorkflowAccumulatorStorageForTest(ctx context.Context, selected any, runID, path string) (WorkflowAccumulatorStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (WorkflowAccumulatorStorage, error) {
+		return pipelinepersistence.ReadWorkflowAccumulatorStorageTx(ctx, tx, runID, path)
+	})
+}
 
 func ReadWorkflowRunFieldsRevisionStorageForTest(ctx context.Context, selected any, runID string) (WorkflowRunFieldsRevisionStorage, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
