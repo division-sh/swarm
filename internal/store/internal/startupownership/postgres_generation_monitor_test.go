@@ -285,6 +285,9 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				}
 				query := "SELECT pg_try_advisory_lock(hashtext($1))"
 				if disposition == "deadline" {
+					if session.lease.ReleasedCleanly() {
+						t.Fatal("terminal discard fabricated acknowledged normal unlock")
+					}
 					select {
 					case <-control.monitored.Load().closed:
 					default:
@@ -299,8 +302,8 @@ func TestPostgresGenerationMonitorFencesStalledNativePhase(t *testing.T) {
 				if err := observer.QueryRowContext(joinCtx, query, runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
 					t.Fatalf("joined disposal retained native possession: acquired=%t err=%v", acquired, err)
 				}
-				if _, err := observer.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", runtimeSharedStoreOwnershipLock); err != nil {
-					t.Fatal(err)
+				if err := observer.QueryRowContext(joinCtx, "SELECT pg_advisory_unlock(hashtext($1))", runtimeSharedStoreOwnershipLock).Scan(&acquired); err != nil || !acquired {
+					t.Fatalf("successor unlock was not acknowledged: unlocked=%t err=%v", acquired, err)
 				}
 			})
 		}
