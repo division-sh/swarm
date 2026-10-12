@@ -298,7 +298,11 @@ func probeSQLitePossession(ctx context.Context, selectedPath string, identity *S
 	if err != nil {
 		return false, err
 	}
-	defer func() { resultErr = errors.Join(resultErr, database.Close(), ctx.Err()) }()
+	defer func() {
+		if err := errors.Join(database.Close(), ctx.Err()); err != nil {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
 	if identity == nil {
 		return false, errors.New("SQLite possession observation requires opened backend identity")
 	}
@@ -315,10 +319,14 @@ func probeSQLitePossession(ctx context.Context, selectedPath string, identity *S
 	coordinate, coordinateInfo, err := openSQLitePossessionCoordinate(path+sqlitePossessionSuffix, false)
 	if err != nil {
 		if occupied, ok := err.(*runtimestartupownership.AcquisitionError); ok && occupied.Failure == runtimestartupownership.AcquisitionTakeoverRequired {
-			return false, errors.Join(
+			identityErr := errors.Join(
 				proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"),
 				proveSQLitePossessionIdentity(path+sqlitePossessionSuffix, reference.coordinateInfo, true, "SQLite possession coordinate changed after inspection opened"),
 			)
+			if identityErr != nil {
+				return false, errors.Join(err, identityErr)
+			}
+			return false, err
 		}
 		return false, errors.Join(err, proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"))
 	}
