@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1289,17 +1290,10 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				var opened *store.PostgresStore
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-					var err error
-					opened, err = store.NewPostgresStore(dsn)
-					if err != nil {
-						return nil, err
-					}
-					storetest.BootstrapPostgresRuntimeStore(t, opened)
-					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg), nil
+				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+					return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil

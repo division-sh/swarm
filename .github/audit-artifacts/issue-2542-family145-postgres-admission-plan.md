@@ -5721,3 +5721,39 @@ M01/Docker/drain/D3/M07/integration holds remain. Local only, no push/PR/tier/
 server2. Per the updated merge-order instruction, the rebase waits for #2617;
 #2624's exact policy/custody/cache integration conditions remain binding.
 Receipts:~/.cache/swarm-2542-family145/mock-memory-duplicate-construction-*.
+
+## Mixed standing healthy/terminal restart construction (2026-10-12)
+
+TestStandingRestartMixedHealthyAndTerminalProcessParity now uses the existing
+selected.OpenRuntime constructor with its actual context/selection, original
+DSN and TTL. Its unused detached PostgreSQL adapter, explicit bootstrap and
+database getter are deleted. The existing selected projection capture, both
+real process lifecycles, runtime-authorized terminalization, workspace owner,
+recovery options, healthy/terminal generation identities, Telegram calls,
+no-extra-call assertions and joined teardown are unchanged. Other construction
+and diagnostic helpers in this file remain explicit parent debt.
+
+One exact whole-body inverse restores only the original constructor and its
+unused variable. Hostile controls reject changed context/selection/DSN/TTL,
+projection capture, terminalization, first/second stop, recovery, identities,
+negative call and cleanup cuts; the actual function is source-pinned.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Healthy service resumes while terminal sibling stays terminal through real restart | reproduced and fixed | Original TestStandingRestartMixedHealthyAndTerminalProcessParity BOTH stores under race, PASS47.288s, every original service/run/generation/call/recovery assertion unchanged |
+| Native constructor receives exact requested authority and joined close owner | execution-proven through the same corrected path | Exact source-pinned inverse and hostile controls plus the actual both-store first/second native lifecycle above |
+
+The initially named before receipt overlapped source editing during compilation;
+it is NOT attributed to the old tree and establishes no baseline or timing gain.
+The first structural run exposed an inverse boundary error (workspace setup was
+mistakenly included twice); the proof now restores only the factory, preserving
+the workspace block verbatim. Complete cheap collection, six boundaries and
+affected U1000 pass. Before/24 receipts/prior Successor survive:1291/532,
+digest c06f9e4fabcc807fab5d57a665024c04b8673c79527edf72f4c7957f0648f8ee.
+Downward census PASS35.641s:7884 ->7880 findings,5578 ->5576 raw sites,
+4/2 removed, ZERO added; supplied-pool56 and uncertainty67 unchanged.
+Unchanged ratchet and signed-head complexity precede the stacking report.
+Existing tracker/watchlist/spec suffice; no runtime contract changes, waiver,
+compatibility, push, PR, tier or server2. All qualification holds survive.
+Rebase waits for the orchestrator's #2617 merge signal. Receipts:
+~/.cache/swarm-2542-family145/standing-mixed-*.

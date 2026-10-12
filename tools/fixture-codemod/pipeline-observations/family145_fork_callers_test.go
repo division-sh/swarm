@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 531 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fb128dac4bc3b706c575e6dc69ee030be016ebf235150901213b4f559dc9c865" {
+	if err != nil || len(rows) != 532 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c06f9e4fabcc807fab5d57a665024c04b8673c79527edf72f4c7957f0648f8ee" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -103,6 +103,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "runMockAgentSupportedSurface" || row.Function == "runStandingTelegramMemorySupportedSurface" {
 			if err := family145MockMemoryConstructionProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "TestStandingRestartMixedHealthyAndTerminalProcessParity" {
+			if err := family145StandingMixedConstructionProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "fb128dac4bc3b706c575e6dc69ee030be016ebf235150901213b4f559dc9c865"
+const targetDigest = "c06f9e4fabcc807fab5d57a665024c04b8673c79527edf72f4c7957f0648f8ee"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -187,6 +187,7 @@ var files = []string{
 	"internal/serveapp/mailbox_completion_fixture_test.go",
 	"internal/serveapp/agent_mock_supported_surface_test.go",
 	"internal/serveapp/agent_memory_supported_surface_test.go",
+	"internal/serveapp/standing_ingress_supported_surface_test.go",
 	"internal/serveapp/numeric_timer_inspection_test.go",
 	"internal/serveapp/run_fork_runtime_test.go",
 	"internal/serveapp/run_fork_constructor_fixture_test.go",
@@ -277,6 +278,7 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/serveapp/standing_ingress_supported_surface_test.go":   {"TestStandingRestartMixedHealthyAndTerminalProcessParity": true},
 	"internal/serveapp/agent_mock_supported_surface_test.go":         {"runMockAgentSupportedSurface": true},
 	"internal/serveapp/agent_memory_supported_surface_test.go":       {"runStandingTelegramMemorySupportedSurface": true},
 	"internal/serveapp/mailbox_completion_fixture_test.go":           {"newRetainedMailboxCompletionRuntimeConfigured": true},
