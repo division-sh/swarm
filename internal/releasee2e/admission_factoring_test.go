@@ -10,16 +10,13 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
 	config, env := clockReleaseConfig(t, root, "sqlite")
-	source := canonicalrouting.CopyStandingRootTreePublic(t)
+	source := copyFactoringStandingSource(t)
 	for _, args := range [][]string{
 		{"verify", "--portable", "--json"}, {"verify", "--json"},
 		{"describe"}, {"describe", "--json"}, {"describe", "--quiet"},
@@ -85,9 +82,12 @@ func TestAdmissionFactoringCompiledCapabilitySurfacesBothStores(t *testing.T) {
 			}
 		}
 		var report struct {
-			OK                 bool            `json:"ok"`
-			CapabilitySubjects []packs.Subject `json:"capability_subjects"`
-			PackInventory      json.RawMessage `json:"pack_inventory"`
+			OK                 bool `json:"ok"`
+			CapabilitySubjects []struct {
+				Kind, Applicability, Status string
+				TriggerAdmission            json.RawMessage `json:"trigger_admission"`
+			} `json:"capability_subjects"`
+			PackInventory json.RawMessage `json:"pack_inventory"`
 		}
 		if err := json.Unmarshal([]byte(result.output), &report); err != nil {
 			t.Fatal(err)
@@ -96,7 +96,7 @@ func TestAdmissionFactoringCompiledCapabilitySurfacesBothStores(t *testing.T) {
 			t.Fatalf("doctor omitted installed inventory: ok=%t capability_subjects=%d pack_inventory=%s", report.OK, len(report.CapabilitySubjects), report.PackInventory)
 		}
 		for _, subject := range report.CapabilitySubjects {
-			if subject.Kind == packs.SubjectProviderTrigger && (subject.Applicability != "installed" || subject.Status != packs.StatusAvailable || subject.TriggerAdmission != nil) {
+			if subject.Kind == "provider_trigger" && (subject.Applicability != "installed" || subject.Status != "AVAILABLE" || len(subject.TriggerAdmission) != 0) {
 				t.Fatalf("source-free doctor invented target authority: %#v", subject)
 			}
 		}
@@ -110,7 +110,7 @@ func proveFactoringCompiledStandingSubjects(t *testing.T, binary, backend string
 	t.Helper()
 	root := goldenReleaseRoot(t)
 	config, env := clockReleaseConfig(t, root, backend)
-	source := canonicalrouting.CopyStandingRootTreePublic(t)
+	source := copyFactoringStandingSource(t)
 	writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 	spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source, ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env}
 	start := func(wantRuns int) *releaseServeProcess {
@@ -189,6 +189,13 @@ func proveFactoringCompiledStandingSubjects(t *testing.T, binary, backend string
 			t.Fatalf("provisioned shutdown: %v\n%s", err, p.output.String())
 		}
 	}
+}
+
+func copyFactoringStandingSource(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(goldenReleaseRoot(t), "contracts")
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/admission_factoring"), root)
+	return root
 }
 
 func TestAdmissionFactoringRegisteredToolExecution(t *testing.T) {
