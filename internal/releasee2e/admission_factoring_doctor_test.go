@@ -89,6 +89,44 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 			})
 		})
 	}
+	t.Run("invalid-env-config", func(t *testing.T) {
+		cwd := goldenReleaseRoot(t)
+		config, env := clockReleaseConfig(t, cwd, "sqlite")
+		env = append(env, "SWARM_TOOL_GATEWAY_TOKEN=stale-parent-token")
+		args := []string{"doctor", "--config", config, "--workspace-backend", "host", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0", "--schema-inventory"}
+		for _, asJSON := range []bool{true, false} {
+			t.Run(map[bool]string{true: "json", false: "text"}[asJSON], func(t *testing.T) {
+				commandArgs := append([]string(nil), args...)
+				if asJSON {
+					commandArgs = append(commandArgs, "--json")
+				}
+				result := runReleaseCommand(t, goldenStartupTimeout, cwd, env, "", binary, commandArgs...)
+				exit, exited := result.err.(*exec.ExitError)
+				if !exited || exit.ExitCode() != 3 || strings.Contains(result.output, "stale-parent-token") {
+					t.Fatalf("compiled doctor env blocker lost exit/redaction: %v\n%s", result.err, result.output)
+				}
+				if !asJSON {
+					if !strings.Contains(result.output, "/config_load_failed @ doctor:") || strings.Contains(result.output, "/api_listener @ doctor:") {
+						t.Fatalf("invalid config bypassed the earlier admission gate\n%s", result.output)
+					}
+					return
+				}
+				var report factoringDoctorReport
+				if err := json.Unmarshal([]byte(result.output), &report); err != nil || report.OK {
+					t.Fatalf("compiled doctor accepted env blocker: %v\n%s", err, result.output)
+				}
+				found := 0
+				for _, finding := range report.Findings {
+					if finding.Code == "config_load_failed" && finding.Status == "failed" && finding.Severity == "blocker" {
+						found++
+					}
+				}
+				if found != 1 || len(report.CapabilitySubjects) != 0 || len(report.PackInventory.Packs) != 0 {
+					t.Fatalf("invalid config bypassed the earlier admission gate: blockers=%d\n%s", found, result.output)
+				}
+			})
+		}
+	})
 	t.Run("failure-gates", func(t *testing.T) {
 		for _, tc := range []struct{ name, suffix, code string }{
 			{"invalid-pack", "platform:\n  packs:\n    platform_dirs: [missing-pack-directory]\n", "platform_pack_load_failed"},
