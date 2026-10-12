@@ -546,33 +546,14 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		detail["reply_origin"] = target
 		return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 	}
-	claimed := record
-	outcome := runtimereplycontext.ClaimAccepted
-	retained, err := selectedForkReplyReturn(ctx, evt, record)
+	claim, outcome, err := replyResponseClaim(ctx, evt, record)
 	if err != nil {
 		return nil, nil, nil, 0, nil, err
 	}
-	if !retained && templateInstanceLifecyclePreview(ctx) {
-		if record.State == runtimereplycontext.StateTerminal {
-			if record.AcceptedReplyEventID == evt.ID() {
-				outcome = runtimereplycontext.ClaimIdempotent
-			} else {
-				outcome = runtimereplycontext.ClaimTerminal
-			}
-		}
-	}
 	if outcome == runtimereplycontext.ClaimTerminal {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureReplyAlreadyTerminal.Code()
-		detail["accepted_reply_event_id"] = claimed.AcceptedReplyEventID
+		detail["accepted_reply_event_id"] = record.AcceptedReplyEventID
 		return nil, nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil
-	}
-	var claim *runtimereplycontext.ClaimCommand
-	if !retained {
-		command := runtimereplycontext.ClaimCommand{Expected: record, ReplyEventID: evt.ID()}.Normalized()
-		if err := command.Validate(); err != nil {
-			return nil, nil, nil, 0, nil, err
-		}
-		claim = &command
 	}
 	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
@@ -621,6 +602,28 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	detail["request_correlation_id"] = record.RequestCorrelationID
 	detail["reply_claim_outcome"] = outcome
 	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), claim, 0, detail, nil
+}
+
+func replyResponseClaim(ctx context.Context, event events.Event, record runtimereplycontext.Record) (*runtimereplycontext.ClaimCommand, runtimereplycontext.ClaimOutcome, error) {
+	retained, err := selectedForkReplyReturn(ctx, event, record)
+	if err != nil {
+		return nil, "", err
+	}
+	if retained {
+		return nil, runtimereplycontext.ClaimIdempotent, nil
+	}
+	outcome := runtimereplycontext.ClaimAccepted
+	if templateInstanceLifecyclePreview(ctx) && record.State == runtimereplycontext.StateTerminal {
+		if record.AcceptedReplyEventID != event.ID() {
+			return nil, runtimereplycontext.ClaimTerminal, nil
+		}
+		outcome = runtimereplycontext.ClaimIdempotent
+	}
+	command := runtimereplycontext.ClaimCommand{Expected: record, ReplyEventID: event.ID()}.Normalized()
+	if err := command.Validate(); err != nil {
+		return nil, "", err
+	}
+	return &command, outcome, nil
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {

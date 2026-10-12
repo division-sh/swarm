@@ -312,6 +312,11 @@ func receiverOwnershipCollect(pkg *types.Package, info *types.Info, fset *token.
 								continue
 							}
 						}
+						if field := structure.Field(i); field.Name() == "ContinuedReplyReturn" {
+							if pointer, ok := field.Type().(*types.Pointer); ok && receiverOwnershipType(pointer.Elem()) == "runtime/replycontext.Record" {
+								continue
+							}
+						}
 						if !allowed[structure.Field(i).Name()] {
 							add(n, "competing_source_carrier_field:"+structure.Field(i).Name())
 						}
@@ -382,8 +387,8 @@ type EntityIdentity struct { EntityID, FlowInstance string }
 func ordinary(a, b string) EntityIdentity { return EntityIdentity{a, b} }
 `, []string{"ordinary/write:runtime/runfork.EntityIdentity.EntityID", "ordinary/write:runtime/runfork.EntityIdentity.FlowInstance"}},
 		{"carrier_cannot_grow_competing_fields", "runtime/runfork", "models.go", `package runfork
-type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string; PublishedJoin string; PublishedJoinRoute string; ContinuedFanOutRoutes string; ContinuedReplyRequests string }
-`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication", "competing_source_carrier_field:PublishedJoin", "competing_source_carrier_field:PublishedJoinRoute", "competing_source_carrier_field:ContinuedFanOutRoutes", "competing_source_carrier_field:ContinuedReplyRequests"}},
+type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string; PublishedJoin string; PublishedJoinRoute string; ContinuedFanOutRoutes string; ContinuedReplyRequests string; ContinuedReplyReturn string }
+`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication", "competing_source_carrier_field:PublishedJoin", "competing_source_carrier_field:PublishedJoinRoute", "competing_source_carrier_field:ContinuedFanOutRoutes", "competing_source_carrier_field:ContinuedReplyRequests", "competing_source_carrier_field:ContinuedReplyReturn"}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			fset := token.NewFileSet()
