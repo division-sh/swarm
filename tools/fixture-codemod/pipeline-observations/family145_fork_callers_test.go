@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 334 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "431a50903d864dc034f6b1664df846f809da20087f0c1a84f5fcb100f08ecd32" {
+	if err != nil || len(rows) != 348 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "81172f655a7efb88ad6a76995a78a1893f1afdb95a4b936058bc9ee55539b5d6" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -119,6 +119,14 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if _, ok := family145ArtifactCallbackCuts[row.Function]; ok {
 			if err := family145ArtifactCallbackProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		_, gateHelper := family145GateRecoveryHelpers[row.Function]
+		_, gateCaller := family145GateRecoveryCallers[row.Function]
+		if gateHelper || gateCaller {
+			if err := family145GateRecoveryProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "431a50903d864dc034f6b1664df846f809da20087f0c1a84f5fcb100f08ecd32"
+const targetDigest = "81172f655a7efb88ad6a76995a78a1893f1afdb95a4b936058bc9ee55539b5d6"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -95,6 +95,8 @@ var files = []string{
 	"internal/runtime/channel_runtime_supported_surface_test.go",
 	"internal/runtime/operator_channel_inbound_supported_surface_test.go",
 	"internal/runtime/bus/eventbus_publish_test.go",
+	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+	"internal/runtime/pipeline/selection_retry_cas_external_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
 	"internal/runtime/artifact_action_result_delivery_test.go",
@@ -144,6 +146,9 @@ func main() {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
+			if targets, limited := gateRecoveryTargets[path]; limited && !targets[key] {
+				continue
+			}
 			if path == "internal/runtime/bus/eventbus_publish_test.go" && key != "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" && key != "TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects" && key != "TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutation" {
 				continue
 			}
@@ -183,6 +188,27 @@ var renamedHelpers = map[string]map[string]string{
 	},
 	"internal/runtime/artifact_action_result_delivery_test.go": {
 		"waitArtifactActionResultDBCount": "waitArtifactActionResultSettledCount",
+	},
+}
+
+var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go": {
+		"TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores":                  true,
+		"TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores": true,
+		"TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBothStores":   true,
+		"installProposedEffectCreateFailure":                                                   true,
+		"setGateRecoveryRouteAttempt":                                                          true,
+		"testWorkflowGateStartupTerminalRecovery":                                              true,
+		"testWorkflowGateUnavailablePinRecovery":                                               true,
+		"makeGateRecoveryRouteDue":                                                             true,
+		"assertProposedEffectOutcomeCount":                                                     true,
+		"proposedEffectProofFailure":                                                           true,
+		"gateRecoveryOutcomeEventID":                                                           true,
+		"gateRecoveryOutcomeEventCount":                                                        true,
+		"gateRecoveryDeliveryCount":                                                            true,
+	},
+	"internal/runtime/pipeline/selection_retry_cas_external_test.go": {
+		"TestSelectionRetryAfterRealCASConflictBothStores": true,
 	},
 }
 

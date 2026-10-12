@@ -129,7 +129,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
 			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || fault.selection.DisplayLabel() != "first" {
-				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
+				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected.events, event.ID()))
 			}
 			evidence := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, event.ID())
 			if len(evidence.Deliveries) != 1 {

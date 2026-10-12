@@ -3011,3 +3011,57 @@ original owners and narrow detached evidence; parent and M01/Docker/drain/D3/
 M07/rollback holds remain unwaived. No new framework, tracker, PR, push, tier,
 budget or server2 use. The next ready shared chain is gate-recovery construction,
 physical observations and its existing exact named fault cuts.
+
+## Complete gate-recovery read/fault helper and caller dependency
+
+All eight shared physical read/fault helpers now consume the original selected
+store, not gateRecoveryStoreCase. Their complete caller chain is propagated,
+including the selection-CAS failure diagnostic outside the recovery file.
+Fourteen exact function transitions /1165 recipes are finite and source-pinned;
+every original Before/After and the24 historical mechanical receipts remain.
+
+The larger gateRecoveryStoreCase construction container is NOT retired here.
+Inspection/compiler controls exposed independent A2, timer, snapshot, prospective
+publication and handwritten transaction consumers of its raw fields. Its existing
+constructors/fields are retained as explicit debt, without a new delegate, getter,
+compatibility seam or constructor-removal credit. Those dependencies must migrate
+together before last-caller deletion; this group closes the entire eight-helper
+read/fault chain, not that wider container or all pipeline authority.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| decisionpersistence | Fixed physical continuation cardinality; the original BEFORE INSERT continuation trigger and exact decision-route attempt/due and due-only writes. All three fault shapes keep table/columns/predicate/payload and temporal location. Each row update requires exactly one existing obligation; absence rolls back and yields no successful cut. Faults use the original unrevisioned selected writer, never fabricated transaction contexts or new coordinators. |
+| Closed delivery projection | Exact node delivery status, event/subscriber count without an added type restriction, and original latest dead-letter NULL/order/limit observation. No delivery SQL remains in the eight helpers. |
+| eventrecord and existing run-lifecycle owner | Fixed source/name event cardinality and run-local created_at chronology; existing exact run/name count, source/name identity and run status ports are reused. No new run, type, readiness or eligibility filter is introduced. Event bridges remain in test_event_support.go. |
+| Original selected coordinator | All independent observation cuts remain separate and return no partial values on invalid/raw/cancelled/closed ownership or storage failure. The three actual SQLite faults are execution-proven to queue behind a channel-held original writer, cancel without starting a second SQL transaction and join before cleanup. |
+| Finite caller/statement/assertion controls | Eight helper signatures cannot retain the raw-bearing container. Every native port, argument and caller is hostile-controlled; original assertions compare after only the exact helper container-to-events-field propagation is normalized. Existing sibling transaction observers are preserved, not claimed repaired. All old fixed read queries and trigger/update statements are compared to their original shapes, including quote-sensitive payloads. |
+
+| Manifestation | Disposition / named executed proof |
+| --- | --- |
+| Persisted pin recovery and terminal no-emit completion | reproduced and fixed: TestWorkflowGateUnavailablePinRecoversThroughPersistedEventBusOnBothStores and TestWorkflowGateStartupRecoverySettlesTerminalNoEmitOutcomeOnBothStores, both stores under race |
+| Frozen activity input, callback outcomes and complete rollback | reproduced and fixed: TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores and TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores, both stores under race; trigger remains at continuation insertion after actual workflow/card work |
+| Completed-route replay before source fence, preserving reply context | execution-proven through the same corrected path: TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyContextOnBothStores, both stores under race |
+| Fairness, poison quarantine and foreground acknowledgment uncertainty | execution-proven through the same corrected path: TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBothStores, TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores, TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores and TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForms, both stores under race |
+| External real-CAS refusal retains original failure diagnostic | execution-proven through the same corrected path: TestSelectionRetryAfterRealCASConflictBothStores, both stores under race; its separate handwritten transaction observer remains explicit debt |
+| Raw/foreign/cancelled/missing/closed ownership and absent-obligation refusal | execution-proven through the same corrected path: TestGateRecoveryPortsRefuseRawCancelledMissingAndClosedOwnersBothStores, both stores under race PASS8.540s |
+| Actual writer admission, cancellation and joined teardown for every fault | execution-proven through the same corrected path: TestGateRecoveryFaultsRespectOriginalSQLiteWriterAdmission, all three named cuts under race PASS12.180s; exact queue/counters and channel-held writer distinguish a bypass, no sleep-based visibility assumption |
+| Full helper/caller, assertion and original SQL/DDL correspondence | execution-proven through the same corrected path: TestFamily145GateRecoveryEntireHelperAndCallerChainRetainsAssertions and TestFamily145GateRecoveryNamedFaultSQLMatchesOriginalTemporalCuts; all family145/historical/finite/idempotency/rename controls PASS7.983s |
+
+The complete ten-root pipeline race run PASS77.674s; original business/lifecycle
+assertions are unchanged. Affected boundary/revision/writer guards PASS5.925s,
+retirement guards PASS5.368s, U1000 clean, dry-run Changes=[]. The first constructor
+field deletion failed compilation against wider sibling consumers; those existing
+fields and constructor bodies were restored, with no debt-deletion claim. The
+corpus-count control caught reused historical rows; the exact count was corrected
+without dropping or replacing any row. Wider unchanged receipts carry.
+
+Ratchet PASS191.300s removed26/added0:8944 ->8918; raw-operation debt6450 ->6426.
+After adding the actual-writer control, final ratchet PASS50.400s confirmed0/0.
+Excluded uncertainty67 and collector/policy unchanged; broader54786/39069 is not
+debt. Supplied pools remain90 (88 external +2 private), M0/D53/S37, qualified
+openings44. No constructor/restart or parent-class closure is claimed. Signed-head
+complexity is recorded with receipts. Existing watchlist/architecture disposition
+stays original owners and narrower component capabilities; no new abstraction,
+tracking issue, push, PR, tier/full, budget, server2, timeout or waiver. All parent
+and M01/Docker/drain/D3/M07/rollback holds remain open. The wider recovery container
+is a mixed mechanical/semantic dependency, not a ready constructor-only rewrite.

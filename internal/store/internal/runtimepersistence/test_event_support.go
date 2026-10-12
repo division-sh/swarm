@@ -627,6 +627,18 @@ func ReadTemplateNamedEventIdentityForTest(ctx context.Context, selected any, na
 		return eventrecord.ReadTemplateNamedEventIdentityTx(ctx, tx, name)
 	})
 }
+
+func CountGateSourceNamedEventsForTest(ctx context.Context, selected any, name, source string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{source}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountGateSourceNamedEventsTx(ctx, tx, name, source)
+	})
+}
+
+func ReadGateRunEventNamesForTest(ctx context.Context, selected any, run string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadGateRunEventNamesTx(ctx, tx, run)
+	})
+}
 func ReadTemplateSourceNamedEventIdentityForTest(ctx context.Context, selected any, name, source string) (string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{source}, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		return eventrecord.ReadTemplateSourceNamedEventIdentityTx(ctx, tx, name, source)

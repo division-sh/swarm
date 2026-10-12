@@ -173,6 +173,34 @@ func CountTemplateNodeDeliveryTx(ctx context.Context, tx *sql.Tx, event, node st
 	return count, err
 }
 
+func ReadGateNodeDeliveryStatusTx(ctx context.Context, tx *sql.Tx, event, node string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM event_deliveries WHERE event_id = $1 AND subscriber_type = 'node' AND subscriber_id = $2`, event, node).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func CountGateEventSubscriberDeliveriesTx(ctx context.Context, tx *sql.Tx, event, subscriber string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1 AND subscriber_id = $2`, event, subscriber).Scan(&count)
+	return count, err
+}
+
+func ReadGateLatestDeadLetterFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, event string) (string, error) {
+	query := `SELECT COALESCE(CAST(failure AS TEXT), '') FROM dead_letters WHERE original_event_id = $1 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(failure::text, '') FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	err := tx.QueryRowContext(ctx, query, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 func CountTemplateNodeDeliveryChronologyTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2 AND settled_at IS NOT NULL AND created_at<settled_at`, event, node).Scan(&count)
