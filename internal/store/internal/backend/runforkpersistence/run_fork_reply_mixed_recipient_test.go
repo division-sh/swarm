@@ -102,3 +102,48 @@ func TestIssue642SettledReplyDoesNotBlockOtherPendingRecipient(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue642NativeRequestPartitionIncludesOnlyUnfinishedRecipients(t *testing.T) {
+	for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter, deliverylifecycle.StatusCanceled} {
+		t.Run(string(status), func(t *testing.T) {
+			snapshot, eventID, child, _, routes := mixedRequestRecipientFixture(t)
+			snapshot.Deliveries[0].Snapshot.Status = status
+			before := projectionJSON(t, snapshot)
+			partitions, err := requestPendingPublications(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{snapshot.Deliveries[1].Snapshot.DeliveryID}
+			if !snapshot.Deliveries[0].Snapshot.Terminal() {
+				want = append(want, snapshot.Deliveries[0].Snapshot.DeliveryID)
+			}
+			if len(partitions) != 1 || len(partitions[eventID]) != len(want) {
+				t.Fatalf("complete unfinished request partition: %+v want=%v", partitions, want)
+			}
+			for _, id := range want {
+				found := false
+				for _, actual := range partitions[eventID] {
+					found = found || actual == id
+				}
+				if !found {
+					t.Fatalf("unfinished request delivery omitted: %s", id)
+				}
+			}
+			if snapshot.Deliveries[0].Snapshot.Terminal() {
+				projected, err := projectContinuedRequestSourceRoutes(snapshot, eventID, child)
+				if err != nil || !reflect.DeepEqual(projected, routes[1:]) {
+					t.Fatalf("non-reply observer projection changed: %+v error=%v", projected, err)
+				}
+				if err := requireRunForkRequestRecipientPartition(snapshot, eventID, child, nil, routes[1:]); err != nil {
+					t.Fatalf("settled provider blocked exact unfinished observer: %v", err)
+				}
+				if err := requireRunForkRequestRecipientPartition(snapshot, eventID, child, nil, routes); err == nil {
+					t.Fatal("settled provider was admitted as fresh owed work")
+				}
+			}
+			if before != projectionJSON(t, snapshot) {
+				t.Fatal("partition discovery/projection repaired retained history")
+			}
+		})
+	}
+}

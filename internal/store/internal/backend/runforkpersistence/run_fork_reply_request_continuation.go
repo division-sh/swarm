@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -55,6 +56,21 @@ func capturedRunForkRequestReplies(snapshot *runForkRevisionSnapshot, eventID st
 }
 
 func capturedReplyRequestPublication(cut runForkReplayCut, event events.Event, record replycontext.Record) bool {
+	if !capturedReplyRequestEventMatches(event, record) {
+		return false
+	}
+	if _, selected := event.SelectedForkLineage(); !selected {
+		return true
+	}
+	for _, captured := range cut.deliveries {
+		if captured.Snapshot.EventID == event.ID() && captured.Snapshot.Route.Context.ReplyContextID() == record.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func capturedReplyRequestEventMatches(event events.Event, record replycontext.Record) bool {
 	if _, selected := event.SelectedForkLineage(); !selected {
 		return record.RequestEventID == event.ID()
 	}
@@ -65,15 +81,86 @@ func capturedReplyRequestPublication(cut runForkReplayCut, event events.Event, r
 		path = "."
 	}
 	name := eventidentity.ExternalizeForFlow(path, []string{record.RequestOutputPin}, record.RequestOutputPin)
-	if string(event.Type()) != name {
-		return false
+	return string(event.Type()) == name
+}
+
+func requestPendingPublications(snapshot *runForkRevisionSnapshot) (map[string][]string, error) {
+	if snapshot == nil {
+		return nil, fmt.Errorf("request partition lacks its fixed cut")
 	}
-	for _, captured := range cut.deliveries {
-		if captured.Snapshot.EventID == event.ID() && captured.Snapshot.Route.Context.ReplyContextID() == record.ID {
-			return true
+	if len(snapshot.ReplyContexts) == 0 {
+		return map[string][]string{}, nil
+	}
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	records := make(map[string]replycontext.Record, len(snapshot.ReplyContexts))
+	original := make(map[string]bool, len(snapshot.ReplyContexts))
+	for _, captured := range snapshot.ReplyContexts {
+		if err := captured.Record.Validate(); err != nil || captured.Record.RunID != snapshot.RunID {
+			return nil, fmt.Errorf("request partition has invalid or foreign captured reply evidence: %v", err)
+		}
+		if _, duplicate := records[captured.Record.ID]; duplicate {
+			return nil, fmt.Errorf("request partition has duplicate captured reply identities")
+		}
+		records[captured.Record.ID] = captured.Record
+		original[captured.Record.RequestEventID] = true
+	}
+	requests := make(map[string]bool)
+	for _, delivery := range cut.deliveries {
+		event, err := cut.event(delivery.Snapshot.EventID)
+		if err != nil {
+			return nil, err
+		}
+		if _, selected := event.SelectedForkLineage(); !selected {
+			requests[event.ID()] = original[event.ID()]
+		} else if record, found := records[delivery.Snapshot.Route.Context.ReplyContextID()]; found && capturedReplyRequestEventMatches(event, record) {
+			requests[event.ID()] = true
 		}
 	}
-	return false
+	partitions := make(map[string][]string)
+	for _, delivery := range cut.deliveries {
+		if !delivery.Snapshot.Terminal() && requests[delivery.Snapshot.EventID] {
+			partitions[delivery.Snapshot.EventID] = append(partitions[delivery.Snapshot.EventID], delivery.Snapshot.DeliveryID)
+		}
+	}
+	for _, ids := range partitions {
+		sort.Strings(ids)
+	}
+	return partitions, nil
+}
+
+func projectContinuedRequestSourceRoutes(snapshot *runForkRevisionSnapshot, eventID, child string) ([]events.DeliveryRoute, error) {
+	partitions, err := requestPendingPublications(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	ids, present := partitions[eventID]
+	if !present {
+		return nil, nil
+	}
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	event, err := cut.event(eventID)
+	if err != nil {
+		return nil, err
+	}
+	routes := make([]events.DeliveryRoute, 0, len(ids))
+	for _, id := range ids {
+		delivery, err := cut.delivery(eventID, id)
+		if err != nil {
+			return nil, err
+		}
+		route, err := projectSelectedFanOutRecipient(snapshot, event, delivery, child)
+		if err != nil {
+			return nil, err
+		}
+		routes = append(routes, route)
+	}
+	return routes, nil
 }
 
 func (a runForkSourceStateAdmission) projectRequestReplies(eventID string) ([]replycontext.Record, error) {
@@ -107,7 +194,11 @@ func requireRunForkRequestReplyEvidenceTx(ctx context.Context, tx *sql.Tx, linea
 	if err := requireRunForkRequestReplyEvidence(expected, replies, routes); err != nil {
 		return err
 	}
-	if len(expected) == 0 {
+	partitions, err := requestPendingPublications(admission.snapshot)
+	if err != nil {
+		return err
+	}
+	if len(expected) == 0 && len(partitions[lineage.SourceEventID]) == 0 {
 		return nil
 	}
 	return requireRunForkRequestRecipientPartition(admission.snapshot, lineage.SourceEventID, lineage.ForkRunID, replies, routes)

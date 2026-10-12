@@ -20,14 +20,18 @@ import (
 )
 
 func TestIssue642MixedRequestWholePublicationBothStores(t *testing.T) {
-	runMixedRequestWholePublication(t, false)
+	runMixedRequestWholePublication(t, false, false)
 }
 
 func TestIssue642SettledReplyKeepsPendingObserverWholePublicationBothStores(t *testing.T) {
-	runMixedRequestWholePublication(t, true)
+	runMixedRequestWholePublication(t, true, false)
 }
 
-func runMixedRequestWholePublication(t *testing.T, settledProvider bool) {
+func TestIssue642CompletedReplyKeepsPendingObserverWholePublicationBothStores(t *testing.T) {
+	runMixedRequestWholePublication(t, true, true)
+}
+
+func runMixedRequestWholePublication(t *testing.T, settledProvider, returnedRequester bool) {
 	t.Helper()
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
@@ -41,7 +45,7 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider bool) {
 				eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
 			cut := ""
 			if settledProvider {
-				cut = holdMixedRequestObserverUntilProviderSettles(t, h, selected, step)
+				cut = holdMixedRequestObserverUntilProviderSettles(t, h, selected, step, returnedRequester)
 			} else {
 				h.publishAndWait(step, 20*time.Second)
 			}
@@ -171,6 +175,17 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider bool) {
 					t.Fatal(err)
 				}
 				if settled == wantRecipients && observed == 1 && pending == 0 {
+					if returnedRequester {
+						providerReplies, err := storetest.ReadLifecycleEventCardinality(wait, selected, staged.ForkRunID, "provider.replied")
+						if err != nil || providerReplies != 0 {
+							t.Fatalf("completed reply/provider was reissued: count=%d error=%v", providerReplies, err)
+						}
+						retainedReturn := storetest.LoadCanonicalEventRecord(t, wait, selected, activityidentity.ForkLineageEventID(staged.ForkRunID, cut))
+						lineage, isSelected := retainedReturn.SelectedForkLineage()
+						if !isSelected || lineage.SourceEventID() != cut || string(retainedReturn.Type()) != "request.finished" {
+							t.Fatal("completed return was re-executed rather than retaining its exact cut publication")
+						}
+					}
 					break
 				}
 				select {
@@ -207,7 +222,7 @@ func runMixedRequestWholePublication(t *testing.T, settledProvider bool) {
 	}
 }
 
-func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarness, selected unclaimedFanOutReplyStore, step catalogTriggerStep) string {
+func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarness, selected unclaimedFanOutReplyStore, step catalogTriggerStep, returnedRequester bool) string {
 	t.Helper()
 	node, err := identity.AdmitExecutableNodeDeclaration(".", "request-observer")
 	if err != nil {
@@ -265,6 +280,28 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 				t.Fatalf("temporal cut lacks one settled provider and one unfinished observer: provider=%d observer=%d", provider, observer)
 			}
 			cut := row.AcceptedReplyEventID
+			if returnedRequester {
+				count, err := storetest.ReadLifecycleEventCardinality(ctx, selected, catalogRuntimeRunID, "request.finished")
+				if err != nil || count > 1 {
+					t.Fatalf("ordinary requester return count=%d error=%v", count, err)
+				}
+				if count == 0 {
+					select {
+					case <-ctx.Done():
+						t.Fatal("ordinary requester did not return within the original business bound")
+					case <-time.After(10 * time.Millisecond):
+						continue
+					}
+				}
+				cut, err = storetest.ReadLatestNamedEventIdentityStorage(ctx, selected, "request.finished", "")
+				if err != nil || cut == "" {
+					t.Fatalf("ordinary committed requester return cut: %v", err)
+				}
+				finished := storetest.LoadCanonicalEventRecord(t, ctx, selected, cut)
+				if finished.RunID() != catalogRuntimeRunID || finished.ParentEventID() != row.AcceptedReplyEventID {
+					t.Fatal("requester return cut belongs to another run or accepted reply")
+				}
+			}
 			held.resume()
 			select {
 			case err := <-published:

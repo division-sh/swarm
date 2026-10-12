@@ -22,6 +22,51 @@ type fanOutRecipientPartitionSlot struct {
 	selected forkrecipient.Evidence
 }
 
+func TestIssue642RequestFrontierUsesExactNativePartition(t *testing.T) {
+	run := uuid.NewString()
+	slots := []fanOutRecipientPartitionSlot{
+		fanOutRecipientPartitionNode(t, run, ".", ".", "pending-observer"),
+		fanOutRecipientPartitionNode(t, run, "provider", "provider", "settled-provider"),
+	}
+	plan, partition := fanOutRecipientPartitionPlan(t, run, slots, 1)
+	plan.FanOutObligations = nil
+	plan.ForkPoint.Revision = 5
+	plan = plan.WithHistoricalEvents(5, []string{partition.SourceEventID})
+	plan, err := plan.WithHistoricalRequestPublications(5, map[string][]string{partition.SourceEventID: partition.SourceDeliveryIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, present, err := plan.RequestPendingRecipientPartition(partition.SourceEventID)
+	if err != nil || !present {
+		t.Fatalf("native request partition missing: %v", err)
+	}
+	for _, fault := range []string{"exact", "missing", "duplicate", "wrong_handler"} {
+		t.Run(fault, func(t *testing.T) {
+			selected := []forkrecipient.Evidence{slots[0].selected, slots[1].selected}
+			switch fault {
+			case "missing":
+				selected = selected[1:]
+			case "duplicate":
+				selected = append(selected, selected[0])
+			case "wrong_handler":
+				selected[0] = fanOutRecipientPartitionNode(t, run, ".", ".", "different-observer").selected
+			}
+			before := append([]forkrecipient.Evidence(nil), selected...)
+			got, err := continuingPublicationRecipients(plan, partition.SourceEventID, ids, selected)
+			if fault == "exact" {
+				if err != nil || !reflect.DeepEqual(got, []forkrecipient.Evidence{slots[0].selected}) {
+					t.Fatalf("settled provider returned to planning: %+v error=%v", got, err)
+				}
+			} else if err == nil {
+				t.Fatal("inexact request recipient partition admitted")
+			}
+			if !reflect.DeepEqual(before, selected) {
+				t.Fatal("recipient narrowing mutated its input")
+			}
+		})
+	}
+}
+
 func fanOutRecipientPartitionNode(t *testing.T, runID, flow, path, name string) fanOutRecipientPartitionSlot {
 	t.Helper()
 	node := identitytest.FlowNode(t, flow, name)

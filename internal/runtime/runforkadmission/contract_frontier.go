@@ -133,6 +133,16 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 				return runfork.RunForkContractFrontierAdmission{}, err
 			}
 		}
+		requestDeliveries, continuingRequest, err := req.Plan.RequestPendingRecipientPartition(frontier[i].SourceEventID)
+		if err != nil {
+			return runfork.RunForkContractFrontierAdmission{}, err
+		}
+		if continuingRequest {
+			frontier[i].DerivedRecipients, err = continuingPublicationRecipients(req.Plan, frontier[i].SourceEventID, requestDeliveries, frontier[i].DerivedRecipients)
+			if err != nil {
+				return runfork.RunForkContractFrontierAdmission{}, err
+			}
+		}
 		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
 			pendingRecipients := frontier[i].DerivedRecipients[:0]
 			for _, recipient := range frontier[i].DerivedRecipients {
@@ -150,7 +160,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			frontier[i].DerivedRecipients = pendingRecipients
 		}
 		_, inputPublication := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID)
-		if inputPublication || continuingFanOut {
+		if inputPublication || continuingFanOut || continuingRequest {
 			for _, recipient := range frontier[i].DerivedRecipients {
 				if recipient.Recipient.IsNode() {
 					frontier[i].WorkflowNodeSubscribers = append(frontier[i].WorkflowNodeSubscribers, recipient.HandlerNode().Key())
@@ -233,10 +243,14 @@ func matchesHistoricalRecipient(sourceRun string, route events.DeliveryRoute, re
 }
 
 func continuingFanOutRecipients(plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, selected []forkrecipient.Evidence) ([]forkrecipient.Evidence, error) {
-	owed := make(map[string]events.DeliveryRoute, len(replay.SourceDeliveryIDs))
-	for _, id := range replay.SourceDeliveryIDs {
+	return continuingPublicationRecipients(plan, replay.SourceEventID, replay.SourceDeliveryIDs, selected)
+}
+
+func continuingPublicationRecipients(plan runfork.RunForkPlan, eventID string, deliveryIDs []string, selected []forkrecipient.Evidence) ([]forkrecipient.Evidence, error) {
+	owed := make(map[string]events.DeliveryRoute, len(deliveryIDs))
+	for _, id := range deliveryIDs {
 		for _, pending := range plan.PendingWork {
-			if pending.EventID == replay.SourceEventID && pending.DeliveryID == id {
+			if pending.EventID == eventID && pending.DeliveryID == id {
 				owed[id] = pending.DeliveryRoute
 			}
 		}
@@ -250,15 +264,15 @@ func continuingFanOutRecipients(plan runfork.RunForkPlan, replay runfork.RunFork
 				continue
 			}
 			if matched[id] || candidateMatched {
-				return nil, fmt.Errorf("selected fan-out event %s resolves an unfinished slot more than once", replay.SourceEventID)
+				return nil, fmt.Errorf("selected publication %s resolves an unfinished slot more than once", eventID)
 			}
 			matched[id] = true
 			candidateMatched = true
 			out = append(out, recipient)
 		}
 	}
-	if len(out) != len(replay.SourceDeliveryIDs) || len(matched) != len(owed) {
-		return nil, fmt.Errorf("selected fan-out event %s cannot resolve its complete unfinished partition", replay.SourceEventID)
+	if len(out) != len(deliveryIDs) || len(matched) != len(owed) {
+		return nil, fmt.Errorf("selected publication %s cannot resolve its complete unfinished partition", eventID)
 	}
 	return forkrecipient.CanonicalSet(out)
 }

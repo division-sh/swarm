@@ -803,7 +803,11 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 	if err != nil {
 		return nil, err
 	}
-	if !continuing && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 {
+	_, request, err := c.req.SourcePlan.RequestPendingRecipientPartition(source.SourceEventID)
+	if err != nil {
+		return nil, err
+	}
+	if !continuing && !request && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 {
 		return ctx, nil
 	}
 	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {

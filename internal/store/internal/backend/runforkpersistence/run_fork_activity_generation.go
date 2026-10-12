@@ -374,6 +374,20 @@ func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.C
 	if err != nil {
 		return projected, err
 	}
+	if len(projected.ContinuedReplyRequests) == 0 {
+		requestRoutes, err := projectContinuedRequestSourceRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
+		if err != nil {
+			return projected, err
+		}
+		if len(requestRoutes) != 0 {
+			if len(projected.ContinuedRecipientRoutes) != 0 {
+				if err := requireExactRunForkRequestRoutes(requestRoutes, projected.ContinuedRecipientRoutes); err != nil {
+					return projected, err
+				}
+			}
+			projected.ContinuedRecipientRoutes = requestRoutes
+		}
+	}
 	activityRoutes, activityResult, err := a.publishedActivityResultRoutes(ctx, tx, source.SourceEventID)
 	if err != nil {
 		return projected, err
