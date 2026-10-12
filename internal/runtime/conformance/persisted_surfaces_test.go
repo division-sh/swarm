@@ -1492,17 +1492,6 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 	select {
 	case delivery := <-replayDeliveries:
-		if delivery.ID() != replayChildID {
-			t.Fatalf("continued local delivery id = %q, want %q", delivery.ID(), replayChildID)
-		}
-		claimResult, err := pg.ClaimDelivery(ctx, authority, delivery.Event(), replayRoute)
-		if err != nil {
-			t.Fatalf("claim continued local delivery: %v", err)
-		}
-		claimed, ok := claimResult.Acquired()
-		if !ok {
-			t.Fatalf("continued local delivery disposition = %q, want acquired", claimResult.Disposition)
-		}
 		carrier, err := worklifetime.NewEventDeliveryCarrierGuard(delivery)
 		if err != nil {
 			t.Fatalf("guard continued local delivery: %v", err)
@@ -1515,6 +1504,17 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 				t.Errorf("join continued local delivery ownership: %v", err)
 			}
 		}()
+		if delivery.ID() != replayChildID {
+			t.Fatalf("continued local delivery id = %q, want %q", delivery.ID(), replayChildID)
+		}
+		claimResult, err := pg.ClaimDelivery(ctx, authority, delivery.Event(), replayRoute)
+		if err != nil {
+			t.Fatalf("claim continued local delivery: %v", err)
+		}
+		claimed, ok := claimResult.Acquired()
+		if !ok {
+			t.Fatalf("continued local delivery disposition = %q, want acquired", claimResult.Disposition)
+		}
 		if resolution, err := carrier.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
 			t.Fatalf("transfer continued local delivery into attempt: %v", err)
 		}

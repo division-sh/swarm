@@ -53,6 +53,9 @@ func family145RecoveryRunFaultProofError(before, after string) error {
 	if strings.Count(after, "rm.Recover(ctx)") != 2 || strings.Count(after, "return carrier.Complete(nil)") != 1 || strings.Count(after, "completeCarrier()") != 2 ||
 		strings.Index(after, "storetest.ClearEventRunForRecovery(") > strings.Index(after, "pg.ActivateDeliveryAuthority(") ||
 		strings.Index(after, "continuations.Retire(") > strings.Index(after, "continuations.Start(") ||
+		strings.Index(after, "worklifetime.NewEventDeliveryCarrierGuard(delivery)") > strings.Index(after, "if delivery.ID() != replayChildID") ||
+		strings.Index(after, "join continued local delivery ownership") > strings.Index(after, "if delivery.ID() != replayChildID") ||
+		strings.Index(after, "join continued local delivery ownership") > strings.Index(after, "pg.ClaimDelivery(") ||
 		strings.Index(after, "join continued local delivery ownership") > strings.Index(after, "carrier.Consume(") ||
 		strings.LastIndex(after, "completeCarrier()") < strings.Index(after, "pg.SettleSuccess(") {
 		return fmt.Errorf("recovery fault changed registration, normal completion, repeat-recovery or corruption order")
@@ -98,6 +101,20 @@ func TestFamily145RecoveryRunFaultRetainsRealReplayNoRedispatchAndJoinedOwnershi
 		found++
 		if err := family145RecoveryRunFaultProofError(row.Before, row.After); err != nil {
 			t.Fatal(err)
+		}
+		cleanup := "defer func() {\n\t\t\tif _, err := completeCarrier(); err != nil {\n\t\t\t\tt.Errorf(\"join continued local delivery ownership: %v\", err)\n\t\t\t}\n\t\t}()"
+		for _, cut := range []string{
+			"t.Fatalf(\"continued local delivery id = %q, want %q\", delivery.ID(), replayChildID)\n\t\t}",
+			"t.Fatalf(\"continued local delivery disposition = %q, want acquired\", claimResult.Disposition)\n\t\t}",
+		} {
+			if !strings.Contains(row.After, cleanup) || !strings.Contains(row.After, cut) {
+				t.Fatal("receipt-to-claim cleanup counterexample no longer matches the reviewed source")
+			}
+			late := strings.Replace(row.After, cleanup, "", 1)
+			late = strings.Replace(late, cut, cut+"\n\t\t"+cleanup, 1)
+			if family145RecoveryRunFaultProofError(row.Before, late) == nil {
+				t.Fatalf("carrier cleanup after identity/claim accepted: %s", cut)
+			}
 		}
 		for _, cut := range family145RecoveryRunFaultCuts {
 			if family145RecoveryRunFaultProofError(row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {

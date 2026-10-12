@@ -3620,3 +3620,42 @@ source, session or architecture semantics changed. #2542/#2151, M01/Docker/drain
 D3/M07/rollback and the earlier run-state warning remain open. Receipts:
 ~/.cache/swarm-2542-family145/recovery-run-fault-* on vemew. No push, PR, server2,
 tier/full, timeout/budget increase, legacy shim or ratchet/classifier relaxation.
+
+### Recovery Received-Carrier Before-Claim F1 Repair
+
+Reviewer-b6118031456 reproduced an earlier unjoined ownership window: the
+received delivery already owns its route, but identity or claim assertions could
+fail before the carrier guard/defer was registered. The preceding after-Consume
+control did not cover that cut; the earlier complete failure-cleanup claim was
+too broad and is superseded by this repair and its explicit receipt.
+
+The same guard and once-only completion defer now register immediately on receive,
+before identity validation and ClaimDelivery. Genuine Consume still follows
+successful acquisition, normal completion still follows actual SettleSuccess,
+and no new completion/release authority, retry or timeout is added. The finite
+source control rejects defer registration after either identity or acquisition,
+as well as the earlier after-Consume/order/input/assertion counterexamples.
+
+| Additional manifestation | Disposition / exact proof |
+| --- | --- |
+| Fatal assertion after receive/registration, before identity validation or claim, must join the accepted route | reproduced and fixed: reviewer original injected failure hung in exact route retirement; repaired pre-claim injected fatal is required to fail only at the intended assertion, without carrier/continuation/route/process/store cleanup failure |
+| After-Consume fatal still joins actual accepted execution before fixture teardown | execution-proven through the same corrected path: repeat the existing bounded fatal-after-Consume control on the repaired head |
+| Identity and claim assertions cannot precede cleanup registration | execution-proven through the same corrected path: finite hostile relocation controls place the defer after each boundary and must reject both |
+
+Only the exact current recovery transition/recipe is reconciled; immutable
+predecessors, original event/fault/SQLite-queue execution and five-removal census
+remain carried. Block movement adds no SQL, constructor or authority operation,
+and earns no deletion credit. #2542/#2151 and all existing qualification holds
+remain open; reviewer-b's comment records the lifetime watchlist refinement.
+No production contract change, new framework, compatibility path or exception.
+Exact signed-head receipts follow with this bounded repair checkpoint.
+
+Go1.26.8/race: pre-claim fatal expected RED6.861s and after-Consume fatal
+expected RED6.296s, each only its named injection and no join/cleanup error;
+both temporary injections removed, original root GREEN7.407s. Complete cheap
+finite controls GREEN10.313s and changed-package U1000 clean. Corpus remains
+1192/379; only the recovery current mapping changed, now digest
+eb1d7d86bd58731abf94b0eab185351e1e6966f6c99d5900735e96bd5f3a1bcb.
+No fault, writer, queue, column or source input changed. The prior8709/6270,
+five-removal/zero-addition census is carried with no duplicate cold run, per
+reviewer-b's explicit disposition; no deletion credit is claimed for F1.
