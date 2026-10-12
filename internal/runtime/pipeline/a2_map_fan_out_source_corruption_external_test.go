@@ -310,10 +310,12 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				before := f.footprint(t)
 				var originalFactKey string
 				var originalFact []byte
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT fact_key,fact
-					FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'
-					ORDER BY revision DESC LIMIT 1`, f.p.runID).Scan(&originalFactKey, &originalFact); err != nil {
-					t.Fatal(err)
+				{
+					originalEvidence, err := storetest.ReadLatestFanOutObligationFactStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					originalFactKey, originalFact = originalEvidence.Key, originalEvidence.Fact
 				}
 				_, err := f.p.pc.ServeFanOutCandidate(f.p.ctx, f.handoff.owner, f.handoff.key)
 				waitForGateRecoveryQuiescence(t, f.p.bus, f.p.ctx)
@@ -331,10 +333,12 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				}
 				var diagnostic []byte
 				var released bool
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT blocked_reason,
-					claim_owner IS NULL AND lease_expires_at IS NULL FROM fan_out_intents WHERE run_id=$1`,
-					f.p.runID).Scan(&diagnostic, &released); err != nil {
-					t.Fatal(err)
+				{
+					blocked, err := storetest.ReadFanOutRunBlockedClaimStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					diagnostic, released = blocked.Diagnostic, blocked.Released
 				}
 				persisted, decodeErr := runtimefailures.UnmarshalEnvelope(diagnostic)
 				if decodeErr != nil || !released || a2AccumulatorJSONHash(t, diagnostic) != a2AccumulatorJSONHash(t, returnedRaw) {
@@ -352,10 +356,13 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				var family, factKey string
 				var fact []byte
 				var present bool
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT family,fact_key,fact,present
-					FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`,
-					f.p.runID, want.LatestRevision).Scan(&family, &factKey, &fact, &present); err != nil {
-					t.Fatal(err)
+				{
+					revisionEvidence, err := storetest.ReadRunRevisionFactStorage(f.p.ctx, f.p.selected.events, f.p.runID, want.LatestRevision)
+					if err != nil {
+						t.Fatal(err)
+					}
+					family, factKey = revisionEvidence.Family, revisionEvidence.Key
+					fact, present = revisionEvidence.Fact, revisionEvidence.Present
 				}
 				var expectedFact map[string]any
 				if err := json.Unmarshal(originalFact, &expectedFact); err != nil {

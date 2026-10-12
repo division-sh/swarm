@@ -4898,3 +4898,43 @@ pool calls61 unchanged. Carrier tail12 references/6files; source facts/diagnosti
 and remaining compound footprints stay live. No parent/qualification hold is
 waived. Local only; no push/PR/tier/server2. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/multi-until-history-*.
+
+## Shared Gate/A2 Dependency: Complete Source-Refusal Diagnostic/Fact Read Chain
+
+The actual corrupt-source pump's three remaining scalar interpreters now consume
+the existing revision and fan-out projection owners: latest fan-out obligation
+fact (exact family, descending revision, LIMIT1), exact run/revision fact (no added
+family filter/order), and raw blocked diagnostic plus both claim/lease NULL tests.
+Every original statement, run/revision scope, raw byte/bool destination, strict
+NULL behavior, and before-pump/after-refusal/history cut is retained. Read errors
+are deliberately block-scoped so they cannot replace the original pump error in
+its typed-return, error diagnostic or final log assertions. No history payload is
+admitted as executable authority; typed ports are detached physical evidence only.
+The compound footprint and dialect-specific JSONB controls remain live tails.
+
+Original whole pump plus native observer root PASS both stores under race30.400s;
+final missing-revision control/native root PASS13.883s. Native proof uses the real
+compiled source and issued claim, checks live/unblocked then actual released/
+blocked state, observes three separate native read commits at each phase, retains
+the exact original intent key, complete original fact plus typed diagnostic,
+matching latest/specific revision physical bytes and unchanged complete storage
+snapshots. Missing exact revision cannot borrow the latest row. Actual null-source
+refusal is produced by the existing pump, not a synthetic fault/result. Private
+foreign/invalid/raw/closed/cancellation controls PASS11.683s under race. Six closed
+persistence boundary roots PASS4.259s; U1000 clean.
+
+Finite proof preserves every original refusal/history/no-progress/retry assertion,
+exact original SQL/order/destination and all three original coordinator bindings.
+The first complete guard collection caught a matcher counting both first pump and
+later retry; the first statement's full line boundary is now pinned, while retry
+and all original assertions remain. Complete cheap Family145/current/historical
+120-root collection PASS12.957s. Corpus1239/454, digest
+ee364f820288df7bdf78fb777eeb91389bb0f5180af6b3baea54feba2bafd105;
+all immutable/current historical receipts remain unchanged in this group.
+
+Downward census PASS160.422s; final unchanged25.149s:8301 ->8295 findings,
+5917 ->5911 raw sites, six removals/zero additions. Uncertainty67 and supplied-
+pool calls61 unchanged. Original shared carrier/openers and all M07/D3/Docker/
+M01/drain/integration obligations remain live; no family/parent completion waiver.
+Local only; no push/PR/tier/server2. Signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/source-fact-diagnostic-*.

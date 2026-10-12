@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 453 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "6fba6eccf7b89865ba870c50af9d906d20a255a99d1a4def8591830baaef5847" {
+	if err != nil || len(rows) != 454 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ee364f820288df7bdf78fb777eeb91389bb0f5180af6b3baea54feba2bafd105" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -146,6 +146,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores" {
 			if err := family145PublicationHistoryProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores" {
+			if err := family145SourceFactDiagnosticProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
