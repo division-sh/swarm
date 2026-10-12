@@ -763,6 +763,7 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, testServeRegistrationAuthority(grantEvidence)); err != nil || current {
 		t.Errorf("terminal process still grants executable registration currentness: %v %v", current, err)
 	}
+	assertTerminalRegistrationRefusesAuthorization(t, ctx, selected, testServeRegistrationAuthority(grantEvidence))
 
 	successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("successor"))
 	if err != nil || successor == nil {
@@ -854,10 +855,8 @@ func TestSQLiteProcessCapabilityFileReplacementTerminalizesIdleOwner(t *testing.
 func TestSQLiteProcessCapabilityCoordinateReplacementTerminalizesIdleOwner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	selected := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	capability, err := selected.AcquireProcessCapability(context.Background(), testStartupAcquireRequest("sqlite-coordinate-replaced-owner"))
-	if err != nil {
-		t.Fatalf("AcquireProcessCapability: %v", err)
-	}
+	ctx := testAuthorActivityContext()
+	capability, _, grant := admitRegistrationTestGeneration(t, ctx, selected, "sqlite-coordinate-replaced-owner")
 	t.Cleanup(func() { _ = capability.Release(context.Background()) })
 	coordinatePath := path + ".possession"
 	if err := os.Rename(coordinatePath, coordinatePath+".retired"); err != nil {
@@ -874,6 +873,28 @@ func TestSQLiteProcessCapabilityCoordinateReplacementTerminalizesIdleOwner(t *te
 	result, ok := capability.TerminalResult()
 	if !ok || result.Cause != runtimestartupownership.TerminalOwnershipUnprovable || result.SuccessorAuthorityID != "" {
 		t.Fatalf("terminal result=%#v ok=%v, want ownership_unprovable", result, ok)
+	}
+	authority := testServeRegistrationAuthority(grant)
+	if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
+		t.Errorf("terminal SQLite process still grants executable registration currentness: %v %v", current, err)
+	}
+	assertTerminalRegistrationRefusesAuthorization(t, ctx, selected, authority)
+}
+
+func assertTerminalRegistrationRefusesAuthorization(t *testing.T, ctx context.Context, store startupAuthorityParityStore, authority runtimeeffects.Authority) {
+	t.Helper()
+	registration, ok := runtimeeffects.RegistrationFor("provider_registration")
+	if !ok {
+		t.Fatal("provider registration adapter missing")
+	}
+	request := runtimeeffects.AuthorizeRequest{OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
+		Adapter: registration.Adapter, Transport: registration.Transport, RequestFingerprint: "terminal-owner-refusal",
+		Lineage: map[string]string{"binding_id": "hitl", "intent_id": authority.ID}, Now: time.Now().UTC()}
+	if _, err := store.AuthorizeExternalAttempt(ctx, authority, request); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
+		t.Errorf("locally retired process authorized registration: %v", err)
+	}
+	if outcome, found, err := store.(runtimeeffects.OutcomeStore).GetExternalEffectOutcome(ctx, request.OperationID); err != nil || found {
+		t.Errorf("terminal refusal persisted an operation: %+v found=%v err=%v", outcome, found, err)
 	}
 }
 

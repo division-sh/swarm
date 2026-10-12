@@ -21,6 +21,7 @@ import (
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
+	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -114,7 +115,7 @@ func (tx *pipelineCrashTx) Commit() error {
 	return err
 }
 
-func openPipelineCrashStore(t *testing.T, backend, location string) (authorActivityReceiptFixture, *pipelineCrashConnector) {
+func openPipelineCrashStore(t *testing.T, backend, location string, instrumentation ...driver.Connector) (authorActivityReceiptFixture, *pipelineCrashConnector) {
 	t.Helper()
 	var native driver.Connector
 	if backend == "postgres" {
@@ -126,6 +127,25 @@ func openPipelineCrashStore(t *testing.T, backend, location string) (authorActiv
 	} else {
 		native = pipelineCrashSQLiteConnector{path: location}
 	}
+	if len(instrumentation) > 1 || len(instrumentation) == 1 && instrumentation[0] == nil {
+		t.Fatal("native process fixture accepts one nonnil transaction observer")
+	}
+	if len(instrumentation) == 1 {
+		native = instrumentation[0]
+	}
+	var identity *storeownership.SQLiteBackendIdentity
+	if backend == "sqlite" && len(instrumentation) == 1 {
+		guard, err := storeownership.AcquireSQLiteConstructionGuard(location)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity, err = guard.BackendIdentity(context.Background())
+		if err != nil {
+			_ = guard.Release()
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = identity.ReleaseConstructionPossession() })
+	}
 	control := &pipelineCrashConnector{Connector: native}
 	db := sql.OpenDB(control)
 	db.SetMaxOpenConns(8)
@@ -136,7 +156,15 @@ func openPipelineCrashStore(t *testing.T, backend, location string) (authorActiv
 		}
 	})
 	if backend == "postgres" {
-		store := admitTestPostgresStore(t, db)
+		var inspection []pq.Config
+		if len(instrumentation) != 0 {
+			cfg, err := pq.NewConfig(location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inspection = append(inspection, cfg)
+		}
+		store := admitTestPostgresStore(t, db, inspection...)
 		registerTestAuthorActivityCatalog(t, store)
 		return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}, control
 	}
@@ -151,7 +179,7 @@ func openPipelineCrashStore(t *testing.T, backend, location string) (authorActiv
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := newSQLiteStoreComposition(schema, b, nil)
+	store, err := newSQLiteStoreComposition(schema, b, identity)
 	if err != nil {
 		t.Fatal(err)
 	}

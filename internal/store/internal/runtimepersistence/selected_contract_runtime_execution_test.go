@@ -480,7 +480,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("recovery entries = %+v %v", entries, err)
 	}
-	recoveryRequest := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+	recoveryRequest := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
 	beforeRecovery := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
 	inspection, err := recovery.InspectSelectedForkRecovery(ctx, entries[0])
 	if err != nil || inspection.ExecutionState != "running" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed || inspection.Plan.Effects != (runtimeeffects.RecoverySummary{}) {

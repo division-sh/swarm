@@ -143,7 +143,7 @@ func TestSelectedTerminatedOriginStartupBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						repeated, err := fork.SelectedContractForkLifecycle.RecoverSelectedFork(startupCtx, runcontrol.SelectedForkRecoveryRequest{
-							Entry: entries[0], Process: processEvidence, Effects: effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live),
+							Entry: entries[0], Process: processEvidence.LeaseStamp(), Effects: effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live),
 							Cancellations: []effects.CanceledTurnCommand{command},
 						})
 						if err != nil || len(repeated.CanceledTurns) != 1 {
@@ -421,7 +421,7 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("inventory: %+v %v", entries, err)
 			}
-			request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+			request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
 			pending, err := recovery.RecoverSelectedFork(ctx, request)
 			if err != nil || len(pending.PendingCancellations) != 1 {
 				t.Fatalf("physical recovery: %+v %v", pending, err)
@@ -566,7 +566,7 @@ func TestSelectedCanceledOriginRecoveryRetainsPendingIntentBothStores(t *testing
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("selected recovery inventory: %+v %v", entries, err)
 			}
-			request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+			request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
 			result, err := recovery.RecoverSelectedFork(ctx, request)
 			if err != nil || result.Effects.OutcomeUncertain != 1 {
 				t.Fatalf("recover selected physical tail: %+v %v", result, err)

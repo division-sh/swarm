@@ -85,7 +85,7 @@ func (a *fanOutAdmission) proveProcess(ctx context.Context, tx *sql.Tx, lock boo
 	if err != nil {
 		return authority, err
 	}
-	current, err := ProcessAuthorityCurrent(ctx, tx, authority, a.sqlite, lock)
+	current, err := ProcessAuthorityCurrent(ctx, tx, authority.LeaseStamp(), a.sqlite, lock)
 	if err != nil {
 		return authority, err
 	}

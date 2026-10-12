@@ -6,13 +6,14 @@ import (
 	"errors"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 // ProcessAuthorityCurrent checks the exact current stamp. Mutation callers must
 // use the canonical generation fence; retained data is never lock possession.
-func ProcessAuthorityCurrent(ctx context.Context, q authorityQueryer, expected runtimeownership.Authority, sqlite, lock bool) (bool, error) {
+func ProcessAuthorityCurrent(ctx context.Context, q authorityQueryer, expected processbinding.LeaseStamp, sqlite, lock bool) (bool, error) {
 	if err := expected.Validate(); err != nil {
 		return false, err
 	}
@@ -21,10 +22,10 @@ func ProcessAuthorityCurrent(ctx context.Context, q authorityQueryer, expected r
 		if !ok {
 			return false, errors.New("process mutation proof requires its transaction")
 		}
-		return generationauthority.ProcessGenerationCurrent(ctx, tx, expected.LeaseStamp(), sqlite)
+		return generationauthority.ProcessGenerationCurrent(ctx, tx, expected, sqlite)
 	}
 	current, err := generationauthority.ReadProcessGeneration(ctx, q, sqlite)
-	return err == nil && current == expected.LeaseStamp(), err
+	return err == nil && current == expected, err
 }
 
 // GenerationGrantProcessCurrent observes the exact current grant's process,

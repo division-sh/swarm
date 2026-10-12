@@ -13,6 +13,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -20,6 +21,11 @@ import (
 const selectedContractRuntimeExecutionLease = 2 * time.Minute
 
 func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkIssue, s) {
+		var issued runfork.SelectedContractRuntimeExecution
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkIssueOperation(s, req, &issued))
+		return issued, err
+	}
 	if s == nil || s.backend == nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
 	}
@@ -47,6 +53,10 @@ func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx 
 }
 
 func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (issued runfork.SelectedContractRuntimeExecution, err error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkIssue, s) {
+		err = runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkIssueOperation(s, req, &issued))
+		return issued, err
+	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
@@ -276,6 +286,11 @@ func validateSelectedRuntimeAdmission(admission runfork.RunForkSelectedContractE
 }
 
 func (s *RunForkPostgresOwner) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkClaim, s) {
+		var authority runtimeeffects.Authority
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkClaimOperation(s, issued, owner, lease, &authority))
+		return authority, err
+	}
 	if s == nil || s.backend == nil {
 		return runtimeeffects.Authority{}, fmt.Errorf("postgres store is required")
 	}
@@ -283,6 +298,10 @@ func (s *RunForkPostgresOwner) ClaimRunForkSelectedContractRuntimeExecution(ctx 
 }
 
 func (s *RunForkSQLiteOwner) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (authority runtimeeffects.Authority, err error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkClaim, s) {
+		err = runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkClaimOperation(s, issued, owner, lease, &authority))
+		return authority, err
+	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeeffects.Authority{}, err
 	}

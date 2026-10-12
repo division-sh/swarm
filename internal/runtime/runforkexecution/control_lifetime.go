@@ -110,7 +110,7 @@ func (o SelectedContractExecutionOwner) acquireSelectedStop(ctx context.Context,
 	if err != nil {
 		return nil, true, err
 	}
-	if err := (runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: runID}, Binding: binding, Process: process}).Validate(); err != nil {
+	if err := (runcontrol.SelectedStopRequest{Transition: runcontrol.TransitionRequest{RunID: runID}, Binding: binding, Process: process.LeaseStamp()}).Validate(); err != nil {
 		return nil, true, err
 	}
 	availability, err := ports.fork.LoadRunBundleAvailability(owned, runID)
@@ -169,7 +169,7 @@ func (o SelectedContractExecutionOwner) StopSelectedFork(ctx context.Context, re
 			return result, true, cleanupErr
 		}
 	}
-	state, err := o.ports.fork.StopSelectedFork(context.WithoutCancel(use.ctx), runcontrol.SelectedStopRequest{Transition: req, Binding: use.binding, Process: use.process})
+	state, err := o.ports.fork.StopSelectedFork(context.WithoutCancel(use.ctx), runcontrol.SelectedStopRequest{Transition: req, Binding: use.binding, Process: use.process.LeaseStamp()})
 	if state.RunID == "" {
 		return result, true, err
 	}

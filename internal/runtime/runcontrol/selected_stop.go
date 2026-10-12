@@ -4,17 +4,17 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
-// SelectedStopRequest carries the exact durable binding and current process
-// possession. It grants no execution or replay permission.
+// SelectedStopRequest carries exact durable coordinates, not possession.
+// The store admits the complete operation through its retained process owner.
 type SelectedStopRequest struct {
 	Transition TransitionRequest
 	Binding    runfork.RunForkSelectedContractBinding
-	Process    startupownership.Authority
+	Process    processbinding.LeaseStamp
 }
 
 func (r SelectedStopRequest) Validate() error {

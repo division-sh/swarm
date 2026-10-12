@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeeffects "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
@@ -90,6 +91,11 @@ func listSelectedForkRecoveryEntries(ctx context.Context, tx *sql.Tx) ([]runfork
 }
 
 func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkRecover, s) {
+		var recovered runfork.SelectedForkRecoveryResult
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkRecoverOperation(s, req, &recovered))
+		return recovered, err
+	}
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
@@ -121,6 +127,11 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 }
 
 func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkRecover, s) {
+		var recovered runfork.SelectedForkRecoveryResult
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkRecoverOperation(s, req, &recovered))
+		return recovered, err
+	}
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
@@ -320,7 +331,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	// exact preparation, fingerprint and fork/declaration/origin correspondence.
 	// This check orders that evidence against the fenced current process; a
 	// different UUID or lower number alone would not establish provenance.
-	if preparation.ProcessGeneration >= req.Process.AuthorityGeneration || preparation.Coordinates.ProcessAuthorityID == req.Process.AuthorityID {
+	if preparation.ProcessGeneration >= req.Process.Generation || preparation.Coordinates.ProcessAuthorityID == req.Process.LeaseID {
 		return result, fmt.Errorf("selected recovery admitted preparation is not from an earlier process generation")
 	}
 	var canceled []runtimeeffects.CanceledTurnCommit

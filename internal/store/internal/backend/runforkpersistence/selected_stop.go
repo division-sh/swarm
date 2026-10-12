@@ -11,12 +11,18 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func (s *RunForkPostgresOwner) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkStop, s) {
+		var state runcontrol.State
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkStopOperation(s, req, &state))
+		return state, err
+	}
 	if err := req.Validate(); err != nil {
 		return runcontrol.State{}, err
 	}
@@ -40,6 +46,11 @@ func (s *RunForkPostgresOwner) StopSelectedFork(ctx context.Context, req runcont
 }
 
 func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkStop, s) {
+		var state runcontrol.State
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkStopOperation(s, req, &state))
+		return state, err
+	}
 	if err := req.Validate(); err != nil {
 		return runcontrol.State{}, err
 	}
