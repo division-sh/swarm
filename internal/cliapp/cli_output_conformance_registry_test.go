@@ -137,7 +137,6 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm context prune":          "split",
 	"swarm store":                  "exception",
 	"swarm store status":           "split",
-	"swarm store repair-authority": "split",
 }
 
 var cliOutputExpectedFactOwners = map[string]string{

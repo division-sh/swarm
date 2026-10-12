@@ -867,8 +867,6 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm channel resume", "flag:client-language"):        true,
 	cliIdentifierRegistryKey("swarm data show", "flag:format"):                      true,
 	cliIdentifierRegistryKey("swarm store status", "flag:store"):                    true,
-	cliIdentifierRegistryKey("swarm store repair-authority", "flag:confirm"):        true,
-	cliIdentifierRegistryKey("swarm store repair-authority", "flag:store"):          true,
 	cliIdentifierRegistryKey("swarm new", "flag:output"):                            true,
 	cliIdentifierRegistryKey("swarm test", "flag:derive"):                           true,
 	cliIdentifierRegistryKey("swarm test", "flag:input"):                            true,
