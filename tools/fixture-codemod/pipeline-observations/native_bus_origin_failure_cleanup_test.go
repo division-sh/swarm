@@ -45,7 +45,7 @@ func TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners(t *testi
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "test", "-overlay", overlayPath, "-race", "-count=1", "-timeout=2m", "-json", "./internal/runtime/bus", "-run", "^TestContinuationOriginReadPostgresCancellationCausality$")
 	command.Dir = root
-	output, runErr := command.CombinedOutput()
+	output, runErr := runNativeMutationJSON(t, command)
 	if runErr == nil || ctx.Err() != nil {
 		t.Fatalf("assertion cut was not a bounded failing run: %v/%v\n%s", runErr, ctx.Err(), output)
 	}

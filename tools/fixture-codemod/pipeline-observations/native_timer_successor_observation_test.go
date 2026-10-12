@@ -57,7 +57,7 @@ func TestNativeTimerSuccessorObserverRejectsRepublicationBothStores(t *testing.T
 			selector := "^TestPipelineCompiledTimerTransitionEvidenceOnBothStores$/(sqlite|postgres)/^(" + cut.variants + ")$"
 			command := exec.CommandContext(ctx, "go", "test", "-overlay", overlayPath, "-race", "-count=1", "-timeout=3m", "-json", "./internal/runtime/pipeline", "-run", selector)
 			command.Dir = root
-			output, runErr := command.CombinedOutput()
+			output, runErr := runNativeMutationJSON(t, command)
 			if runErr == nil || ctx.Err() != nil {
 				t.Fatalf("successor mutant was not a bounded failing execution: %v/%v\n%s", runErr, ctx.Err(), output)
 			}

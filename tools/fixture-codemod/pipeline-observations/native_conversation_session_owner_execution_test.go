@@ -43,7 +43,7 @@ func TestNativeConversationSessionRejectsSameDatabaseRegistryReconstruction(t *t
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "test", "-overlay", overlay, "-count=1", "-timeout=2m", "-json", "./internal/runtime/conformance", "-run", "^TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader$")
 	command.Dir = root
-	output, runErr := command.CombinedOutput()
+	output, runErr := runNativeMutationJSON(t, command)
 	if runErr == nil || ctx.Err() != nil || !strings.Contains(string(output), "conversation acquisition escaped original selected coordinator") ||
 		!strings.Contains(string(output), `"Action":"fail"`) || strings.Contains(string(output), "release conversation proof grant:") {
 		t.Fatalf("same-database reconstruction did not fail at original ownership with successful deferred release: %v/%v\n%s", runErr, ctx.Err(), output)
