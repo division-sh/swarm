@@ -83,6 +83,22 @@ func ReadGateNodeFailureForTest(ctx context.Context, selected any, eventID, node
 type WorkflowTimerNodeFailureStorage = delivery.WorkflowTimerNodeFailureStorage
 type WorkflowTimerDeliveryTraceStorage = delivery.WorkflowTimerDeliveryTraceStorage
 
+type ExactJoinNodeDeliveryStorage = delivery.ExactJoinNodeDeliveryStorage
+
+func ReadExactJoinNodeDeliveryStorageForTest(ctx context.Context, selected any, eventID, subscriberKey string) (ExactJoinNodeDeliveryStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (ExactJoinNodeDeliveryStorage, error) {
+		return delivery.ReadExactJoinNodeDeliveryStorageTx(ctx, tx, postgres, eventID, subscriberKey)
+	})
+}
+
+func CountExactJoinNodeDeliveriesForTest(ctx context.Context, selected any, eventID, subscriberKey string) (int, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountExactJoinNodeDeliveriesTx(ctx, tx, postgres, eventID, subscriberKey)
+	})
+}
+
 func ReadWorkflowTimerNodeFailureForTest(ctx context.Context, selected any, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
 	_, postgres := selected.(*PostgresStore)
 	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (WorkflowTimerNodeFailureStorage, error) {

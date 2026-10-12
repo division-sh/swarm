@@ -40,6 +40,30 @@ type WorkflowTimerNodeFailureStorage struct {
 	Failure []byte
 }
 
+type ExactJoinNodeDeliveryStorage struct{ Status, Failure string }
+
+func ReadExactJoinNodeDeliveryStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, subscriberKey string) (ExactJoinNodeDeliveryStorage, error) {
+	query := `SELECT status, CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(failure, '{}'::jsonb)::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var out ExactJoinNodeDeliveryStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&out.Status, &out.Failure); err != nil {
+		return ExactJoinNodeDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+func CountExactJoinNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, subscriberKey string) (int, error) {
+	query := `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var count int
+	err := tx.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&count)
+	return count, err
+}
+
 func ReadWorkflowTimerNodeFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
 	query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 	if postgres {

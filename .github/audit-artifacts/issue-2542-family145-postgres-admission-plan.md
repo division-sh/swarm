@@ -4579,3 +4579,45 @@ Shared carrier/openers, other gate/A2 consumers, parent completion and all
 M07/D3/Docker/M01/drain qualification holds remain open and unwaived.
 Local-only; no push/PR/tier/server2. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/timer-event-*.
+
+## Shared Gate/A2 Dependency: Entire Exact Join Read-Helper Chain
+
+All three exact-join helpers now consume native detached observations; the
+entire workflow_join_supported_surface_external_test.go is raw-SQL/dialect-free.
+The two fixed closed-delivery readers preserve exact event/node/subscriber scope,
+physical failure text (including pending NULL -> {}), all stored statuses and
+count semantics. Existing event-record identity and independent global newest-log
+owners from the timer checkpoint are reused, not duplicated. Original caller
+contexts, five-second bounds, ten-millisecond polls, success gates, last successful
+diagnostic fields and all count/status/fatal assertions remain. Native errors
+never manufacture successful absence or let the polling success gate pass.
+
+Systematic consumption:71 references across20 files are68 calls plus the three
+helper declarations. All calls still reach those same helpers; no caller
+construction, execution, assertion, lifecycle ordering or held phase was changed.
+Inventory receipt exact-join-callers-inventory.txt names every consumer. This
+closes that shared read-helper chain, not all twenty callers' distinct raw fault,
+compound snapshot or carrier dependencies. Representative original whole roots
+(durable declaration, schedule occurrence, membership validation, lost close
+acknowledgment and cancellation) passed both stores under race90.471s. Other
+unchanged journey receipts carry; no new execution/restart claim is made for them.
+
+Native both-store race PASS15.454s: genuine pending and dead-letter settlements,
+exact original physical text, two separate selected read commits, foreign event/
+node refusal, actual agent-only exclusion with matching subscriber identity,
+cancelled/raw/closed refusals and complete unchanged application/history/lease/
+clock snapshots. Finite controls retain every helper assertion, exact native
+bindings, wait and diagnostic cuts, original dialect literals and casts; hostile
+missing scope/context/status/count/poll controls fail. Relevant current/historical
+collection PASS7.770s; six persistence boundaries PASS5.149s; U1000 clean.
+Corpus1231/445, digest
+2b1b50aec2784cd69ce327d782f01c9b757a54ded1ecdedaea21f417edb9d719;
+immutable mechanical inputs and historical digest unchanged.
+
+Ratchet PASS143.015s:8345 ->8337 findings,5957 ->5949 raw sites, eight removals/
+zero additions. Uncertainty67 and supplied-pool calls61 remain unchanged. The
+carrier inventory now has29 candidate db/dialect references across7 files.
+Carrier/openers, other gate/A2 dependencies and parent completion remain open;
+all M07/D3/Docker/M01/drain holds stay explicit and unwaived. No push/PR, tier or
+server2; signed-head complexity follows. Receipts
+~/.cache/swarm-2542-family145/exact-join-*.
