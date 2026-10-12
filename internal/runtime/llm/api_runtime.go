@@ -427,6 +427,9 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 		if t.Schema != nil {
 			tool.InputSchema = t.Schema
 		}
+		if err := ValidateProviderToolSchema(t.Name, tool.InputSchema); err != nil {
+			return anthropicRequest{}, err
+		}
 		tools = append(tools, tool)
 	}
 

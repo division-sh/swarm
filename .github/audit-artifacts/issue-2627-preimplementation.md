@@ -9,6 +9,14 @@ provider call outside local simulators, external message or vendor change.
 
 ## Binding Context And Class
 
+Implementation addendum,2026-10-12: independent gate6118463764 approves the
+whole widened five-consumer/four-family enforcement class. Coding is now OPEN
+under its five binding conditions. Actual implementation base568dd9ab0 integrates
+merged2628 without editing its canonical validator or characterization files.
+The historical audit-only status above records the pre-gate source, not current
+permission. Hosted lifecycle/no extra units, local focused race/dual-store/
+compiled-host proof; all32 rows and five call-removal mutations remain required.
+
 Read the full2627 issue/thread, including6117796296's additional MCP seam, the
 2447/2628 split/gate, IMPLEMENTER_GUIDELINES and SEMANTIC_DRIFT. Exact binding spec:
 `engine.agent_session_management.llm_provider_adapter_contract.required_contract_dimensions.tool_schema.rules`

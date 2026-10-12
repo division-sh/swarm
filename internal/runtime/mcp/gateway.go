@@ -754,6 +754,9 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 			mismatch := managedcapabilities.DeliveryMismatch{BindingKind: entry.binding.Kind, ExactName: entry.binding.ExactName, Kind: "mcp_definition_identity_mismatch", Detail: "live MCP description or schema differs from the planned definition"}
 			return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "definition_identity_mismatch", "tool": definition.Name})
 		}
+		if err := llm.ValidateProviderToolSchema(definition.Name, deliveredDefinition.InputSchema); err != nil {
+			return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.schema", err, map[string]any{"reason": "invalid_input_schema", "tool": definition.Name})
+		}
 		out = append(out, deliveredDefinition)
 		deliveredNames[definition.Name] = struct{}{}
 		if !entry.tool.EffectiveVisible || !entry.tool.EffectiveCallable {
@@ -830,6 +833,9 @@ func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.Ag
 		}
 		if def.Schema != nil {
 			schema = def.Schema
+		}
+		if err := llm.ValidateProviderToolSchema(name, schema); err != nil {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.schema", err, map[string]any{"reason": "invalid_input_schema", "tool": name})
 		}
 		out = append(out, ToolDef{Name: name, Description: desc, InputSchema: schema})
 	}

@@ -7602,6 +7602,12 @@ engine:
           rules:
           - Platform tool definitions must be translated to the provider-facing schema format before invocation.
           - Provider-facing input schemas must be validated before execution reaches the provider.
+          - The canonical provider JSON-subset validator governs every projected API or Mock request, selected owned MCP
+            tools/list schema, and target-observed MCP definition before request dispatch, list/evidence publication, or
+            observed confirmation. Validate the selected/defaulted projection, not unrelated hidden catalog entries.
+            Earlier source admission and exact definition identity do not substitute for this final schema admission.
+            Refusal returns no partial request, list, or confirmation and must occur before model/worker launch; existing
+            actor, token, identity, credential, memory, message, and lease authority retain their earlier gate precedence.
           - Platform tool results must be returned through the provider adapter in a normalized message form.
         session_lifecycle:
           rules:

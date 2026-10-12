@@ -1,0 +1,136 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/google/uuid"
+)
+
+func TestProviderSchemaGatewayAdmission(t *testing.T) {
+	bad := llm.ToolDefinition{Name: "write_file", Schema: map[string]any{"type": "unsupported-provider-type"}}
+	good := llm.ToolDefinition{Name: "read_file", Description: " exact ", Schema: map[string]any{"type": "object", "properties": map[string]any{}}}
+	for _, kind := range []managedcapabilities.ExecutionKind{managedcapabilities.ExecutionNormalAgent, managedcapabilities.ExecutionSelectedContractFork} {
+		t.Run("managed/"+string(kind), func(t *testing.T) {
+			ctx, surface := providerSchemaGatewaySurface(t, kind, []llm.ToolDefinition{good, bad}, false)
+			actor, _ := models.ActorFromContext(ctx)
+			calls := 0
+			executor := &leasedCatalogExecutorStub{actorScopedToolExecutorStub: actorScopedToolExecutorStub{callCount: &calls}, leasedDefinitions: []llm.ToolDefinition{good, bad}}
+			gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
+			tools, evidence, mismatches, err := gateway.mcpToolsForCapabilitySurface(ctx, TurnContext{Actor: actor, CapabilitySurface: &surface})
+			cause := errors.Unwrap(err)
+			if cause == nil || !strings.Contains(cause.Error(), "write_file.input_schema.type") || tools != nil || evidence != nil || len(mismatches) != 0 || calls != 0 {
+				t.Fatalf("invalid selected catalog escaped: tools=%v evidence=%v mismatches=%v calls=%d err=%v", tools, evidence, mismatches, calls, err)
+			}
+			if executor.acquired != 1 || executor.released != 1 {
+				t.Fatalf("refusal lease=%d/%d, want 1/1", executor.acquired, executor.released)
+			}
+		})
+	}
+	for _, startup := range []bool{false, true} {
+		name := "http/normal"
+		if startup {
+			name = "http/startup"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, surface := providerSchemaGatewaySurface(t, managedcapabilities.ExecutionNormalAgent, []llm.ToolDefinition{bad}, startup)
+			registry := NewTurnContextRegistry(models.ActorFromContext)
+			token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+			if token == "" {
+				t.Fatal("earlier exact-context admission refused")
+			}
+			defer registry.UnregisterTurnContext(token)
+			calls := 0
+			gateway := NewGateway(actorScopedToolExecutorStub{actorDefs: []llm.ToolDefinition{bad}, callCount: &calls}, testGatewayToken, managedCLIGatewayHooks(registry))
+			response := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", Method: "tools/list", ID: "schema-list"})
+			if response.Error == nil || response.Result != nil || calls != 0 {
+				t.Fatalf("tools/list admitted invalid schema: %+v calls=%d", response, calls)
+			}
+			after, ok := registry.ResolveManagedCapabilitySurface(token)
+			if !ok || after.Tools[0].EffectiveVisible || after.Tools[0].EffectiveCallable {
+				t.Fatalf("refusal published confirmation: %+v", after)
+			}
+		})
+	}
+	t.Run("managed/selection-and-identity", func(t *testing.T) {
+		ctx, surface := providerSchemaGatewaySurface(t, managedcapabilities.ExecutionNormalAgent, []llm.ToolDefinition{good}, false)
+		actor, _ := models.ActorFromContext(ctx)
+		executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{bad, good}}
+		gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
+		tools, evidence, _, err := gateway.mcpToolsForCapabilitySurface(ctx, TurnContext{Actor: actor, CapabilitySurface: &surface})
+		if err != nil || len(tools) != 1 || len(evidence) != 1 || tools[0].Name != good.Name || executor.released != 1 {
+			t.Fatalf("unselected malformed entry changed selected list: tools=%v evidence=%v err=%v", tools, evidence, err)
+		}
+		want := `[{"name":"read_file","description":"exact","inputSchema":{"properties":{},"type":"object"}}]`
+		if raw, _ := json.Marshal(tools); string(raw) != want {
+			t.Fatalf("valid selected bytes=%s, want %s", raw, want)
+		}
+		executor.leasedDefinitions = []llm.ToolDefinition{{Name: good.Name, Schema: bad.Schema}}
+		tools, evidence, mismatches, err := gateway.mcpToolsForCapabilitySurface(ctx, TurnContext{Actor: actor, CapabilitySurface: &surface})
+		if err == nil || len(mismatches) != 1 || mismatches[0].Kind != "mcp_definition_identity_mismatch" || tools != nil || evidence != nil || executor.released != 2 {
+			t.Fatalf("earlier identity precedence changed: tools=%v evidence=%v mismatch=%v err=%v", tools, evidence, mismatches, err)
+		}
+	})
+	t.Run("actor/refusal", func(t *testing.T) {
+		executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{good, bad}}
+		gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
+		tools, err := gateway.mcpToolsForActorInContext(context.Background(), models.AgentConfig{ID: "actor"}, nil, true)
+		cause := errors.Unwrap(err)
+		if cause == nil || !strings.Contains(cause.Error(), "write_file.input_schema.type") || tools != nil || executor.acquired != 1 || executor.released != 1 {
+			t.Fatalf("actor projection escaped or leaked: tools=%v err=%v lease=%d/%d", tools, err, executor.acquired, executor.released)
+		}
+	})
+	t.Run("actor/selection-and-defaults", func(t *testing.T) {
+		executor := &leasedCatalogExecutorStub{leasedDefinitions: []llm.ToolDefinition{bad, {Name: "read_file"}, {Name: "typed_nil", Schema: map[string]any(nil)}}}
+		gateway := NewGateway(executor, testGatewayToken, GatewayHooks{})
+		allowed := map[string]struct{}{"read_file": {}, "typed_nil": {}}
+		tools, err := gateway.mcpToolsForActorInContext(context.Background(), models.AgentConfig{ID: "actor"}, allowed, true)
+		if err != nil || executor.released != 1 {
+			t.Fatalf("hidden malformed schema invalidated list: %v", err)
+		}
+		want := `[{"name":"read_file","description":"Runtime tool","inputSchema":{"additionalProperties":true,"properties":{},"type":"object"}},{"name":"typed_nil","description":"Runtime tool","inputSchema":null}]`
+		if raw, _ := json.Marshal(tools); string(raw) != want {
+			t.Fatalf("actor bytes=%s, want %s", raw, want)
+		}
+	})
+}
+
+func providerSchemaGatewaySurface(t testing.TB, kind managedcapabilities.ExecutionKind, definitions []llm.ToolDefinition, startup bool) (context.Context, managedcapabilities.Surface) {
+	t.Helper()
+	ctx, original, _ := managedClaudeProviderTurnTestContext(t, kind)
+	actor, _ := models.ActorFromContext(ctx)
+	caps := make([]toolcapabilities.Capability, 0, len(definitions))
+	for _, definition := range definitions {
+		caps = append(caps, toolcapabilities.Capability{Name: definition.Name, Visible: true, Callable: true})
+	}
+	tools, err := llm.CompileManagedCapabilityAdmission(actor, llm.ClaudeCLIProviderContract(), definitions, toolcapabilities.NewSet(caps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := managedcapabilities.Plan{ActorIdentity: actor.Identity, RuntimeMode: original.RuntimeMode, Provider: original.Provider,
+		Transport: original.Transport, ProviderContract: original.ProviderContract, Authority: original.Authority, Tools: tools, CreatedAt: time.Now().UTC()}
+	if startup {
+		plan.ActorPlan, err = actor.Identity.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan.ActorIdentity = models.AgentConfig{}.Identity
+		plan.RuntimeMode = "startup_probe"
+		plan.Authority = managedcapabilities.Authority{Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "schema-startup", StartupOwnerID: "schema-owner", StartupGeneration: 1}
+		ctx = models.WithActor(context.Background(), models.AgentConfig{ID: actor.ID, FlowPath: actor.FlowPath})
+	}
+	surface, err := managedcapabilities.New(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managedcapabilities.WithContext(ctx, surface), surface
+}
