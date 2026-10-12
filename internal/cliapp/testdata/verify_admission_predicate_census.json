@@ -1377,7 +1377,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.FinalizeCommittedAgentReadiness",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "4e628fc526d67aace19b3b26fa067f1abc747579acfc95a33d55eb39b9a5bc10"
+    "body_sha256": "b7905b6e7dd5087bf3dfcc066bf4517439679fce24c225f583b422b7f63055ee"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.HydrateStaticTopologyForStartup",
