@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -75,17 +76,22 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
 			}
 			firstRef := joins[0].JoinRef()
+			nativeEvents, hasNativeEvents := rt.ReceiverStateReader.(runtimebus.EventStore)
+			if !hasNativeEvents || nativeEvents == nil {
+				t.Fatal("retained join outcome requires its original selected event reader")
+			}
+			nativeHandoff := servedWorkspaceProofRuntime{Events: nativeEvents}
 			firstCtx, cancelFirst := context.WithTimeout(t.Context(), servedProofPollDeadline)
 			firstWaitErr := waitServedRetainedJoinOutcome(firstCtx, started.RunID, firstRef, func() (loopruntime.Activation, []joinruntime.Activation) {
-				return readRetainedRootJoins(t, rt, started.RunID)
+				return readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			})
 			cancelFirst()
 			if firstWaitErr != nil {
 				t.Fatalf("first exact retained join outcome: %v", firstWaitErr)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			first, joins = readRetainedRootJoins(t, rt, started.RunID)
+			waitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)
+			first, joins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
@@ -109,15 +115,15 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			}
 			currentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)
 			currentWaitErr := waitServedRetainedJoinOutcome(currentCtx, started.RunID, currentRef, func() (loopruntime.Activation, []joinruntime.Activation) {
-				return readRetainedRootJoins(t, rt, started.RunID)
+				return readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			})
 			cancelCurrent()
 			if currentWaitErr != nil {
 				t.Fatalf("current exact retained join outcome: %v", currentWaitErr)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			current, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)
+			waitWorkspaceProofPipelineHandoff(t, nativeHandoff, started.RunID)
+			current, sourceJoins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			for _, join := range sourceJoins {
 				if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || len(join.Outputs) != 1 || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
