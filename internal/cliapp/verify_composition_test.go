@@ -23,12 +23,15 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type verifyCompositionBootStore interface {
 	store.SchemaBootstrapper
 	storetest.RunFixtureStore
+	sourceartifactfixture.Writer
+	sourceartifactfixture.Reader
 	startupownership.Store
 	InspectSchema(context.Context, store.SchemaBootstrapRequest) (store.SchemaInspection, error)
 	Close() error
@@ -44,7 +47,9 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 		if err != nil {
 			t.Fatal(err)
 		}
-		owner = selected
+		// Semantic runs and fixed mutation observation retain the original native
+		// owner rather than the process-only lease projection.
+		owner = selected.RunFixtureStore.(verifyCompositionBootStore)
 		configText = fmt.Sprintf("store: {backend: sqlite, sqlite: {path: %q}}\n", path)
 	} else {
 		dsn, _, _ := testutil.StartEmptyPostgres(t)
