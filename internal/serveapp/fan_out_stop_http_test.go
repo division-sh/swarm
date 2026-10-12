@@ -223,6 +223,9 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 		})
 		prefixes = append(prefixes, published.EventID)
 	}
+	if err := waitExactOriginPublications(t.Context(), rt.Probe.Raw(), prefixes...); err != nil {
+		t.Fatalf("join paused prefix publication before stop fixture: %v", err)
+	}
 	var deliveryID string
 	if err := rt.DB.QueryRow(`SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' ORDER BY delivery_id LIMIT 1`, eventID).Scan(&deliveryID); err != nil {
 		t.Fatal(err)
