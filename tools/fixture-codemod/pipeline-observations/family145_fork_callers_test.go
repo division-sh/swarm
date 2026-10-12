@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 400 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768" {
+	if err != nil || len(rows) != 402 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "85c0dc98a1f98e11187d11193277b6a17b40561a44b4371b4bb496dcd167f082" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -57,6 +57,10 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			if err := family145CLIForkProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
+			continue
+		}
+		if row.Function == "openSQLiteGateRecoveryStore" || row.Function == "openPostgresGateRecoveryStore" {
+			if err := family145GateNativeSetupProofError(row.Function, row.Before, row.After); err != nil { t.Fatal(err) }
 			continue
 		}
 		if family145SemanticOwner(row.Function) {
