@@ -48,7 +48,7 @@ func TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts(t *
 			defer cancel()
 			command := exec.CommandContext(ctx, "go", "test", "-overlay", overlayPath, "-count=1", "-timeout=2m", "-json", "./internal/runtime/bus", "-run", "^TestPostCommitDispatchPreservesBusOwnedSourceFactThroughClaimAndSettlement$")
 			command.Dir = root
-			output, runErr := command.CombinedOutput()
+			output, runErr := runNativeMutationJSON(t, command)
 			if runErr == nil || ctx.Err() != nil {
 				t.Fatalf("lost-source mutant was not an exact bounded failure: %v/%v\n%s", runErr, ctx.Err(), output)
 			}
