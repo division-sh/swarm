@@ -15,6 +15,18 @@ func CountA2MembershipRefusalEvents(ctx context.Context, selected any, runID str
 	return private.CountA2MembershipRefusalEventsForTest(ctx, selected, runID)
 }
 
+func SetA2ActivationJoinScheduleFailure(ctx context.Context, selected any, enabled bool) error {
+	return private.SetA2ActivationJoinScheduleFailureForTest(ctx, selected, enabled)
+}
+
+func SetA2JoinCloseScheduleFailure(ctx context.Context, selected any, enabled bool) error {
+	return private.SetA2JoinCloseScheduleFailureForTest(ctx, selected, enabled)
+}
+
+func SetA2AccumulatorPublicationFailure(ctx context.Context, selected any, enabled bool) error {
+	return private.SetA2AccumulatorPublicationFailureForTest(ctx, selected, enabled)
+}
+
 func ReadGateNodeDeliveryStatus(ctx context.Context, selected any, event, node string) (string, error) {
 	return private.ReadGateNodeDeliveryStatusForTest(ctx, selected, event, node)
 }

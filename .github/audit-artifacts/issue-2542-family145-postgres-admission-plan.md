@@ -4238,3 +4238,41 @@ calls61 and uncertainty67 remain. Carrier/openers, wider gate/A2 and parent
 closure and all previous S qualification holds remain open. No push/PR, tier,
 server2 or new gate. Signed-head complexity follows. Receipts
 ~/.cache/swarm-2542-family145/gate-reply-fault-* and gate-counts-scalar-review-red.
+
+## Shared Gate/A2 Dependency: Complete Remaining Creation-Trigger Chain
+
+Activation schedule insertion, join-complete insertion and accumulator
+publication faults now use three fixed native operations. Schedule DDL stays
+with genericschedule; event DDL stays with eventrecord and its existing
+test_event_support bridge. Both use the original selected backend coordinator,
+not raw Exec or reconstructed transaction/candidate ownership. PostgreSQL
+function+trigger installation is one native transaction, not two escaped calls.
+DDL does not manufacture run-revision or Story evidence.
+
+Every original trigger/function name, table, condition, action and error remains:
+activation fails ALL timer inserts, close fails only platform.join_complete,
+accumulator fails only item.recorded. These are not interchangeable faults.
+Original DROP/TRIGGER behavior and removal points stay; no IF EXISTS/idempotency,
+fallback, retries or new failure suppression. Accumulator's plain Exec retains
+context.Background; contextual timer faults retain their original ctx. Faults
+remain installed through their original failed execution/reconstruction cuts.
+The activation helper retains its exact returned-removal closure.
+
+| Proof | Executed receipt with Go1.26.8 |
+| --- | --- |
+| Twenty actual activation cells plus close rollback/recovery and accumulator rollback/reconstruction on both stores | Three original whole roots under race PASS79.113s, all original semantic assertions retained |
+| Exact install/remove trigger lifetime, six original native writer commits, complete unchanged data/revision/Story/clock snapshots | TestA2CreationFaultsUseOriginalCoordinatorAndLeaveDataHistoryUnchangedBothStores |
+| Every install/remove operation queues behind the exact SQLite writer and joins cancellation without a second transaction; missing/raw/closed owners refuse | Six deterministic admission cells and invalid-owner root; complete native race group PASS28.435s |
+| Complete consumer assertions and installation/removal cut ordering, exact three CREATE and one DROP literals per dialect family, context/owner/enabled bindings and hostile lost cuts/assertions | Complete gate/creation correspondence collection plus current/historical finite roots PASS8.073s |
+| Six persistence boundaries/accessor/writer inventories | PASS3.454s, no allowance or inventory relaxation; U1000 clean |
+| Decreasing global census | PASS147.456s:8420 ->8411 findings,6029 ->6020 raw sites; nine removed/zero added; uncertainty67 unchanged |
+
+Finite corpus1215/427; transition digest
+ac22957216f5d2cc752710e1aac28a9e73b3c891a0a53d25d0c505b19a980d18.
+All24 immutable mechanical inputs and combined digest unchanged. The activation
+and close-rollback files now contain NO raw selected.db/postgres reference.
+The accumulator's unrelated observation tail remains live; this checkpoint
+closes creation-trigger wiring only, not the entire accumulator/gate/A2 family,
+shared carrier/openers or parent. Supplied-pool calls61 and previous qualification
+holds remain. No push/PR, tier, server2 or new gate. Signed-head complexity
+follows. Receipts ~/.cache/swarm-2542-family145/a2-creation-faults-*.

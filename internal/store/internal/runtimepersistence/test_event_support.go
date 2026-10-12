@@ -568,6 +568,16 @@ func CountA2MembershipRefusalEventsForTest(ctx context.Context, selected any, ru
 	})
 }
 
+func SetA2AccumulatorPublicationFailureForTest(ctx context.Context, selected any, enabled bool) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.SetA2AccumulatorPublicationFailureTx(ctx, tx, postgres, enabled)
+	})
+}
+
 type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
 
 type FanInDiagnosticEventStorage = eventrecord.FanInDiagnosticEventStorage

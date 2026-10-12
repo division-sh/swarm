@@ -423,21 +423,12 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 
 func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase) func() {
 	t.Helper()
-	create := `CREATE TRIGGER a2_activation_join_failure BEFORE INSERT ON timers BEGIN SELECT RAISE(ABORT,'a2_activation_join_sql_fault'); END`
-	drop := "DROP TRIGGER a2_activation_join_failure"
-	if selected.postgres {
-		if _, err := selected.db.ExecContext(ctx, `CREATE FUNCTION a2_activation_join_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'a2_activation_join_sql_fault'; END $$`); err != nil {
-			t.Fatal(err)
-		}
-		create = `CREATE TRIGGER a2_activation_join_failure BEFORE INSERT ON timers FOR EACH ROW EXECUTE FUNCTION a2_activation_join_fail()`
-		drop += " ON timers"
-	}
-	if _, err := selected.db.ExecContext(ctx, create); err != nil {
+	if err := storetest.SetA2ActivationJoinScheduleFailure(ctx, selected.events, true); err != nil {
 		t.Fatal(err)
 	}
 	return func() {
 		t.Helper()
-		if _, err := selected.db.ExecContext(ctx, drop); err != nil {
+		if err := storetest.SetA2ActivationJoinScheduleFailure(ctx, selected.events, false); err != nil {
 			t.Fatal(err)
 		}
 	}

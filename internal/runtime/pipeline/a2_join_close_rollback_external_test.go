@@ -114,14 +114,7 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 			if arm := exactJoinPersistedArm(t, before); arm.Status != joinruntime.StatusOpen || arm.Completed() != 1 {
 				t.Fatalf("fault checkpoint lacks one admitted member: %#v", arm)
 			}
-			fault := `CREATE TRIGGER a2_join_close_failure BEFORE INSERT ON timers WHEN NEW.fire_event='platform.join_complete' BEGIN SELECT RAISE(ABORT,'a2_join_close_sql_fault'); END`
-			if selected.postgres {
-				if _, err := selected.db.ExecContext(ctx, `CREATE FUNCTION a2_join_close_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.fire_event='platform.join_complete' THEN RAISE EXCEPTION 'a2_join_close_sql_fault'; END IF; RETURN NEW; END $$`); err != nil {
-					t.Fatal(err)
-				}
-				fault = `CREATE TRIGGER a2_join_close_failure BEFORE INSERT ON timers FOR EACH ROW EXECUTE FUNCTION a2_join_close_fail()`
-			}
-			if _, err := selected.db.ExecContext(ctx, fault); err != nil {
+			if err := storetest.SetA2JoinCloseScheduleFailure(ctx, selected.events, true); err != nil {
 				t.Fatal(err)
 			}
 			failed := publish("b", "failed", "dead_letter")
@@ -145,11 +138,7 @@ func TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores(t *testing.T) {
 			if err := json.Unmarshal([]byte(failureJSON), &failure); err != nil || failure.Class != failures.ClassInternalFailure || failure.Retryable {
 				t.Fatalf("SQL fault delivery accounting changed: %s err=%v", failureJSON, err)
 			}
-			drop := "DROP TRIGGER a2_join_close_failure"
-			if selected.postgres {
-				drop += " ON timers"
-			}
-			if _, err := selected.db.ExecContext(ctx, drop); err != nil {
+			if err := storetest.SetA2JoinCloseScheduleFailure(ctx, selected.events, false); err != nil {
 				t.Fatal(err)
 			}
 			if err := schedules.Stop(ctx); err != nil {

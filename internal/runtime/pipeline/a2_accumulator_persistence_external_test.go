@@ -412,14 +412,7 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 			proof := newA2AccumulatorPersistenceProof(t, backend.open(t))
 			proof.execute(t, proof.publish(t, "item.keyed", `{"id":"accepted","marker":"before"}`), "")
 			before := proof.evidence(t)
-			fault := `CREATE TRIGGER a2_accumulator_publication_failure BEFORE INSERT ON events WHEN NEW.event_name='item.recorded' BEGIN SELECT RAISE(ABORT,'a2_accumulator_publication_fault'); END`
-			if proof.selected.postgres {
-				if _, err := proof.selected.db.Exec(`CREATE FUNCTION a2_accumulator_publication_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_name='item.recorded' THEN RAISE EXCEPTION 'a2_accumulator_publication_fault'; END IF; RETURN NEW; END $$`); err != nil {
-					t.Fatal(err)
-				}
-				fault = `CREATE TRIGGER a2_accumulator_publication_failure BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION a2_accumulator_publication_fail()`
-			}
-			if _, err := proof.selected.db.Exec(fault); err != nil {
+			if err := storetest.SetA2AccumulatorPublicationFailure(context.Background(), proof.selected.events, true); err != nil {
 				t.Fatal(err)
 			}
 			publication := proof.publish(t, "item.keyed", `{"id":"refused-at-commit","marker":"must-not-persist"}`)
@@ -446,11 +439,7 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 			if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, publication.event.ID()).Scan(&delivered); err != nil || delivered != 0 {
 				t.Fatalf("failed transaction acknowledged delivery: %d %v", delivered, err)
 			}
-			drop := "DROP TRIGGER a2_accumulator_publication_failure"
-			if proof.selected.postgres {
-				drop += " ON events"
-			}
-			if _, err := proof.selected.db.Exec(drop); err != nil {
+			if err := storetest.SetA2AccumulatorPublicationFailure(context.Background(), proof.selected.events, false); err != nil {
 				t.Fatal(err)
 			}
 		})

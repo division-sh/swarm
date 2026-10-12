@@ -16,6 +16,26 @@ func CountRunTimerStorageForTest(ctx context.Context, selected any, runID string
 	})
 }
 
+func SetA2ActivationJoinScheduleFailureForTest(ctx context.Context, selected any, enabled bool) error {
+	postgres, err := workflowProjectionNativePostgres(selected)
+	if err != nil {
+		return err
+	}
+	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return genericschedule.SetA2ActivationJoinScheduleFailureForTest(ctx, tx, postgres, enabled)
+	})
+}
+
+func SetA2JoinCloseScheduleFailureForTest(ctx context.Context, selected any, enabled bool) error {
+	postgres, err := workflowProjectionNativePostgres(selected)
+	if err != nil {
+		return err
+	}
+	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return genericschedule.SetA2JoinCloseScheduleFailureForTest(ctx, tx, postgres, enabled)
+	})
+}
+
 func CountWorkflowSchedulerTimersForTest(ctx context.Context, selected any, entity, path string) (int64, error) {
 	id, err := uuid.Parse(entity)
 	if err != nil || id == uuid.Nil || id.String() != entity || strings.Trim(strings.TrimSpace(path), "/") != path || path == "" {
