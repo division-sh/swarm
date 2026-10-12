@@ -117,7 +117,18 @@ func TestSQLiteRuntimeCloseErrorReleasesConstructionAfterNativeJoin(t *testing.T
 	if err := store.Ping(context.Background()); err == nil || !strings.Contains(err.Error(), "database is closed") {
 		t.Fatalf("failed close did not terminally dispose the DB: %v", err)
 	}
-	successor, err := NewSQLiteRuntimeStore(path)
+	successorGuard, err := storeownership.AcquireSQLiteConstructionGuard(path)
+	if err != nil {
+		t.Fatalf("failed schema close retained construction possession: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := successorGuard.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	successor, err := NewSQLiteRuntimeStore(path, nativeSQLiteFixtureConstruction{
+		connector: pipelineCrashSQLiteConnector{path: path}, possession: successorGuard,
+	})
 	if err != nil {
 		t.Fatalf("failed schema close retained construction possession: %v", err)
 	}
