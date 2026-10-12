@@ -179,7 +179,9 @@ func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineag
 	if err != nil {
 		return err
 	}
-	if err := requireCapturedReplyReturnClaims(a.snapshot, lineage.SourceEventID, *source, returns[0].Plan); err != nil {
+	sourceReturn := returns[0].Normalized()
+	sourceReturn.Record = *source
+	if err := requireCapturedReplyReturnClaims(a.snapshot, lineage.SourceEventID, sourceReturn); err != nil {
 		return err
 	}
 	expectedRoutes, err := projectReplyReturnRoutes(a.snapshot, lineage.SourceEventID, lineage.ForkRunID)
@@ -192,22 +194,25 @@ func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineag
 	return requireExactRunForkRequestRoutes(expectedRoutes, routes)
 }
 
-func requireCapturedReplyReturnClaims(snapshot *runForkRevisionSnapshot, eventID string, record replycontext.Record, plan pinrouting.ConnectRoutePlan) error {
-	continuation := pinrouting.ReplyReturnContinuation{Record: record, Plan: plan}
+func requireCapturedReplyReturnClaims(snapshot *runForkRevisionSnapshot, eventID string, continuation pinrouting.ReplyReturnContinuation) error {
 	if err := continuation.Validate(); err != nil {
 		return err
 	}
 	matched := false
 	for _, captured := range snapshot.Deliveries {
 		delivery := captured.Snapshot
-		if delivery.EventID != eventID || delivery.Terminal() || !continuation.MatchesResponseRecipient(delivery.Route) {
+		if delivery.EventID != eventID || delivery.Terminal() {
 			continue
 		}
-		claim, err := continuation.ClaimForDelivery(delivery.Route)
+		response := continuation.MatchesResponseRecipient(delivery.Route)
+		claim, present, err := retainedReturnRecipientClaim(continuation, delivery.Route)
+		if !present && delivery.Route.ConnectClaim.Empty() {
+			continue
+		}
 		if err != nil || !claim.Equal(delivery.Route.ConnectClaim) {
 			return fmt.Errorf("retained return changed its captured complete response claim: %v", err)
 		}
-		matched = true
+		matched = matched || response
 	}
 	if !matched {
 		return fmt.Errorf("retained return lacks its unfinished captured requester")
@@ -220,14 +225,25 @@ func bindReplyReturnRecipientClaims(routes []events.DeliveryRoute, continuation 
 		return err
 	}
 	for i := range routes {
-		if !continuation.MatchesResponseRecipient(routes[i]) {
-			continue // Unrelated observers retain their complete original claims.
+		claim, present, err := retainedReturnRecipientClaim(continuation, routes[i])
+		if !present && routes[i].ConnectClaim.Empty() {
+			continue
 		}
-		claim, err := continuation.ClaimForDelivery(routes[i])
-		if err != nil {
+		if err != nil || !present {
+			if err == nil {
+				return fmt.Errorf("retained return lacks its ordinary compiled recipient")
+			}
 			return err
 		}
 		routes[i].ConnectClaim = claim
 	}
 	return nil
+}
+
+func retainedReturnRecipientClaim(continuation pinrouting.ReplyReturnContinuation, route events.DeliveryRoute) (events.ConnectExecutionClaim, bool, error) {
+	if continuation.MatchesResponseRecipient(route) {
+		claim, err := continuation.ClaimForDelivery(route)
+		return claim, true, err
+	}
+	return continuation.OrdinaryClaimForDelivery(route)
 }

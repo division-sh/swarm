@@ -365,6 +365,9 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.ReplyCreations = append([]runtimereplycontext.Record(nil), p.ReplyCreations...)
 	p.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), p.ReplyContinuations...)
 	p.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), p.ReplyReturns...)
+	for i := range p.ReplyReturns {
+		p.ReplyReturns[i] = p.ReplyReturns[i].Normalized()
+	}
 	p.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), p.ReplyClaims...)
 	p.ContradictionReason = strings.TrimSpace(p.ContradictionReason)
 	if p.CycleEscalation != nil {

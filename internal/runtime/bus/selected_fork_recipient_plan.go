@@ -219,6 +219,12 @@ func selectedForkReturnContexts(selected selectedForkRecipientPlan, returns []pi
 				return nil, err
 			}
 			route.ConnectClaim = claim
+		} else if claim, matched, err := returns[0].OrdinaryClaimForDelivery(route); err != nil {
+			return nil, err
+		} else if matched {
+			route.ConnectClaim = claim
+		} else if !route.ConnectClaim.Empty() {
+			return nil, fmt.Errorf("retained ordinary context lacks its compiled connection")
 		}
 		key, err := selectedForkContextRouteIdentity(route)
 		if err != nil {

@@ -194,8 +194,8 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	return connectRoutePlanDispatch{}, exhaustedConnectRoutePlanSnapshotError()
 }
 
-// A paired response resumes retained return authority, not every ordinary edge
-// that happens to match its event. Missing authority still reaches typed refusal.
+// A paired response narrows response authority, not unrelated ordinary edges.
+// Missing authority still reaches typed refusal before ordinary publication.
 func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.ConnectRoutePlan, runtimereplycontext.Record, error) {
 	var responses []runtimepinrouting.ConnectRoutePlan
 	for _, plan := range matched {
@@ -226,7 +226,13 @@ func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched
 	if len(exact) == 0 {
 		return responses, record, nil
 	}
-	return exact, record, nil
+	var admitted []runtimepinrouting.ConnectRoutePlan
+	for _, plan := range matched {
+		if plan.ReplyRole() != runtimepinrouting.ConnectReplyRoleResponse || plan.MatchesReplyRecord(record) {
+			admitted = append(admitted, plan)
+		}
+	}
+	return admitted, record, nil
 }
 
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string, replyRecord runtimereplycontext.Record) (connectRoutePlanDispatch, error) {
@@ -284,7 +290,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if claim != nil {
 				out.ReplyClaims = append(out.ReplyClaims, *claim)
 			} else {
-				out.ReplyReturns = append(out.ReplyReturns, runtimepinrouting.ReplyReturnContinuation{Record: replyRecord, Plan: plan})
+				out.ReplyReturns = append(out.ReplyReturns, retainedReplyReturn(replyRecord, plan, matched))
 			}
 			receiverEvent := plan.ReceiverLocalEvent()
 			intents, err := replyResponseDeliveryIntents(evt.RunID(), plan, routes, receiverEvent)
@@ -425,6 +431,16 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
 	out.ReplyContextConsumed = replyContextConsumed
 	return out, nil
+}
+
+func retainedReplyReturn(record runtimereplycontext.Record, response runtimepinrouting.ConnectRoutePlan, matched []runtimepinrouting.ConnectRoutePlan) runtimepinrouting.ReplyReturnContinuation {
+	var ordinary []runtimepinrouting.ConnectRoutePlan
+	for _, plan := range matched {
+		if plan.ReplyRole() == 0 {
+			ordinary = append(ordinary, plan)
+		}
+	}
+	return (runtimepinrouting.ReplyReturnContinuation{Record: record, Plan: response, OrdinaryPlans: ordinary}).Normalized()
 }
 
 func replyResponseDeliveryIntents(runID string, plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute, receiverEvent events.EventType) ([]RoutePlanDeliveryIntent, error) {

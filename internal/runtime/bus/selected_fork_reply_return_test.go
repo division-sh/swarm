@@ -65,15 +65,17 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 	}
 	observer := identitytest.FlowNode(t, ".", "response-observer")
 	ordinaryRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(observer), Target: events.MustExistingEntityTarget(record.Origin)}
+	ordinaryBlueprint := record.Origin
+	ordinaryBlueprint.EntityID = ""
 	ordinaryRoute.ConnectClaim, err = pinrouting.ConnectExecutionClaim(ordinary, pinrouting.ConnectDeliveryRoute{Recipient: ordinaryRoute.Recipient,
-		Target: record.Origin, Handler: pinrouting.MustConnectReceiverHandler(observer)})
+		Target: ordinaryBlueprint, Handler: pinrouting.MustConnectReceiverHandler(observer)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	responseRoute := events.DeliveryRoute{Recipient: compiled.Recipient, Target: events.MustExistingEntityTarget(record.Origin), ConnectClaim: compiled.ConnectClaim}
 	retainedRoutes := []events.DeliveryRoute{ordinaryRoute, responseRoute}
 	contexts, err := selectedForkReturnContexts(selectedForkRecipientPlan{returnReply: &record, returnRoutes: retainedRoutes},
-		[]pinrouting.ReplyReturnContinuation{{Record: record, Plan: response}})
+		[]pinrouting.ReplyReturnContinuation{{Record: record, Plan: response, OrdinaryPlans: []pinrouting.ConnectRoutePlan{ordinary}}})
 	if err != nil || len(contexts) != 2 {
 		t.Fatalf("same-origin compiled response subset restoration: contexts=%+v error=%v", contexts, err)
 	}
@@ -86,6 +88,30 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 	}
 	if !reflect.DeepEqual(retainedRoutes, []events.DeliveryRoute{ordinaryRoute, responseRoute}) {
 		t.Fatal("context restoration rewrote retained input")
+	}
+	resolver := connectRoutePlanResolver{replyStore: retainedReturnReplyStore{record: record}}
+	matched, loaded, err := resolver.resolveReplyPlans(bound, []pinrouting.ConnectRoutePlan{ordinary, response})
+	if err != nil || len(matched) != 2 || !reflect.DeepEqual(loaded, record) {
+		t.Fatalf("paired reply selection discarded an ordinary connection: plans=%d error=%v", len(matched), err)
+	}
+	for _, fault := range []string{"missing_reference", "missing_row", "unpaired_row"} {
+		t.Run("plan_selection_"+fault, func(t *testing.T) {
+			callCtx, callResolver := bound, resolver
+			switch fault {
+			case "missing_reference":
+				callCtx = context.Background()
+			case "missing_row":
+				callResolver.replyStore = retainedReturnReplyStore{}
+			case "unpaired_row":
+				changed := record.Normalized()
+				changed.ProviderOutputPin = "other"
+				callResolver.replyStore = retainedReturnReplyStore{record: changed}
+			}
+			plans, _, err := callResolver.resolveReplyPlans(callCtx, []pinrouting.ConnectRoutePlan{ordinary, response})
+			if err != nil || len(plans) != 1 || plans[0].ReplyRole() != pinrouting.ConnectReplyRoleResponse {
+				t.Fatalf("unadmitted response escaped its ordinary refusal branch: plans=%d error=%v", len(plans), err)
+			}
+		})
 	}
 	for _, fault := range []string{"open", "run", "identity", "accepted", "origin", "clock", "original", "enclosing", "canceled"} {
 		t.Run(fault, func(t *testing.T) {
@@ -127,4 +153,16 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 	if !reflect.DeepEqual(record, before) {
 		t.Fatal("return binding rewrote retained input")
 	}
+}
+
+type retainedReturnReplyStore struct {
+	replycontext.Store
+	record replycontext.Record
+}
+
+func (s retainedReturnReplyStore) LoadReplyContext(_ context.Context, id string) (replycontext.Record, error) {
+	if id != s.record.ID {
+		return replycontext.Record{}, replycontext.ErrNotFound
+	}
+	return s.record.Normalized(), nil
 }

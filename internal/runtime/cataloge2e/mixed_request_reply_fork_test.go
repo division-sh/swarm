@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -252,7 +253,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				}
 			}
 			if responseObserver {
-				proveMixedResponseOrdinaryRecipient(t, wait, selected, sourceRows[0].AcceptedReplyEventID, staged.ForkRunID)
+				proveMixedResponseOrdinaryRecipient(t, wait, h, selected, sourceRows[0].AcceptedReplyEventID, staged.ForkRunID)
 			}
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
 			defer stop()
@@ -267,7 +268,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 	}
 }
 
-func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, sourceEventID, child string) {
+func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *runtimeHarness, selected unclaimedFanOutReplyStore, sourceEventID, child string) {
 	t.Helper()
 	source, found, err := selected.LoadPreparedPublishEvent(ctx, sourceEventID)
 	if err != nil || !found || len(source.DeliveryRoutes) != 2 {
@@ -287,6 +288,12 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, sele
 		t.Fatal("source ordinary response observer borrowed reply authority")
 	}
 	inputID := activityidentity.ForkLineageEventID(child, sourceEventID)
+	var ordinaryPlan pinrouting.ConnectRoutePlan
+	for _, plan := range pinrouting.CompileConnectGraph(h.rt.Pipeline.SemanticSource()).Plans() {
+		if plan.ReceiverLocalEvent() == "provider.observed" {
+			ordinaryPlan = plan
+		}
+	}
 	for {
 		publication, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
 		if err != nil || !found || len(publication.DeliveryRoutes) != 2 {
@@ -299,8 +306,12 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, sele
 			}
 		}
 		projected, err := runfork.ProjectEntityOwnership(catalogRuntimeRunID, child, original.Target.Route().EntityID, original.Target.Route().FlowInstance)
+		blueprint := ordinary.Target.Route()
+		blueprint.EntityID = ""
+		claim, claimErr := pinrouting.ConnectExecutionClaim(ordinaryPlan, pinrouting.ConnectDeliveryRoute{Recipient: original.Recipient,
+			Target: blueprint, Handler: pinrouting.MustConnectReceiverHandler(node), Context: original.Context, PayloadProjection: original.PayloadProjection})
 		if err != nil || ordinary.Target.Route() != (events.RouteIdentity{FlowID: original.Target.Route().FlowID, FlowInstance: projected.Fork.FlowInstance, EntityID: projected.Fork.EntityID}) ||
-			!ordinary.ConnectClaim.Equal(original.ConnectClaim) || !reflect.DeepEqual(ordinary.Context, original.Context) {
+			claimErr != nil || !ordinary.ConnectClaim.Equal(claim) || !reflect.DeepEqual(ordinary.Context, original.Context) {
 			t.Fatalf("ordinary response observer lost its own target/claim/context: %+v error=%v", ordinary, err)
 		}
 		id, err := deliverylifecycle.DeliveryID(inputID, ordinary)
