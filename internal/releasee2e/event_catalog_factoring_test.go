@@ -83,7 +83,7 @@ func TestEventCatalogFactoringRefinedPublicationBothStores(t *testing.T) {
 			if err := process.rpc.call(ctx, "run.list", map[string]any{"bundle_hash": hash}, &before); err != nil {
 				t.Fatal(err)
 			}
-			for index, invalid := range []map[string]any{{"id": "X"}, {"id": "x"}, {"id": "toooolong"}, {"note": "missing id"}} {
+			for index, invalid := range []map[string]any{{"id": "XX"}, {"id": "x"}, {"id": "toooolong"}, {"note": "missing id"}} {
 				var result json.RawMessage
 				if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": invalid, "emitter": "releasee2e", "idempotency_key": "refused-" + strconv.Itoa(index)}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
 					t.Fatalf("invalid refined publication did not reach payload refusal: %v %s %v", invalid, result, err)
