@@ -344,8 +344,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				if route.Recipient.ID() != collector.Key() || route.Target.Route() != record.Origin || !reflect.DeepEqual(siblingBefore, loadSibling()) {
 					t.Fatalf("exact A reply expanded to a later independently subscribed B: %#v", route)
 				}
-				var deliveries int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'", replyID).Scan(&deliveries); err != nil || deliveries != 1 {
+				deliveries, err := storetest.CountGateEventNodeDeliveries(ctx, selected.events, replyID)
+				if err != nil || deliveries != 1 {
 					t.Fatalf("exact reply persisted extra sibling deliveries: count=%d err=%v", deliveries, err)
 				}
 			}

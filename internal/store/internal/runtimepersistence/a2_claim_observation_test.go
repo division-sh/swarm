@@ -71,6 +71,18 @@ WHERE d.event_id=$1 AND d.subscriber_type='node' AND d.subscriber_id=$2 GROUP BY
 			if counts := probe.Snapshot(); counts.Active != 0 || counts.Total.Begun != 3 || counts.Total.ReadCommits != 3 || counts.Total.WriteCommits != 0 {
 				t.Fatalf("claim observations merged cuts or bypassed the exact coordinator: %+v", counts)
 			}
+			if got, err := CountGateEventNodeDeliveriesForTest(f.ctx, f.store, event.ID()); err != nil || got != 1 {
+				t.Fatalf("event-level node count changed settled failure visibility: %d %v", got, err)
+			}
+			if got, err := ReadGateEventNodeDeliveryIdentityForTest(f.ctx, f.store, event.ID()); err != nil || got != deliveryID {
+				t.Fatalf("event-level node identity changed its physical scope: %q %v", got, err)
+			}
+			if got, err := CountGateEventDeliveredRowsForTest(f.ctx, f.store, event.ID()); err != nil || got != 0 {
+				t.Fatalf("event delivered count borrowed a dead-letter settlement: %d %v", got, err)
+			}
+			if counts := probe.Snapshot(); counts.Active != 0 || counts.Total.Begun != 6 || counts.Total.ReadCommits != 6 || counts.Total.WriteCommits != 0 {
+				t.Fatalf("event-level observations merged cuts or bypassed the original coordinator: %+v", counts)
+			}
 			for _, scope := range [][2]string{{uuid.NewString(), node.Key()}, {event.ID(), "foreign-node"}} {
 				assertA2ClaimObservationAbsent(t, f.ctx, f.store, scope[0], scope[1])
 			}
@@ -82,7 +94,41 @@ WHERE d.event_id=$1 AND d.subscriber_type='node' AND d.subscriber_id=$2 GROUP BY
 			}
 			restore()
 			assertA2ClaimObserversExcludeActualAgent(t, f, owner, state.Identity.RunID)
+			assertA2DeliveredCountIncludesActualAgent(t, f, owner, state.Identity.RunID)
 		})
+	}
+}
+
+func assertA2DeliveredCountIncludesActualAgent(t *testing.T, f receiverConfigActivationFixture, owner deliveryFixtureStore, runID string) {
+	t.Helper()
+	identity := mustTestAgentIdentityForRun(runID, "a2-delivered-agent", "a2-delivered/agent")
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review/finish.requested", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+	if err := commitSemanticEventFixtureWithRoutes(f.ctx, owner, event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := CountGateEventDeliveredRowsForTest(f.ctx, f.store, event.ID()); err != nil || got != 0 {
+		t.Fatalf("pending agent became a delivered witness: %d %v", got, err)
+	}
+	claimed, err := claimDeliveryFixture(f.ctx, owner, event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.SettleSuccess(f.ctx, claimed.Claim, nil, 0, handlerselection.NotApplicable()); err != nil {
+		t.Fatal(err)
+	}
+	before := competingRevisionPairSnapshot(t, f)
+	if got, err := CountGateEventDeliveredRowsForTest(f.ctx, f.store, event.ID()); err != nil || got != 1 {
+		t.Fatalf("event delivered count added a node-only filter or fabricated zero: %d %v", got, err)
+	}
+	if got, err := CountGateEventNodeDeliveriesForTest(f.ctx, f.store, event.ID()); err != nil || got != 0 {
+		t.Fatalf("node-only count borrowed actual agent delivery: %d %v", got, err)
+	}
+	if got, err := ReadGateEventNodeDeliveryIdentityForTest(f.ctx, f.store, event.ID()); !errors.Is(err, sql.ErrNoRows) || got != "" {
+		t.Fatalf("node-only identity borrowed actual agent delivery: %q %v", got, err)
+	}
+	if !reflect.DeepEqual(before, competingRevisionPairSnapshot(t, f)) {
+		t.Fatal("event-level delivery observations changed data, history, lease or clocks")
 	}
 }
 
@@ -110,6 +156,15 @@ func assertA2ClaimObservationFailure(t *testing.T, ctx context.Context, owner an
 	}
 	if got, err := CountGateNodeSettledAttemptsForTest(ctx, owner, event, node); !check(err) || got != 0 {
 		t.Fatalf("failed owner supplied settled attempts: %d %v", got, err)
+	}
+	if got, err := CountGateEventNodeDeliveriesForTest(ctx, owner, event); !check(err) || got != 0 {
+		t.Fatalf("failed owner supplied event-level node count: %d %v", got, err)
+	}
+	if got, err := ReadGateEventNodeDeliveryIdentityForTest(ctx, owner, event); !check(err) || got != "" {
+		t.Fatalf("failed owner supplied event-level node identity: %q %v", got, err)
+	}
+	if got, err := CountGateEventDeliveredRowsForTest(ctx, owner, event); !check(err) || got != 0 {
+		t.Fatalf("failed owner supplied delivered evidence: %d %v", got, err)
 	}
 }
 

@@ -95,6 +95,18 @@ func CountGateNodeSettledAttempts(ctx context.Context, selected any, eventID, no
 	return private.CountGateNodeSettledAttemptsForTest(ctx, selected, eventID, nodeID)
 }
 
+func CountGateEventNodeDeliveries(ctx context.Context, selected any, eventID string) (int, error) {
+	return private.CountGateEventNodeDeliveriesForTest(ctx, selected, eventID)
+}
+
+func ReadGateEventNodeDeliveryIdentity(ctx context.Context, selected any, eventID string) (string, error) {
+	return private.ReadGateEventNodeDeliveryIdentityForTest(ctx, selected, eventID)
+}
+
+func CountGateEventDeliveredRows(ctx context.Context, selected any, eventID string) (int, error) {
+	return private.CountGateEventDeliveredRowsForTest(ctx, selected, eventID)
+}
+
 func ReadGateRunEventNames(ctx context.Context, selected any, run string) ([]string, error) {
 	return private.ReadGateRunEventNamesForTest(ctx, selected, run)
 }

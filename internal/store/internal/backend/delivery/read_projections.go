@@ -349,6 +349,26 @@ func CountGateNodeSettledAttemptsTx(ctx context.Context, tx *sql.Tx, postgres bo
 	return count, err
 }
 
+func CountGateEventNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, eventID).Scan(&count)
+	return count, err
+}
+
+func ReadGateEventNodeDeliveryIdentityTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var id string
+	if err := tx.QueryRowContext(ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, eventID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func CountGateEventDeliveredRowsTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, eventID).Scan(&count)
+	return count, err
+}
+
 func CountGateEventSubscriberDeliveriesTx(ctx context.Context, tx *sql.Tx, event, subscriber string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1 AND subscriber_id = $2`, event, subscriber).Scan(&count)

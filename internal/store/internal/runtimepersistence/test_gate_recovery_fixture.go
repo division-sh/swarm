@@ -44,6 +44,24 @@ func CountGateNodeSettledAttemptsForTest(ctx context.Context, selected any, even
 	})
 }
 
+func CountGateEventNodeDeliveriesForTest(ctx context.Context, selected any, eventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountGateEventNodeDeliveriesTx(ctx, tx, eventID)
+	})
+}
+
+func ReadGateEventNodeDeliveryIdentityForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return delivery.ReadGateEventNodeDeliveryIdentityTx(ctx, tx, eventID)
+	})
+}
+
+func CountGateEventDeliveredRowsForTest(ctx context.Context, selected any, eventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountGateEventDeliveredRowsTx(ctx, tx, eventID)
+	})
+}
+
 func ReadGateEventFailureForTest(ctx context.Context, selected any, eventID string) (string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		return delivery.ReadGateEventFailureTx(ctx, tx, eventID)

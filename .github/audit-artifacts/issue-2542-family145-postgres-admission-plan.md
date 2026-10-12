@@ -4461,3 +4461,40 @@ uncertainty67 unchanged. Supplied-pool calls61 and broader carrier/openers,
 gate/A2/parent closure plus all qualification holds remain open. No push/PR,
 tier, server2 or waiver. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/a2-source-children-*.
+
+## Shared Gate/A2 Dependency: Final Bound/Accumulator Delivery Read Tail
+
+Both complete bound-reply and accumulator-persistence caller files are now
+SQL/dialect-free. Fixed readers in the existing classified delivery owner keep
+event-only node count/identity (no added subscriber-ID/status filter) and
+all-subscriber delivered count (no added node filter). Context, event ID,
+destinations and every original isolation, persisted delivery order/identity,
+receipt and rollback assertion remain. These ports observe storage and never
+authorize delivery, infer a route or reconstruct a coordinator.
+
+Six original whole roots on both stores under race PASS50.987s. Extended native
+claim controls PASS14.915s: actual dead-letter node still counts1 and retains its
+exact physical delivery identity while delivered count remains0. A genuinely
+claimed and successfully settled agent proves delivered count1 across all
+subscriber types, while node count remains0 and node identity is NoRows. Six
+independent read cuts use the exact selected coordinator; cancellation,
+raw/nil/uninitialized/closed refusals and complete unchanged application/history/
+lease/clock snapshots remain. No real-dispatch or restart claim is substituted
+by these storage controls; original journeys retain their execution proofs.
+
+Finite consumers pin all original semantic assertions and exact scope/context/
+destinations. Physical controls require the three original SQL projections and
+predicates with hostile lost bindings/assertions. Final relevant collection
+PASS8.103s (the actual corpus gains one unkeyed-root row:1220 recipes/434
+transitions); six persistence boundaries PASS3.704s; U1000 clean. Transition
+digest89b69d96d52ca8388570aca61525c05131e0e06b17881d3c7c7ca31d31bbde9d;
+immutable mechanical inputs unchanged. Downward census PASS139.929s, final
+unchanged PASS24.176s:8372 ->8366 findings,5983 ->5977 raw sites, six removed/
+zero added; uncertainty67 unchanged. Supplied-pool calls61 remain. The original
+139-reference/27-file gate-carrier consumption inventory is now54 candidate
+db/dialect references across9 files, distinct from census debt and not54 bugs.
+Largest ready tail: timer supported-surface helpers18 references; map execution
+8, map source corruption8, join supported surface7, canonical accumulator5.
+Shared carrier/openers and broader gate/A2/parent closure plus existing semantic/
+qualification holds remain open. No push/PR, tier, server2 or waiver. Signed-head
+complexity follows. Receipts ~/.cache/swarm-2542-family145/a2-event-delivery-tail-*.

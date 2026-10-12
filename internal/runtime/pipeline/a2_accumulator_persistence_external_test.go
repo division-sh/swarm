@@ -376,8 +376,8 @@ func TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores(t *testing.
 				t.Fatalf("unkeyed multiplicity/order changed: %#v", state)
 			}
 			for _, publication := range publications {
-				var deliveryID string
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, publication.event.ID()).Scan(&deliveryID); err != nil {
+				deliveryID, err := storetest.ReadGateEventNodeDeliveryIdentity(proof.ctx, proof.selected.events, publication.event.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
 				if state.Deliveries[deliveryID] == "" {
@@ -438,8 +438,8 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 			if state := proof.accumulator(t, "item.keyed"); len(state.Items) != 1 || state.Received["refused-at-commit"] != "" {
 				t.Fatalf("failed transaction retained admission: %#v", state)
 			}
-			var delivered int
-			if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, publication.event.ID()).Scan(&delivered); err != nil || delivered != 0 {
+			delivered, err := storetest.CountGateEventDeliveredRows(proof.ctx, proof.selected.events, publication.event.ID())
+			if err != nil || delivered != 0 {
 				t.Fatalf("failed transaction acknowledged delivery: %d %v", delivered, err)
 			}
 			if err := storetest.SetA2AccumulatorPublicationFailure(context.Background(), proof.selected.events, false); err != nil {
