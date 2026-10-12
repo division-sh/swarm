@@ -5246,3 +5246,45 @@ holds remain explicit and unwaived. The inspected resource-read raw pin seed and
 integrity faults were NOT changed or certified; its canonical construction
 dependency remains separate. Receipts
 ~/.cache/swarm-2542-family145/selected-capability-chain-*.
+
+## Whole Post-Join Numeric Timer Inspector Construction
+
+Retired the ENTIRE supplementary inspector's supplied-pool construction and
+independent close capability on both backends. It now uses the existing native
+location fixture with the EXACT configured SQLite path or derived PostgreSQL
+DSN. That unchanged shared fixture registers its original native close owner
+before consumers; no pool/coordinator is reconstructed or exposed. The timer
+reader remains the existing typed WorkflowTimerActivationPersistence owner.
+
+This child is reached only after the real served process has joined, twice per
+backend in the numeric100-row interruption/restart journey. No timer writer,
+public endpoint or new initialization protocol was introduced. All100 entity/
+route identities, initial activation cause, active/non-recurring flags, exact
+FireAt-CreatedAt duration, duplicate refusal, run/path scoping,20-second child
+deadline, configured-location loading and detached output remain unchanged.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Post-join SQLite raw pool admission and close | reproduced and fixed | Unchanged real numeric100-row interruption/restart journey SQLite PASS69.57s, child executed at BOTH pre/post restart cuts; no skipped child credit |
+| Post-join PostgreSQL raw pool admission and close | reproduced and fixed | Same original PostgreSQL cell PASS66.91s, BOTH actual child invocations; complete parent root PASS163.795s |
+| Configured location, native owner, timing/identity/read/output semantics | execution-proven through the same corrected path | Exact entire child inverse transformation restores predecessor body byte-for-byte after AST formatting; hostile location/context/read/count/clock/identity/output mutations refuse |
+
+Only construction/close mechanics change; existing native cleanup/location-owner
+receipts carry. The release parent is untouched and its joined ordering, real
+restart, exact public100-item readback and timer equality checks all executed.
+No timeout inflation, retries, skip changes, raw seeds or compatibility adapters.
+Full cheap131-root Family145/current/historical collection PASS14.493s, affected
+serve/script U1000 clean. Transport retirement inventories, final unchanged
+ratchet and signed-head complexity receipts accompany the checkpoint; the six
+unchanged persistence-boundary receipts carry from the immediately preceding
+family because their owners/consumers and query corpus are unchanged here.
+
+Downward census PASS32.557s:8167 ->8157 findings,5806 ->5801 raw sites,
+10/5 removed,ZERO additions, excluded uncertainty67. Supplied-pool calls58 ->57
+(56 outside+1 private). Corpus1266/489, digest
+c687666fd9c3ef21d3c368d2bf259199840141132818123f2d7cea719a6e85f9;
+all24 immutable historical receipts retained. Parent #2542/#2151 remains open,
+with M01/Docker/drain/D3/M07/integration holds unwaived. Existing native fixture
+and typed read ownership suffice; no new architecture/spec semantics/watchlist
+node/issue. Local only, no push/PR/tier/server2. Receipts
+~/.cache/swarm-2542-family145/numeric-timer-native-inspection-*.
