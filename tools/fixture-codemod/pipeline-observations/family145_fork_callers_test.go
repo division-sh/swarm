@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 432 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f4c00d4c33987fcc8b259ce81c2604494b1354ad980d86a63c6715d6bb9eec9e" {
+	if err != nil || len(rows) != 433 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ef8c3a14d6c75fa6504454e956905cfa4c45a1f68a4f401ae7a6f775c41be796" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -81,6 +81,14 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 				t.Fatal(err)
 			}
 			continue
+		}
+		if row.Function == "a2MultiUntilChildren" || row.Function == "testA2StageEntryPublicationBinding" {
+			if err := family145SourceChildrenProofError(row.Function, row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			if row.Function == "a2MultiUntilChildren" {
+				continue
+			}
 		}
 		if family145A2CreationFaultCuts[row.Function] != nil {
 			if err := family145A2CreationFaultProofError(family145GateScalarReadKey(row.File, row.Function), row.Before, row.After); err != nil {

@@ -699,6 +699,24 @@ func ReadA2WorkerOutputsForTest(ctx context.Context, selected any, runID, source
 	})
 }
 
+func CountSourceEventPublicationsForTest(ctx context.Context, selected any, sourceEventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{sourceEventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountSourceEventPublicationsTx(ctx, tx, sourceEventID)
+	})
+}
+
+func ReadSourceEventPublicationIdentityForTest(ctx context.Context, selected any, sourceEventID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{sourceEventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadSourceEventPublicationIdentityTx(ctx, tx, sourceEventID)
+	})
+}
+
+func ReadSourceNamedChildEventIDsForTest(ctx context.Context, selected any, parentID, name string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{parentID}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadSourceNamedChildEventIDsTx(ctx, tx, parentID, name)
+	})
+}
+
 func ReadGateRunEventNamesForTest(ctx context.Context, selected any, run string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadGateRunEventNamesTx(ctx, tx, run)

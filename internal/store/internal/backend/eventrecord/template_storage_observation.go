@@ -29,6 +29,42 @@ func ReadA2WorkerOutputsTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 	return out, nil
 }
 
+func CountSourceEventPublicationsTx(ctx context.Context, tx *sql.Tx, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE source_event_id=$1`, sourceEventID).Scan(&count)
+	return count, err
+}
+
+func ReadSourceEventPublicationIdentityTx(ctx context.Context, tx *sql.Tx, sourceEventID string) (string, error) {
+	var id string
+	if err := tx.QueryRowContext(ctx, `SELECT event_id FROM events WHERE source_event_id=$1`, sourceEventID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func ReadSourceNamedChildEventIDsTx(ctx context.Context, tx *sql.Tx, parentID, name string) (out []string, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events
+		WHERE source_event_id=$1 AND (event_name=$2 OR event_name LIKE $3) ORDER BY event_id`, parentID, name, "%/"+name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func ReadGateRunEventNamesTx(ctx context.Context, tx *sql.Tx, run string) (out []string, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT event_name FROM events WHERE run_id = $1 ORDER BY created_at`, run)
 	if err != nil {

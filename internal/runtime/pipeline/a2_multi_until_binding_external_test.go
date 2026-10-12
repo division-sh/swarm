@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
@@ -417,24 +418,8 @@ func a2MultiUntilEntryArms(t *testing.T, instance pipeline.WorkflowInstance, ent
 
 func a2MultiUntilChildren(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, parentID, name string, want int) []events.Event {
 	t.Helper()
-	rows, err := selected.db.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events
-		WHERE source_event_id=$1 AND (event_name=$2 OR event_name LIKE $3) ORDER BY event_id`, parentID, name, "%/"+name)
+	ids, err := storetest.ReadSourceNamedChildEventIDs(ctx, selected.events, parentID, name)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != want {

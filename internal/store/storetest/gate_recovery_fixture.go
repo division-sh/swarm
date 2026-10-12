@@ -69,6 +69,18 @@ func ReadA2WorkerOutputs(ctx context.Context, selected any, runID, sourceEventID
 	return private.ReadA2WorkerOutputsForTest(ctx, selected, runID, sourceEventID)
 }
 
+func CountSourceEventPublications(ctx context.Context, selected any, sourceEventID string) (int, error) {
+	return private.CountSourceEventPublicationsForTest(ctx, selected, sourceEventID)
+}
+
+func ReadSourceEventPublicationIdentity(ctx context.Context, selected any, sourceEventID string) (string, error) {
+	return private.ReadSourceEventPublicationIdentityForTest(ctx, selected, sourceEventID)
+}
+
+func ReadSourceNamedChildEventIDs(ctx context.Context, selected any, parentID, name string) ([]string, error) {
+	return private.ReadSourceNamedChildEventIDsForTest(ctx, selected, parentID, name)
+}
+
 type A2EarlyRefusalStorage = private.A2EarlyRefusalStorage
 
 func ReadA2EarlyRefusal(ctx context.Context, selected any, eventID, nodeID string) (A2EarlyRefusalStorage, error) {

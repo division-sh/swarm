@@ -4423,3 +4423,41 @@ zero added; uncertainty67 unchanged. Carrier/openers, broader gate/A2/parent
 and existing semantic/qualification holds remain open; supplied-pool calls61.
 No push/PR, tier, server2 or waiver. Signed-head complexity follows.
 Receipts ~/.cache/swarm-2542-family145/a2-known-target-claims-*.
+
+## Shared Gate/A2 Dependency: Whole Source-Child Discovery Protocol
+
+The shared a2MultiUntilChildren SQL/row protocol now consumes a fixed eventrecord
+reader, retaining immediate source parent, exact-or-namespaced LIKE matching,
+event-ID ordering, multiplicity, and nil absence. The caller still loads each
+actual prepared publication, validates its original parent, and returns the
+same persisted events: no reconstructed event or routing authority. The complete
+source-only publication count/identity tail in testA2StageEntryPublicationBinding
+also consumes fixed owners without adding run/name/status filters, LIMIT/order,
+or inferred identity. That entire publication-binding file is now SQL-free.
+The until caller's separate event/revision aggregate remains live and is not
+claimed closed here.
+
+Six original whole publication/until roots on both stores under race
+PASS92.738s, preserving contention rollback, held publication retry, late
+refusal, exact namespaces, original child receipts and later-arm/restart
+isolation. The reused lawful native source/child control is extended with
+three separately admitted reads: all-name source count3, exact other-parent
+identity, ordered same-parent/name children, positive foreign-name/parent
+exclusion, zero/NoRows/nil absence, cancellation and raw/closed refusals. All
+four read cuts use the exact original coordinator and leave complete data,
+history, lease and clock snapshots unchanged. Final native race PASS14.951s.
+
+Finite controls preserve all original business/cardinality/parent assertions
+and persisted-object iteration, pin the named context/owner/destinations and
+exact original SQL/LIKE/order/arguments, and require scan/iteration/error/close
+handling below the opaque owner. Removed local SQL error machinery is replaced
+by the still-fatal native error return, not waived. Complete relevant finite,
+hostile and current/historical collection PASS14.984s; six persistence boundaries
+PASS4.464s; U1000 clean. Corpus1219/433, transition digest
+ef8c3a14d6c75fa6504454e956905cfa4c45a1f68a4f401ae7a6f775c41be796;
+immutable mechanical inputs unchanged. Downward census PASS153.303s:
+8383 ->8372 findings,5993 ->5983 raw sites, eleven removals/zero additions;
+uncertainty67 unchanged. Supplied-pool calls61 and broader carrier/openers,
+gate/A2/parent closure plus all qualification holds remain open. No push/PR,
+tier, server2 or waiver. Signed-head complexity follows.
+Receipts ~/.cache/swarm-2542-family145/a2-source-children-*.

@@ -351,8 +351,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					}
 					cancel()
 					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "in_progress")
-					var publications int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1", triggerID).Scan(&publications); err != nil || publications != 0 {
+					publications, err := storetest.CountSourceEventPublications(ctx, selected.events, triggerID)
+					if err != nil || publications != 0 {
 						t.Fatalf("rejected first publication leaked: count=%d err=%v", publications, err)
 					}
 					root, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
@@ -397,8 +397,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						t.Fatalf("upstream worker did not complete: status=%s err=%v", completed.Status, err)
 					}
 					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "delivered")
-					var outputID string
-					if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1", triggerID).Scan(&outputID); err != nil {
+					outputID, err := storetest.ReadSourceEventPublicationIdentity(ctx, selected.events, triggerID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					blocked, found, err := selected.events.LoadPreparedPublishEvent(ctx, outputID)

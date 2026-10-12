@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "f4c00d4c33987fcc8b259ce81c2604494b1354ad980d86a63c6715d6bb9eec9e"
+const targetDigest = "ef8c3a14d6c75fa6504454e956905cfa4c45a1f68a4f401ae7a6f775c41be796"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -116,6 +116,7 @@ var files = []string{
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go",
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go",
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go",
+	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go",
 	"internal/runtime/pipeline/pause_eligibility_test.go",
 	"internal/runtime/pipeline/prospective_publication_external_test.go",
 	"internal/runtime/pipeline/receiver_future_appearance_external_test.go",
@@ -242,6 +243,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go":                {"TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores": true},
 	"internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go":                       {"assertProgress/*a2MapFanOutExecution": true},
 	"internal/runtime/pipeline/a2_publication_binding_external_test.go":                         {"testA2StageEntryPublicationBinding": true},
+	"internal/runtime/pipeline/a2_multi_until_binding_external_test.go":                         {"a2MultiUntilChildren": true},
 	"internal/runtime/pipeline/pause_eligibility_test.go":                                       {"TestPausedHandedNodeParksUntilContinueBothStores": true},
 	"internal/runtime/conformance/persisted_surfaces_test.go": {
 		"TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField":                        true,
