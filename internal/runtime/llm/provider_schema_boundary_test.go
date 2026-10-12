@@ -58,6 +58,7 @@ func TestProviderSchemaBoundaryAdmission(t *testing.T) {
 	}
 	t.Run("anthropic/valid", testProviderSchemaAnthropicBytes)
 	t.Run("mock/valid", testProviderSchemaMockBytes)
+	t.Run("mock/gates", testProviderSchemaMockRequestGates)
 	t.Run("mock/continued", func(t *testing.T) {
 		source := []byte("def handle(input):\n    return {'text': 'unused'}\n")
 		actor := runtimeactors.AgentConfig{ID: "mock-agent", ExecutionMode: "mock"}
@@ -106,6 +107,43 @@ func testProviderSchemaMockBytes(t *testing.T) {
 		Messages: append(append([]Message(nil), session.Messages...), message), ToolResults: []Message{message}}
 	if got := providerSchemaJSON(t, request); got != providerSchemaJSON(t, want) || providerSchemaJSON(t, session) != before {
 		t.Fatalf("valid mock input changed bytes: %s", got)
+	}
+}
+
+func testProviderSchemaMockRequestGates(t *testing.T) {
+	source := []byte("def handle(input):\n    return {'text': 'unused'}\n")
+	actor := runtimeactors.AgentConfig{ID: "mock-agent", Model: "regular", ExecutionMode: "mock", Identity: testAgentIdentity("mock-agent", "test/instance")}
+	actor.Mock.Kind, actor.Mock.Source, actor.Mock.Digest = "python", source, pythonSourceDigest(source)
+	probe := &providerSchemaMemoryProbe{}
+	runtime := &MockRuntime{cfg: &config.Config{LLM: config.LLMConfig{Models: map[string]map[string]string{"regular": {"mock": "mock-model"}}}}, liveSessions: probe}
+	session := &Session{ID: uuid.NewString(), AgentID: actor.ID, MemoryIdentity: actor.Identity,
+		Tools: []ToolDefinition{{Name: "bad", Schema: map[string]any{"type": "unsupported-provider-type"}}}}
+	_, err := runtime.continueSession(context.Background(), session, Message{Content: "hello"}, nil)
+	requireProviderSchemaError(t, err, "mock runtime requires the exact executing agent descriptor")
+	live := actor
+	live.ExecutionMode = "live"
+	_, err = runtime.continueSession(runtimeactors.WithActor(context.Background(), live), session, Message{Content: "hello"}, nil)
+	requireProviderSchemaError(t, err, "agent mock-agent is not authorized for mock execution")
+	missing := actor
+	missing.Mock.Source = nil
+	_, err = runtime.continueSession(runtimeactors.WithActor(context.Background(), missing), session, Message{Content: "hello"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "no compiled Python performance") || probe.calls != 0 {
+		t.Fatalf("performance gate precedence changed: err=%v memory=%d", err, probe.calls)
+	}
+	ctx := runtimeactors.WithActor(context.Background(), actor)
+	ctx = runtimecorrelation.WithRunID(ctx, actor.Identity.RunID)
+	session.Memory = testMemory()
+	ctx = agentmemory.WithExecution(ctx, session.Memory, session.MemoryIdentity)
+	_, err = runtime.continueSession(ctx, session, Message{Content: "hello"}, nil)
+	if err == nil || strings.Contains(err.Error(), "input_schema") || probe.calls != 1 {
+		t.Fatalf("memory gate precedence changed: err=%v memory=%d", err, probe.calls)
+	}
+	session.Memory = agentmemory.Plan{}
+	ctx = agentmemory.WithExecution(ctx, session.Memory, session.MemoryIdentity)
+	_, err = runtime.continueSession(ctx, session, Message{Content: "hello"}, nil)
+	requireProviderSchemaError(t, err, ValidateProviderToolDefinitions(session.Tools).Error())
+	if probe.calls != 1 {
+		t.Fatalf("memory-disabled schema refusal acquired memory: %d", probe.calls)
 	}
 }
 
