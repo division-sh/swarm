@@ -712,12 +712,6 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 				return err
 			}
 		}
-		if len(sourceEvent.ContinuedReplyRequests) != 0 {
-			eventCtx, err = runtimebus.WithSelectedForkRequestReplies(eventCtx, evt, sourceEvent.ContinuedReplyRequests)
-			if err != nil {
-				return err
-			}
-		}
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
 			if err != nil {
@@ -822,6 +816,9 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 		if err != nil {
 			return nil, err
 		}
+	}
+	if len(source.ContinuedReplyRequests) != 0 {
+		return runtimebus.WithSelectedForkRequestReplies(ctx, event, source.ContinuedReplyRequests)
 	}
 	return ctx, nil
 }
