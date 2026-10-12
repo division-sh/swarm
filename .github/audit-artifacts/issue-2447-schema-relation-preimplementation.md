@@ -1,5 +1,14 @@
 # Pre-Implementation Coverage Audit: #2447 Schema Relation Family
 
+Implementation authorization: independent re-gate6129609951 is **approved as first
+slice**, covering the complete14-function corrected family and all58 rows.
+Signed444c422b3 characterization precedes extraction0f6daf859. The read-only
+snapshot and its former coding-closed language below are preserved history;
+current binding conditions are the recorded gate, not automatic semantic-merge
+credit. Hosted lifecycle/no CI-Units and focused local/complete pre-push guards
+apply. See the companion post-implementation audit for actual proof, not closure
+of2447/2407/2349. No spec/runtime semantic change or size waiver is authorized.
+
 Corrected-behavior delta audit on merged master628a21e74, effective go1.26.8,
 2026-10-12. #2631 merged at17:26:07Z and closed #2630. Its reviewed8208d08d5
 owner, consumer, test and spec bytes equal merged628a21e74. This audit changes
