@@ -83,6 +83,7 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort", "postgresRunForkWorkflowTimerReadbackPort",
 		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
 		"requireRunForkRequestReplyEvidenceTx",
+		"requireRunForkReplyReturnEvidenceTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "exact shared contextual event-point consumer"}
 	}
@@ -91,6 +92,7 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort", "sqliteRunForkWorkflowTimerReadbackPort",
 		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
 		"requireRunForkRequestReplyEvidenceTx",
+		"requireRunForkReplyReturnEvidenceTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "thin SQLite adapter consumes the shared contextual event point"}
 	}
