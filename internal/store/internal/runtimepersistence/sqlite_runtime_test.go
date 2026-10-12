@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1672,15 +1673,68 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability first: %v", err)
 	}
-	if _, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-2")); err == nil {
-		t.Fatal("AcquireProcessCapability second unexpectedly succeeded")
+	predecessor, err := processCapability.Evidence()
+	if err != nil {
+		t.Fatal(err)
 	}
+	before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	done := make(chan error, 1)
+	joined := false
+	t.Cleanup(func() {
+		cancel()
+		if err := processCapability.Release(context.Background()); err != nil {
+			t.Errorf("cleanup incumbent process capability: %v", err)
+		}
+		if !joined {
+			if err := <-done; !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+				t.Errorf("cleanup standby join: %v", err)
+			}
+		}
+	})
+	go func() {
+		competing, err := store.AcquireProcessCapability(waiting, testStartupAcquireRequest("runtime-2"))
+		if competing != nil {
+			err = errors.Join(errors.New("standby published a competing capability"), competing.Release(context.Background()))
+		}
+		done <- err
+	}()
+	<-waiting.Done()
+	after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("waiting standby changed store facts: %v", err)
+	}
+	if err := processCapability.ProveCurrent(ctx); err != nil {
+		t.Fatalf("waiting standby disturbed incumbent authority: %v", err)
+	}
+	// The native flock wait joins only after the actual holder releases it.
 	if err := processCapability.Release(ctx); err != nil {
 		t.Fatalf("release process capability: %v", err)
+	}
+	standbyErr := <-done
+	joined = true
+	if !errors.Is(standbyErr, context.DeadlineExceeded) {
+		t.Fatalf("cancelled standby join = %v, want DeadlineExceeded", standbyErr)
+	}
+	after, err = ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("cancelled standby wrote a late generation: %v", err)
 	}
 	successorProcessCapability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-2"))
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability after release: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := successorProcessCapability.Release(context.Background()); err != nil {
+			t.Errorf("cleanup successor process capability: %v", err)
+		}
+	})
+	successor, err := successorProcessCapability.Evidence()
+	if err != nil || successor.Validate() != nil || successor.AuthorityID == predecessor.AuthorityID || successor.AuthorityGeneration != predecessor.AuthorityGeneration+1 {
+		t.Fatalf("successor evidence = %+v after %+v: %v", successor, predecessor, err)
 	}
 	if err := successorProcessCapability.Release(ctx); err != nil {
 		t.Fatalf("release successor process capability: %v", err)
