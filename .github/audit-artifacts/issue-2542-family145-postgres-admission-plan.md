@@ -5178,3 +5178,20 @@ No new architecture or spec semantics: existing native/domain owners are reused
 under the binding raw_sql_policy. Existing #2542/#2151 watchlist mapping remains
 sufficient; no new issue or framework. Local only, no push/PR/tier/server2.
 Receipts ~/.cache/swarm-2542-family145/source-route-event-only-chain-*.
+
+### Canonical Event Island: Signed Complexity Correction
+
+The first signed checkpoint200566215 is qualification-open: its actual complexity
+receipt is RED, with currentReplacement at31 in BOTH metrics. The issue comment's
+premature complexity-PASS wording was corrected immediately; no approval/push was
+requested against that red receipt. The bounded repair uses the existing rename
+registry plus four exact retired-declaration keys instead of adding branch-heavy
+path/name dispatch. Retired declarations reappearing in current source now panic
+rather than being silently marked removed. No broad matcher, exemption, baseline
+credit or alternative runtime owner is introduced.
+
+No-write reconciliation produces the IDENTICAL485 transitions and digest above;
+the complete128-root cheap collection PASS16.606s, script U1000 clean, unchanged
+ratchet PASS27.995s at8197/5831. All unchanged original/native/race/counterexample
+receipts carry; no repeated business matrix or tier. The repaired signed-head
+complexity receipt follows before this family is offered for stacking.

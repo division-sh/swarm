@@ -227,6 +227,9 @@ func main() {
 }
 
 var renamedHelpers = map[string]map[string]string{
+	"internal/store/storetest/event.go": {
+		"InsertCanonicalEventRecord": "InsertNativeCanonicalEventRecord",
+	},
 	"internal/runtime/template_instance_delivery_test.go": {
 		"waitRuntimeDBCount":   "waitRuntimeStorageCount",
 		"waitRuntimeEventID":   "waitRuntimeStoredEventID",
@@ -234,6 +237,17 @@ var renamedHelpers = map[string]map[string]string{
 	},
 	"internal/runtime/artifact_action_result_delivery_test.go": {
 		"waitArtifactActionResultDBCount": "waitArtifactActionResultSettledCount",
+	},
+}
+
+var retiredEventFixtureHelpers = map[string]map[string]bool{
+	"internal/store/storetest/event.go": {
+		"InsertExistingRunRootEventRecord": true,
+		"InsertChildEventRecord":           true,
+		"runCanonicalEventMutation":        true,
+	},
+	"internal/store/internal/runtimepersistence/contextual_runtime_lineage_parity_test.go": {
+		"selectedDatabase": true,
 	},
 }
 
@@ -332,13 +346,10 @@ var gateRecoveryTargets = map[string]map[string]bool{
 }
 
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
-	if path == "internal/store/storetest/event.go" && (key == "InsertExistingRunRootEventRecord" || key == "InsertChildEventRecord" || key == "runCanonicalEventMutation") {
-		return "", true
-	}
-	if path == "internal/store/storetest/event.go" && key == "InsertCanonicalEventRecord" {
-		return after["InsertNativeCanonicalEventRecord"], false
-	}
-	if path == "internal/store/internal/runtimepersistence/contextual_runtime_lineage_parity_test.go" && key == "selectedDatabase" {
+	if retiredEventFixtureHelpers[path][key] {
+		if after[key] != "" {
+			panic("retired raw event fixture helper survived: " + path + "/" + key)
+		}
 		return "", true
 	}
 	if replacement := after[key]; replacement != "" {
