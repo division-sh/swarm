@@ -72,6 +72,22 @@ func CountPostgresRunStatusSemanticEventsTx(ctx context.Context, tx *sql.Tx, run
 	return count, err
 }
 
+func ReadPostgresRecoveryFailedPayloadStorageTx(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name = 'platform.recovery_failed' ORDER BY created_at DESC LIMIT 1`).Scan(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func ReadPostgresResetPayloadStorageTx(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name = 'platform.reset' ORDER BY created_at DESC LIMIT 1`).Scan(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
 // ReadStageLifecycleRuntimeLogPayloadsTx preserves physical payload text, not
 // decoded event bytes, for the bounded whole-store failure diagnostic.
 func ReadStageLifecycleRuntimeLogPayloadsTx(ctx context.Context, tx *sql.Tx) (out []string, err error) {

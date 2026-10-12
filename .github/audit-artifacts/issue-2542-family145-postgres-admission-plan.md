@@ -3420,3 +3420,66 @@ not parent elimination. Existing watchlist and narrow native-owner architecture
 disposition stand; no new issue/framework, compatibility seam or ownership
 decision. No push, PR, server2, tier/full, timeout/budget raise, assertion
 weakening, generic SQL allowance or ratchet/classifier relaxation.
+
+### Complete Recovery-Failure And Orphan-Reset Aftermath Group
+
+The two coupled aftermath consumers in persisted_surfaces_test.go now open the
+original selected PostgreSQL owner natively. No borrowed pool, direct SQL,
+transaction callback or reconstructed coordinator remains in either root.
+Startup still reaches the actual failing recovery claim before its diagnostic
+observation; orphan reset still uses an actually acquired session, real manager,
+runtime occurrence, logger and event bus. Every original business assertion and
+its order remains. The incidental defer cleanup that could close a borrowed pool
+before registered runtime/bus joins is gone; existing native close ownership and
+joined lifecycle recipes are reused, not duplicated.
+
+| Canonical owner | Exhaustive changed consumption / exact contract |
+| --- | --- |
+| Native construction / runtime lifetime | Both original PG-only roots use StartPostgresRuntimeStore at their original opening point. Recovery retains compiled source, catalog, startup grant, claim-failure wrapper, options and the actual rt.Start failure. Reset retains issued identity/lease, original 30s TTL, work occurrence, runtime logger, bus and ResetRuntimeStateWithSource. |
+| Existing exact event-name count | Recovery uses CountEventNameStorage with the fixed platform.reset name. Its original whole-store COUNT(*) is unchanged except parameter binding; no run, eligibility or successful-decoding condition is added. Existing other consumers are unchanged. |
+| eventrecord, through test_event_support.go | Fixed recovery_failed and reset ports each preserve SELECT payload, exact name, created_at DESC and LIMIT 1. Native payload bytes stay undecoded until the original consumer. No extra run/type/status filter, tie-breaker, fallback clock or complete-event projection is introduced. |
+| llmpersistence session owner | Reset reads only its actually issued session ID, retaining the original three COALESCE-to-empty columns for status, termination_reason and termination_detail, with no current-lease or eligibility filter. The detached tuple is mapped to the same original assertion variables. |
+| Exact selected native reader | Each original observation remains a separate read at its original execution cut. Three new fixed public ports expose only bytes or a detached tuple, not SQL/handles/query selectors/callbacks. Their private bridges validate PG ownership and exact session identity, then use the original selected read coordinator; failure yields no provisional evidence. |
+| Finite transformation owner | Two source-pinned caller transitions retain the real failure/reset paths and all original conditions. Hostile controls reject missing source, native owner, lease/reset/diagnostic cuts, field mappings, business assertions and moved/duplicated independent reads. Four original statements are reconciled, including the reused parameterized count; no corpus row or historical receipt is discarded. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Real startup recovery exhaustion persists the canonical recovery_failed failure, not platform.reset | reproduced and fixed: TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset under race, original PG scope, 7.03s |
+| Real orphan reset reports the exact issued session and source through public log readback, physical termination tuple and platform.reset | reproduced and fixed: TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader under race, original PG scope, 0.83s; combined native package PASS8.904s |
+| Missing/raw/foreign/typed-nil/SQLite/cancelled/closed ownership and invalid session identity | execution-proven through the same corrected path: TestPostgresResetRecoveryAftermathStorageRefusesForeignCancelledAndClosedOwners under race, all three fixed ports, package PASS11.412s. SQLite is an explicitly foreign posture for these original PG-only statements, not new SQLite positive parity evidence. |
+| Exact latest-name scope, native JSONB bytes, detached result, physical NULL and missing-event refusal | execution-proven through the same corrected path: TestPostgresResetRecoveryPayloadsKeepPhysicalBytesNamesOrderAndNull under race, PASS6.337s; isolated unadmitted backend query-only schema, not runtime construction or diagnostic publication authority |
+| Exact physical session identity, all three NULL defaults and missing-row refusal | execution-proven through the same corrected path: TestPostgresSessionTerminationStorageKeepsExactTupleAndNullDefaults under race, PASS6.352s; isolated unadmitted query-only schema, not fabricated runtime sessions/leases or reset proof |
+| Complete assertion/cut/query/bridge inventory with hostile controls | execution-proven through the same corrected path: all three TestFamily145ResetRecoveryAftermath roots, final PASS0.147s; broader unchanged finite controls carry PASS15.423s |
+
+Event/delivery/lifecycle/revision/writer boundary guards PASS7.520s; retired
+constructor inventory PASS10.392s. Dry-run Changes=[] and diff clean. Two new
+rows make1189 recipes/376 transitions, digest
+dc2f26c4885d01726b6a557d09a41fb119463f5e77fdb33d3d1102a99dc246e9;
+immutable predecessors, existing After mappings and24 mechanical receipts remain.
+The new owner reads implement the already binding bounded fixture-operation
+contract in platform-spec.yaml; no production recovery/reset/session semantics
+or architecture contract is changed. Native tests and source controls are
+original-scope qualification, not process-restart or parent-completion proof.
+
+Parent PostgreSQL supplied-pool authority and wider #2542/#2151 remain open.
+The four other borrowed openings in persisted_surfaces_test.go (lease frontier,
+CLI session failure, replay fault and malformed canonical mutation) are not
+quietly included or credited. Existing watchlist / native-owner architecture
+disposition stands; no new issue or framework. M01/Docker/drain/D3/M07/rollback
+and the previously disclosed run-state diagnostic warning remain unwaived.
+Receipts: ~/.cache/swarm-2542-family145/reset-recovery-aftermath-* on vemew.
+Ordinary testsGo1.25.0 while #2622 remains OPEN; U1000Go1.26.8. No push, PR,
+server2, tier/full, timeout/budget raise, weakened assertion, generic SQL
+allowance, classifier relaxation, ratchet exception or compatibility behavior.
+
+Downward ratchet PASS282.827s:8748 ->8732 findings (16 removed, zero added),
+confirmed raw-operation debt6299 ->6287, uncertainty67 unchanged. Collector
+policy fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9
+is unchanged; total54790 findings/39075 raw sites includes legitimate owners
+and is not the debt denominator. Supplied-pool calls79 ->77 (75 external +2
+private), provisional M0/D40/S37 and57 qualified openings. Affected six-package
+U1000 is clean, with the last test-only ordering delta separately checked.
+Signed-head complexity is recorded with the checkpoint. Timing is disclosed as
+actual native execution8.904s, three bounded owner packages11.412/6.337/6.352s,
+shared finite controls15.423s, boundaries7.520s, retirement10.392s and the cold
+whole-source census282.827s; no repeat full matrix or tier was run.

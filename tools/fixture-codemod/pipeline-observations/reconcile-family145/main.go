@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "8cdd888755e9d7ca555b74044bb8167c83101bcaf36bac65b4787622dbe97344"
+const targetDigest = "dc2f26c4885d01726b6a557d09a41fb119463f5e77fdb33d3d1102a99dc246e9"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -81,6 +81,7 @@ var files = []string{
 	"internal/runtime/conformance/fan_out_pressure_reservation_test.go",
 	"internal/runtime/conformance/fan_out_pressure_soak_test.go",
 	"internal/runtime/conformance/lifecycle_diagnostic_overlap_test.go",
+	"internal/runtime/conformance/persisted_surfaces_test.go",
 	"internal/runtime/conformance/workflow_stage_lifecycle_identity_conformance_test.go",
 	"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go",
 	"internal/runtime/deliverylifecycle/claim_commit_runtime_test.go",
@@ -199,6 +200,10 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/runtime/conformance/persisted_surfaces_test.go": {
+		"TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset": true,
+		"TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader":              true,
+	},
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go": {
 		"TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores":                  true,
 		"TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores": true,

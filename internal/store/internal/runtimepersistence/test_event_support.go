@@ -611,6 +611,20 @@ func CountPostgresRunStatusSemanticEventsForTest(ctx context.Context, selected a
 	})
 }
 
+func ReadPostgresRecoveryFailedPayloadStorageForTest(ctx context.Context, selected any) ([]byte, error) {
+	if err := validatePostgresPublicationIdentities(selected); err != nil {
+		return nil, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, eventrecord.ReadPostgresRecoveryFailedPayloadStorageTx)
+}
+
+func ReadPostgresResetPayloadStorageForTest(ctx context.Context, selected any) ([]byte, error) {
+	if err := validatePostgresPublicationIdentities(selected); err != nil {
+		return nil, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, eventrecord.ReadPostgresResetPayloadStorageTx)
+}
+
 func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, name, parent string) ([]string, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run, parent}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
 		return eventrecord.ReadNestedSourceEventIDsTx(ctx, tx, run, name, parent)

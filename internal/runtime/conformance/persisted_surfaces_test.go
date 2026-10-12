@@ -1079,9 +1079,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 }
 
 func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	module := loadConformanceRuntimeWorkflowModule(t)
 	bundle, ok := runtimesemanticview.Bundle(module.source)
 	if !ok || bundle == nil {
@@ -1132,26 +1130,16 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
 
-	var resetCount int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.reset'
-	`).Scan(&resetCount); err != nil {
+	resetCount, err := storetest.CountEventNameStorage(ctx, pg, "platform.reset")
+	if err != nil {
 		t.Fatalf("count platform.reset events: %v", err)
 	}
 	if resetCount != 0 {
 		t.Fatalf("platform.reset event count = %d, want 0", resetCount)
 	}
 
-	var recoveryFailedPayloadRaw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.recovery_failed'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&recoveryFailedPayloadRaw); err != nil {
+	recoveryFailedPayloadRaw, err := storetest.ReadPostgresRecoveryFailedPayloadStorage(ctx, pg)
+	if err != nil {
 		t.Fatalf("load platform.recovery_failed event: %v", err)
 	}
 	var recoveryFailedPayload map[string]any
@@ -1199,9 +1187,7 @@ func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediag
 
 func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -1284,21 +1270,11 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("detail.orphaned_sessions[0].termination_detail = %q, want admin_cli", got)
 	}
 
-	var (
-		status            string
-		terminationReason string
-		terminationDetail string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(status, ''),
-			COALESCE(termination_reason, ''),
-			COALESCE(termination_detail, '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, lease.SessionID).Scan(&status, &terminationReason, &terminationDetail); err != nil {
+	termination, err := storetest.ReadPostgresSessionTerminationStorage(ctx, pg, lease.SessionID)
+	if err != nil {
 		t.Fatalf("load reset session row: %v", err)
 	}
+	status, terminationReason, terminationDetail := termination.Status, termination.Reason, termination.Detail
 	if status != "terminated" {
 		t.Fatalf("status = %q, want terminated", status)
 	}
@@ -1309,14 +1285,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("termination_detail = %q, want admin_cli", terminationDetail)
 	}
 
-	var resetPayloadRaw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.reset'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&resetPayloadRaw); err != nil {
+	resetPayloadRaw, err := storetest.ReadPostgresResetPayloadStorage(ctx, pg)
+	if err != nil {
 		t.Fatalf("load platform.reset event: %v", err)
 	}
 	var resetPayload map[string]any
