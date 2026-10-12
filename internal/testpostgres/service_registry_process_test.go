@@ -670,10 +670,10 @@ func TestSwarmTestDescendantProcessFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	} else {
+		signal.Ignore(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		if err := os.WriteFile(started, []byte("started\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		signal.Ignore(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		for {
 			if _, err := os.Stat(release); err == nil {
 				break
