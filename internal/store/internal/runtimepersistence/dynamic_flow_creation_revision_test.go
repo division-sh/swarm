@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,12 +16,15 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -40,11 +45,52 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					return item
 				}
 				original := load()
+				originalBundle := dynamicFlowCreationAtomicityBundle(t)
+				construction := func(ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.FlowConstructionPublicationEvidence {
+					t.Helper()
+					lookup, err := runtimepipeline.NewExactFlowInstanceLookup(semanticview.Wrap(bundle), sourceartifactfixture.FactFor(bundle.SourceArtifact), flowidentity.RunScopedFlowInstance{RunID: f.runID, Route: original.Plan.Identity.Route()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					observed, found, err := f.selected.LookupFlowInstance(ctx, lookup)
+					if err != nil || !found {
+						t.Fatalf("read exact native construction: found=%v err=%v", found, err)
+					}
+					receipt, native, err := observed.NativeConstruction()
+					if err != nil || !native {
+						t.Fatalf("read immutable native receipt: native=%v err=%v", native, err)
+					}
+					return receipt
+				}
+				originalConstruction := construction(f.ctx, originalBundle)
 				ownership, err := f.grant.InspectRunExecutionOwnership(f.ctx, f.runID)
 				if err != nil || ownership != runtimemanager.RunExecutionOwned {
 					t.Fatalf("pre-revision generation ownership: disposition=%v err=%v", ownership, err)
 				}
-				artifact := sourceartifactfixture.New("schema.yaml", []byte("name: revised-creation-proof\n"))
+				// Revise the root declaration, not the child constructor/schema.
+				root := t.TempDir()
+				for _, member := range originalBundle.SourceArtifact.Entries() {
+					body := member.Bytes()
+					if member.Label() == "schema.yaml" {
+						body = []byte("name: revised-creation-proof\n")
+					}
+					path := filepath.Join(root, member.Label())
+					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				artifact, err := sourceartifact.AdmitDirectory(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				repo := runtimepipeline.WorkflowRepoRoot()
+				revisedBundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatalf("compile exact revised source: %v", err)
+				}
 				source := sourceartifactfixture.FactFor(artifact)
 				sourceartifactfixture.RequireArtifact(t, f.ctx, f.selected, artifact)
 				revise := func() error {
@@ -129,6 +175,9 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if err := reconcile(current, desired); err != nil {
 					t.Fatalf("explicit pending-plan reconciliation: %v", err)
 				}
+				if got := construction(ctx, revisedBundle); !reflect.DeepEqual(originalConstruction, got) {
+					t.Fatal("source revision replaced the original immutable construction receipt")
+				}
 				replaced := load()
 				gotPlan, err := runtimecanonicaljson.Bytes(replaced.Plan)
 				if err != nil {
@@ -204,7 +253,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					if err := f.commit(); err == nil {
 						t.Fatal("old callback adopted revised readiness")
 					}
-					bundle := semanticview.Wrap(dynamicFlowCreationAtomicityBundle(t))
+					bundle := semanticview.Wrap(revisedBundle)
 					descriptors, err := runtimepkg.AuthorActivityEventDescriptors(bundle)
 					if err != nil {
 						t.Fatal(err)
