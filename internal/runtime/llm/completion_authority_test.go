@@ -121,7 +121,7 @@ func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T
 		FlowInstance: target.FlowInstance, CapabilitySurface: &surface,
 	}
 	result, err := settleCompletionTurn(ctx, dispatch, target.ID, turn, response, profile,
-		unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateSettled, nil, nil)
+		unavailableCompletionUsage(), runtimeeffects.StateSettled, nil, nil)
 	if !result.Committed || !errors.Is(err, cleanup) || !errors.Is(err, launchCleanup) || !errors.Is(err, observationCleanup) {
 		failure, _ := runtimefailures.As(err)
 		if failure != nil {
@@ -810,7 +810,7 @@ func TestClaudeCompletionUsageFromRawDirectAndStream(t *testing.T) {
 		{name: "stream", raw: "{\"type\":\"system\",\"subtype\":\"init\"}\n" + result + "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			usage, err := claudeCompletionUsageFromRaw([]byte(tc.raw), "fallback")
+			usage, err := claudeCompletionUsageFromRaw([]byte(tc.raw))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -826,7 +826,7 @@ func TestClaudeCompletionUsageFromRawDirectAndStream(t *testing.T) {
 }
 
 func TestClaudeCompletionUsageFromRawRejectsInvalidCacheSubtotals(t *testing.T) {
-	_, err := claudeCompletionUsageFromRaw([]byte(`{"type":"result","model":"claude-sonnet-4","usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":6,"ephemeral_1h_input_tokens":5}}}`), "")
+	_, err := claudeCompletionUsageFromRaw([]byte(`{"type":"result","model":"claude-sonnet-4","usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":6,"ephemeral_1h_input_tokens":5}}}`))
 	if err == nil {
 		t.Fatal("invalid cache subtotals were accepted")
 	}

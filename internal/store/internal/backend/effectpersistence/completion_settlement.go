@@ -27,6 +27,7 @@ var _ runtimeeffects.CompletionStore = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.CompletionStore = (*EffectSQLiteOwner)(nil)
 
 func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
+	settlement = settlement.Clone()
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
@@ -177,6 +178,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 }
 
 func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
+	settlement = settlement.Clone()
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
@@ -530,6 +532,10 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 		return err
 	}
 	u := settlement.Usage
+	evidenceJSON, err := u.Evidence.Encode()
+	if err != nil {
+		return err
+	}
 	var storedRunID, storedTurnID string
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO agent_turns (
@@ -540,12 +546,12 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			agent_frame_bytes, completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
-			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (
+		cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at, completion_evidence
+		) SELECT
 			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,NULLIF($12,'')::uuid,
 			NULLIF($13,'')::uuid,NULLIF($14,''),NULLIF($15,''),$16::uuid,$17::jsonb,$18::jsonb,
-			$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24,$25,$26::uuid,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38
-		)
+			$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24,$25,$26::uuid,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38,$39::jsonb
+		WHERE (SELECT authority_evidence->'provider_request' FROM runtime_external_effect_attempts WHERE attempt_id=$26::uuid) = $39::jsonb->'request'
 		RETURNING run_id::text, turn_id::text
 	`, t.TurnID, t.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, t.EntityID,
@@ -553,7 +559,7 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
 		agentFrame, attempt.AttemptID, attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
-		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, nullableJSON(failure), settlement.Now.UTC()).Scan(&storedRunID, &storedTurnID)
+		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, nullableJSON(failure), settlement.Now.UTC(), string(evidenceJSON)).Scan(&storedRunID, &storedTurnID)
 	if err != nil {
 		return fmt.Errorf("insert completion agent turn: %w", err)
 	}
@@ -593,7 +599,11 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 		return err
 	}
 	u := settlement.Usage
-	_, err = tx.ExecContext(ctx, `
+	evidenceJSON, err := u.Evidence.Encode()
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, entity_id,
@@ -602,17 +612,21 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			agent_frame_bytes, completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
-			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at, completion_evidence
+		) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		WHERE (SELECT json_extract(authority_evidence,'$.provider_request') FROM runtime_external_effect_attempts WHERE attempt_id=?) = json_extract(?,'$.request')
 	`, t.TurnID, sqliteNullString(t.RunID), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, sqliteNullString(t.EntityID),
 		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
 		agentFrame, attempt.AttemptID, attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
-		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, sqliteNullableJSON(failure), settlement.Now.UTC())
+		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, sqliteNullableJSON(failure), settlement.Now.UTC(), string(evidenceJSON), attempt.AttemptID, string(evidenceJSON))
 	if err != nil {
 		return fmt.Errorf("insert sqlite completion agent turn: %w", err)
+	}
+	if err := requireCompletionEvidenceInsert(result); err != nil {
+		return err
 	}
 	return effects.AddFact(t.RunID, privaterunforkrevision.FamilyAgentTurns, t.TurnID)
 }
@@ -630,20 +644,25 @@ func insertForkCompletionPostgres(ctx context.Context, tx *sql.Tx, attempt runti
 		return err
 	}
 	u := settlement.Usage
-	_, err = tx.ExecContext(ctx, `
+	evidenceJSON, err := u.Evidence.Encode()
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_fork_turn_completions (
 			completion_id,fork_turn_id,ordinal,attempt_id,execution_mode,resolved_model,usage_exactness,input_tokens,output_tokens,
 			cache_read_input_tokens,cache_creation_input_tokens,cache_creation_5m_input_tokens,cache_creation_1h_input_tokens,
-			provider_reported_cost_usd,state,failure,evidence,created_at
-		) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18)
+			provider_reported_cost_usd,state,failure,evidence,created_at,completion_evidence
+		) SELECT $1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18,$19::jsonb
+		WHERE (SELECT authority_evidence->'provider_request' FROM runtime_external_effect_attempts WHERE attempt_id=$4::uuid) = $19::jsonb->'request'
 	`, completionChildID(attempt.AttemptID), attempt.Authority.ForkChat.ForkTurnID, attempt.Authority.Target.Ordinal, attempt.AttemptID,
 		attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
 		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, completionChildState(settlement.Settlement.State),
-		nullableJSON(failure), completionJSON(runtimeeffects.EvidenceJSON(settlement.Settlement.Evidence), `{}`), settlement.Now.UTC())
+		nullableJSON(failure), completionJSON(runtimeeffects.EvidenceJSON(settlement.Settlement.Evidence), `{}`), settlement.Now.UTC(), string(evidenceJSON))
 	if err != nil {
 		return fmt.Errorf("insert forkchat completion child: %w", err)
 	}
-	return nil
+	return requireCompletionEvidenceInsert(result)
 }
 
 func insertForkCompletionSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
@@ -652,18 +671,34 @@ func insertForkCompletionSQLite(ctx context.Context, tx *sql.Tx, attempt runtime
 		return err
 	}
 	u := settlement.Usage
-	_, err = tx.ExecContext(ctx, `
+	evidenceJSON, err := u.Evidence.Encode()
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_fork_turn_completions (
 			completion_id,fork_turn_id,ordinal,attempt_id,execution_mode,resolved_model,usage_exactness,input_tokens,output_tokens,
 			cache_read_input_tokens,cache_creation_input_tokens,cache_creation_5m_input_tokens,cache_creation_1h_input_tokens,
-			provider_reported_cost_usd,state,failure,evidence,created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			provider_reported_cost_usd,state,failure,evidence,created_at,completion_evidence
+		) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		WHERE (SELECT json_extract(authority_evidence,'$.provider_request') FROM runtime_external_effect_attempts WHERE attempt_id=?) = json_extract(?,'$.request')
 	`, completionChildID(attempt.AttemptID), attempt.Authority.ForkChat.ForkTurnID, attempt.Authority.Target.Ordinal, attempt.AttemptID,
 		attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
 		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, completionChildState(settlement.Settlement.State),
-		sqliteNullableJSON(failure), completionJSON(runtimeeffects.EvidenceJSON(settlement.Settlement.Evidence), `{}`), settlement.Now.UTC())
+		sqliteNullableJSON(failure), completionJSON(runtimeeffects.EvidenceJSON(settlement.Settlement.Evidence), `{}`), settlement.Now.UTC(), string(evidenceJSON), attempt.AttemptID, string(evidenceJSON))
 	if err != nil {
 		return fmt.Errorf("insert sqlite forkchat completion child: %w", err)
+	}
+	return requireCompletionEvidenceInsert(result)
+}
+
+func requireCompletionEvidenceInsert(result sql.Result) error {
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return fmt.Errorf("completion evidence does not match frozen native request")
 	}
 	return nil
 }
@@ -736,10 +771,19 @@ func insertCompletionSpendRow(ctx context.Context, tx *sql.Tx, postgres bool, at
 	if identityFields.RunID != "" && identityFields.RunID != runID {
 		return fmt.Errorf("completion spend concrete agent run does not match target run")
 	}
-	query := `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,run_id,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	evidence := settlement.Usage.Evidence.Clone()
+	if basis == "accounting_unavailable_exhaustion" {
+		evidence.CostProvenance = runtimeeffects.CompletionCostReservation
+	}
+	evidenceJSON, err := evidence.Encode()
+	if err != nil {
+		return err
+	}
+	query := `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,run_id,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at,completion_evidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	args := []any{uuid.NewString(), attempt.AttemptID, attempt.Authority.ExecutionMode, runID, sqliteNullString(s.EntityID), s.FlowInstance, s.AgentID, sqliteNullString(identityFields.NameOwner), sqliteNullString(identityFields.NameSource), sqliteNullString(identityFields.RoutePresence), sqliteNullString(identityFields.FlowScopeKey), sqliteNullString(identityFields.FlowInstanceID), s.Model, defaultCompletionIdentity(s.ModelAlias), s.BackendProfile, s.Provider, s.Transport, s.ResolvedModel, input, output, cost, s.InvocationType, accounting, sqliteNullString(basis), settlement.Now.UTC()}
+	args = append(args, string(evidenceJSON))
 	if postgres {
-		query = `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,run_id,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NULLIF($24,''),$25)`
+		query = `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,run_id,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at,completion_evidence) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NULLIF($24,''),$25,$26::jsonb)`
 		args[4] = strings.TrimSpace(s.EntityID)
 		args[23] = basis
 	}

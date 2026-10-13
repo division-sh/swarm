@@ -158,7 +158,14 @@ func completionContinuationForHandle(handle *runtimeeffects.Handle, adapter stri
 	if !ok {
 		return nil, nil
 	}
-	return completionContinuationForPayload(snapshot.Payload, adapter)
+	continuation, err := completionContinuationForPayload(snapshot.Payload, adapter)
+	if err != nil {
+		return nil, err
+	}
+	if continuation.Usage.Evidence.Request != handle.Attempt().Authority.CompletionRequest {
+		return nil, fmt.Errorf("completion continuation contradicts frozen request")
+	}
+	return continuation, nil
 }
 
 func completionContinuationForPayload(payload json.RawMessage, adapter string) (*completionContinuationEnvelope, error) {
@@ -184,7 +191,7 @@ func validateCompletionContinuation(continuation completionContinuationEnvelope,
 	if !reflect.DeepEqual(projection.Messages[len(projection.Messages)-1], continuation.Response.Message) {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_projection_mismatch", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
-	if err := continuation.Usage.Validate(); err != nil {
+	if err := continuation.Usage.ValidateEvidence(); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_usage_invalid", "llm-completion-authority", "recover_completion", nil, err)
 	}
 	if continuation.Response.ToolOutputAuthority == nil || continuation.Response.ToolOutputAuthority.Validate() != nil {
@@ -684,9 +691,16 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	}
 	turn = enrichTurnRecord(ctx, nil, turn, response)
 	turn = CanonicalizeTurnForPersistence(turn)
-	if usage.ResolvedModel == "" {
-		usage.ResolvedModel = "unknown"
+	request := dispatch.handle.Attempt().Authority.CompletionRequest
+	if err := request.Validate(); err != nil {
+		return runtimeeffects.CompletionSettlementResult{}, err
 	}
+	usage = usage.Clone()
+	usage.Evidence.Request = request
+	usage.Evidence.ProviderReportedCostUSD = usage.ProviderReportedCostUSD
+	usage.ResolvedModel = usage.Evidence.ResolvedModel()
+	usage.Evidence.CostProvenance = usage.CostProvenance()
+	usage.Evidence = usage.Evidence.Canonical()
 	if state != runtimeeffects.StateSettled && failure == nil {
 		envelope := runtimefailures.FromError(fmt.Errorf("completion failed without provider failure detail"), "llm-completion-authority", "settle_completion")
 		failure = &envelope.Failure
@@ -812,7 +826,7 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 	if usage.OutputTokens != nil {
 		output = *usage.OutputTokens
 	}
-	cost := estimateCompletionCostUSD(usage.ResolvedModel, input, output)
+	cost := estimateCompletionCostUSD(providerModel.ConcreteModel, input, output)
 	if usage.ProviderReportedCostUSD != nil {
 		cost = *usage.ProviderReportedCostUSD
 	}
@@ -821,83 +835,55 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 		FlowInstance:   flowInstance,
 		AgentID:        strings.TrimSpace(turn.AgentID),
 		AgentIdentity:  turn.Identity,
-		Model:          usage.ResolvedModel,
+		Model:          providerModel.ConcreteModel,
 		ModelAlias:     mapString(meta, "model_alias"),
 		BackendProfile: coalesce(mapString(meta, "backend_profile"), profile.ID),
 		Provider:       coalesce(mapString(meta, "provider"), profile.Provider),
 		Transport:      coalesce(mapString(meta, "transport"), profile.Transport),
-		ResolvedModel:  coalesce(mapString(meta, "resolved_model"), usage.ResolvedModel),
+		ResolvedModel:  usage.ResolvedModel,
 		CostUSD:        cost,
 		InvocationType: profile.ID,
 	}
 }
 
-func completionUsage(input, output int, model string, exactness runtimeeffects.CompletionUsageExactness) runtimeeffects.CompletionUsage {
+func completionUsage(input, output int, exactness runtimeeffects.CompletionUsageExactness) runtimeeffects.CompletionUsage {
 	in, out := int64(input), int64(output)
-	return runtimeeffects.CompletionUsage{ResolvedModel: strings.TrimSpace(model), Exactness: exactness, InputTokens: &in, OutputTokens: &out}
+	return runtimeeffects.CompletionUsage{Exactness: exactness, InputTokens: &in, OutputTokens: &out}
 }
 
-func unavailableCompletionUsage(model string) runtimeeffects.CompletionUsage {
-	return runtimeeffects.CompletionUsage{ResolvedModel: coalesce(strings.TrimSpace(model), "unknown"), Exactness: runtimeeffects.CompletionUsageUnavailable}
+func withCompletionRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel) context.Context {
+	return runtimeeffects.WithCompletionRequest(ctx, runtimeeffects.CompletionRequest{
+		ModelAlias: model.ModelAlias, RequestedModel: model.ConcreteModel,
+		BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport,
+	})
 }
 
-func claudeCompletionUsageFromRaw(raw []byte, fallbackModel string) (runtimeeffects.CompletionUsage, error) {
-	type resultMessage struct {
-		Type         string   `json:"type"`
-		Model        string   `json:"model"`
-		TotalCostUSD *float64 `json:"total_cost_usd"`
-		Usage        struct {
-			InputTokens              *int64 `json:"input_tokens"`
-			OutputTokens             *int64 `json:"output_tokens"`
-			CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
-			CacheCreation            struct {
-				Ephemeral5mInputTokens *int64 `json:"ephemeral_5m_input_tokens"`
-				Ephemeral1hInputTokens *int64 `json:"ephemeral_1h_input_tokens"`
-			} `json:"cache_creation"`
-		} `json:"usage"`
-	}
-	decode := func(line []byte) (resultMessage, bool) {
-		var result resultMessage
-		if json.Unmarshal(bytes.TrimSpace(line), &result) != nil || strings.TrimSpace(strings.ToLower(result.Type)) != "result" {
-			return resultMessage{}, false
-		}
-		return result, true
-	}
-	var terminal resultMessage
-	found := false
-	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte{'\n'}) {
-		if result, ok := decode(line); ok {
-			terminal, found = result, true
-		}
-	}
-	if !found {
-		if result, ok := decode(raw); ok {
-			terminal, found = result, true
-		}
-	}
-	if !found || terminal.Usage.InputTokens == nil || terminal.Usage.OutputTokens == nil {
-		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage missing exact usage")
-	}
-	model := strings.TrimSpace(coalesce(terminal.Model, fallbackModel))
+func unavailableCompletionUsage() runtimeeffects.CompletionUsage {
+	return runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable}
+}
+
+func completionObservedUsage(input, output int, observedModel string) runtimeeffects.CompletionUsage {
+	usage := completionUsage(input, output, runtimeeffects.CompletionUsageExact)
+	observeAPIModel(&usage, observedModel)
+	return usage
+}
+
+func unavailableObservedCompletionUsage(model string) runtimeeffects.CompletionUsage {
+	usage := unavailableCompletionUsage()
+	observeAPIModel(&usage, model)
+	return usage
+}
+
+func observeAPIModel(usage *runtimeeffects.CompletionUsage, model string) {
 	if model == "" {
-		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage completion model is unavailable")
+		return
 	}
-	usage := runtimeeffects.CompletionUsage{
-		ResolvedModel:              model,
-		Exactness:                  runtimeeffects.CompletionUsageExact,
-		InputTokens:                terminal.Usage.InputTokens,
-		OutputTokens:               terminal.Usage.OutputTokens,
-		CacheReadInputTokens:       terminal.Usage.CacheReadInputTokens,
-		CacheCreationInputTokens:   terminal.Usage.CacheCreationInputTokens,
-		CacheCreation5mInputTokens: terminal.Usage.CacheCreation.Ephemeral5mInputTokens,
-		CacheCreation1hInputTokens: terminal.Usage.CacheCreation.Ephemeral1hInputTokens,
-		ProviderReportedCostUSD:    terminal.TotalCostUSD,
+	if strings.TrimSpace(model) == "" {
+		completionObservationProblem(&usage.Evidence, runtimeeffects.CompletionModelResponse, "model", "invalid")
+		return
 	}
-	if err := usage.Validate(); err != nil {
-		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage usage is invalid: %w", err)
-	}
-	return usage, nil
+	usage.Evidence.Models = []runtimeeffects.CompletionModelObservation{{Model: model, Source: runtimeeffects.CompletionModelResponse}}
+	usage.ResolvedModel = model
 }
 
 func completionRaw(raw []byte) json.RawMessage {

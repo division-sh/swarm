@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 const (
@@ -168,14 +169,16 @@ type ConversationForkSnapshot struct {
 }
 
 type ConversationForkSourceTurn struct {
-	TurnID          string          `json:"turn_id"`
-	TurnIndex       int             `json:"turn_index"`
-	SelectedAt      time.Time       `json:"selected_at"`
-	CreatedAt       time.Time       `json:"created_at"`
-	RequestPayload  json.RawMessage `json:"request_payload,omitempty"`
-	ResponsePayload json.RawMessage `json:"response_payload,omitempty"`
-	ToolCalls       json.RawMessage `json:"tool_calls,omitempty"`
-	AvailableTools  json.RawMessage `json:"available_tools,omitempty"`
+	CompletionEvidence runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel      string                            `json:"resolved_model,omitempty"`
+	TurnID             string                            `json:"turn_id"`
+	TurnIndex          int                               `json:"turn_index"`
+	SelectedAt         time.Time                         `json:"selected_at"`
+	CreatedAt          time.Time                         `json:"created_at"`
+	RequestPayload     json.RawMessage                   `json:"request_payload,omitempty"`
+	ResponsePayload    json.RawMessage                   `json:"response_payload,omitempty"`
+	ToolCalls          json.RawMessage                   `json:"tool_calls,omitempty"`
+	AvailableTools     json.RawMessage                   `json:"available_tools,omitempty"`
 }
 
 type ConversationForkEntitySnapshot struct {

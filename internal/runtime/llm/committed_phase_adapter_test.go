@@ -183,7 +183,7 @@ func TestHTTPCompletionAcknowledgedHeartbeatPreservesProviderResponseAndSettleme
 		FlowInstance: target.FlowInstance, CapabilitySurface: &surface,
 	}
 	result, settleErr := settleCompletionTurn(ctx, dispatch, target.ID, turn, response, profile,
-		unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateSettled, nil, nil)
+		unavailableCompletionUsage(), runtimeeffects.StateSettled, nil, nil)
 	if !result.Committed || !errors.Is(settleErr, fault) || calls.Load() != 1 {
 		t.Fatalf("completion settlement = result:%+v calls:%d err:%v", result, calls.Load(), settleErr)
 	}
@@ -271,7 +271,7 @@ func TestHTTPCompletionCommittedLaunchCanceledBeforeInvocationSettlesNoDispatch(
 	}
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
 	dispatch.providerModel = mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
-	_, settleErr := settleCompletionTurn(ctx, dispatch, "", AgentTurnRecord{}, nil, profile, unavailableCompletionUsage("test"), runtimeeffects.StateTerminalFailure, nil, nil)
+	_, settleErr := settleCompletionTurn(ctx, dispatch, "", AgentTurnRecord{}, nil, profile, unavailableCompletionUsage(), runtimeeffects.StateTerminalFailure, nil, nil)
 	if !errors.Is(settleErr, launchFault) {
 		t.Fatalf("terminal no-dispatch settlement lost committed diagnostic: %v", settleErr)
 	}

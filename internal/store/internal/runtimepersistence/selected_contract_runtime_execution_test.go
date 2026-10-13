@@ -1543,6 +1543,11 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		Now: now,
 	}
 	applyManagedCompletionContextSurface(t, ctx, settlement.AgentTurn)
+	source := runtimeeffects.CompletionModelResponse
+	if handle.Attempt().Adapter == "claude_cli" {
+		source = runtimeeffects.CompletionModelCLITerminal
+	}
+	bindCompletionEvidenceForTest(&settlement, handle.Attempt().Authority.CompletionRequest, []runtimeeffects.CompletionModelObservation{{Model: "test-model", Source: source}})
 	if event, ok := correlation.InboundEventFromContext(ctx); ok {
 		settlement.AgentTurn.TriggerEventID, settlement.AgentTurn.TriggerEventType = event.ID(), string(event.Type())
 	}

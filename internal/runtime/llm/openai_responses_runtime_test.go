@@ -140,10 +140,10 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	if conv.Session == nil || conv.Session.ID == "" || conv.Session.MemoryIdentity != testMemoryIdentity("agent-1", "support/inst-1") || conv.Session.TurnCount != 2 {
 		t.Fatalf("projected session = %#v, want exact reusable-memory snapshot", conv.Session)
 	}
-	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "test-model" {
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-5.4-nano" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
-	if settlements[1].Spend.BackendProfile != "openai_responses" || settlements[1].Spend.Provider != "openai" || settlements[1].Spend.Transport != "api" || settlements[1].Spend.ResolvedModel != "test-model" {
+	if settlements[1].Spend.BackendProfile != "openai_responses" || settlements[1].Spend.Provider != "openai" || settlements[1].Spend.Transport != "api" || settlements[1].Spend.ResolvedModel != "gpt-5.4-nano" {
 		t.Fatalf("completion spend = %#v, want backend/provider/transport/model facts", settlements[1].Spend)
 	}
 }

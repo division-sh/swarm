@@ -53,6 +53,7 @@ type completionContinuationRow struct {
 	memoryEnabled      bool
 	entityID           string
 	surface            string
+	providerRequest    string
 }
 
 func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
@@ -166,7 +167,7 @@ const postgresCompletionContinuationSelect = `
 	SELECT o.operation_id::text,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id::text,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),
 	       t.turn_id::text,t.run_id::text,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),a.authority_evidence->'provider_request'
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -181,7 +182,7 @@ const sqliteCompletionContinuationSelect = `
 	SELECT o.operation_id,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),
 	       t.turn_id,t.run_id,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),json_extract(a.authority_evidence,'$.provider_request')
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -222,6 +223,7 @@ func scanCompletionContinuationRows(rows *sql.Rows) ([]completionContinuationRow
 			&row.attemptID, &row.attemptOrdinal, &row.adapter, &row.transport, &authorizedAt, &row.evidence, &row.phase, &row.successor,
 			&row.turnID, &row.runID, &row.agentID, &row.nameOwner, &row.nameSource, &row.routePresence,
 			&row.flowScopeKey, &row.flowInstanceID, &row.flowInstance, &row.sessionID, &row.memoryEnabled, &row.entityID, &row.surface, &row.sessionGrantID, &row.sessionLockOwner,
+			&row.providerRequest,
 		); err != nil {
 			return nil, err
 		}
@@ -280,6 +282,12 @@ func admitCompletionContinuationRow(ctx context.Context, req runtimeeffects.Comp
 	}
 	authority := req.Authority
 	authority.Target = target
+	if err := json.Unmarshal([]byte(row.providerRequest), &authority.CompletionRequest); err != nil {
+		return runtimeeffects.Attempt{}, fmt.Errorf("decode frozen completion request: %w", err)
+	}
+	if err := authority.CompletionRequest.Validate(); err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	attempt := runtimeeffects.Attempt{
 		OperationID: row.operationID, AttemptID: row.attemptID, Token: authority.Normal, Authority: authority,
 		Kind: runtimeeffects.KindProviderTurn, Class: runtimeeffects.EffectClass(row.effectClass), Adapter: row.adapter,

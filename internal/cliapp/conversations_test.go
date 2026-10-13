@@ -467,13 +467,15 @@ func validConversationDetail(sessionID string) map[string]any {
 
 func validConversationTurn(index int, turnID, eventID, eventType string) map[string]any {
 	return map[string]any{
-		"ordinal":            index,
-		"turn_id":            turnID,
-		"completed_at":       "2026-05-20T01:01:01Z",
-		"duration_ms":        150,
-		"trigger_event_id":   eventID,
-		"trigger_event_type": eventType,
-		"parse_ok":           true,
+		"completion_evidence": completionEvidenceFixtureForCLI(),
+		"execution_mode":      "live",
+		"ordinal":             index,
+		"turn_id":             turnID,
+		"completed_at":        "2026-05-20T01:01:01Z",
+		"duration_ms":         150,
+		"trigger_event_id":    eventID,
+		"trigger_event_type":  eventType,
+		"parse_ok":            true,
 		"activity_counts": map[string]any{
 			"dispatch": 0, "tool": 0, "tool_result": 0, "publish": 0, "output": 1, "failure": 0,
 		},
@@ -482,6 +484,8 @@ func validConversationTurn(index int, turnID, eventID, eventType string) map[str
 
 func validConversationTurnFull(index int, turnID, eventID, eventType string) map[string]any {
 	return map[string]any{
+		"completion_evidence":      completionEvidenceFixtureForCLI(),
+		"execution_mode":           "live",
 		"ordinal":                  index,
 		"turn_id":                  turnID,
 		"completed_at":             "2026-05-20T01:01:01Z",

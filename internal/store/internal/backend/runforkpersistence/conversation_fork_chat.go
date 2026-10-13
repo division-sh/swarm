@@ -600,6 +600,9 @@ func loadConversationForkSnapshot(ctx context.Context, owner conversationForkSto
 	if err := json.Unmarshal(sourceTurnRaw, &out.SourceTurn); err != nil {
 		return runtimerunfork.ConversationForkSnapshot{}, fmt.Errorf("decode conversation fork source turn snapshot: %w", err)
 	}
+	if err := out.SourceTurn.CompletionEvidence.Validate(); err != nil || out.SourceTurn.ResolvedModel != out.SourceTurn.CompletionEvidence.ResolvedModel() {
+		return runtimerunfork.ConversationForkSnapshot{}, fmt.Errorf("invalid frozen source completion evidence: %v", err)
+	}
 	if err := json.Unmarshal(entitiesRaw, &out.EntitySnapshot); err != nil {
 		return runtimerunfork.ConversationForkSnapshot{}, fmt.Errorf("decode conversation fork entity snapshot: %w", err)
 	}
@@ -667,7 +670,7 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 			COALESCE(t.response_payload, '{}'),
 			COALESCE(t.tool_calls, '[]'),
 			c.surface,
-			t.created_at
+			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,'')
 		FROM agent_turns t
 		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id
 		WHERE t.session_id = ?
@@ -682,9 +685,9 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	`, fork.SourceSessionID, fork.ForkPoint.TurnID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 	var out runtimerunfork.ConversationForkSourceTurn
-	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw []byte
+	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw, completionRaw []byte
 	var createdAt conversationForkTimeValue
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt); err != nil {
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimerunfork.ConversationForkSourceTurn{}, &operatorread.EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
@@ -696,6 +699,12 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	out.RequestPayload = cloneRawMessage(requestRaw)
 	out.ResponsePayload = cloneRawMessage(responseRaw)
 	out.ToolCalls = cloneRawMessage(toolCallsRaw)
+	if out.CompletionEvidence, err = runtimeeffects.DecodeCompletionEvidence(completionRaw); err != nil {
+		return runtimerunfork.ConversationForkSourceTurn{}, err
+	}
+	if out.ResolvedModel != out.CompletionEvidence.ResolvedModel() {
+		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("fork source model contradicts historical completion evidence")
+	}
 	surface, err := storemanagedcapability.Decode(capabilitySurfaceRaw)
 	if err != nil {
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("decode conversation fork source capability surface: %w", err)
@@ -878,7 +887,66 @@ func loadConversationForkTurns(ctx context.Context, owner conversationForkStore,
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read conversation fork turns: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := loadConversationForkCompletions(ctx, owner, db, forkID, turns); err != nil {
+		return nil, err
+	}
 	return turns, nil
+}
+
+func loadConversationForkCompletions(ctx context.Context, owner conversationForkStore, db conversationForkQueryer, forkID string, turns []operatorread.OperatorConversationTurn) error {
+	indices := make(map[string]int, len(turns))
+	for i := range turns {
+		indices[turns[i].TurnID] = i
+		turns[i].Completions = []operatorread.OperatorConversationCompletion{}
+	}
+	rows, err := owner.query(ctx, db, `
+		SELECT CAST(c.fork_turn_id AS TEXT), CAST(c.attempt_id AS TEXT), c.ordinal, c.execution_mode,
+			COALESCE(c.resolved_model,''), c.usage_exactness, c.input_tokens, c.output_tokens,
+			c.cache_read_input_tokens, c.cache_creation_input_tokens, c.cache_creation_5m_input_tokens,
+			c.cache_creation_1h_input_tokens, c.provider_reported_cost_usd, CAST(c.completion_evidence AS TEXT)
+		FROM conversation_fork_turn_completions c
+		JOIN conversation_fork_turns t ON t.fork_turn_id=c.fork_turn_id
+		WHERE t.fork_id=? AND t.state='succeeded'
+		ORDER BY t.turn_index, c.ordinal
+	`, forkID)
+	if err != nil {
+		return fmt.Errorf("load fork completion evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var turnID string
+		var raw []byte
+		var completion operatorread.OperatorConversationCompletion
+		u := &completion.Usage
+		if err := rows.Scan(&turnID, &completion.AttemptID, &completion.Ordinal, &completion.ExecutionMode, &u.ResolvedModel, &u.Exactness,
+			&u.InputTokens, &u.OutputTokens, &u.CacheReadInputTokens, &u.CacheCreationInputTokens,
+			&u.CacheCreation5mInputTokens, &u.CacheCreation1hInputTokens, &u.ProviderReportedCostUSD, &raw); err != nil {
+			return err
+		}
+		if u.Evidence, err = runtimeeffects.DecodeCompletionEvidence(raw); err != nil {
+			return err
+		}
+		if err := u.ValidateEvidence(); err != nil {
+			return err
+		}
+		index, exists := indices[turnID]
+		if !exists || completion.Ordinal != len(turns[index].Completions)+1 || completion.ExecutionMode != turns[index].ExecutionMode || u.ResolvedModel != u.Evidence.ResolvedModel() {
+			return fmt.Errorf("invalid ordered fork completion evidence")
+		}
+		turns[index].Completions = append(turns[index].Completions, completion)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, turn := range turns {
+		if len(turn.Completions) == 0 {
+			return fmt.Errorf("succeeded fork turn lacks ordered completion evidence")
+		}
+	}
+	return nil
 }
 
 func conversationForkToolResultsFromCalls(calls []operatorread.OperatorConversationToolCall) []operatorread.OperatorConversationToolResult {

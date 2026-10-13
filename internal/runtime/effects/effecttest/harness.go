@@ -103,7 +103,7 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: h.Token.Identity, RuntimeMode: "task", Provider: "effect-test", Transport: "api", ProviderContract: "effect-test",
+		ActorIdentity: h.Token.Identity, RuntimeMode: "api", Provider: "anthropic", Transport: "api", ProviderContract: "effect-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: h.Token.AgentID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
