@@ -852,7 +852,7 @@ func receiverProjectionEvent(suffix string) events.Event {
 func receiverProjectionEventForType(suffix string, eventType events.EventType) events.Event {
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(), eventType, "receiver-projection-test", "", []byte(`{}`), 0,
-		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	return eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-" + suffix}})
 }

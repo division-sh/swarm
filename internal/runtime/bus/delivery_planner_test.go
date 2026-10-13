@@ -621,7 +621,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 			},
 		},
 	)
-	target := events.RouteIdentity{EntityID: "requester-entity", FlowInstance: "review/instance-b"}
+	target := events.RouteIdentity{FlowID: "review", EntityID: "requester-entity", FlowInstance: "review/instance-b"}
 	evt := eventtest.RunCreatingRootIngress(
 		"",
 		"human_task.approved",
@@ -629,7 +629,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		"",
 		nil,
 		0,
-		"",
+		descriptorB.Identity.RunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
 		time.Time{},
@@ -651,7 +651,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		"",
 		nil,
 		0,
-		"",
+		descriptorB.Identity.RunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "requester-entity"),
 		time.Time{},
@@ -719,7 +719,7 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	observerIdentity := agentidentitytest.RootRuntime(t, "observer", "delivery-planner-test")
-	runID := uuid.NewString()
+	runID := observerIdentity.RunID
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {

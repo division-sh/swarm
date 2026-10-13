@@ -72,7 +72,7 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 				}
 				entityID := runID
 				evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), eventtest.StaticFlowRoutingSource(".", runID, entityID), time.Now().UTC())
-				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 					CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 				})); err != nil {

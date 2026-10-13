@@ -443,6 +443,7 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 `,
 		"operations/events.yaml": "construct.requested:\n",
 	}, nil)
+	f.constructKeylessRoot(t)
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, flow, "receiver", "", flow+"/receiver")
 	parent := flowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")

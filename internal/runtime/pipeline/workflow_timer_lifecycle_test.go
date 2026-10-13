@@ -37,7 +37,7 @@ func VerifyNativeExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandlerForTest(t *tes
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := runID
-			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				EntityID:        entityID,
@@ -121,7 +121,7 @@ func VerifyNativeExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransition
 			bus := observeNativePipelineDeliveryBusForTest(t, pc)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := runID
-			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				EntityID:        entityID,
@@ -262,7 +262,7 @@ func VerifyNativePipelineIntercept_HandlesChildFlowOutputForRootListenerForTest(
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := runID
-			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				EntityID:        entityID,
