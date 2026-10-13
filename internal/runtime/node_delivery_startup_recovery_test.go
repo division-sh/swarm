@@ -835,33 +835,36 @@ func startNodeDeliveryContinuation(
 func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, nodeDeliveryRecoveryStore)
+		setup func(*testing.T, semanticview.Source) (context.Context, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartPostgresRuntimeStore(t)
-				ctx := seedRuntimeTestRun(t, selected)
+				ctx := seedRuntimeTestRunForSource(t, selected, source)
 				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				fact := runtimeTestSourceArtifactFact(t, source)
+				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
+				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+				bundle, _ := semanticview.Bundle(source)
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
+			ctx, selected := backend.setup(t, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if pc == nil {
 						return nil
@@ -889,6 +892,8 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			})
 
 			instance := artifactActionResultWorkflowInstance()
+			instance.Mode, instance.InstanceKey, instance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
+			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, instance)
 
 			eventID := "99999999-9999-4999-8999-999999999981"
@@ -925,35 +930,38 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+		setup func(*testing.T, semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				ctx := seedRuntimeTestRun(t, selected)
+				ctx := seedRuntimeTestRunForSource(t, selected, source)
 				return ctx, db, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				fact := runtimeTestSourceArtifactFact(t, source)
+				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
+				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+				bundle, _ := semanticview.Bundle(source)
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, storetest.Database(selected), selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, db, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
+			ctx, db, selected := backend.setup(t, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if pc == nil {
 						return nil
@@ -980,12 +988,15 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			})
 
 			healthyInstance := artifactActionResultWorkflowInstance()
+			healthyInstance.Mode, healthyInstance.InstanceKey, healthyInstance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
+			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, healthyInstance)
 
 			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
 			poisonTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/poison", EntityID: poisonEntityID}
 			poisonInstance := artifactActionResultWorkflowInstance()
 			poisonInstance.InstanceID = "poison"
+			poisonInstance.Mode, poisonInstance.InstanceKey, poisonInstance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "poison", source.WorkflowVersion()
 			poisonInstance.StorageRef = poisonTarget.FlowInstance
 			poisonInstance.EntityID = poisonEntityID
 			poisonInstance.Fields = map[string]any{}
@@ -1065,35 +1076,38 @@ func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, db *sq
 func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+		setup func(*testing.T, semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				ctx := seedRuntimeTestRun(t, selected)
+				ctx := seedRuntimeTestRunForSource(t, selected, source)
 				return ctx, db, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T, source semanticview.Source) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				fact := runtimeTestSourceArtifactFact(t, source)
+				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
+				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+				bundle, _ := semanticview.Bundle(source)
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, storetest.Database(selected), selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, db, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
+			ctx, db, selected := backend.setup(t, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if pc == nil {
 						return nil
@@ -1129,6 +1143,8 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			})
 
 			instance := artifactActionResultWorkflowInstance()
+			instance.Mode, instance.InstanceKey, instance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
+			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, instance)
 
 			eventID := "99999999-9999-4999-8999-999999999982"
