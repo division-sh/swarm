@@ -15,14 +15,13 @@ func CarriesLoopRevision(value ExpressionValue) bool {
 	}
 }
 
-func RequiresLoopRevision(payload EventPayloadSpec, field string) bool {
+func RequiresLoopRevision(payload EventPayloadSpec, field string, ref CatalogTypeReference) bool {
 	property, ok := payload.Properties[field]
-	if !ok {
+	if !ok || strings.TrimSpace(property.Type) != strings.TrimSpace(ref.Type) {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(property.Type)) {
-	case "text", "string":
-	default:
+	resolved, err := ref.Resolve()
+	if err != nil || !resolved.PlainText() {
 		return false
 	}
 	for _, required := range payload.Required {

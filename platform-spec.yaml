@@ -2972,6 +2972,16 @@ type_system:
       Text aliases remain text; UUID, timestamp and enums are not file text just
       because their structural representation is string-like. Scalar routing
       integer-to-numeric widening remains separate from map key eligibility.
+      Policy-sheet lookup literal checking consumes the admitted flow-event
+      scalar kind, including aliased boolean exhaustiveness, and refuses an
+      unresolved or unsupported literal domain. Citation scalar/list elements
+      and original loop revision carriage consume the flow-scoped plain-text
+      domain, not raw type spelling; enum/UUID/timestamp are not plain text.
+      Requiredness, citation criteria/classes and exact loop.revision_id mapping
+      remain separately required. An expression context may omit its optional
+      join result-schema evidence and retain dynamic results; this is absence
+      at that boundary, not an authored empty reference. A supplied invalid
+      join result reference still refuses before expression evaluation.
     list_spelling_presence: |
       T[] and []T are invalid on authored presence, including nested positions;
       the typed verification error names [T] as the supported replacement.
