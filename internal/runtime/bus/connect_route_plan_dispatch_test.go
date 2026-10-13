@@ -3447,7 +3447,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t *testing.T) {
+func VerifyConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrierForTest(t *testing.T, prepare func(*testing.T, semanticview.Source) runtimepipeline.FlowInstanceActivationPlanner) {
 	source := connectRoutePlanTemplateInstanceMultiInputSource(
 		t,
 		canonicalrouting.TemplateInstanceRouteSelectOrCreate,
@@ -3457,10 +3457,22 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	store := &connectRoutePlanLifecycleStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 	}
+	preparedOwner := prepare(t, source)
+	finalizer := newTestFlowInstanceActivationOwner(store.Activate)
+	planner := runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+		plan, err := preparedOwner.PrepareFlowInstanceActivation(ctx, req)
+		if err == nil {
+			finalizer.mu.Lock()
+			finalizer.pending[plan.Identity.Route()] = req
+			finalizer.mu.Unlock()
+		}
+		return plan, err
+	})
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
-		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		TemplateInstancePlanner: planner,
+		FlowActivationFinalizer: finalizer,
 		Interceptors:            []EventInterceptor{interceptor},
 	})
 	if err != nil {

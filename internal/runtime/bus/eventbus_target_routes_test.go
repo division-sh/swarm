@@ -2896,6 +2896,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
 			store:   store,
@@ -2908,7 +2909,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("item.received"))
 	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("item.received"),
 		"",
@@ -2916,7 +2917,6 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 		[]byte(`{"item_id":"item-1"}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-loaded-root-source")),
 		time.Now().UTC(),
 	)
@@ -2931,7 +2931,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if len(plan.RoutedRecipients) != 1 {
 		t.Fatalf("routed recipients = %#v, want one compiler-owned root subscription", plan.RoutedRecipients)
 	}
-	if recipient := plan.RoutedRecipients[0]; recipient.ID != want.Recipient.ID() || recipient.Path != "." || recipient.RouteSource != "subscription" {
+	if recipient := plan.RoutedRecipients[0]; recipient.ID != want.Recipient.ID() || recipient.Path != rootOwner.FlowInstance || recipient.RouteSource != "subscription" || recipient.MatchedPattern != rootOwner.FlowInstance+"/item.received" || recipient.LocalizedEvent != "item.received" {
 		t.Fatalf("routed recipient = %#v, want exact root item-handler subscription", recipient)
 	}
 	if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
@@ -3127,15 +3127,17 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	bundle := loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	rootOwner := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: eventtest.UUID("root-node-owner")}
-	store.setTargetOwnerRoutes(rootOwner)
+	constructed := installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
+	rootOwner := events.RouteIdentity{FlowID: constructed.TemplateID, FlowInstance: constructed.InstancePath, EntityID: constructed.EntityID}
 	portfolioNode := testRootNode(t, "portfolio-node")
 	ch := subscribeInternalDeliveriesForTest(t, eb, portfolioNode.Key(), events.EventType("opco.spinup_requested"))
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("opco.spinup_requested"),
 		"",
@@ -3143,7 +3145,6 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 		[]byte(`{}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("root-node-source")),
 		time.Now().UTC(),
 	)
@@ -3240,13 +3241,15 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
 	runID := uuid.NewString()
-	rootOwner := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("root-node-owner")}
-	store.setTargetOwnerRoutes(rootOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	constructed := installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
+	rootOwner := events.RouteIdentity{FlowID: constructed.TemplateID, FlowInstance: constructed.InstancePath, EntityID: constructed.EntityID}
+	evt := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("opco.spinup_requested"),
 		"",
@@ -3254,7 +3257,6 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 		[]byte(`{}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("root-node-source")),
 		time.Now().UTC(),
 	)
@@ -3328,6 +3330,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
 			store:   store,
