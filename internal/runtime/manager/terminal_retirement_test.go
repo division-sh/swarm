@@ -735,7 +735,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			pending := cell.retirement
 			fenced := cell.execution.fenced
 			c.mu.Unlock()
-			if pending == nil || !fenced {
+			if !fenced || (!loopReleased && pending == nil) {
 				t.Fatal("readiness returned without exact fenced retirement")
 			}
 			if !loopReleased {
@@ -756,6 +756,10 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			probe.mu.Unlock()
 			if err := prepared.wait(); (err != nil) != failedRoute || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
 				t.Fatalf("exact readiness retirement result: %v", err)
+			}
+			state, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+			if err != nil || !found || state.Phase != AgentLifecycleRegistered || state.Generation != token.Generation {
+				t.Fatalf("process-only retirement changed its ordinary release disposition: state=%+v found=%t err=%v", state, found, err)
 			}
 			if err := c.waitForWork(ctx); err != nil {
 				t.Fatalf("process retirement leaked into terminal completion: %v", err)
