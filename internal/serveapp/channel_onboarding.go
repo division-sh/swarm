@@ -603,9 +603,11 @@ type serveConnectedChannelReadiness struct {
 }
 
 func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.require_owner")
 	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil || o.ingress == nil {
 		return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("connected channel readiness dependencies are incomplete")
 	}
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.activation_read")
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
 	if err != nil {
 		if errors.Is(err, channelonboarding.ErrNotFound) {
@@ -627,6 +629,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	}
 
 	planID := channelonboarding.LearnedBindingID(activation.SlotKey)
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.publication_acquire")
 	publicationLease, available, publicationErr := o.manager.AcquireChannelActivationPublication(activation.Coordinate.BundleHash, activation.Coordinate.ContextPublicationGeneration)
 	if publicationErr != nil {
 		return channelonboarding.ConnectedChannelReadiness{}, false, publicationErr
@@ -650,6 +653,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.PlanGeneration = plangeneration.Generation{}
 	}
 
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.binding_proof_read")
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
 	if bindingErr != nil {
 		if !errors.Is(bindingErr, operatorchannel.ErrNotFound) && !errors.Is(bindingErr, operatorchannel.ErrCredentialStale) {
@@ -662,6 +666,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.ExpectedProofRevision = binding.ProofRevision
 	}
 
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.credential_projection")
 	credentialProjection := o.credentials.BeginSecretBindingProjection()
 	facts.CredentialsCurrent, err = observeChannelActivationAdmissions(ctx, credentialProjection, activation.CredentialAdmissions)
 	if err != nil {
@@ -673,6 +678,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 
 	confirmationID := strings.TrimSpace(op.ConfirmationOperationID)
 	if confirmationID != "" {
+		channelonboarding.SigningDiagnosticPhase(ctx, "readiness.confirmation_outcome_read")
 		outcome, found, outcomeErr := o.effects.GetExternalEffectOutcome(ctx, confirmationID)
 		if outcomeErr != nil {
 			return channelonboarding.ConnectedChannelReadiness{}, false, outcomeErr
@@ -682,6 +688,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	facts.ConfirmationActivationRevision = op.ActivationRevision
 	facts.ConfirmationBindingRevision = op.BindingRevision
 
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.registration_read")
 	switch activation.Posture {
 	case channelonboarding.ActivationWebhookRegistration:
 		registration, found := o.ingress.ChannelRegistrationCurrent(ctx, now, planID, activation.TargetSelector, activation.Provider)
@@ -702,6 +709,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	if o.native == nil {
 		return projection, false, fmt.Errorf("native inbox qualification readback owner is unavailable")
 	}
+	channelonboarding.SigningDiagnosticPhase(ctx, "readiness.native_qualification_read")
 	qualification, err := o.native.ReadNativeInboxQualification(ctx, activation.ActivationID)
 	if err != nil {
 		return projection, false, err

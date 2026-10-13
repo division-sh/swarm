@@ -26,6 +26,20 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 					}
 					t.Run(string(backend)+"/"+keyKind+"/"+entry+"/"+state, func(t *testing.T) {
 						h := newChannelOnboardingE2EHarness(t, backend, true)
+						probe := channelonboarding.NewSigningDiagnostic(func(record channelonboarding.SigningDiagnosticRecord) {
+							raw, err := json.Marshal(record)
+							if err != nil {
+								t.Errorf("signing diagnostic encoding failed")
+								return
+							}
+							t.Logf("signing-cause %s", raw)
+						})
+						h.opts.TestSigningDiagnostic = probe
+						t.Cleanup(func() {
+							if !probe.Dispose() {
+								t.Errorf("signing diagnostic incomplete (overflow, truncated causes, or unfinished call)")
+							}
+						})
 						h.start(t)
 						verb, key := channelonboarding.VerbConnect, ""
 						operationID := ""

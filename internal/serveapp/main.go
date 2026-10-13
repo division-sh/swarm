@@ -1538,6 +1538,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		},
 		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness,
 		Now: opts.TestChannelOnboardingNow, TestBarrier: opts.TestChannelOnboardingBarrier,
+		TestSigningDiagnostic: opts.TestSigningDiagnostic,
 	})
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)

@@ -63,6 +63,7 @@ type ServeOptions struct {
 	TestAfterAuthorActivityHead      func() error
 	TestChannelOnboardingNow         func() time.Time
 	TestChannelOnboardingBarrier     channelonboarding.TestLifecycleBarrier
+	TestSigningDiagnostic            *channelonboarding.SigningDiagnostic
 	TestChannelReconcileCadence      runtimechanneldelivery.ReconcileCadence
 	TestChannelReconcilePass         func(runtimechanneldelivery.ReconcilePass)
 	TestChannelReconcileStarted      func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))

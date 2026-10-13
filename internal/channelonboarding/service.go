@@ -154,34 +154,36 @@ const (
 type TestLifecycleBarrier func(TestLifecycleBoundary, string) error
 
 type ServiceOptions struct {
-	SourceArtifacts sourceartifact.Reader
-	Store           Store
-	Identities      IdentityLifecycle
-	Credentials     *CredentialWriter
-	Catalog         CatalogProvider
-	Activations     ActivationRefresher
-	Confirmation    ConfirmationDispatcher
-	Readiness       ReadinessProjector
-	Now             func() time.Time
-	Secret          func() (string, error)
-	TestBarrier     TestLifecycleBarrier
+	SourceArtifacts       sourceartifact.Reader
+	Store                 Store
+	Identities            IdentityLifecycle
+	Credentials           *CredentialWriter
+	Catalog               CatalogProvider
+	Activations           ActivationRefresher
+	Confirmation          ConfirmationDispatcher
+	Readiness             ReadinessProjector
+	Now                   func() time.Time
+	Secret                func() (string, error)
+	TestBarrier           TestLifecycleBarrier
+	TestSigningDiagnostic *SigningDiagnostic
 }
 
 type Service struct {
-	sourceArtifacts sourceartifact.Reader
-	store           Store
-	identities      IdentityLifecycle
-	credentials     *CredentialWriter
-	catalog         CatalogProvider
-	activations     ActivationRefresher
-	confirmation    ConfirmationDispatcher
-	effects         EffectRebindReconciler
-	readiness       ReadinessProjector
-	now             func() time.Time
-	secret          func() (string, error)
-	driveMu         sync.Mutex
-	driveLocks      map[string]*operationDriveLock
-	testBarrier     TestLifecycleBarrier
+	sourceArtifacts       sourceartifact.Reader
+	store                 Store
+	identities            IdentityLifecycle
+	credentials           *CredentialWriter
+	catalog               CatalogProvider
+	activations           ActivationRefresher
+	confirmation          ConfirmationDispatcher
+	effects               EffectRebindReconciler
+	readiness             ReadinessProjector
+	now                   func() time.Time
+	secret                func() (string, error)
+	driveMu               sync.Mutex
+	driveLocks            map[string]*operationDriveLock
+	testBarrier           TestLifecycleBarrier
+	testSigningDiagnostic *SigningDiagnostic
 }
 
 type operationDriveLock struct {
@@ -231,26 +233,34 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
-		testBarrier: opts.TestBarrier,
+		testBarrier:           opts.TestBarrier,
+		testSigningDiagnostic: opts.TestSigningDiagnostic,
 	}, nil
 }
 
-func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
+func (s *Service) Start(ctx context.Context, input StartInput) (out Result, returnErr error) {
+	ctx, diagnostic := s.beginSigningDiagnostic(ctx, "start")
+	defer func() { diagnostic.finish(returnErr) }()
+	SigningDiagnosticPhase(ctx, "start.validate_input")
 	if s == nil || !input.Verb.Valid() {
 		return Result{}, fmt.Errorf("%w: an explicit connect, reconnect, or rebind verb is required", ErrInvalidRequest)
 	}
+	SigningDiagnosticPhase(ctx, "start.principal")
 	principal, err := s.identities.Principal()
 	if err != nil {
 		return Result{}, err
 	}
+	SigningDiagnosticPhase(ctx, "start.catalog")
 	catalog, err := s.catalog()
 	if err != nil {
 		return Result{}, err
 	}
+	SigningDiagnosticPhase(ctx, "start.resolve_candidate")
 	candidate, err := catalog.Resolve(input.Selection)
 	if err != nil {
 		return Result{}, err
 	}
+	SigningDiagnosticPhase(ctx, "start.provider_admission")
 	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
 		return Result{}, err
 	}
@@ -283,6 +293,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		SaveProof: input.SaveProof, ClientLanguage: input.ClientLanguage, CredentialReservations: reservations, RequestedAt: s.now().UTC(),
 	}
+	SigningDiagnosticPhase(ctx, "start.request_lookup")
 	if existing, found, err := findOperationByRequestKey(ctx, s.store, requestKey); err != nil {
 		return Result{}, err
 	} else if found {
@@ -292,20 +303,25 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		if existing.Phase == PhaseFailed || existing.Phase == PhaseRetired {
 			return s.Get(ctx, existing.OperationID)
 		}
+		signingDiagnosticOperation(ctx, existing)
+		SigningDiagnosticPhase(ctx, "start.rebind_existing")
 		existing, candidate, err = s.bindCurrentCandidate(context.WithoutCancel(ctx), existing)
 		if err != nil {
 			return Result{Operation: existing}, err
 		}
 		return s.drive(context.WithoutCancel(ctx), existing, candidate, input.ProviderCredential)
 	}
+	SigningDiagnosticPhase(ctx, "start.slot_state")
 	state, err := s.slotState(ctx, start)
 	if err != nil {
 		return Result{}, err
 	}
+	SigningDiagnosticPhase(ctx, "start.verb_admission")
 	decision := AdmitVerb(input.Verb, state)
 	if decision != AdmissionStart && decision != AdmissionStartPreservingIdentity && decision != AdmissionStartReplacingIdentity {
 		return Result{}, admissionError(input.Verb, state, decision)
 	}
+	SigningDiagnosticPhase(ctx, "start.reserve")
 	op, err := s.store.ReserveChannelOnboarding(ctx, start)
 	if err != nil {
 		return Result{}, err
@@ -509,7 +525,10 @@ func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity)
 	return &ConnectedChannelRecovery{Reason: ReadinessActivationUnavailable, Provider: provider, Commands: commands}, nil
 }
 
-func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
+func (s *Service) Retry(ctx context.Context, input RetryInput) (out Result, returnErr error) {
+	ctx, diagnostic := s.beginSigningDiagnostic(ctx, "retry")
+	defer func() { diagnostic.finish(returnErr) }()
+	SigningDiagnosticPhase(ctx, "retry.load_operation")
 	operationID := strings.TrimSpace(input.OperationID)
 	unlock := s.lockDrive(operationID)
 	defer unlock()
@@ -518,6 +537,8 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	signingDiagnosticOperation(ctx, op)
+	SigningDiagnosticPhase(ctx, "retry.locale_admission")
 	if op.Phase == PhaseFailed || op.Phase == PhaseRetired {
 		if input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0 {
 			return Result{Operation: op}, fmt.Errorf("%w: terminal onboarding cannot acquire a client qualification", ErrConflict)
@@ -543,6 +564,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 			return Result{Operation: op}, fmt.Errorf("%w: client language requires its observed locale revision", ErrInvalidRequest)
 		}
 	}
+	SigningDiagnosticPhase(ctx, "retry.rebind_candidate")
 	rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 	if err != nil {
 		return Result{Operation: op}, fmt.Errorf("bind onboarding retry to current candidate: %w", err)
@@ -567,6 +589,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 			return Result{Operation: op}, err
 		}
 	}
+	SigningDiagnosticPhase(ctx, "retry.drive")
 	result, err := s.driveLocked(context.WithoutCancel(ctx), rebound, candidate, input.ProviderCredential)
 	if err != nil {
 		return result, fmt.Errorf("drive onboarding retry: %w", err)
@@ -831,10 +854,14 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 	return s.driveLocked(ctx, op, candidate, providerCredential)
 }
 
-func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
+func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (out Result, returnErr error) {
+	defer func() { signingDiagnosticError(ctx, "advancement_return", returnErr) }()
+	signingDiagnosticOperation(ctx, op)
+	SigningDiagnosticPhase(ctx, "advance.provider_admission")
 	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
 		return Result{Operation: op, Candidate: &candidate}, err
 	}
+	SigningDiagnosticPhase(ctx, "advance.load_operation")
 	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
 	if err != nil {
 		return Result{}, err
@@ -847,6 +874,8 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
 	}
 	for {
+		signingDiagnosticOperation(ctx, op)
+		SigningDiagnosticPhase(ctx, "advance."+string(op.Phase))
 		switch op.Phase {
 		case PhasePreparing:
 			admissions, err := s.admitCredentials(ctx, op, candidate, providerCredential, true)
@@ -878,6 +907,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
 				return s.blockedResult(ctx, op, candidate, errors.Join(err, resetErr))
 			}
+			SigningDiagnosticPhase(ctx, "advance.target_admission")
 			promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
 			if err != nil {
 				return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit channel target: %w", err))
@@ -899,6 +929,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op = next
 			}
 			candidate = promoted
+			SigningDiagnosticPhase(ctx, "advance.activation_preflight")
 			if err := s.activations.PreflightChannelActivation(ctx, op, candidate); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
 					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
@@ -936,6 +967,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseAwaitingExternalIdentity:
+			SigningDiagnosticPhase(ctx, "advance.identity")
 			next, blocked, err := s.advanceIdentity(ctx, op, candidate)
 			if err != nil {
 				var required *CredentialRequiredError
@@ -1864,7 +1896,10 @@ func historicalCandidate(op Operation) Candidate {
 	}
 }
 
-func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
+func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (out Result, returnErr error) {
+	defer func() { signingDiagnosticError(ctx, "result_projection", returnErr) }()
+	signingDiagnosticOperation(ctx, op)
+	SigningDiagnosticPhase(ctx, "result.identity_read")
 	result := Result{Operation: op, Candidate: candidate}
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
@@ -1874,6 +1909,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		identityOp = operatorchannel.ProjectOperationReadback(identityOp)
 		result.IdentityOperation = &identityOp
 	}
+	SigningDiagnosticPhase(ctx, "result.binding_read")
 	if binding, err := s.identities.CurrentBinding(ctx, op.Interface); err == nil {
 		result.Binding = &binding
 	}
@@ -1881,6 +1917,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	if candidate != nil {
 		readinessCandidate = *candidate
 	}
+	SigningDiagnosticPhase(ctx, "result.readiness")
 	readiness, found, err := s.readiness.ProjectConnectedChannelReadiness(ctx, op, readinessCandidate)
 	if err != nil {
 		return result, err
@@ -1892,6 +1929,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 }
 
 func (s *Service) blockedResult(ctx context.Context, op Operation, candidate Candidate, cause error) (Result, error) {
+	signingDiagnosticError(ctx, "blocked_original", cause)
 	result, err := s.result(ctx, op, &candidate)
 	return result, errors.Join(cause, err)
 }
