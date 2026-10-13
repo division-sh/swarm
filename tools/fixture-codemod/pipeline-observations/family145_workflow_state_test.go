@@ -33,6 +33,7 @@ func workflowStatePins(t *testing.T) []workflowstate.Pin {
 }
 
 func family145WorkflowStateCallerInverse(function, current string) string {
+	current = family145ServedEventCountCallerInverse(function, current)
 	pins, err := workflowstate.Decode(family145WorkflowStateBytes)
 	if err != nil {
 		panic(err)
@@ -73,7 +74,7 @@ func workflowStateCurrentDeclaration(t *testing.T, path, function string) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	return requestKeyDeclaration(t, raw, function)
+	return family145ServedEventCountPrevious(t, path, function, requestKeyDeclaration(t, raw, function))
 }
 
 func TestFamily145WorkflowStateTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
@@ -103,7 +104,7 @@ func TestFamily145WorkflowStateWholeChainPreservesEveryPollAndRefusalCut(t *test
 			t.Fatal("workflow state source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || family145ServedEventCountPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("workflow state current source escaped its whole rule:", key, err)
 		}
 		after, count, err := workflowstate.Transform(pin.Before)
@@ -183,7 +184,7 @@ func workflowStateOwnedFile(t *testing.T, path string, file *ast.File) (int, int
 			if ok && workflowstate.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := requestkey.Node(fn)
+				current := family145ServedEventCountPrevious(t, path, fn.Name.Name, requestkey.Node(fn))
 				if workflowstate.Previous(workflowStatePins(t), path, fn.Name.Name, current) == current {
 					t.Error("workflow state caller escaped exact chain:", path, fn.Name.Name)
 				}

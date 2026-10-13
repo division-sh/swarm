@@ -49,12 +49,12 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 					if resumeOnConstruction.Load() {
 						enabled.Store(false)
 					}
-					p.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(servedSelectionReceiverFault{
-						WorkflowPersistenceOwner: p.deps.EventStore.(pipeline.WorkflowPersistenceOwner), enabled: &enabled, hits: &hits,
-					})
+					p.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(servedSelectionReceiverFault{WorkflowPersistenceOwner: p.deps.EventStore.(pipeline.WorkflowPersistenceOwner), enabled: &enabled, hits: &hits})
 					return p
 				}
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopySelectionRetry(t))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "selection-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -93,9 +93,6 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
 				}
-				// Clear only the injected dependency fault while constructing the next
-				// runtime, after the original lifecycle has joined. Retry timing, source,
-				// persisted obligation and normal startup recovery remain untouched.
 				resumeOnConstruction.Store(true)
 				rt, _ = restart()
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -119,8 +116,12 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 					t.Fatalf("retry changed immutable accepted publication: before=%+v after=%+v", immutable, after)
 				}
 				var count int
-				if err := rt.DB.QueryRow("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='ack'", seed.RunID).Scan(&count); err != nil || count != 1 {
-					t.Fatalf("final consumer count=%d err=%v", count, err)
+				{
+					var err error
+					count, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, seed.RunID, "ack")
+					if err != nil || count != 1 {
+						t.Fatalf("final consumer count=%d err=%v", count, err)
+					}
 				}
 				if err := rt.DB.QueryRow("SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.event_name='selected' AND d.status='delivered'", seed.RunID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("final consumer did not settle once: %d %v", count, err)

@@ -18,6 +18,26 @@ type receiverProofStateReader interface {
 	InspectSnapshot(context.Context, func(context.Context) error) error
 }
 
+type servedEventCountReader interface {
+	InspectSnapshot(context.Context, func(context.Context) error) error
+}
+
+func readServedEventNameCountForRun(ctx context.Context, reader servedEventCountReader, runID, eventName string) (int, error) {
+	if reader == nil {
+		return 0, fmt.Errorf("served event count requires the original selected reader")
+	}
+	var count int
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunNamedEventStorage(ctx, reader, runID, eventName)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func requireReceiverSourceDomainSnapshot(t testing.TB, reader receiverProofStateReader, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
 	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot

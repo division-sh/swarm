@@ -8,6 +8,10 @@ import (
 )
 
 func family145GateCompletionConstructorProofError(before, after string) error {
+	const reader = ", ReceiverStateReader: requireReceiverProofStateReader(t, projected)"
+	if strings.Count(after, reader) != 1 {
+		return fmt.Errorf("gate completion does not bind its reader to the captured selected owner")
+	}
 	const capture = "captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {\n\t\tdb, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p)\n\t})"
 	const sqliteCapture = "captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {\n\t\t\tdb, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p)\n\t\t})"
 	const native = "buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {\n\t\t\treturn storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})\n\t\t}"
@@ -20,7 +24,7 @@ func family145GateCompletionConstructorProofError(before, after string) error {
 	if strings.Count(after, ownerAssertion) != 1 || strings.Count(after, "\n\tvar projected any") != 1 || strings.Count(after, "\n\t\tprojected = p.deps.EventStore") != 1 {
 		return fmt.Errorf("gate completion did not prove the exact current selected owner at every readiness/restart")
 	}
-	normalized := strings.Replace(after, native, before[begin:end], 1)
+	normalized := strings.Replace(strings.Replace(after, reader, "", 1), native, before[begin:end], 1)
 	normalized = strings.Replace(normalized, "\n\t"+capture, "", 1)
 	normalized = strings.Replace(normalized, sqlite, sqlite+"\n\t\t"+sqliteCapture, 1)
 	normalized = strings.Replace(normalized, "\n\tvar projected any", "", 1)
@@ -54,6 +58,7 @@ func TestFamily145GateCompletionConstructorUsesOneActualOwnerAndPreservesEveryCo
 			"db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p)", "deliveryReader = p.deps.DeliveryStore.SummarizeRun",
 			"p.waitForReadyLine()", "Postgres: selectedPG", "SQLite: selectedSQLite", "ReadRunDeliveries: deliveryReader", "t.Cleanup(cleanup)", "buildStoresForServe = original",
 			"projected = p.deps.EventStore", "projected == nil", "projected != selectedSQLite", "projected != selectedPG", "t.Fatalf(\"gate completion fixture lost actual current owner:",
+			"ReceiverStateReader: requireReceiverProofStateReader(t, projected)",
 		} {
 			if family145GateCompletionConstructorProofError(row.Before, strings.Replace(row.After, cut, "foreignCompletionOwner()", 1)) == nil {
 				t.Fatalf("gate completion owner/source/consumer/context/lifetime mutation passed: %s", cut)

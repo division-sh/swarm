@@ -151,8 +151,12 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				requirePendingInputStateCount(t, rt.ReceiverStateReader, fork.ForkRunID, "ready", 2-wantDone)
 				requirePendingInputPublicStates(t, rt, fork.ForkRunID, wantDone)
 				var copied int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='work.seeded'`, fork.ForkRunID).Scan(&copied); err != nil {
-					t.Fatal(err)
+				{
+					var err error
+					copied, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, fork.ForkRunID, "work.seeded")
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				if copied != 0 {
 					t.Fatal("completed seed input was executed again")

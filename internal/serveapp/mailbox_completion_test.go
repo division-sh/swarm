@@ -96,11 +96,19 @@ func gateCompletionRead(t *testing.T, rt servedControlProofRuntime, phase, runID
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, runID).Scan(&out.DecisionEvents); err != nil {
-		t.Fatal(err)
+	{
+		var err error
+		out.DecisionEvents, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, runID, "mailbox.card_decided")
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='work.completed'`, runID).Scan(&out.OutcomeEvents); err != nil {
-		t.Fatal(err)
+	{
+		var err error
+		out.OutcomeEvents, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, runID, "work.completed")
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	rows, err := rt.DB.Query(`SELECT CAST(change_id AS TEXT), change_type, CAST(payload AS TEXT) FROM decision_card_changes WHERE card_id=$1 ORDER BY change_id`, cardID)
 	if err != nil {
@@ -132,8 +140,6 @@ func gateCompletionRead(t *testing.T, rt servedControlProofRuntime, phase, runID
 		t.Fatal(err)
 	}
 	rows.Close()
-	// Include any wrong actor/hash domain associated with this card or key;
-	// absence cannot be inferred from only the expected tuple.
 	rows, err = rt.DB.Query(`SELECT method, actor_kind, actor_id, idempotency_key, request_hash, COALESCE(resource_id,''), CAST(response AS TEXT) FROM api_idempotency WHERE resource_id=$1 OR (method=$2 AND idempotency_key=$3) ORDER BY method, actor_kind, actor_id, idempotency_key`, cardID, domain.Method, domain.Key)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +228,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 		if projected == nil || backend == "sqlite" && projected != selectedSQLite || backend != "sqlite" && projected != selectedPG {
 			t.Fatalf("gate completion fixture lost actual current owner: projected=%p postgres=%p sqlite=%p", projected, selectedPG, selectedSQLite)
 		}
-		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
+		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite, ReceiverStateReader: requireReceiverProofStateReader(t, projected)}
 	}
 }
 

@@ -27,13 +27,14 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/workflowstate"
 )
 
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "99b6e841e91ca0590e96320484c64139443105345231e36b1bf6a378491dd280"
+const targetDigest = "ff7a7d8b4ae4d45fd927aed7249e7aa64d086bb9664cf7d3596a3f7f51bfb2fa"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -294,6 +295,7 @@ func main() {
 	includeWorkflowStateTargets()
 	includeChannelDecisionTargets()
 	includeChannelEventCountTargets()
+	includeServedEventCountTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -434,6 +436,22 @@ func includeChannelDecisionTargets() {
 	raw, err := os.ReadFile(channeldecision.Path)
 	must(err)
 	pins, err := channeldecision.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeServedEventCountTargets() {
+	raw, err := os.ReadFile(servedeventcount.Path)
+	must(err)
+	pins, err := servedeventcount.Decode(raw)
 	must(err)
 	for _, pin := range pins {
 		if !slices.Contains(files, pin.File) {

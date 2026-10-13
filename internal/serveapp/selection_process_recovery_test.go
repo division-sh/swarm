@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,7 +42,11 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 					}
 				}()
 				reached := make(chan error, 1)
-				go func() { var b [1]byte; _, err := io.ReadFull(ready, b[:]); reached <- err }()
+				go func() {
+					var b [1]byte
+					_, err := io.ReadFull(ready, b[:])
+					reached <- err
+				}()
 				select {
 				case err := <-reached:
 					if err != nil {
@@ -59,8 +64,12 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&facts); err != nil {
 					t.Fatal(err)
 				}
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, seed.RunID).Scan(&publications); err != nil {
-					t.Fatal(err)
+				{
+					var err error
+					publications, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, seed.RunID, "selected")
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				committed := cut == "selected"
 				if committed {
@@ -92,8 +101,12 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				}
 				for _, name := range []string{"selected", "ack"} {
 					var count int
-					if err := recovered.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, seed.RunID, name).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("recovery duplicated/lost %s: count=%d err=%v", name, count, err)
+					{
+						var err error
+						count, err = readServedEventNameCountForRun(context.Background(), recovered.ReceiverStateReader, seed.RunID, name)
+						if err != nil || count != 1 {
+							t.Fatalf("recovery duplicated/lost %s: count=%d err=%v", name, count, err)
+						}
 					}
 				}
 				if err := second.stop(); err != nil {

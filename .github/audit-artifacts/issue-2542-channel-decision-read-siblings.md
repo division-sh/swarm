@@ -75,8 +75,10 @@ Receipts ~/.cache/swarm-2542-family145/channel-decision-*.
   pass. The uninterrupted exact-three-callers-race receipt PASS358.171s,
   three roots/nine records, all six selected SQLite/PostgreSQL cells; no
   assertion, retry or timeout change was made.
-- source-fork-race: PostgreSQL fork cell PASS and reaches the two corrected
-  diagnostic/replay reads. SQLite is RED at the public run.fork HTTP request,
+- source-fork-race: PostgreSQL fork cell PASS reaches the corrected replay
+  read, but does not execute the timeout-only diagnostic read. That diagnostic
+  is covered by the complete source-preservation control, not execution proof.
+  SQLite is RED at the public run.fork HTTP request,
   before either changed read, with original20s client deadline exceeded.
   That existing SQLite public-fork qualification hold remains unwaived; this
   wave does not establish clean-master attribution or runtime/fork closure.
@@ -86,7 +88,8 @@ Receipts ~/.cache/swarm-2542-family145/channel-decision-*.
 | Raw uncertain-copy poll and all three consumers | reproduced and fixed | Complete3-call/five-body codemod controls; uninterrupted exact-three-callers-race receipt recorded with the checkpoint |
 | Wrong reader/card, state/verdict/refusal/poll or alias escape | execution-proven through the same corrected path | ChannelDecisionTransformRefusesForeignCarriersAndShadowedCalls; WholeChainPreservesEveryPollAndRefusalCut; OwnedInventoryHasNoRawCallerOrAlias |
 | Divergent local two-column query ownership | reproduced and fixed | ChannelDecisionReusesTheExactExistingCanonicalQuery, immutable native-owner equality and original SQL literal equality; actual source census |
-| Source diagnostic/restart read and parent immutability | execution-proven through the same corrected path | explicit_postgres/fork under race; complete source-lifecycle Before/After proof retains every parent clock/identity/refusal assertion |
+| Source restart read and parent immutability | execution-proven through the same corrected path | explicit_postgres/fork under race; complete source-lifecycle Before/After proof retains every parent clock/identity/refusal assertion |
+| Timeout-only source diagnostic read | split / escalated as separate class | Complete source-preservation control passes; the passing PostgreSQL fork does not reach this diagnostic. Its execution proof remains qualification-open, without closure credit |
 | SQLite public-fork reachability | split / escalated as separate class | default_sqlite/fork timeout before the changed reads; existing #2542/#2151 public-fork hold remains open |
 | Broader compound/status-only/setup/fault/teardown authority | split / escalated as separate class | Source sweep and parent debt ledger; no wider lifecycle/constructor interpretation is migrated or waived |
 
