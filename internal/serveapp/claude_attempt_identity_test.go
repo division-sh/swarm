@@ -1056,6 +1056,12 @@ func runClaudeAttemptProofProcessHelper() int {
 		fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","tools":[]}`)
 	}
 	fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q,\"model\":\"claude-proof\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":12,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}\n", providerSessionID)
+	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "valid_result_exit" {
+		return 1
+	}
+	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "invalid_final_result" {
+		fmt.Fprintln(os.Stdout, `{"type":"result","type":"result","model":"invalid-final","usage":{"input_tokens":99,"output_tokens":99},"total_cost_usd":99}`)
+	}
 	return 0
 }
 

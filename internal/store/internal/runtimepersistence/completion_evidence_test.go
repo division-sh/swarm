@@ -59,6 +59,11 @@ func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
 			reads := fixture.store.(interface {
 				LoadOperatorConversationFork(context.Context, string) (runfork.OperatorConversationForkSession, error)
 			})
+			if fixture.sqlite {
+				reads = newBootstrappedSQLiteRuntimeStoreForPath(t, fixture.store.(*SQLiteRuntimeStore).Path())
+			} else {
+				reads = admitTestPostgresStore(t, fixture.db)
+			}
 			for repeat := 0; repeat < 2; repeat++ {
 				reloaded, err := reads.LoadOperatorConversationFork(testAuthorActivityContext(), fixture.fork.ForkID)
 				if err != nil || len(reloaded.Turns) != 1 || !reflect.DeepEqual(reloaded.Turns[0].Completions, want) {

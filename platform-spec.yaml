@@ -18514,7 +18514,7 @@ platform_tables:
             cache_creation_input_tokens     BIGINT,
             cache_creation_5m_input_tokens  BIGINT,
             cache_creation_1h_input_tokens  BIGINT,
-            provider_reported_cost_usd      NUMERIC(18,9),
+            provider_reported_cost_usd      NUMERIC,
             failure                         JSONB,
             created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((agent_route_presence = 'root' AND flow_scope_key = '' AND flow_instance_id = '' AND flow_instance = '') OR (agent_route_presence = 'present' AND flow_scope_key <> '' AND flow_instance_id <> '' AND flow_instance <> '')),
@@ -18989,7 +18989,7 @@ platform_tables:
             cache_creation_input_tokens    BIGINT,
             cache_creation_5m_input_tokens BIGINT,
             cache_creation_1h_input_tokens BIGINT,
-            provider_reported_cost_usd     NUMERIC(18,9),
+            provider_reported_cost_usd     NUMERIC,
             state                          TEXT NOT NULL CHECK (state IN ('succeeded', 'failed', 'outcome_uncertain')),
             failure                        JSONB,
             evidence                       JSONB NOT NULL DEFAULT '{}',
@@ -42347,12 +42347,20 @@ llm_completion_execution_authority:
       full contributor collection. A terminal model or exactly one contributor supplies resolved_model; multiple contributors
       without a terminal label or missing observations leave it absent. Sorting never chooses the first model. Labels are
       observations, not certification of a pinned concrete model. Mock work never manufactures provider labels or billing.
+      CLI evidence follows the last exact type=result candidate, independently of dimension validation. A malformed or
+      contradictory later result never certifies an earlier result's facts. Case-variant metadata does not override
+      exact protocol keys. Contributor key lexemes undergo strict Unicode admission before decoding; invalid surrogate
+      escapes do not become replacement-character model labels, and valid sibling contributors remain independent.
+      Process exit, cancellation, observation acknowledgment and heartbeat failures carry owned terminal observations
+      through the existing failure settlement without successful session/head adoption or automatic replay.
     price_owner: >-
       Token exactness and price provenance are independent. Reported terminal total (including zero), local estimate,
       unavailable price and reservation-exhaustion accounting remain distinct. Estimation uses the frozen requested model
       and existing rates, not the observed label. Per-model amounts never create a second charge. Missing or invalid
       dimensions retain valid independent observations and explicit problem/failure evidence. Unavailable-token reservation
       exhaustion, exactly-once spend keys and all budget arithmetic remain unchanged.
+      Reported-source-fact columns in agent_turns and conversation_fork_turn_completions use unscaled NUMERIC to preserve
+      finite reported totals without quantization. The charged spend_ledger amount retains its existing precision.
     consumption: >-
       The immutable target and spend rows retain the typed evidence atomically. Drains, evidence-only results and committed
       continuations clone it without mutable provider/caller aliases; startup recovery preserves the frozen request but

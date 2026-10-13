@@ -337,6 +337,13 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	}))
 	defer server.Close()
 	cfg.LLM.OpenAICompatible.BaseURL = server.URL
+	defer func() {
+		select {
+		case <-releaseServer:
+		default:
+			close(releaseServer)
+		}
+	}()
 
 	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
@@ -347,13 +354,19 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	firstErr := make(chan error, 1)
 	go func() {
 		ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-compatible-admission-first"))
-		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
+		ctx = withEffectTestRequest(t, ctx, profile, model)
+		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, jsonBytes(map[string]any{"model": model.ConcreteModel, "messages": []Message{{Role: "user", Content: "hello"}}}), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case err := <-firstErr:
+		t.Fatalf("first request rejected before HTTP entry: %v", err)
+	}
 
 	secondCtx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-compatible-admission-second"))
-	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
+	secondCtx = withEffectTestRequest(t, secondCtx, profile, model)
+	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, jsonBytes(map[string]any{"model": model.ConcreteModel, "messages": []Message{{Role: "user", Content: "second"}}}), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -387,6 +400,13 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	}))
 	defer server.Close()
 	cfg.LLM.OpenAIResponses.BaseURL = server.URL
+	defer func() {
+		select {
+		case <-releaseServer:
+		default:
+			close(releaseServer)
+		}
+	}()
 
 	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
@@ -397,13 +417,19 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	firstErr := make(chan error, 1)
 	go func() {
 		ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-responses-admission-first"))
-		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
+		ctx = withEffectTestRequest(t, ctx, profile, model)
+		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, jsonBytes(map[string]any{"model": model.ConcreteModel, "input": []Message{{Role: "user", Content: "hello"}}}), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case err := <-firstErr:
+		t.Fatalf("first request rejected before HTTP entry: %v", err)
+	}
 
 	secondCtx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-responses-admission-second"))
-	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
+	secondCtx = withEffectTestRequest(t, secondCtx, profile, model)
+	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, jsonBytes(map[string]any{"model": model.ConcreteModel, "input": []Message{{Role: "user", Content: "second"}}}), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
