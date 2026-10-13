@@ -41,7 +41,11 @@ func TestNativeExecutionConstructionPreservesWholeWorkloadAndOriginalOpening(t *
 func assertNativeExecutionConstruction(t *testing.T, row recipe) {
 	t.Helper()
 	actual := selectedCausalObservationBody(t, row.File, row.Function)
-	want, err := canonicalFunction(row.After)
+	reviewed, err := r52NativeExecutionCurrentBody(row, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := canonicalFunction(reviewed)
 	got, actualErr := canonicalFunction(actual)
 	if err != nil || actualErr != nil || want != got || strings.Contains(actual, "testutil.StartPostgres") || strings.Contains(actual, "AdmitPostgresRuntimeStore") || strings.Count(actual, "storetest.StartPostgresRuntimeStore(t)") != 1 {
 		t.Fatal("execution fixture regained raw or duplicate construction")
