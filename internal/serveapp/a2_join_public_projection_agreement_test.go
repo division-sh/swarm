@@ -71,11 +71,11 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				t.Fatalf("supported root ingress did not create the join run: %+v", opened)
 			}
 			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
-			created := requireA2PortfolioEntity(t, rt, opened.RunID, opened.RunID)
+			created := requireA2PortfolioEntity(t, rt.Endpoint, opened.RunID, opened.RunID)
 			if created.Entity.CurrentState != "dispatching" {
 				t.Fatalf("actual root creation did not enter dispatching: %+v", created)
 			}
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "order.started",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, opened.EventID, opened.RunID, "order.started",
 				map[string]any{"dispatch_id": "dispatch-m37", "expected": []any{"op-a", "op-b"}}), ".", "starter", created, "materializing_entity")
 			dispatched := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"run_id": opened.RunID, "event_name": "order.dispatched", "source_event_id": opened.EventID,
@@ -91,7 +91,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				initial.Expected() != 2 || initial.OutcomePending || initial.OutcomeFired || initial.DeadlineAt.Sub(initial.ArmedAt) != time.Hour {
 				t.Fatalf("public initial arrival obligation: entity=%+v arm=%+v", initialEntity, initial)
 			}
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, dispatched.EventID, opened.RunID, "order.dispatched", map[string]any{}),
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, dispatched.EventID, opened.RunID, "order.dispatched", map[string]any{}),
 				".", "dispatcher", initialEntity, "existing_entity")
 			a2RequireJoinPublicGraph(t, rt, root, initialEntity, initial)
 			publish := func(member, idempotency string, ok bool) servedEventPublishRPCResult {
@@ -114,7 +114,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				t.Fatalf("public partial arrival obligation: %+v", partial)
 			}
 			a2RequireJoinPublicResults(t, partial, []any{map[string]any{"ok": false}})
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, first.EventID, opened.RunID, "item.completed",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, first.EventID, opened.RunID, "item.completed",
 				map[string]any{"dispatch_id": "dispatch-m37", "member_id": "op-b", "result": map[string]any{"ok": false}}), ".", "join-node", partialEntity, "existing_entity")
 			last := publish("op-a", "a2-m37-a", true)
 			var occurrence events.Event
@@ -132,7 +132,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			}
 			ordered := []any{map[string]any{"ok": true}, map[string]any{"ok": false}}
 			a2RequireJoinPublicResults(t, pending, ordered)
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, last.EventID, opened.RunID, "item.completed",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, last.EventID, opened.RunID, "item.completed",
 				map[string]any{"dispatch_id": "dispatch-m37", "member_id": "op-a", "result": map[string]any{"ok": true}}), ".", "join-node", pendingEntity, "existing_entity")
 			completion := a2ReadJoinPublicEvent(t, rt, occurrence.ID())
 			handle, ref, valid := timeridentity.ParseJoinHandle(completion.Payload)
@@ -318,7 +318,7 @@ func a2ReadJoinPublicEvent(t *testing.T, rt servedControlProofRuntime, eventID s
 		t.Fatalf("public join event lost its exact committed identity/obligation: %+v", event)
 	}
 	var matches []operatorread.OperatorEventFull
-	for _, listed := range requireA2PortfolioEvents(t, rt, event.RunID, event.EventName) {
+	for _, listed := range requireA2PortfolioEvents(t, rt.Endpoint, event.RunID, event.EventName) {
 		if listed.EventID == eventID {
 			matches = append(matches, listed)
 		}

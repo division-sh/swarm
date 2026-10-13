@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
 )
 
@@ -184,10 +185,14 @@ func currentOutput(r result) []byte {
 			continue
 		}
 		actual := nodeString(declaration)
-		if actual != p.Before && actual != p.After {
+		previous := publicendpoint.Previous(r.path, key, actual)
+		if actual != p.Before && previous != p.After {
 			panic("current declaration differs from exact predecessor/successor: " + r.path + "/" + key)
 		}
 		delete(rules, key)
+		if actual != previous {
+			continue // Keep the exact newer endpoint-only successor, never rewind it.
+		}
 		edits = append(edits, edit{fset.Position(declaration.Pos()).Offset, fset.Position(declaration.End()).Offset, exactSource(r.source, key)})
 	}
 	for key, p := range rules {

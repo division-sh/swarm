@@ -13,12 +13,14 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 )
 
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "57299f75b5ac17086c95f0a7a30eff118e3589d809f24da2a2c463e6e6f622fe"
+const targetDigest = "c8de8b56edfaf09f04bf05d3736742dde66825589e5afc5a98af8a63d6dbf780"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -265,6 +267,7 @@ var files = []string{
 
 func main() {
 	includeServedDebugTargets()
+	includePublicA2EndpointTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -310,6 +313,22 @@ func main() {
 		writeJSON(transitionLedger, changes)
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
+	}
+}
+
+func includePublicA2EndpointTargets() {
+	for _, pin := range publicendpoint.Pins() {
+		found := false
+		for _, path := range files {
+			found = found || path == pin.File
+		}
+		if !found {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
 	}
 }
 

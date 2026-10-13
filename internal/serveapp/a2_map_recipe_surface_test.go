@@ -68,8 +68,8 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					if err := json.Unmarshal(raw, &payload); err != nil {
 						t.Fatal(err)
 					}
-					requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "batch.ready", payload), ".", "scatter", entity, "materializing_entity")
-					requests := requireA2PortfolioEvents(t, rt, opened.RunID, "item.requested")
+					requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, opened.EventID, opened.RunID, "batch.ready", payload), ".", "scatter", entity, "materializing_entity")
+					requests := requireA2PortfolioEvents(t, rt.Endpoint, opened.RunID, "item.requested")
 					if len(requests) != len(tc.members) {
 						t.Fatalf("map key fan-out count=%d want=%d", len(requests), len(tc.members))
 					}
@@ -89,17 +89,17 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 						for _, value := range tc.items[member] {
 							values = append(values, float64(value))
 						}
-						request := requireA2PortfolioEvent(t, rt, matches[0].EventID, opened.RunID, "item.requested", map[string]any{
+						request := requireA2PortfolioEvent(t, rt.Endpoint, matches[0].EventID, opened.RunID, "item.requested", map[string]any{
 							"member_id": member, "values": values, "index": float64(index), "count": float64(len(tc.members)),
 						})
-						worker := requireA2PortfolioEntity(t, rt, opened.RunID, request.Deliveries[0].Target.FlowInstance)
+						worker := requireA2PortfolioEntity(t, rt.Endpoint, opened.RunID, request.Deliveries[0].Target.FlowInstance)
 						if worker.Entity.CurrentState != "complete" || worker.Entity.EntityID == entity.Entity.EntityID || worker.Fields["member_id"] != member ||
 							!reflect.DeepEqual(worker.Fields["values"], values) || seen[worker.Entity.EntityID] {
 							t.Fatalf("actual keyed worker construction/state/value isolation: %+v", worker)
 						}
 						seen[worker.Entity.EntityID] = true
 						requireA2PortfolioDelivery(t, request, "workers", "worker", worker, "materializing_entity")
-						report := requireA2PortfolioEmission(t, rt, opened.RunID, worker.Entity.FlowInstance+"/item.reported", request.EventID, map[string]any{"member_id": member, "result": values})
+						report := requireA2PortfolioEmission(t, rt.Endpoint, opened.RunID, worker.Entity.FlowInstance+"/item.reported", request.EventID, map[string]any{"member_id": member, "result": values})
 						requireA2PortfolioDelivery(t, report, ".", "collector", entity, "existing_entity")
 						workers = append(workers, worker)
 					}
@@ -108,7 +108,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					if entities.NextCursor != "" || len(entities.Entities) != len(tc.members)+1 {
 						t.Fatalf("public exact root/worker census: %+v", entities)
 					}
-					completions := requireA2PortfolioEvents(t, rt, opened.RunID, "platform.join_complete")
+					completions := requireA2PortfolioEvents(t, rt.Endpoint, opened.RunID, "platform.join_complete")
 					if len(completions) != 1 {
 						t.Fatalf("exact durable map continuation count=%d want=1", len(completions))
 					}
@@ -138,7 +138,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					t.Fatal("normal serve restart changed retained map/result/entry evidence")
 				}
 				for _, worker := range batch.workers {
-					if !reflect.DeepEqual(worker, requireA2PortfolioEntity(t, rt, batch.opened.RunID, worker.Entity.FlowInstance)) {
+					if !reflect.DeepEqual(worker, requireA2PortfolioEntity(t, rt.Endpoint, batch.opened.RunID, worker.Entity.FlowInstance)) {
 						t.Fatal("normal serve restart changed an actually created keyed worker")
 					}
 				}

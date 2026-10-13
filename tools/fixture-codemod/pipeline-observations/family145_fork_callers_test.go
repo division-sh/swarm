@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 700 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "57299f75b5ac17086c95f0a7a30eff118e3589d809f24da2a2c463e6e6f622fe" {
+	if err != nil || len(rows) != 715 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c8de8b56edfaf09f04bf05d3736742dde66825589e5afc5a98af8a63d6dbf780" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -54,6 +54,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			t.Fatalf("changed binding/workload accepted: %s", row.Function)
 		}
 		if family145CheckServedDebugWholeRule(t, row.File, row.Function, row.After) || family145CheckForkCompletionWholeRule(t, row.File, row.Function, row.After) || family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, row.After) || family145CheckWriterStageWholeRule(t, row.File, row.Function, row.After) || row.Function == "requireServedEventPublishEntityState" || row.Function == "requireLifecycleEventCount" || row.Function == "readLifecycleLoop" {
+			continue
+		}
+		if family145CheckPublicA2EndpointWholeRule(t, row.File, row.Function, row.After) {
 			continue
 		}
 		if family145CLIForkRow(row.File, row.Function) {

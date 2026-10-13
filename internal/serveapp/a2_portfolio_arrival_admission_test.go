@@ -30,7 +30,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			parent := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio", "portfolio_id", "portfolio-one")
 			period := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "period-one")
-			requireA2PortfolioSetupRoutes(t, rt, setup, parent, period, "materializing_entity")
+			requireA2PortfolioSetupRoutes(t, rt.Endpoint, setup, parent, period, "materializing_entity")
 			initialArm := requireA2PortfolioJoin(t, rt, period, 0, false, nil)
 			workers := map[string]bool{}
 			requireSettled := func(deliveryID string) {
@@ -58,13 +58,13 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 					t.Fatalf("independent trigger borrowed an earlier worker: %+v", worker)
 				}
 				workers[worker.Entity.EntityID] = true
-				reported := requireA2PortfolioEmission(t, rt, setup.RunID, worker.Entity.FlowInstance+"/operating.reported", requested.EventID, map[string]any{
+				reported := requireA2PortfolioEmission(t, rt.Endpoint, setup.RunID, worker.Entity.FlowInstance+"/operating.reported", requested.EventID, map[string]any{
 					"portfolio_id": "portfolio-one", "period_id": "period-one", "operating_id": member,
 					"operating_instance_id": requested.EventID, "revenue": float64(revenue),
 				})
 				requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-router", parent, "existing_entity")
 				var matches []operatorread.OperatorEventFull
-				for _, event := range requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported") {
+				for _, event := range requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported") {
 					if event.SourceEventID == reported.EventID {
 						matches = append(matches, event)
 					}
@@ -99,7 +99,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				return params, trigger, arrival
 			}
 			_, _, original := publish("a2-original", "op-a", 11, "", "")
-			period = requireA2PortfolioEntity(t, rt, setup.RunID, period.Entity.FlowInstance)
+			period = requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, period.Entity.FlowInstance)
 			partial := requireA2PortfolioJoin(t, rt, period, 1, false, nil)
 			if !partial.JoinRef().Equal(initialArm.JoinRef()) {
 				t.Fatal("first arrival replaced its original arm")
@@ -115,12 +115,12 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			beforeHistory := history()
 			requireUnchanged := func() {
 				t.Helper()
-				after := requireA2PortfolioEntity(t, rt, setup.RunID, period.Entity.FlowInstance)
+				after := requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, period.Entity.FlowInstance)
 				if !reflect.DeepEqual(partial, requireA2PortfolioJoin(t, rt, after, 1, false, nil)) ||
 					!reflect.DeepEqual(period.Fields, after.Fields) || !reflect.DeepEqual(period.Gates, after.Gates) ||
 					!reflect.DeepEqual(period.Accumulated, after.Accumulated) ||
 					period.Entity.CurrentState != after.Entity.CurrentState || history() != beforeHistory ||
-					len(requireA2PortfolioEvents(t, rt, setup.RunID, "platform.join_complete")) != 0 {
+					len(requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "platform.join_complete")) != 0 {
 					t.Fatal("duplicate/conflict changed membership, business state, history or completion")
 				}
 			}
@@ -133,8 +133,8 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			requireUnchanged()
 			unexpectedParams, unexpectedTrigger, unexpected := publish("a2-unexpected-member", "not-a-member", 33, failures.ClassUnexpectedArrival, "join_member_unexpected")
 			requireUnchanged()
-			beforeRequests := requireA2PortfolioEvents(t, rt, setup.RunID, "ingress/operating.report.requested")
-			beforeReports := requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported")
+			beforeRequests := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "ingress/operating.report.requested")
+			beforeReports := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")
 			if len(beforeRequests) != 4 || len(beforeReports) != 4 {
 				t.Fatal("independent public arrivals did not create four actual worker requests/reports")
 			}
@@ -158,8 +158,8 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 				if replay.EventID != refused.trigger.EventID || replay.RunID != setup.RunID ||
 					!reflect.DeepEqual(refused.arrival, a2ReadJoinPublicEvent(t, rt, refused.arrival.EventID)) ||
-					!reflect.DeepEqual(beforeRequests, requireA2PortfolioEvents(t, rt, setup.RunID, "ingress/operating.report.requested")) ||
-					!reflect.DeepEqual(beforeReports, requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) {
+					!reflect.DeepEqual(beforeRequests, requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "ingress/operating.report.requested")) ||
+					!reflect.DeepEqual(beforeReports, requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) {
 					t.Fatal("committed refusal replay changed identity, settled outcomes or actual worker publications")
 				}
 				requireSettled(refused.arrival.Deliveries[0].DeliveryID)
@@ -169,12 +169,12 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			period = waitA2PortfolioComplete(t, rt, setup.RunID, period.Entity.FlowInstance)
 			closed := requireA2PortfolioJoin(t, rt, period, 2, true, []any{int64(11), int64(22)})
 			if !closed.JoinRef().Equal(initialArm.JoinRef()) || len(workers) != 5 ||
-				len(requireA2PortfolioEvents(t, rt, setup.RunID, "ingress/operating.report.requested")) != 5 ||
-				len(requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) != 5 ||
-				len(requireA2PortfolioEvents(t, rt, setup.RunID, "platform.join_complete")) != 1 {
+				len(requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "ingress/operating.report.requested")) != 5 ||
+				len(requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) != 5 ||
+				len(requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "platform.join_complete")) != 1 {
 				t.Fatal("valid final member did not complete the original arm exactly once")
 			}
-			completion := requireA2PortfolioEvents(t, rt, setup.RunID, "platform.join_complete")[0]
+			completion := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "platform.join_complete")[0]
 			requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt, completion.EventID), "portfolio/period", "portfolio-collector", period, "existing_entity")
 			requireSettled(completion.Deliveries[0].DeliveryID)
 			if code := process.stop(); code != 0 {
