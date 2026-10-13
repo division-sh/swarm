@@ -21,6 +21,37 @@ func errText(err error) string {
 	return ""
 }
 
+func loadProbeSource(repo, evidence, ref, extra string, template bool) (*c.WorkflowContractBundle, string, error) {
+	root, err := os.MkdirTemp(evidence, "b-source-")
+	if err != nil {
+		panic(err)
+	}
+	files := map[string]string{
+		"schema.yaml":   "name: b-admission-probe\nstages: {done: {final: true}}\n",
+		"types.yaml":    catalog + extra,
+		"entities.yaml": fmt.Sprintf("person:\n  items:\n    type: %q\n    _unused_reason: admission-probe\n    _unused_reader_reason: admission-probe\n", ref),
+	}
+	if ref == "[Chain]" {
+		files["types.yaml"] = strings.Replace(catalog, "  Label: text\n", "  Label: text\n  Chain: Label\n", 1)
+	}
+	if template {
+		delete(files, "entities.yaml")
+		files["worker/schema.yaml"] = "name: worker\ninstance: id\nstages: {done: {final: true}}\n"
+		files["worker/entities.yaml"] = fmt.Sprintf("person:\n  id: %q\n", ref)
+	}
+	for name, body := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			panic(err)
+		}
+	}
+	bundle, err := c.LoadWorkflowContractBundleWithOverrides(repo, root, c.DefaultPlatformSpecFile(repo))
+	return bundle, root, err
+}
+
 func main() {
 	repo, evidence, binary := os.Args[1], os.Args[2], os.Args[3]
 	out := json.NewEncoder(os.Stdout)
@@ -30,34 +61,7 @@ func main() {
 		}
 	}
 	load := func(ref, extra string, template bool) (*c.WorkflowContractBundle, string, error) {
-		root, err := os.MkdirTemp(evidence, "b-source-")
-		if err != nil {
-			panic(err)
-		}
-		files := map[string]string{
-			"schema.yaml":   "name: b-admission-probe\nstages: {done: {final: true}}\n",
-			"types.yaml":    catalog + extra,
-			"entities.yaml": fmt.Sprintf("person:\n  items:\n    type: %q\n    _unused_reason: admission-probe\n    _unused_reader_reason: admission-probe\n", ref),
-		}
-		if ref == "[Chain]" {
-			files["types.yaml"] = strings.Replace(catalog, "  Label: text\n", "  Label: text\n  Chain: Label\n", 1)
-		}
-		if template {
-			delete(files, "entities.yaml")
-			files["worker/schema.yaml"] = "name: worker\ninstance: id\nstages: {done: {final: true}}\n"
-			files["worker/entities.yaml"] = fmt.Sprintf("person:\n  id: %q\n", ref)
-		}
-		for name, body := range files {
-			path := filepath.Join(root, name)
-			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-				panic(err)
-			}
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-				panic(err)
-			}
-		}
-		bundle, err := c.LoadWorkflowContractBundleWithOverrides(repo, root, c.DefaultPlatformSpecFile(repo))
-		return bundle, root, err
+		return loadProbeSource(repo, evidence, ref, extra, template)
 	}
 	for _, ref := range []string{"[text]", "[Label]", "map[text]Item", "map[Label]Item", "map[integer]Item", "map[numeric]Item", "map[boolean]Item", "map[uuid]Item", "map[ID]Item", "map[Status]Item", "[map[text]Item]", "map[text][Item]", "Item[]", "[]Item", "[Missing]", "[Cycle]", "[Left]", "[Chain]"} {
 		extra := ""
