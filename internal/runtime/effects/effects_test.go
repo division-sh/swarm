@@ -904,24 +904,30 @@ func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
 		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{},
 		FlowInstance: token.Identity.FlowInstance(), EntityID: uuid.NewString(),
 	}
+	authority.CompletionRequest = CompletionRequest{ModelAlias: "regular", RequestedModel: "request-A", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"}
 	inputTokens, outputTokens := int64(1), int64(1)
 	settlement := CompletionSettlement{
 		Settlement: Settlement{State: StateSettled},
 		Usage: CompletionUsage{
 			ResolvedModel: "test-model", Exactness: CompletionUsageExact, InputTokens: &inputTokens, OutputTokens: &outputTokens,
+			Evidence: CompletionEvidence{Request: authority.CompletionRequest, Models: []CompletionModelObservation{{Model: "test-model", Source: CompletionModelResponse}}, CostProvenance: CompletionCostEstimated},
 		},
 		AgentTurn: &CompletionAgentTurn{
-			TurnID: authority.Target.ID, RunID: authority.Target.RunID, AgentID: "different-agent",
+			TurnID: authority.Target.ID, RunID: authority.Target.RunID, AgentID: authority.Target.AgentID, Identity: authority.Target.AgentIdentity,
 			SessionID: authority.Target.SessionID, Memory: authority.Target.Memory, FlowInstance: authority.Target.FlowInstance,
 			EntityID: authority.Target.EntityID, CapabilitySurfaceID: uuid.NewString(), CapabilitySurface: []byte(`{}`),
 		},
 		Spend: CompletionSpend{
 			FlowInstance: token.Identity.FlowInstance(), AgentID: token.AgentID, AgentIdentity: token.Identity,
-			Model: "test-model", BackendProfile: "test",
-			Provider: "test", Transport: "api", ResolvedModel: "test-model", InvocationType: "task",
+			Model: "request-A", ModelAlias: "regular", BackendProfile: "anthropic",
+			Provider: "anthropic", Transport: "api", ResolvedModel: "test-model", InvocationType: "task",
 		},
 	}
 	attempt := Attempt{AttemptID: uuid.NewString(), Authority: authority, Adapter: "anthropic_api"}
+	if err := settlement.Validate(attempt); err != nil {
+		t.Fatalf("positive settlement control: %v", err)
+	}
+	settlement.AgentTurn.SessionID = uuid.NewString()
 	if err := settlement.Validate(attempt); err == nil {
 		t.Fatal("completion settlement accepted turn evidence for a different actor")
 	}
@@ -1102,7 +1108,7 @@ func normalManagedEffectSurface(t testing.TB, admission managedexecution.Admissi
 		}
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: actorIdentity, RuntimeMode: "api", Provider: "anthropic", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
@@ -1131,7 +1137,7 @@ func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admis
 		}
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: actorIdentity, RuntimeMode: "api", Provider: "anthropic", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID,
 			ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,

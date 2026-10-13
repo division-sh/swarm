@@ -121,11 +121,11 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Agent agent-1  running",
-		"identity   role reviewer, type worker",
-		"model      default",
-		"memory     false",
-		"session    session-1, started 2026-05-18T03:00:00Z",
-		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed true",
+		"identity                role reviewer, type worker",
+		"configured model alias  default",
+		"memory                  false",
+		"session                 session-1, started 2026-05-18T03:00:00Z",
+		"last turn               turn-1, completed 2026-05-18T03:05:00Z, parsed true",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())

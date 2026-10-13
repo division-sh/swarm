@@ -48,7 +48,8 @@ func TestCompletion2270EvidenceCopiesDoNotAlias(t *testing.T) {
 	want := evidence.Canonical()
 	usage := CompletionUsage{Evidence: evidence, ResolvedModel: evidence.ResolvedModel(), Exactness: CompletionUsageExact,
 		InputTokens: evidence.Models[1].InputTokens, OutputTokens: evidence.Models[1].OutputTokens, ProviderReportedCostUSD: evidence.ProviderReportedCostUSD}
-	copy := (CompletionSettlement{Usage: usage, AgentTurn: &CompletionAgentTurn{ResponsePayload: json.RawMessage(`{"content":"original"}`)}}).Clone()
+	original := CompletionSettlement{Usage: usage, AgentTurn: &CompletionAgentTurn{ResponsePayload: json.RawMessage(`{"content":"original"}`)}}
+	copy := original.Clone()
 	encoded, err := copy.Usage.Evidence.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,10 @@ func TestCompletion2270EvidenceCopiesDoNotAlias(t *testing.T) {
 	evidence.Models[0].Model = "mutated"
 	*evidence.Models[1].InputTokens = 999
 	*evidence.ProviderReportedCostUSD = 999
+	original.AgentTurn.ResponsePayload[0] = 'X'
+	if string(copy.AgentTurn.ResponsePayload) != `{"content":"original"}` {
+		t.Fatal("immutable continuation bytes alias the caller")
+	}
 	if !reflect.DeepEqual(copy.Usage.Evidence.Canonical(), want) || *copy.Usage.InputTokens != 10 || *copy.Usage.ProviderReportedCostUSD != 0.25 {
 		t.Fatalf("settlement aliases mutable evidence: %+v", copy.Usage)
 	}
@@ -65,5 +70,11 @@ func TestCompletion2270EvidenceCopiesDoNotAlias(t *testing.T) {
 	}
 	if _, err := DecodeCompletionEvidence([]byte(`{"request":{},"request":{}}`)); err == nil {
 		t.Fatal("accepted contradictory persisted request fields")
+	}
+	var wire struct {
+		Evidence CompletionEvidence `json:"completion_evidence"`
+	}
+	if err := json.Unmarshal([]byte(`{"completion_evidence":{"request":{},"request":{}}}`), &wire); err == nil {
+		t.Fatal("nested continuation/public decoder bypassed the canonical evidence admission")
 	}
 }

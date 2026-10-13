@@ -80,11 +80,77 @@ func TestCompletion2270NoContributorDoubleCharge(t *testing.T) {
 
 func completionEvidencePtr[T any](v T) *T { return &v }
 
+func TestCompletion2270ContributorDimensionsIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields  string
+		tokens, price bool
+	}{
+		{"duplicate-cost", `"inputTokens":10,"costUSD":0.1,"costUSD":0.2`, true, false},
+		{"invalid-cost", `"inputTokens":10,"costUSD":1e999`, true, false},
+		{"duplicate-counter", `"inputTokens":10,"inputTokens":20,"costUSD":0.2`, false, true},
+		{"invalid-counter", `"inputTokens":-1,"costUSD":0.2`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(`{"type":"result","modelUsage":{"bad":{` + tc.fields + `},"good":{"inputTokens":5,"costUSD":0.1}},"total_cost_usd":0.3,"usage":{"input_tokens":15,"output_tokens":2}}`)
+			usage, err := claudeCompletionUsageFromRaw(raw)
+			if err == nil || len(usage.Evidence.Models) != 2 || usage.ResolvedModel != "" || usage.InputTokens == nil || *usage.InputTokens != 15 || usage.ProviderReportedCostUSD == nil || *usage.ProviderReportedCostUSD != 0.3 {
+				t.Fatalf("one contributor dimension erased independent reports: %+v, %v", usage, err)
+			}
+			bad, good := usage.Evidence.Models[0], usage.Evidence.Models[1]
+			if bad.Model != "bad" || good.Model != "good" || good.InputTokens == nil || *good.InputTokens != 5 || good.ProviderReportedCostUSD == nil || *good.ProviderReportedCostUSD != 0.1 || (bad.InputTokens != nil) != tc.tokens || (bad.ProviderReportedCostUSD != nil) != tc.price {
+				t.Fatalf("contributor dimension falsely certified or dropped: %+v", usage.Evidence)
+			}
+			if err := usage.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCompletion2270EstimateUsesFrozenRequestModel(t *testing.T) {
-	usage := completionObservedUsage(1_000_000, 0, "reported-opus")
+	usage := apiCompletionUsageFromRaw([]byte(`{"model":"reported-opus","usage":{"input_tokens":1000000,"output_tokens":0}}`), "input_tokens", "output_tokens")
 	spend := completionSpendForContext(context.Background(), llmselection.Profile{ID: "anthropic", Provider: "anthropic", Transport: "api"}, AgentTurnRecord{}, usage,
 		llmselection.ResolvedModel{ModelAlias: "cheap", ConcreteModel: "requested-haiku"})
 	if spend.CostUSD != 0.8 {
 		t.Fatalf("observation changed the existing request estimate: cost=%g, want 0.8", spend.CostUSD)
+	}
+}
+
+func TestCompletion2270APIIndependentDimensions(t *testing.T) {
+	for _, protocol := range []struct{ name, input, output string }{
+		{"anthropic_api", "input_tokens", "output_tokens"},
+		{"openai_responses", "input_tokens", "output_tokens"},
+		{"openai_compatible", "prompt_tokens", "completion_tokens"},
+	} {
+		for _, tc := range []struct {
+			name, model, tokens, wantModel string
+			wantExact                      bool
+		}{
+			{"reported", `"model":"served",`, `10`, "served", true},
+			{"absent-model", ``, `10`, "", true},
+			{"invalid-model", `"model":17,`, `10`, "", true},
+			{"duplicate-model", `"model":"first","model":"second",`, `10`, "", true},
+			{"bad-tokens", `"model":"served",`, `"invalid"`, "served", false},
+			{"negative-tokens", `"model":"served",`, `-1`, "served", false},
+			{"zero-tokens", `"model":"served",`, `0`, "served", true},
+		} {
+			t.Run(protocol.name+"/"+tc.name, func(t *testing.T) {
+				raw := []byte(`{` + tc.model + `"usage":{"` + protocol.input + `":` + tc.tokens + `,"` + protocol.output + `":2}}`)
+				usage := apiCompletionUsageFromRaw(raw, protocol.input, protocol.output)
+				if usage.ResolvedModel != tc.wantModel || (usage.Exactness == runtimeeffects.CompletionUsageExact) != tc.wantExact {
+					t.Fatalf("one invalid dimension erased another: %+v", usage)
+				}
+				if err := usage.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if tc.wantExact {
+					*usage.InputTokens = 99
+					repeated := apiCompletionUsageFromRaw(raw, protocol.input, protocol.output)
+					if *repeated.InputTokens == 99 {
+						t.Fatal("normalized tokens alias provider storage")
+					}
+				}
+			})
+		}
 	}
 }

@@ -66,12 +66,15 @@ def handle(input):
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "mock-turn"))
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
+	profile := mustAdmissionProfile(t, llmselection.BackendMock)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	actor := runtimeactors.AgentConfig{
 		ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{Kind: "python", SourcePath: "mocks/assistant.py", Source: source, Digest: pythonSourceDigest(source)},
 	}
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"notify_human","schema":{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"},"context":{}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
-	response, _, usage, _, err := executeMockCompletionWithExecutor(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false, managedProviderCallForEffectTest(t, ctx), mockHostCompletionExecutor(t))
+	response, _, usage, _, err := executeMockCompletionWithExecutor(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, model, false, managedProviderCallForEffectTest(t, ctx), mockHostCompletionExecutor(t))
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}

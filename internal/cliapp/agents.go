@@ -881,7 +881,7 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			{Header: "ROLE"},
 			{Header: "TYPE"},
 			{Header: "STATUS"},
-			{Header: "MODEL"},
+			{Header: "MODEL_ALIAS"},
 			{Header: "MEMORY"},
 			{Header: "FLOW_INSTANCE", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 		},
@@ -1015,7 +1015,7 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	agent := result.Agent
 	rows := []cliLabeledDetailRow{
 		{Label: "identity", Value: fmt.Sprintf("role %s, type %s", agent.Role, agent.Type)},
-		{Label: "model", Value: agent.Model},
+		{Label: "configured model alias", Value: agent.Model},
 		{Label: "memory", Value: fmt.Sprintf("%t", agent.Memory)},
 	}
 	if agent.FlowInstance != "" {

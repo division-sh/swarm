@@ -720,6 +720,9 @@ func writeConversationDetailResult(out io.Writer, result conversationTurnPage) {
 		})
 	}
 	footers := []string{}
+	for _, turn := range result.Turns {
+		footers = append(footers, fmt.Sprintf("turn %s: %s", cliSanitizeOneLineValue(turn.TurnID), cliCompletionEvidenceSummary(turn.CompletionEvidence)))
+	}
 	if strings.TrimSpace(result.NextCursor) != "" {
 		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}

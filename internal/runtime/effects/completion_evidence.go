@@ -177,6 +177,16 @@ func (e CompletionEvidence) Validate() error {
 	return e.validateModels()
 }
 
+func (e CompletionEvidence) ValidateRequest(request CompletionRequest, resolvedModel string) error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	if e.Request != request || e.ResolvedModel() != resolvedModel {
+		return fmt.Errorf("completion evidence contradicts request or observed model projection")
+	}
+	return nil
+}
+
 func (e CompletionEvidence) validatePrice() error {
 	switch e.CostProvenance {
 	case CompletionCostReported, CompletionCostEstimated, CompletionCostUnavailable, CompletionCostReservation:
@@ -201,7 +211,7 @@ func (e CompletionEvidence) validatePrice() error {
 func (e CompletionEvidence) validateProblems() error {
 	for _, problem := range e.Problems {
 		switch problem.Source {
-		case CompletionModelResponse, CompletionModelCLITerminal, CompletionModelCLIUsage, "claude.result.usage", "claude.result.total_cost_usd":
+		case CompletionModelResponse, CompletionModelCLITerminal, CompletionModelCLIUsage, "response.usage", "claude.result.usage", "claude.result.total_cost_usd":
 		default:
 			return fmt.Errorf("invalid completion evidence problem source")
 		}
@@ -254,15 +264,17 @@ func (e CompletionEvidence) validateModels() error {
 }
 
 func DecodeCompletionEvidence(raw []byte) (CompletionEvidence, error) {
-	var evidence CompletionEvidence
+	type wireEvidence CompletionEvidence
+	var wire wireEvidence
 	if _, err := canonicaljson.Decode(raw); err != nil {
-		return evidence, fmt.Errorf("decode completion evidence: %w", err)
+		return CompletionEvidence{}, fmt.Errorf("decode completion evidence: %w", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&evidence); err != nil {
-		return evidence, fmt.Errorf("decode completion evidence: %w", err)
+	if err := decoder.Decode(&wire); err != nil {
+		return CompletionEvidence{}, fmt.Errorf("decode completion evidence: %w", err)
 	}
+	evidence := CompletionEvidence(wire)
 	if evidence.Models == nil {
 		return evidence, fmt.Errorf("completion model observations must be an array")
 	}
@@ -270,6 +282,15 @@ func DecodeCompletionEvidence(raw []byte) (CompletionEvidence, error) {
 		return evidence, err
 	}
 	return evidence.Canonical(), nil
+}
+
+func (e *CompletionEvidence) UnmarshalJSON(raw []byte) error {
+	decoded, err := DecodeCompletionEvidence(raw)
+	if err != nil {
+		return err
+	}
+	*e = decoded
+	return nil
 }
 
 func (e CompletionEvidence) Encode() ([]byte, error) {

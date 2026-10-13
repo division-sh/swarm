@@ -56,6 +56,9 @@ type ManagedAgentTurnFixture struct {
 	KeepDelivery      bool
 	ExecutionMode     executionmode.Mode
 	Adapter           string
+	RequestedModel    string
+	Usage             *runtimeeffects.CompletionUsage
+	CostUSD           float64
 }
 
 type ManagedAgentTurnFixtureResult struct {
@@ -123,7 +126,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		adapter = "anthropic_api"
 	}
 	surface := managedTurnFixtureSurface(t, authority, adapter)
-	frame := managedTurnFixtureFrame(t, authority, surface, fixture.Event, bundleSource)
+	frame := managedTurnFixtureFrame(t, authority, surface, fixture.Event, bundleSource, fixture.RequestedModel)
 
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	if fixture.DeliveryRoute != nil {
@@ -217,7 +220,11 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	request := handle.Attempt().Authority.CompletionRequest
 	settlement.Usage.ResolvedModel = ""
 	settlement.Usage.Evidence = runtimeeffects.CompletionEvidence{Request: request, Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}
-	settlement.Spend.Model, settlement.Spend.ModelAlias, settlement.Spend.ResolvedModel = request.RequestedModel, request.ModelAlias, ""
+	if fixture.Usage != nil {
+		settlement.Usage = fixture.Usage.Clone()
+	}
+	settlement.Spend.CostUSD = fixture.CostUSD
+	settlement.Spend.Model, settlement.Spend.ModelAlias, settlement.Spend.ResolvedModel = request.RequestedModel, request.ModelAlias, settlement.Usage.ResolvedModel
 	settlement.Spend.BackendProfile, settlement.Spend.Provider, settlement.Spend.Transport = request.BackendProfile, request.Provider, request.Transport
 	result, err := handle.SettleCompletion(executionCtx, settlement)
 	if err != nil || !result.Committed {
@@ -285,7 +292,7 @@ func completionFixtureProfile(t testing.TB, adapter string) llmselection.Profile
 	return profile
 }
 
-func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.SourceArtifactFact) agentframe.Frame {
+func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.SourceArtifactFact, model string) agentframe.Frame {
 	t.Helper()
 	bundleHash := source.BundleHash()
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.storetest.intent", "Persist the admitted managed turn fixture.")
@@ -300,10 +307,13 @@ func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, s
 	if err != nil {
 		t.Fatalf("assemble managed turn fixture prompt: %v", err)
 	}
+	if model == "" {
+		model = "storetest-model"
+	}
 	frame, err := agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: authority.Target.AgentIdentity, Role: "storetest", Intent: intent, ProviderPrompt: providerPrompt,
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
-		ModelAlias: "regular", Model: "storetest-model",
+		ModelAlias: "regular", Model: model,
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
 		BundleHash: bundleHash, Surface: surface,
 	})
