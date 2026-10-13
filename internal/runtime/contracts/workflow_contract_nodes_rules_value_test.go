@@ -12,10 +12,10 @@ func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
   event_handlers:
     task.ready:
       rules:
-        ready: {when: payload.ready, emit: task.accepted}
-        fallback: {else: true, advances_to: stopped}
+        - {when: payload.ready, emit: task.accepted}
+        - {else: true, advances_to: stopped}
       on_complete:
-        - {id: complete, condition: payload.done, emit: task.done}
+        - {condition: payload.done, emit: task.done}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -25,10 +25,13 @@ func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := nodes["worker"].EventHandlers["task.ready"]
-	if len(handler.Rules) != 2 || handler.Rules[0].ID != "ready" ||
+	if len(handler.Rules) != 2 || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when payload.ready" ||
+		handler.Rules[0].Emit.EventType() != "task.accepted" || handler.Rules[1].AdvancesTo != "stopped" ||
 		handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen ||
 		handler.Rules[1].PolicyRow.Kind != PolicySheetRowKindDefault ||
-		len(handler.OnComplete) != 1 || handler.OnComplete[0].Condition != "payload.done" {
+		len(handler.OnComplete) != 1 || handler.OnComplete[0].Condition != "payload.done" ||
+		handler.OnComplete[0].DisplayLabel("on_complete", 0) != "on_complete[0]: condition payload.done" ||
+		handler.OnComplete[0].Emit.EventType() != "task.done" {
 		t.Fatalf("rule order or context lost: %#v", handler)
 	}
 }
