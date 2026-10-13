@@ -199,7 +199,7 @@ worker:
 	bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
 	checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
 	for _, finding := range checker.expressionFieldReferences() {
-		if strings.Contains(finding.Message, "on_complete[early].condition") && strings.Contains(finding.Message, "not definitely assigned") {
+		if strings.Contains(finding.Message, "on_complete[0]: condition entity.base_score > 0.condition") && strings.Contains(finding.Message, "not definitely assigned") {
 			return
 		}
 	}
