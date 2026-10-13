@@ -53,20 +53,6 @@ func reconfigureAgentThroughLifecycleForTest(
 	)
 }
 
-func reconfigureMemoryThroughLifecycleForTest(t testing.TB, am *AgentManager, agentID, flowInstance string, enabled bool) error {
-	t.Helper()
-	current, err := am.ResolveAgentConfig(managerIdentityTestRunID, agentID, flowInstance)
-	if err != nil {
-		return err
-	}
-	identity, err := current.ConcreteIdentity()
-	if err != nil {
-		return err
-	}
-	current.Memory.Enabled = enabled
-	return am.reconfigureAgentIdentityExactWithTopology(am.runtimeContext(), am.semanticSource, identity, current, nil)
-}
-
 func teardownAgentThroughLifecycleForTest(
 	t testing.TB,
 	am *AgentManager,
