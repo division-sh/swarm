@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -87,15 +89,30 @@ func TestRuleFanOutPresentationKeepsCompiledSiteAndOperands(t *testing.T) {
 		{"on_complete", FanOutSiteOnComplete, "on_complete[0]: condition true"},
 	} {
 		t.Run(tc.context, func(t *testing.T) {
-			row := HandlerRuleEntry{Condition: "true", FanOut: &FanOutSpec{
-				ItemsFrom: "payload.items", As: "row_item", Identity: "row_item.id",
-				Emit: EmitSpec{Event: "item.requested", Fields: map[string]ExpressionValue{"id": CELExpression("row_item.id")}},
-			}}
-			handler := SystemNodeEventHandler{}
+			predicate := "when"
+			if tc.context == "on_complete" {
+				predicate = "condition"
+			}
+			var handler SystemNodeEventHandler
+			if err := decodeNodeTestYAML([]byte(fmt.Sprintf(`%s:
+  - %s: true
+    fan_out:
+      items_from: payload.items
+      as: row_item
+      identity: row_item.id
+      emit: {event: item.requested, fields: {id: row_item.id}}
+`, tc.context, predicate)), &handler); err != nil {
+				t.Fatal(err)
+			}
+			var row HandlerRuleEntry
 			if tc.context == "rules" {
-				handler.Rules = []HandlerRuleEntry{row}
+				row = handler.Rules[0]
 			} else {
-				handler.OnComplete = []HandlerRuleEntry{row}
+				row = handler.OnComplete[0]
+			}
+			wantSpec, err := json.Marshal(row.FanOut)
+			if err != nil {
+				t.Fatal(err)
 			}
 			node := identitytest.RootNode(t, "dispatcher")
 			qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
@@ -111,8 +128,17 @@ func TestRuleFanOutPresentationKeepsCompiledSiteAndOperands(t *testing.T) {
 			if len(plans) != 1 || len(fanOutSites) != 1 {
 				t.Fatalf("fan-out census changed: plans=%#v sites=%#v", plans, fanOutSites)
 			}
-			if site := fanOutSites[0]; site.Source != "handler."+tc.label+".fan_out" || site.Kind != tc.kind || site.Index != 0 || !reflect.DeepEqual(site.Spec, row.FanOut) {
+			gotSpec, err := json.Marshal(fanOutSites[0].Spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if site := fanOutSites[0]; site.Source != "handler."+tc.label+".fan_out" || site.Kind != tc.kind || site.Index != 0 || !bytes.Equal(gotSpec, wantSpec) {
 				t.Fatalf("fan-out diagnostic changed execution inputs: %#v", site)
+			}
+			fanOutRef, valid := fanOutSites[0].Spec.DeclarationIdentity()
+			compiledRef, err := plans[0].Ref.ElementRef.DeclarationIdentity()
+			if err != nil || !valid || fanOutRef != compiledRef {
+				t.Fatalf("fan-out qualification/compilation lost its exact identity: site=%#v plan=%#v err=%v", fanOutRef, compiledRef, err)
 			}
 			emits := HandlerDeclarativeEmitSites(qualified, plans)
 			if len(emits) != 1 {
