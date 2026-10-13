@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/eventname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
@@ -28,7 +29,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "e8428a49dd11d6d4df7b976ddea5b9b1adc7b9386516cf989ce905c6246ab2fd"
+const targetDigest = "9d2ffe795edbb0d4eff4ed4957d0ccd81ab394d03c44e9d0ac78a2891b18c16d"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -284,6 +285,7 @@ func main() {
 	includeRequestKeyTargets()
 	includeRunScalarTargets()
 	includeDeliveryStatusTargets()
+	includeEventNameTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -360,6 +362,22 @@ func includeDeliveryStatusTargets() {
 	raw, err := os.ReadFile(deliverystatus.Path)
 	must(err)
 	pins, err := deliverystatus.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeEventNameTargets() {
+	raw, err := os.ReadFile(eventname.Path)
+	must(err)
+	pins, err := eventname.Decode(raw)
 	must(err)
 	for _, pin := range pins {
 		if !slices.Contains(files, pin.File) {

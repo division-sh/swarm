@@ -68,6 +68,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
 		switch collector {
+		case debtEventNameCollectorTo:
+			return debtEventNameUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
 		case debtDeliveryRetirementCollectorTo:
 			return debtDeliveryRetirementUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
 		case debtDeliveryStatusCollectorTo:
@@ -166,6 +168,23 @@ func debtDeliveryRetirementUnrefreshedBaseline(root string, metadata, data []byt
 		return baseline, err
 	}
 	baseline.Collector = debtDeliveryRetirementCollectorTo
+	return baseline, nil
+}
+
+func debtEventNameUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtDeliveryRetirementCollectorTo); err != nil {
+		return baseline, err
+	}
+	if baseline.Collector != debtCacheCollectorFrom {
+		return baseline, fmt.Errorf("historical TSV collector header changed")
+	}
+	if err := debtEventNameSourcePins(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtEventNameCollectorTo
 	return baseline, nil
 }
 

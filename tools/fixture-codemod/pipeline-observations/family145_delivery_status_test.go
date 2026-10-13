@@ -32,6 +32,7 @@ func deliveryStatusPins(t *testing.T) []deliverystatus.Pin {
 }
 
 func family145DeliveryStatusCallerInverse(function, current string) string {
+	current = family145EventNameCallerInverse(function, current)
 	pins, err := deliverystatus.Decode(family145DeliveryStatusBytes)
 	if err != nil {
 		panic(err)
@@ -46,6 +47,7 @@ func family145DeliveryStatusCallerInverse(function, current string) string {
 
 func family145CheckDeliveryStatusWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145EventNameCallerInverse(function, current)
 	for _, pin := range deliveryStatusPins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -71,7 +73,7 @@ func TestFamily145DeliveryStatusWholeChainPreservesEveryPollAndRefusalCut(t *tes
 			t.Fatal("delivery status source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || family145EventNameCallerInverse(pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("delivery status current source escaped its whole rule:", key, err)
 		}
 		after, count, err := deliverystatus.Transform(pin.Before)
@@ -151,7 +153,7 @@ func deliveryStatusOwnedFile(t *testing.T, path string, file *ast.File) (int, in
 			if ok && deliverystatus.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := requestkey.Node(fn)
+				current := family145EventNameCallerInverse(fn.Name.Name, requestkey.Node(fn))
 				if deliverystatus.Previous(deliveryStatusPins(t), path, fn.Name.Name, current) == current {
 					t.Error("delivery status caller escaped exact chain:", path, fn.Name.Name)
 				}

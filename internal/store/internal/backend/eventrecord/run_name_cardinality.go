@@ -5,6 +5,12 @@ import (
 	"database/sql"
 )
 
+func CountGlobalNamedEventStorageTx(ctx context.Context, tx *sql.Tx, eventName string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name=$1`, eventName).Scan(&count)
+	return count, err
+}
+
 func CountRunNamedEventStorageTx(ctx context.Context, tx *sql.Tx, runID, eventName string) (int, error) {
 	var out int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, runID, eventName).Scan(&out)

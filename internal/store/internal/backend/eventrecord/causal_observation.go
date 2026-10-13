@@ -71,12 +71,6 @@ func ReadSourceRouteSettlementStorage(ctx context.Context, tx *sql.Tx, runID, ev
 	return out, nil
 }
 
-func CountRunEventNameStorage(ctx context.Context, tx *sql.Tx, run, name string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name=$2`, run, name).Scan(&count)
-	return count, err
-}
-
 func CountChainDepthDiagnosticStorage(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID, handlerNode string) (int, error) {
 	query := `SELECT COUNT(*) FROM events e
 WHERE e.run_id=$1::uuid AND e.event_name='platform.dead_letter'

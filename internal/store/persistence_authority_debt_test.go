@@ -459,6 +459,11 @@ func debtDeliveryStatusBodies(root string) ([]debtRequestKeyBody, error) {
 }
 
 func debtDeliveryStatusSourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtEventNameSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if !debtDeliveryStatusSuccessorCandidate(current) {
 		return current, nil
 	}
@@ -472,6 +477,78 @@ func debtDeliveryStatusSourcePrevious(root, file, function, current string) (str
 		}
 	}
 	return current, nil
+}
+
+func debtEventNameBodies(root string) ([]debtRequestKeyBody, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"))
+	if err != nil || debtBaselineChecksum(raw) != "3ec05c09f5a792662c6623c10efac08ae2c897fd8308a4d9e62aa941d1f3b0b1" {
+		return nil, fmt.Errorf("exact event name source evidence changed: %v", err)
+	}
+	var bodies []debtRequestKeyBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 6 {
+		return nil, fmt.Errorf("invalid event name complete source inventory: %v", err)
+	}
+	return bodies, nil
+}
+
+func debtEventNameSourcePrevious(root, file, function, current string) (string, error) {
+	if file != "internal/serveapp/main_runtime_test.go" || !debtEventNameSuccessorCandidate(current) {
+		return current, nil
+	}
+	bodies, err := debtEventNameBodies(root)
+	if err != nil {
+		return "", err
+	}
+	for _, body := range bodies {
+		if body.File == file && body.Function == function && current == body.After && debtBaselineChecksum([]byte(body.Before)) == body.SHA256 {
+			return body.Before, nil
+		}
+	}
+	return current, nil
+}
+
+func debtEventNameSuccessorCandidate(current string) bool {
+	for _, marker := range []string{
+		"servedEventNameCount(t, reader,", "servedEventNameCount(t, rt.ReceiverStateReader,",
+		"requireServedEventNameCount(t, rt.ReceiverStateReader,", "servedEventNameCountForRun(t, rt.ReceiverStateReader,",
+		"storetest.CountEventNameStorage(ctx, reader,", "storetest.CountRunNamedEventStorage(ctx, reader,",
+	} {
+		if strings.Contains(current, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func debtEventNameSourcePins(root string) error {
+	bodies, err := debtEventNameBodies(root)
+	if err != nil {
+		return err
+	}
+	const file = "internal/serveapp/main_runtime_test.go"
+	declarations, err := debtServedDebugDeclarations(filepath.Join(root, file))
+	if err != nil {
+		return err
+	}
+	for _, body := range bodies {
+		if body.File != file || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+			return fmt.Errorf("event name owner/assertion/polling cut changed: %s/%s", body.File, body.Function)
+		}
+	}
+	return nil
+}
+
+func debtEventNameCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtEventNameCollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != head.BootstrapSource || debtEventNameSourcePins(proofs[0].Root) != nil {
+		return false
+	}
+	if base == debtDeliveryRetirementCollectorTo {
+		return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, trusted.Sites, trusted.Sites, proofs...)) == 0
+	}
+	intermediate := head
+	intermediate.Collector = debtDeliveryRetirementCollectorTo
+	return debtDeliveryRetirementCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...)
 }
 
 func debtDeliveryStatusSuccessorCandidate(current string) bool {
@@ -500,7 +577,8 @@ func debtDeliveryStatusSourcePins(root string) error {
 				return err
 			}
 		}
-		if files[body.File][body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+		previous, err := debtEventNameSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		if err != nil || previous != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("delivery status owner/assertion/polling cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
 	}
@@ -1897,7 +1975,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) {
+	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

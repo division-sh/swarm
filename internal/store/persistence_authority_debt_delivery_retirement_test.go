@@ -144,7 +144,7 @@ func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t 
 	copy := t.TempDir()
 	const file = "internal/serveapp/main_runtime_test.go"
 	const manifest = "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"
-	for _, path := range []string{file, manifest} {
+	for _, path := range []string{file, manifest, "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)
@@ -168,14 +168,20 @@ func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t 
 		t.Fatal(failures)
 	}
 	for _, body := range bodies {
-		mutant := strings.Replace(body.After, "{", "{ foreignRetirementSource();", 1)
-		if strings.Count(string(original), body.After) != 1 || mutant == body.After {
+		declarations, err := debtServedDebugDeclarations(filepath.Join(copy, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := declarations[body.Function]
+		mutant := strings.Replace(current, "{", "{ foreignRetirementSource();", 1)
+		if strings.Count(string(original), current) != 1 || mutant == current {
 			t.Fatal("hostile retirement source cut is not exact:", body.Function)
 		}
-		debtWriteModuleSource(t, copy, file, strings.Replace(string(original), body.After, mutant, 1))
+		debtWriteModuleSource(t, copy, file, strings.Replace(string(original), current, mutant, 1))
 		if failures := check(); len(failures) == 0 {
 			t.Fatal("changed complete native source admitted:", body.Function)
 		}
+		debtWriteModuleSource(t, copy, file, string(original))
 	}
 	debtWriteModuleSource(t, copy, file, string(original))
 	debtWriteModuleSource(t, copy, manifest, "[]\n")
@@ -263,7 +269,7 @@ func TestPersistenceAuthorityDebtDeliveryRetirementCollectorPreservesExactChain(
 
 func TestPersistenceAuthorityDebtDeliveryRetirementMetadataIsLocalAndSourceBound(t *testing.T) {
 	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
-	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"} {
+	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)

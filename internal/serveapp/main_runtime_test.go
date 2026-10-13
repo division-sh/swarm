@@ -2631,7 +2631,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
-	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.paused", 1)
+	requireServedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "platform.paused", 1)
 	duplicatePause := requireServedJSONRPCError(t, rt.Endpoint, "runtime.pause", map[string]any{})
 	if duplicatePause.Data["code"] != apiv1.RuntimeAlreadyPausedCode {
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
@@ -2647,7 +2647,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
-	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.resumed", 1)
+	requireServedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "platform.resumed", 1)
 	duplicateResume := requireServedJSONRPCError(t, rt.Endpoint, "runtime.resume", map[string]any{})
 	if duplicateResume.Data["code"] != apiv1.RuntimeNotPausedCode {
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
@@ -3702,17 +3702,17 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-event-replay-"+uuid.NewString())
 	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "event-replay")
 	eventReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-event-replay"
-	beforeHoldEvents := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
-	beforeAuditEvents := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
+	beforeHoldEvents := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed")
+	beforeAuditEvents := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed")
 	var eventReplay servedEventReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplay)
 	requireServedLiveAgentEventReplayResult(t, rt, eventReplayOriginal.EventID, eventReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "event.replay", eventReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
 		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
 	}
 	var eventReplayAgain servedEventReplayProofResult
@@ -3720,23 +3720,23 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if eventReplayAgain.ReplayEventID != eventReplay.ReplayEventID || eventReplayAgain.AuditEventID != eventReplay.AuditEventID {
 		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
 	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
 	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
-	beforeHoldEvents = servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
-	beforeAuditEvents = servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
+	beforeHoldEvents = servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed")
+	beforeAuditEvents = servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed")
 	var agentReplay servedAgentReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplay)
 	requireServedLiveAgentAgentReplayResult(t, rt, agentReplayOriginal.EventID, agentReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.replay", agentReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
 		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
 	}
 	var agentReplayAgain servedAgentReplayProofResult
@@ -3744,7 +3744,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if agentReplayAgain.ReplayEventID != agentReplay.ReplayEventID || agentReplayAgain.AuditEventID != agentReplay.AuditEventID {
 		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
@@ -4438,7 +4438,6 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if !found {
 		t.Fatalf("%s terminal mailbox.list = %#v, want superseded card %s", rt.Backend, listed, cardID)
 	}
-
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
@@ -4456,10 +4455,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.RouteForInstancePath(runID),
-	})
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)})
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}
@@ -4484,20 +4480,25 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if changeCount != 1 {
 		t.Fatalf("%s terminal superseded changes for %s = %d, want 1", rt.Backend, cardID, changeCount)
 	}
-	if got := servedEventNameCountForRun(t, rt.DB, rt.Backend, runID, "mailbox.card_superseded"); got != 0 {
+	if got := servedEventNameCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, "mailbox.card_superseded"); got != 0 {
 		t.Fatalf("%s terminal mailbox.card_superseded events for %s = %d, want 0", rt.Backend, runID, got)
 	}
 }
 
-func servedEventNameCountForRun(t *testing.T, db *sql.DB, backend, runID, eventName string) int {
+func servedEventNameCountForRun(t *testing.T, reader receiverProofStateReader, backend, runID, eventName string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
-	args := []any{runID, eventName}
-	if backend == "postgres" {
-		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
+	switch backend {
+	case "postgres", "sqlite":
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunNamedEventStorage(ctx, reader, runID, eventName)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count run %s event name %s: %v", backend, runID, eventName, err)
 	}
 	return count
@@ -4628,12 +4629,12 @@ func servedEventNameByID(t *testing.T, db *sql.DB, backend, eventID string) stri
 	return strings.TrimSpace(name)
 }
 
-func requireServedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string, want int) {
+func requireServedEventNameCount(t *testing.T, reader receiverProofStateReader, backend, eventName string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventNameCount(t, db, backend, eventName)
+		got = servedEventNameCount(t, reader, backend, eventName)
 		if got == want {
 			return
 		}
@@ -4642,22 +4643,20 @@ func requireServedEventNameCount(t *testing.T, db *sql.DB, backend, eventName st
 	t.Fatalf("%s events named %s = %d, want %d", backend, eventName, got, want)
 }
 
-func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) int {
+func servedEventNameCount(t *testing.T, reader receiverProofStateReader, backend, eventName string) int {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
-		args = []any{eventName}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = ?`
-		args = []any{eventName}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountEventNameStorage(ctx, reader, eventName)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count event name %s: %v", backend, eventName, err)
 	}
 	return count

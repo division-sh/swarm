@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/eventname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
@@ -122,10 +123,16 @@ func currentEdit(fset *token.FileSet, file *ast.File, path string, pin pin) edit
 			continue
 		}
 		current := requestkey.Node(fn)
-		if current != pin.Before && current != pin.After {
+		previous, err := eventname.ReadPrevious(path, pin.Function, current)
+		must(err)
+		if previous != pin.Before && previous != pin.After {
 			panic("delivery status source escaped exact predecessor/successor: " + path + "/" + pin.Function)
 		}
-		return edit{fset.Position(fn.Pos()).Offset, fset.Position(fn.End()).Offset, pin.After}
+		after := pin.After
+		if current != previous {
+			after = current
+		}
+		return edit{fset.Position(fn.Pos()).Offset, fset.Position(fn.End()).Offset, after}
 	}
 	panic("required delivery status source disappeared: " + path + "/" + pin.Function)
 }

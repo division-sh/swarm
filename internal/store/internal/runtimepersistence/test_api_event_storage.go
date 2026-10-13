@@ -231,20 +231,6 @@ func ReadAPIRunStartRefusalStorageForTest(ctx context.Context, selected any, run
 	return out, nil
 }
 
-func CountEventNameStorageForTest(ctx context.Context, selected any, eventName string) (int, error) {
-	if err := validateChannelObservationOwner(selected); err != nil {
-		return 0, err
-	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name=$1`, eventName).Scan(&count)
-	})
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 func ReadAPIEventPublicationRefusalStorageForTest(ctx context.Context, selected any, eventName string) (APIEventPublicationRefusalStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return APIEventPublicationRefusalStorage{}, err
