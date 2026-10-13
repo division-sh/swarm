@@ -250,8 +250,6 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ev
 		if err != nil {
 			return runtimecontracts.HandlerRuleEntry{}, err
 		}
-		admitted.ID = rule.ID
-		admitted.Description = rule.Description
 		admitted.Condition = rule.Condition
 		admitted.PolicyRow = rule.PolicyRow
 		admitted.AdvancesTo = rule.AdvancesTo
