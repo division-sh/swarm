@@ -266,6 +266,9 @@ func checkFailureJobPlatforms(t *testing.T) {
 			} else if f.GOOS != "" || f.Source != "" || f.Problem == "" {
 				t.Fatalf("job label or planner invented authority: %+v", f)
 			}
+			if mode == "foreign-source" && !strings.Contains(f.Problem, "stale evidence") {
+				t.Fatalf("lost stale-source readback classification: %+v", f)
+			}
 		})
 	}
 }

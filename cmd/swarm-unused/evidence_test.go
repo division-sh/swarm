@@ -53,8 +53,15 @@ func TestEvidenceRejectsPolicyDilution(t *testing.T) {
 			e := validEvidence("linux")
 			head := e.SourceSHA
 			mutate(&e)
-			if err := validateEvidence(e, head, "linux"); err == nil {
+			err := validateEvidence(e, head, "linux")
+			if err == nil {
 				t.Fatal("accepted invalid evidence")
+			}
+			if name == "stale" && !strings.Contains(err.Error(), "stale evidence") {
+				t.Fatalf("lost stale-source classification: %v", err)
+			}
+			if name != "stale" && strings.Contains(err.Error(), "stale evidence") {
+				t.Fatalf("non-stale evidence misclassified: %v", err)
 			}
 		})
 	}
