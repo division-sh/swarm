@@ -139,6 +139,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					}
 					expected := parent.Plan
 					expected.BundleHash = facts[index].BundleHash()
+					expected.WorkflowVersion = loaded[index].source.WorkflowVersion()
 					results, err := runtimes[index].Pipeline.ReconcileDynamicFlowRuntimeReadinessPlans(ctx,
 						[]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: parent, Expected: expected}}, time.Now().UTC())
 					if err != nil || len(results) != 1 || !results[0].Changed {
@@ -216,8 +217,11 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				transition, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), facts[1])
 				if inspectErr != nil || len(transition.SourceTransitionRequired) != 1 || transition.SourceTransitionRequired[0].InstancePath != paths[1] ||
 					transition.SourceTransitionRequired[0].Plan.BundleHash != facts[0].BundleHash() ||
+					transition.SourceTransitionRequired[0].Plan.WorkflowVersion != loaded[0].source.WorkflowVersion() ||
 					!transition.SourceTransitionRequired[0].OwningRunSource.Matches(facts[1]) ||
-					len(transition.CurrentCompleted) != 1 || transition.CurrentCompleted[0].InstancePath != runIDs[1] || len(transition.CurrentPending) != 0 {
+					len(transition.CurrentCompleted) != 1 || transition.CurrentCompleted[0].InstancePath != runIDs[1] ||
+					transition.CurrentCompleted[0].Plan.BundleHash != facts[1].BundleHash() ||
+					transition.CurrentCompleted[0].Plan.WorkflowVersion != loaded[1].source.WorkflowVersion() || len(transition.CurrentPending) != 0 {
 					t.Fatalf("foreign transition projection = %#v err=%v", transition, inspectErr)
 				}
 			} else if !foreign.malformed {
