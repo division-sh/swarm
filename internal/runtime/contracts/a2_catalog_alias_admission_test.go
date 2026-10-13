@@ -18,7 +18,13 @@ func TestA2CatalogRejectsEmptyAliasInsideCollections(t *testing.T) {
 			}
 		})
 	}
-	for _, ref := range []string{"", "json", "jsonb"} {
+	t.Run("empty_reference", func(t *testing.T) {
+		resolved, err := (CatalogTypeReference{Catalog: catalog}).Resolve()
+		if _, typed := AsLoaderDiagnostic(err); !typed || resolved.Kind != "" {
+			t.Fatalf("empty reference gained dynamic evidence: resolved=%+v err=%v", resolved, err)
+		}
+	})
+	for _, ref := range []string{"json", "jsonb"} {
 		t.Run("explicit_dynamic_"+ref, func(t *testing.T) {
 			resolved, err := (CatalogTypeReference{Type: ref, Catalog: catalog}).Resolve()
 			if err != nil || resolved.Kind != CatalogTypeDynamic {

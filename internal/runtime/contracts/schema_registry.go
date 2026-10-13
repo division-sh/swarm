@@ -244,57 +244,32 @@ func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[strin
 
 func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {
 	typeRef = strings.TrimSpace(typeRef)
-	if typeRef == "" {
-		return map[string]any{}
-	}
 	if typeRef == runtimefailures.EnvelopeSchemaVersion+" envelope" {
 		return runtimefailures.EnvelopeJSONSchema()
 	}
-	if isEventListType(typeRef) {
+	resolved, err := (CatalogTypeReference{Type: typeRef, Catalog: types}).Resolve()
+	if err != nil {
+		// An invalid reference must never become an unconstrained schema. The
+		// compiled entry owner returns the typed resolution error before here.
+		return map[string]any{"type": typeRef}
+	}
+	return eventSchemaForCatalogType(resolved, types)
+}
+
+func eventSchemaForCatalogType(resolved ResolvedCatalogType, types TypeCatalogDocument) map[string]any {
+	switch resolved.Kind {
+	case CatalogTypeList:
 		return map[string]any{
 			"type":  "array",
-			"items": eventSchemaForTypeRefSchema(eventListItemType(typeRef), types, seen),
+			"items": eventSchemaForCatalogType(*resolved.Element, types),
 		}
-	}
-	if key, value, ok := parseWave1MapTypeRef(typeRef); ok {
-		keySchema := eventSchemaForTypeRefSchema(key, types, seen)
-		if keySchema["type"] != "string" {
-			return map[string]any{"type": typeRef}
-		}
-		return map[string]any{"type": "object", "propertyNames": keySchema, "additionalProperties": eventSchemaForTypeRefSchema(value, types, seen)}
-	}
-	if enumName, ok := eventEnumTypeName(types, typeRef); ok {
-		values := make([]any, 0, len(types.Enums[enumName].Values))
-		for _, value := range types.Enums[enumName].Values {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				continue
-			}
-			values = append(values, value)
-		}
-		return map[string]any{
-			"type": "string",
-			"enum": values,
-		}
-	}
-	if namedName, ok := eventNamedTypeName(types, typeRef); ok {
-		if _, ok := seen[namedName]; ok {
-			return map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{},
-				"additionalProperties": false,
-			}
-		}
-		seen[namedName] = struct{}{}
-		defer delete(seen, namedName)
-		resolved, err := (CatalogTypeReference{Type: namedName, Catalog: types}).Resolve()
-		if err != nil {
-			return map[string]any{}
-		}
+	case CatalogTypeMap:
+		return map[string]any{"type": "object", "propertyNames": eventSchemaForCatalogType(*resolved.Key, types), "additionalProperties": eventSchemaForCatalogType(*resolved.Value, types)}
+	case CatalogTypeObject:
 		props := make(map[string]any, len(resolved.Fields))
 		required := make([]string, 0, len(resolved.Fields))
 		for _, field := range resolved.Fields {
-			prop := eventSchemaForTypeRefSchema(field.TypeRef, types, seen)
+			prop := eventSchemaForCatalogType(field.Type, types)
 			applySchemaRefinements(prop, field.Refinements)
 			props[field.Name] = prop
 			if !field.IsOptional {
@@ -307,47 +282,46 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 			"required":             required,
 			"additionalProperties": false,
 		}
-	}
-	switch normalized := strings.ToLower(strings.TrimSpace(eventTypeName(types, typeRef))); normalized {
-	case "text", "string":
-		return map[string]any{"type": "string"}
-	case "integer":
+	case CatalogTypeText:
+		out := map[string]any{"type": "string"}
+		if resolved.Format != "" {
+			out["format"] = resolved.Format
+		}
+		if resolved.Name != "" {
+			values := make([]any, 0, len(types.Enums[resolved.Name].Values))
+			for _, value := range types.Enums[resolved.Name].Values {
+				if value = strings.TrimSpace(value); value != "" {
+					values = append(values, value)
+				}
+			}
+			out["enum"] = values
+		}
+		return out
+	case CatalogTypeInteger:
 		return map[string]any{"type": "integer"}
-	case "numeric", "number", "float", "double", "real":
+	case CatalogTypeNumber:
 		return map[string]any{"type": "number"}
-	case "boolean":
+	case CatalogTypeBoolean:
 		return map[string]any{"type": "boolean"}
-	case "timestamp":
-		return map[string]any{"type": "string", "format": "date-time"}
-	case "uuid":
-		return map[string]any{"type": "string", "format": "uuid"}
-	case "object":
-		return map[string]any{"type": "object"}
-	case "array":
-		return map[string]any{"type": "array"}
-	case "json", "jsonb":
-		return map[string]any{}
+	case CatalogTypeDynamic:
+		switch resolved.primitive {
+		case "json":
+			return map[string]any{}
+		case "object", "array":
+			return map[string]any{"type": resolved.primitive}
+		}
+		return map[string]any{"type": "invalid"}
 	default:
-		return map[string]any{"type": typeRef}
+		return map[string]any{"type": "invalid"}
 	}
-}
-
-func eventTypeName(types TypeCatalogDocument, typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	if scalar, ok := types.Scalars[typeRef]; ok {
-		return strings.TrimSpace(scalar.Base)
-	}
-	return typeRef
-}
-
-func eventSchemaForTypeRefSchema(raw string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {
-	schema, _ := eventSchemaForTypeRef(raw, types, seen)
-	return schema
 }
 
 // ValidateCatalogFieldSupply uses the same schema implication owner as tool
 // results. Structural equality alone does not preserve refinements or enums.
 func ValidateCatalogFieldSupply(subject string, supplied map[string]any, target EntityFieldDecl, catalog TypeCatalogDocument) error {
+	if _, err := (CatalogTypeReference{Type: target.Type, Catalog: catalog}).Resolve(); err != nil {
+		return fmt.Errorf("%s state type: %w", subject, err)
+	}
 	if (target.Type == "json" || target.Type == "jsonb") && target.Refinements.Empty() {
 		return nil
 	}
@@ -480,18 +454,6 @@ func asSchemaString(value any) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(value))
 	}
-}
-
-func eventNamedTypeName(types TypeCatalogDocument, typeRef string) (string, bool) {
-	typeName := eventTypeName(types, typeRef)
-	_, ok := types.Types[typeName]
-	return typeName, ok
-}
-
-func eventEnumTypeName(types TypeCatalogDocument, typeRef string) (string, bool) {
-	typeName := eventTypeName(types, typeRef)
-	_, ok := types.Enums[typeName]
-	return typeName, ok
 }
 
 func isEventListType(typeRef string) bool {
