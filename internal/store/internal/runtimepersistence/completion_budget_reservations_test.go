@@ -92,6 +92,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 				t.Fatalf("observe mock completion: %v", err)
 			}
 			settlement := budgetAccountingSettlement(mockAuthority.Target, runtimeeffects.CompletionUsageEstimated, runtimeeffects.StateSettled, 10)
+			bindCompletionEvidenceForTest(&settlement, mockHandle.Attempt().Authority.CompletionRequest, nil)
 			applyManagedCompletionTestSurface(t, settlement.AgentTurn, mockAuthority, "mock_python")
 			if _, err := mockHandle.SettleCompletion(mockCtx, settlement); err != nil {
 				t.Fatalf("settle mock completion: %v", err)
@@ -337,6 +338,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 		t.Fatalf("observe budget-accounted completion: %v", err)
 	}
 	settlement := budgetAccountingSettlement(authority.Target, exactness, state, cost)
+	bindCompletionEvidenceForTest(&settlement, handle.Attempt().Authority.CompletionRequest, []runtimeeffects.CompletionModelObservation{{Model: "budget-test", Source: runtimeeffects.CompletionModelResponse}})
 	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, "openai_compatible")
 	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle budget-accounted completion: %v", err)

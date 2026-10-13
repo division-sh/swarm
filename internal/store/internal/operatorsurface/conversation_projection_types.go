@@ -10,6 +10,7 @@ func operatorLiveTurnFromPublic(turn *operatorread.OperatorPublicConversationTur
 		return nil
 	}
 	out := &operatorread.OperatorLiveTurn{
+		CompletionEvidence: turn.CompletionEvidence.Clone(), ResolvedModel: turn.ResolvedModel,
 		TurnID: turn.TurnID, TaskID: turn.TaskID, ParseOK: turn.ParseOK,
 		AssistantVisibleOutput: turn.AssistantVisibleOutput, Outcome: turn.Outcome,
 	}
@@ -37,6 +38,7 @@ func enrichOperatorProjectionWithPublicTurn(projection *operatorAgentProjection,
 	projection.CurrentTaskID = turn.TaskID
 	projection.DiagnosisActive = operatorAgentDiagnosisActiveFromLatestTurn(turn.TurnID, turn.TaskID, turn.EntityID)
 	projection.LastTurnRef = &operatorread.OperatorTurnRef{
+		CompletionEvidence: turn.CompletionEvidence.Clone(), ResolvedModel: turn.ResolvedModel,
 		TurnID: turn.TurnID, CompletedAt: turn.CompletedAt, ParseOK: turn.ParseOK,
 		Failure: runtimefailures.CloneEnvelope(turn.Failure),
 	}

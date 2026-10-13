@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
@@ -155,10 +156,12 @@ type agentSessionRef struct {
 }
 
 type agentTurnRef struct {
-	TurnID      string                    `json:"turn_id"`
-	CompletedAt string                    `json:"completed_at"`
-	ParseOK     *bool                     `json:"parse_ok"`
-	Failure     *runtimefailures.Envelope `json:"failure,omitempty"`
+	CompletionEvidence runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel      string                            `json:"resolved_model,omitempty"`
+	TurnID             string                            `json:"turn_id"`
+	CompletedAt        string                            `json:"completed_at"`
+	ParseOK            *bool                             `json:"parse_ok"`
+	Failure            *runtimefailures.Envelope         `json:"failure,omitempty"`
 }
 
 var agentValidStatuses = map[string]struct{}{
@@ -524,6 +527,9 @@ func validateAgentDetailResult(result agentDetailResult) error {
 		}
 	}
 	if ref := result.LastTurnRef; ref != nil {
+		if err := validateCLICompletionEvidence("last_turn_ref", ref.CompletionEvidence, ref.ResolvedModel); err != nil {
+			return err
+		}
 		if strings.TrimSpace(ref.TurnID) == "" {
 			return fmt.Errorf("malformed agent.get result: last_turn_ref.turn_id is required")
 		}
@@ -553,6 +559,9 @@ func validateAgentDiagnosisResult(result agentDiagnosisResult) error {
 		}
 	}
 	if ref := result.LastTurnRef; ref != nil {
+		if err := validateCLICompletionEvidence("last_turn_ref", ref.CompletionEvidence, ref.ResolvedModel); err != nil {
+			return err
+		}
 		if strings.TrimSpace(ref.TurnID) == "" {
 			return fmt.Errorf("malformed agent.diagnose result: last_turn_ref.turn_id is required")
 		}
@@ -938,6 +947,7 @@ func writeAgentDiagnosisResult(out io.Writer, result agentDiagnosisResult) {
 	}
 	if ref := result.LastTurnRef; ref != nil {
 		value := fmt.Sprintf("%s, completed %s, parsed %t", ref.TurnID, ref.CompletedAt, *ref.ParseOK)
+		value += ", " + cliCompletionEvidenceSummary(ref.CompletionEvidence)
 		if ref.Failure != nil {
 			value += ", failure " + eventObservationFailureSummary(ref.Failure)
 		}
@@ -1016,6 +1026,7 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	}
 	if ref := result.LastTurnRef; ref != nil {
 		value := fmt.Sprintf("%s, completed %s, parsed %t", ref.TurnID, ref.CompletedAt, *ref.ParseOK)
+		value += ", " + cliCompletionEvidenceSummary(ref.CompletionEvidence)
 		if ref.Failure != nil {
 			value += ", failure " + eventObservationFailureSummary(ref.Failure)
 		}

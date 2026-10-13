@@ -838,8 +838,10 @@ func validateAgentUsageResult(item operatorread.OperatorAgentUsage) error {
 		if strings.TrimSpace(row.Transport) == "" {
 			return fmt.Errorf("agent.usage owner returned malformed result: %s.transport is required", prefix)
 		}
-		if strings.TrimSpace(row.ResolvedModel) == "" {
-			return fmt.Errorf("agent.usage owner returned malformed result: %s.resolved_model is required", prefix)
+		if row.CompletionEvidence != nil {
+			if err := row.CompletionEvidence.Validate(); err != nil || row.ResolvedModel != row.CompletionEvidence.ResolvedModel() {
+				return fmt.Errorf("agent.usage owner returned malformed completion evidence: %s: %v", prefix, err)
+			}
 		}
 		if err := validateAgentUsageTotals(prefix+".totals", row.Totals); err != nil {
 			return err

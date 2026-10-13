@@ -280,7 +280,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 			Failure:        agentTurnFailure(lastErr, "anthropic_turn"),
 		}, nil)
 		if dispatch != nil {
-			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
 				return nil, errors.Join(lastErr, settleErr)
 			}
 		}
@@ -314,7 +314,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 			RequestPayload: reqJSON, ResponseRaw: rawResp, ParseOK: false, Latency: latency,
 			Failure: agentTurnFailure(usageErr, "anthropic_usage"),
 		}, nil)
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableObservedCompletionUsage(usage.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
 			return nil, errors.Join(usageErr, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -323,7 +323,6 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		s.ParseFailures++
 		return nil, usageErr
 	}
-	usage.Model = reqBody.Model
 	if err := bindCompletionProjection(dispatch, s, message, managed); err != nil {
 		return nil, err
 	}
@@ -337,7 +336,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		Latency:        latency,
 		RetryCount:     0,
 	}, &resp)
-	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
+	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionObservedUsage(usage.InputTokens, usage.OutputTokens, usage.Model), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
 	if !settled.Committed {
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
@@ -374,6 +373,7 @@ func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile l
 		return nil, anthropicResponse{}, nil, err
 	}
 	defer release()
+	ctx = withCompletionRequest(ctx, profile, model)
 	raw, response, dispatch, err := r.sendRequest(ctx, payload, managed)
 	if dispatch != nil {
 		dispatch.providerModel = model
@@ -613,8 +613,8 @@ func extractUsageTokensFromJSON(raw []byte) (UsageTokens, bool) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return UsageTokens{}, false
 	}
-	if obj.Usage.InputTokens == nil || obj.Usage.OutputTokens == nil {
-		return UsageTokens{}, false
+	if obj.Usage.InputTokens == nil || obj.Usage.OutputTokens == nil || *obj.Usage.InputTokens < 0 || *obj.Usage.OutputTokens < 0 {
+		return UsageTokens{Model: obj.Model}, false
 	}
 	return UsageTokens{
 		InputTokens:  *obj.Usage.InputTokens,

@@ -103,7 +103,7 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
 			"agent":               agentSummaryResult("agent-1", "reviewer", "running"),
 			"current_session_ref": map[string]any{"session_id": "session-1", "started_at": "2026-05-18T03:00:00Z"},
-			"last_turn_ref":       map[string]any{"turn_id": "turn-1", "completed_at": "2026-05-18T03:05:00Z", "parse_ok": parseOK},
+			"last_turn_ref":       map[string]any{"turn_id": "turn-1", "completed_at": "2026-05-18T03:05:00Z", "parse_ok": parseOK, "completion_evidence": completionEvidenceFixtureForCLI()},
 		})
 	}))
 	defer server.Close()

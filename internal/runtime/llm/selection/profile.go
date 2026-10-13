@@ -111,6 +111,22 @@ type AgentExecutionSelectionInput struct {
 
 type EnvLookup func(string) (string, bool)
 
+func ResolveProviderContractProfile(runtimeMode, provider, transport string) (Profile, error) {
+	var selected Profile
+	for _, profile := range profiles {
+		if profile.Active && profile.RuntimeMode == runtimeMode && profile.Provider == provider && profile.Transport == transport {
+			if selected.ID != "" {
+				return Profile{}, fmt.Errorf("provider contract matches multiple profiles")
+			}
+			selected = profile
+		}
+	}
+	if selected.ID == "" {
+		return Profile{}, fmt.Errorf("provider contract has no active profile")
+	}
+	return selected, nil
+}
+
 const (
 	ModelAliasCheap    = "cheap"
 	ModelAliasRegular  = "regular"

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
@@ -135,17 +136,18 @@ type forkChatForkPoint struct {
 }
 
 type forkChatTurn struct {
-	TurnIndex        int                       `json:"turn_index"`
-	TurnID           string                    `json:"turn_id"`
-	TriggerEventID   string                    `json:"trigger_event_id,omitempty"`
-	TriggerEventType string                    `json:"trigger_event_type,omitempty"`
-	RequestPayload   map[string]any            `json:"request_payload,omitempty"`
-	ResponsePayload  map[string]any            `json:"response_payload,omitempty"`
-	ToolCalls        []map[string]any          `json:"tool_calls,omitempty"`
-	TurnBlocks       []map[string]any          `json:"turn_blocks,omitempty"`
-	ParseOK          *bool                     `json:"parse_ok"`
-	LatencyMS        *int                      `json:"latency_ms"`
-	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
+	Completions      []operatorread.OperatorConversationCompletion `json:"completions"`
+	TurnIndex        int                                           `json:"turn_index"`
+	TurnID           string                                        `json:"turn_id"`
+	TriggerEventID   string                                        `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                                        `json:"trigger_event_type,omitempty"`
+	RequestPayload   map[string]any                                `json:"request_payload,omitempty"`
+	ResponsePayload  map[string]any                                `json:"response_payload,omitempty"`
+	ToolCalls        []map[string]any                              `json:"tool_calls,omitempty"`
+	TurnBlocks       []map[string]any                              `json:"turn_blocks,omitempty"`
+	ParseOK          *bool                                         `json:"parse_ok"`
+	LatencyMS        *int                                          `json:"latency_ms"`
+	Failure          *runtimefailures.Envelope                     `json:"failure,omitempty"`
 }
 
 type forkChatSnapshot struct {
@@ -723,6 +725,17 @@ func validateForkChatForkPoint(prefix string, point forkChatForkPoint) error {
 }
 
 func validateForkChatTurn(prefix string, turn forkChatTurn) error {
+	if len(turn.Completions) == 0 {
+		return fmt.Errorf("malformed %s: ordered completions are required", prefix)
+	}
+	for i, completion := range turn.Completions {
+		if completion.Ordinal != i+1 || (completion.ExecutionMode != "live" && completion.ExecutionMode != "mock") {
+			return fmt.Errorf("malformed %s: completion ordering or mode", prefix)
+		}
+		if err := completion.Usage.ValidateEvidence(); err != nil {
+			return fmt.Errorf("malformed %s completion: %w", prefix, err)
+		}
+	}
 	if turn.TurnIndex < 1 {
 		return fmt.Errorf("malformed %s: turn_index must be at least 1", prefix)
 	}
@@ -995,6 +1008,9 @@ func writeForkChatChatSummary(out io.Writer, result forkChatChatResult) {
 	)
 	if message := forkChatAssistantMessage(turn); message != "" {
 		fmt.Fprintf(out, "assistant=%s\n", message)
+	}
+	for _, completion := range turn.Completions {
+		fmt.Fprintf(out, "completion %d: %s\n", completion.Ordinal, cliCompletionEvidenceSummary(completion.Usage.Evidence))
 	}
 }
 

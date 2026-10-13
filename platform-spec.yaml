@@ -18480,6 +18480,7 @@ platform_tables:
             retry_count                     INTEGER NOT NULL DEFAULT 0,
             agent_frame_bytes                BYTEA NOT NULL,
             completion_attempt_id           UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            completion_evidence             JSONB NOT NULL,
             execution_mode                  TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             resolved_model                  TEXT,
             usage_exactness                 TEXT CHECK (usage_exactness IS NULL OR usage_exactness IN ('exact', 'estimated', 'unavailable')),
@@ -18951,11 +18952,12 @@ platform_tables:
       ddl: |
         CREATE TABLE conversation_fork_turn_completions (
             completion_id                  UUID PRIMARY KEY,
+            completion_evidence            JSONB NOT NULL,
             fork_turn_id                   UUID NOT NULL REFERENCES conversation_fork_turns(fork_turn_id) ON DELETE CASCADE,
             ordinal                        INTEGER NOT NULL CHECK (ordinal > 0),
             attempt_id                     UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
             execution_mode                 TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
-            resolved_model                 TEXT NOT NULL,
+            resolved_model                 TEXT,
             usage_exactness                TEXT NOT NULL CHECK (usage_exactness IN ('exact', 'estimated', 'unavailable')),
             input_tokens                   BIGINT,
             output_tokens                  BIGINT,
@@ -19013,6 +19015,7 @@ platform_tables:
         CREATE TABLE spend_ledger (
             ledger_id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             external_effect_attempt_id UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            completion_evidence        JSONB,
             execution_mode             TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             run_id                     UUID NOT NULL,
             entity_id                  UUID,
@@ -19028,7 +19031,7 @@ platform_tables:
             backend_profile            TEXT NOT NULL DEFAULT 'unknown',
             provider                   TEXT NOT NULL DEFAULT 'unknown',
             transport                  TEXT NOT NULL DEFAULT 'unknown',
-            resolved_model             TEXT NOT NULL DEFAULT 'unknown',
+            resolved_model             TEXT,
             input_tokens               INTEGER NOT NULL DEFAULT 0,
             output_tokens              INTEGER NOT NULL DEFAULT 0,
             cost_usd                   NUMERIC(10,6) NOT NULL DEFAULT 0,
@@ -19037,6 +19040,7 @@ platform_tables:
             accounting_basis            TEXT CHECK (accounting_basis IS NULL OR accounting_basis = 'accounting_unavailable_exhaustion'),
             created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (external_effect_attempt_id IS NOT NULL OR accounting_basis IS NULL),
+            CHECK ((external_effect_attempt_id IS NULL) = (completion_evidence IS NULL)),
             CHECK ((agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (NULLIF(TRIM(agent_name_owner), '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND flow_instance = '') OR (agent_route_presence = 'present' AND NULLIF(TRIM(agent_flow_scope_key), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_id), '') IS NOT NULL AND NULLIF(TRIM(flow_instance), '') IS NOT NULL)))),
             INDEX idx_spend_flow (run_id, flow_instance, created_at),
             INDEX idx_spend_agent (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, flow_instance, created_at),
@@ -33566,7 +33570,14 @@ api_specification:
         - turn_id
         - completed_at
         - parse_ok
+        - completion_evidence
         properties:
+          completion_evidence:
+            $ref: '#/components/schemas/CompletionEvidence'
+          resolved_model:
+            type: string
+            minLength: 1
+            description: Unambiguous provider-observed label; omitted when unavailable or ambiguous.
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
           completed_at:
@@ -34137,6 +34148,140 @@ api_specification:
             $ref: '#/components/schemas/AgentDiagnosisActive'
           last_tool_outcome:
             $ref: '#/components/schemas/AgentDiagnosisLastToolOutcome'
+      CompletionRequest:
+        type: object
+        additionalProperties: false
+        required: [model_alias, requested_model, backend_profile, provider, transport]
+        description: Exact request selection frozen at provider-attempt admission, not a provider observation or a current configuration lookup.
+        properties:
+          model_alias:
+            type: string
+            minLength: 1
+          requested_model:
+            type: string
+            minLength: 1
+          backend_profile:
+            type: string
+            enum: [anthropic, claude_cli, openai_responses, openai_compatible, mock]
+          provider:
+            type: string
+            minLength: 1
+          transport:
+            type: string
+            enum: [api, cli]
+      CompletionModelObservation:
+        type: object
+        additionalProperties: false
+        required: [model, source]
+        description: A provider-reported label, not certification of a concrete model version. CLI terminal and modelUsage contributors are distinct roles; contributor amounts never create additional charges.
+        properties:
+          model:
+            type: string
+            minLength: 1
+          source:
+            type: string
+            enum: [response.model, claude.result.model, claude.result.modelUsage]
+          input_tokens:
+            type: integer
+            minimum: 0
+          output_tokens:
+            type: integer
+            minimum: 0
+          cache_read_input_tokens:
+            type: integer
+            minimum: 0
+          cache_creation_input_tokens:
+            type: integer
+            minimum: 0
+          provider_reported_cost_usd:
+            type: number
+            minimum: 0
+      CompletionEvidenceProblem:
+        type: object
+        additionalProperties: false
+        required: [source, dimension, code]
+        description: Invalid or absent provider evidence is explicit without erasing valid independent dimensions. Private raw responses remain in their existing owner only.
+        properties:
+          source:
+            type: string
+            enum: [response.model, claude.result.model, claude.result.modelUsage, claude.result.usage, claude.result.total_cost_usd]
+          dimension:
+            type: string
+            enum: [model, tokens, cost]
+          code:
+            type: string
+            enum: [absent, invalid]
+      CompletionEvidence:
+        type: object
+        additionalProperties: false
+        required: [request, models, cost_provenance]
+        description: Immutable, selected-store completion evidence. Models are source-tagged and sorted by source then exact label for stable encoding, never for first-model selection. Price provenance is independent of token exactness.
+        properties:
+          request:
+            $ref: '#/components/schemas/CompletionRequest'
+          models:
+            type: array
+            items:
+              $ref: '#/components/schemas/CompletionModelObservation'
+          cost_provenance:
+            type: string
+            enum: [provider_reported, locally_estimated, unavailable, reservation_exhaustion]
+          provider_reported_cost_usd:
+            type: number
+            minimum: 0
+            description: Reported terminal total; zero differs from absent. Not recomputed from contributor prices.
+          problems:
+            type: array
+            items:
+              $ref: '#/components/schemas/CompletionEvidenceProblem'
+      CompletionUsage:
+        type: object
+        additionalProperties: false
+        required: [completion_evidence, usage_exactness]
+        properties:
+          completion_evidence:
+            $ref: '#/components/schemas/CompletionEvidence'
+          resolved_model:
+            type: string
+            minLength: 1
+          usage_exactness:
+            type: string
+            enum: [exact, estimated, unavailable]
+          input_tokens:
+            type: integer
+            minimum: 0
+          output_tokens:
+            type: integer
+            minimum: 0
+          cache_read_input_tokens:
+            type: integer
+            minimum: 0
+          cache_creation_input_tokens:
+            type: integer
+            minimum: 0
+          cache_creation_5m_input_tokens:
+            type: integer
+            minimum: 0
+          cache_creation_1h_input_tokens:
+            type: integer
+            minimum: 0
+          provider_reported_cost_usd:
+            type: number
+            minimum: 0
+      ConversationCompletion:
+        type: object
+        additionalProperties: false
+        required: [attempt_id, ordinal, execution_mode, usage]
+        properties:
+          attempt_id:
+            $ref: '#/components/schemas/OpaqueId'
+          ordinal:
+            type: integer
+            minimum: 1
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
+          usage:
+            $ref: '#/components/schemas/CompletionUsage'
       UsageAccounting:
         type: string
         enum:
@@ -34168,7 +34313,11 @@ api_specification:
         - ledger_entries
         - input_tokens
         - output_tokens
+        - cost_usd
         - estimated_cost_usd
+        - provider_reported_cost_usd
+        - reservation_exhaustion_usd
+        - unattributed_cost_usd
         properties:
           ledger_entries:
             type: integer
@@ -34183,6 +34332,20 @@ api_specification:
             type: number
             minimum: 0
             description: Guardrail cost estimate from BudgetTracker pricing, not provider billing truth.
+          cost_usd:
+            type: number
+            minimum: 0
+            description: Total canonical ledger amount. It is not certified provider billing and does not imply token or price exactness.
+          provider_reported_cost_usd:
+            type: number
+            minimum: 0
+          reservation_exhaustion_usd:
+            type: number
+            minimum: 0
+          unattributed_cost_usd:
+            type: number
+            minimum: 0
+            description: Explicit manual/non-completion spend has no provider-attempt evidence; no reported model or price is inferred.
       AgentUsageByAccounting:
         type: object
         additionalProperties: false
@@ -34206,7 +34369,7 @@ api_specification:
         - backend_profile
         - provider
         - transport
-        - resolved_model
+        - cost_provenance
         - cost_display
         - totals
         properties:
@@ -34221,7 +34384,7 @@ api_specification:
           model:
             type: string
             minLength: 1
-            description: Concrete model string used for legacy grouping and guardrail cost estimation.
+            description: Frozen requested model used for guardrail cost estimation, never replaced by the provider-observed label.
           model_alias:
             type: string
             minLength: 1
@@ -34241,7 +34404,12 @@ api_specification:
           resolved_model:
             type: string
             minLength: 1
-            description: Concrete provider model resolved from model_alias for backend_profile at write time.
+            description: Provider-observed terminal label or one unambiguous contributor; omitted when missing or ambiguous. No request/config fallback.
+          completion_evidence:
+            $ref: '#/components/schemas/CompletionEvidence'
+          cost_provenance:
+            type: string
+            enum: [provider_reported, locally_estimated, unavailable, reservation_exhaustion, unattributed]
           cost_display:
             type: string
             minLength: 1
@@ -34461,7 +34629,13 @@ api_specification:
         - activity_counts
         - parse_ok
         - execution_mode
+        - completion_evidence
         properties:
+          completion_evidence:
+            $ref: '#/components/schemas/CompletionEvidence'
+          resolved_model:
+            type: string
+            minLength: 1
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
           ordinal:
@@ -34500,7 +34674,13 @@ api_specification:
         - activity
         - parse_ok
         - execution_mode
+        - completion_evidence
         properties:
+          completion_evidence:
+            $ref: '#/components/schemas/CompletionEvidence'
+          resolved_model:
+            type: string
+            minLength: 1
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
           ordinal:
@@ -34758,7 +34938,14 @@ api_specification:
         - parse_ok
         - latency_ms
         - execution_mode
+        - completions
         properties:
+          completions:
+            type: array
+            minItems: 1
+            description: Immutable ordered provider-call children, each retaining its own request, observations, totals and provenance. No parent-config reconstruction.
+            items:
+              $ref: '#/components/schemas/ConversationCompletion'
           turn_index:
             type: integer
             minimum: 1
@@ -42112,10 +42299,35 @@ llm_completion_execution_authority:
     post_commit_budget_projection: After a transaction commits a spend row, the completion controller synchronously asks the runtime budget projector to re-read retained selected-store spend for the affected scopes. The projector updates warning/throttle/emergency suppression state and emits platform.budget_threshold_crossed without writing spend. Projection failure never reopens or redispatches the committed provider attempt. Startup recovery invokes the mandatory error-returning recovery projection owner from the process context without requiring or synthesizing a run ID. That owner evaluates system then global scope before using one backend-neutral selected-store query to enumerate active (run_id, entity_id) projection targets across every run. Each target retains runs.bundle_hash, exact flow template/instance and raw stage; the corresponding admitted source and compiled flow topology classify terminality before entity-ID deduplication and entity-scope evaluation. A root terminal-name list is never applied to other flows or runs. Distinct source artifacts are loaded at most once per recovery projection; unavailable, mismatched, or corrupt source/stage evidence fails closed. A projection read or event failure is returned to startup recovery and records explicit degraded recovery instead of silently continuing. Repeating recovery over unchanged retained spend is idempotent within the active runtime projection.
     recovery: Expired authorized attempts become terminal_failure without dispatch. Expired launched/response_observed attempts become outcome_uncertain, persist unavailable target evidence, create at most one pessimistic accounting row when positive reservations existed, release reservations, and never redispatch.
   usage:
-    fields: [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, provider_reported_cost_usd, exactness, resolved_model]
+    fields: [completion_evidence, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, provider_reported_cost_usd, exactness, resolved_model]
     exactness: [exact, estimated, unavailable]
     constraints: Exact or estimated usage requires non-negative input/output together. Unavailable usage requires both absent. Partial pairs, negative cache/cost values, and inconsistent cache subtotals fail closed at typed and database boundaries.
-    claude: Direct JSON and stream-json consume terminal ResultMessage usage. Byte-count token estimation is forbidden.
+    request_owner: >-
+      Existing provider-attempt admission freezes model_alias, requested_model, backend_profile, provider and transport
+      as provider_request in the exact operation/attempt authority evidence. Ordinary and selected turns consume the
+      admitted frame; fork-chat consumes its exact admitted request. Settlement must agree with the persisted request
+      even if a caller reconstructs exported authority fields. Recovery never derives request identity from current
+      aliases, agent configuration, provider output or a successor frame.
+    observation_owner: >-
+      CompletionEvidence inside the existing effects owner retains all source-tagged model observations. API response.model
+      is distinct from the requested model. CLI claude.result.model is the terminal role; claude.result.modelUsage is the
+      full contributor collection. A terminal model or exactly one contributor supplies resolved_model; multiple contributors
+      without a terminal label or missing observations leave it absent. Sorting never chooses the first model. Labels are
+      observations, not certification of a pinned concrete model. Mock work never manufactures provider labels or billing.
+    price_owner: >-
+      Token exactness and price provenance are independent. Reported terminal total (including zero), local estimate,
+      unavailable price and reservation-exhaustion accounting remain distinct. Estimation uses the frozen requested model
+      and existing rates, not the observed label. Per-model amounts never create a second charge. Missing or invalid
+      dimensions retain valid independent observations and explicit problem/failure evidence. Unavailable-token reservation
+      exhaustion, exactly-once spend keys and all budget arithmetic remain unchanged.
+    consumption: >-
+      The immutable target and spend rows retain the typed evidence atomically. Drains, evidence-only results and committed
+      continuations clone it without mutable provider/caller aliases; startup recovery preserves the frozen request but
+      invents no observation, tokens or price and never redispatches. Conversation detail/list/latest and agent last-turn
+      projections, both-store SQL usage grouping, ordered fork-chat children, API and CLI consume this evidence, never raw
+      response/config fallbacks. Manual non-completion spend has no completion evidence or inferred observed model and is
+      explicitly unattributed. Existing field/result/message budgets apply without truncation or budget increases.
+    claude: Direct JSON and stream-json consume the last applicable terminal ResultMessage, never init metadata. Byte-count token estimation is forbidden.
   budget_admission:
     scope_order: [system, global, entity]
     applicability: A positive system cap always applies. A positive entity cap applies when an entity exists. A positive global cap applies only when no entity exists.

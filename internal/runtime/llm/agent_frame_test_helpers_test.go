@@ -126,8 +126,15 @@ func requireManagedSettlementProviderSelection(t testing.TB, settlements []runti
 		t.Fatal("managed completion produced no settlements")
 	}
 	for index, settlement := range settlements {
-		if settlement.Usage.ResolvedModel != "test-model" || settlement.Spend.ModelAlias != testManagedModelAlias || settlement.Spend.ResolvedModel != "test-model" {
+		request := settlement.Usage.Evidence.Request
+		if request.RequestedModel != "test-model" || request.ModelAlias != testManagedModelAlias ||
+			settlement.Spend.Model != request.RequestedModel || settlement.Spend.ModelAlias != request.ModelAlias ||
+			settlement.Usage.ResolvedModel != settlement.Usage.Evidence.ResolvedModel() ||
+			settlement.Spend.ResolvedModel != settlement.Usage.ResolvedModel {
 			t.Fatalf("managed settlement %d provider selection = usage %#v spend %#v", index, settlement.Usage, settlement.Spend)
+		}
+		if err := settlement.Usage.Evidence.Validate(); err != nil {
+			t.Fatalf("managed settlement %d evidence: %v", index, err)
 		}
 	}
 }

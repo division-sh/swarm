@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/operatorread"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -449,6 +451,8 @@ func validForkChatChatResult(forkID, turnID string) map[string]any {
 
 func validForkChatTurn(turnID string) map[string]any {
 	return map[string]any{
+		"completions": []operatorread.OperatorConversationCompletion{{AttemptID: "attempt-1", Ordinal: 1, ExecutionMode: "live", Usage: runtimeeffects.CompletionUsage{
+			Evidence: completionEvidenceFixtureForCLI(), Exactness: runtimeeffects.CompletionUsageUnavailable}}},
 		"turn_index":       1,
 		"turn_id":          turnID,
 		"request_payload":  map[string]any{"message": "inspect fork"},

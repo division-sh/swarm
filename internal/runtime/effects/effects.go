@@ -250,6 +250,7 @@ func RegistrationFor(adapter string) (Registration, bool) {
 }
 
 type AuthorizeRequest struct {
+	CompletionRequest  CompletionRequest
 	TurnTimeout        *timeridentity.TurnTimeout
 	SessionGrantID     string
 	SessionLockOwner   string
@@ -1343,6 +1344,7 @@ func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
 }
 
 func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSettlement) (CompletionSettlementResult, error) {
+	settlement = settlement.Clone()
 	if h == nil || h.controller == nil || h.controller.store == nil {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
@@ -1491,6 +1493,9 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		}, err)
 	}
 	if registration.Kind == KindProviderTurn {
+		if req.CompletionRequest == (CompletionRequest{}) {
+			req.CompletionRequest, _ = ctx.Value(completionRequestContextKey{}).(CompletionRequest)
+		}
 		req.TurnTimeout = turnTimeoutFromContext(ctx)
 		if req.TurnTimeout != nil {
 			if err := req.TurnTimeout.Validate(); err != nil {
@@ -1540,6 +1545,12 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		} else if req.CapabilitySurface != nil || req.AgentFrame != nil {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "target_kind": authority.Target.Kind})
 		}
+		var requestErr error
+		authority, requestErr = BindCompletionRequest(authority, req)
+		if requestErr != nil {
+			return Attempt{}, requestErr
+		}
+		req.CompletionRequest = authority.CompletionRequest
 	} else if registration.Kind == KindProviderStartupProbe {
 		if req.AgentFrame != nil || req.CapabilitySurface == nil || !StartupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})

@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -133,7 +134,7 @@ func (claudeAttemptProofWorkspace) ResolveWorkspace(context.Context, runtimeacto
 }
 
 type claudeAttemptProofAgent struct {
-	runtime      *runtimellm.ClaudeCLIRuntime
+	runtime      runtimellm.Runtime
 	config       runtimeactors.AgentConfig
 	calls        *atomic.Int32
 	conversation *runtimellm.Conversation
@@ -166,7 +167,14 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 		if err != nil {
 			return nil, err
 		}
-		providerContract := a.runtime.ProviderContract()
+		profile, err := llmselection.ResolveActiveBackend(a.config.ResolvedLLMBackend)
+		if err != nil {
+			return nil, err
+		}
+		providerContract, err := runtimellm.RequireProviderContractForProfile(profile, a.runtime)
+		if err != nil {
+			return nil, err
+		}
 		a.conversation, err = runtimellm.NewManagedConversation(runtimeagentframe.SessionSeed{
 			AgentIdentity:  a.config.Identity,
 			Role:           a.config.Role,
