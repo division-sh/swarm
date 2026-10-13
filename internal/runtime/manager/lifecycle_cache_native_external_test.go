@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -43,6 +44,8 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				return snapshot
 			}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
 				return admitNativeReconfigureCandidate(t, selected, candidate)
+			}, func(controller agentcontrol.Controller) {
+				proveNativeAgentRestartAPICompletionLoss(t, selected, record.Config, controller)
 			})
 		})
 	}

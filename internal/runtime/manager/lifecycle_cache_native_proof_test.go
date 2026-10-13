@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -46,7 +47,7 @@ func (s *agentRowResponseLoss) CommitAgentLifecycleTransition(ctx context.Contex
 	return result, nil
 }
 
-func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission) {
+func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission, publicRestart func(agentcontrol.Controller)) {
 	t.Helper()
 	binding, ok := store.(processExecutionBindingProvider)
 	if !ok {
@@ -166,6 +167,8 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	if !reflect.DeepEqual(historicalSnapshot, snapshot()) {
 		t.Fatal("historical replay changed durable evidence")
 	}
+	publicRestart(am)
+	historicalSnapshot = snapshot()
 	view, _, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
 	if err != nil {
 		t.Fatal(err)

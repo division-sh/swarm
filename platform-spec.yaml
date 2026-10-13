@@ -41227,6 +41227,9 @@ agent_lifecycle_authority:
       Confirming a committed successor fences predecessor admission immediately,
       while preserving its accepted-work settlement and resource joins. Exact retry
       adopts that outcome without reissuing the native mutation.
+      Until that adoption finishes, a predecessor-configuration no-op refuses rather
+      than reporting obsolete state as current; it cannot construct a candidate or
+      change durable evidence.
       No store-less or session-registry lifecycle projection exists. Cleanup failure
       fences and retains physical responsibility without inventing a durable failed phase.
   lifecycle_token:

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -431,6 +432,8 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	})
 	before := loadStandingMemorySessions(t, backend, storeLocation)
 	requireStandingMemorySessionShape(t, before)
+	beforeTranscript := readStandingPublicTranscript(t, firstURL, binding.RunID, 3)
+	proveStandingAgentRestartLostReply(t, firstURL, backend, storeLocation, before)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -458,6 +461,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		}
 	}
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
+	if afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 3); !reflect.DeepEqual(beforeTranscript, afterTranscript) {
+		t.Fatalf("joined restart changed ordered public turns: before=%+v after=%+v", beforeTranscript, afterTranscript)
+	}
 	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
 	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
 	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
@@ -474,6 +480,13 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		"Mock turn 1: hello 103",
 		"Mock turn 3: hello 104",
 	})
+	afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 4)
+	for sessionID, turns := range beforeTranscript {
+		current := afterTranscript[sessionID]
+		if len(current) < len(turns) || !reflect.DeepEqual(turns, current[:len(turns)]) {
+			t.Fatalf("resumed session %s changed immutable transcript: before=%+v after=%+v", sessionID, turns, current)
+		}
+	}
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
