@@ -10,6 +10,16 @@ type StandaloneRunStorage struct {
 	RunID, Status, TriggerEventType string
 }
 
+type StopRunControlClockStorage struct{ Status, Control, Updated string }
+
+func ReadStopRunControlClockStorageTx(ctx context.Context, tx *sql.Tx, runID string) (StopRunControlClockStorage, error) {
+	var out StopRunControlClockStorage
+	if err := tx.QueryRowContext(ctx, `SELECT r.status,c.control_status,CAST(c.updated_at AS TEXT) FROM runs r JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&out.Status, &out.Control, &out.Updated); err != nil {
+		return StopRunControlClockStorage{}, err
+	}
+	return out, nil
+}
+
 type PostgresRunCompletionIdentityStorage struct{ RunID, BundleHash string }
 type PostgresRunStatusClockStorage struct {
 	Status  string

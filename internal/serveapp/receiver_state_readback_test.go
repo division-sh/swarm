@@ -38,6 +38,22 @@ func readServedEventNameCountForRun(ctx context.Context, reader servedEventCount
 	return count, nil
 }
 
+func readServedStopNonterminalCount(ctx context.Context, reader servedEventCountReader, runID string) (int, error) {
+	if reader == nil {
+		return 0, fmt.Errorf("served stop count requires the original selected reader")
+	}
+	var count int
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunStopNonterminalDeliveries(ctx, reader, runID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func requireReceiverSourceDomainSnapshot(t testing.TB, reader receiverProofStateReader, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
 	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot

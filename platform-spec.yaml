@@ -6881,6 +6881,19 @@ engine:
             - boundary: private bounded fixture operations below internal/store/internal
               reason: Named storage observations and hostile faults consume the original selected coordinator. Public storetest bridges return detached facts or typed outcomes, never handles, arbitrary callbacks, selectors or reconstructed coordinators. Executable-delivery writer and H1/H2 evidence use the closed delivery read-projection owner; pipeline mutation-history witnesses consume its fixed delivered-event join through a named helper in the original read transaction, preserving their predicates and detached fields. Backend qualification and PostgreSQL sandbox infrastructure are distinct roles.
               notify_all_children_item_metadata_observation: Notify-all-children witnesses observe committed outcome-to-event rows through the original selected native read coordinator, retaining the event/outcome run equality, exact triggering source event and fixed child event name, all ordinal ties, native payload bytes and driver timestamp rendering. They separately read latest stored entity fields by exact concrete flow_instance ordered by updated_at with LIMIT 1, without adding a run or eligibility filter. Existing payload decoding, ordinal/account checks, metadata comparison, poll bounds and replay assertions stay with their consumers. Six whole-store diagnostic sections retain their exact columns, scopes and order as independent original-owner reads; the delivery section delegates its fixed physical query to the closed executable-delivery projection owner, never a parallel runtime-adapter SQL owner. A failed section is explicit, returns no partial section and cannot poison later sections or grant runtime success. Closed fault wrappers project only their original embedded native owner; no raw-handle map, reconstructed coordinator, SQL, table, predicate or callback authority crosses the public fixture boundary.
+              run_stop_nonterminal_delivery_observation: >-
+                Stop-quiescence witnesses count every physical event_deliveries row in the exact run with persisted
+                status pending, in_progress or failed, for both canonical subscriber types, irrespective of retry
+                due-time or session presence. Delivered, dead_letter and canceled rows do not contribute. Historical
+                Pending field names denote this unfinished-work count, not only queued or claimable work; derived
+                retrying and processing are not stored statuses. The closed delivery projection owns the predicate;
+                standalone stop-storage, commit-boundary and served stop/refusal/replay witnesses consume it through
+                the original selected read owner. The purpose-specific scalar adds no run-header, control, revision,
+                source, eligibility, route or deduplication dependency. Rich snapshots retain their inner join,
+                missing-control refusal, physical updated_at evidence, ordering and independent read cuts; left-join
+                stop summaries remain a different observation. Invalid, foreign, canceled or closed ownership and
+                failed reads yield no provisional evidence. Production stop, claim, settlement, rollback and commit
+                uncertainty semantics are unchanged.
               fan_in_fixture_storage: >-
                 Fan-in runtime fixtures open both backends natively and carry no pool or dialect through shared helpers.
                 The event owner retains global LIKE suffix witnesses for period.reported and operating.reported, ordered

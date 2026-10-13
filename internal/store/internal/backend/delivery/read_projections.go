@@ -827,7 +827,8 @@ func ReadExactAgentDeliveryStatusTx(ctx context.Context, tx *sql.Tx, postgres bo
 
 func ReadStopPendingDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&count); err != nil {
+	// The historical name denotes unfinished work, including claimed and retrying rows.
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress','failed')`, runID).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

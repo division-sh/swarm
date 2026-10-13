@@ -34,7 +34,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "ff7a7d8b4ae4d45fd927aed7249e7aa64d086bb9664cf7d3596a3f7f51bfb2fa"
+const targetDigest = "0c29f1adbd3d1792bd7e52b54395806fe640efeb0522156fd7245b73e6b89d70"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -296,6 +296,7 @@ func main() {
 	includeChannelDecisionTargets()
 	includeChannelEventCountTargets()
 	includeServedEventCountTargets()
+	includeStopWitnessTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -453,6 +454,25 @@ func includeServedEventCountTargets() {
 	must(err)
 	pins, err := servedeventcount.Decode(raw)
 	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeStopWitnessTargets() {
+	raw, err := os.ReadFile("tools/fixture-codemod/pipeline-observations/family145-stop-witness-amendment.json")
+	must(err)
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "87b00ec86800b2f78e9af3947b503d9c60bee78640bef7e20d52d01966441400" {
+		panic("stop witness semantic amendment escaped its complete source")
+	}
+	var pins []struct{ File, Function string }
+	must(json.Unmarshal(raw, &pins))
 	for _, pin := range pins {
 		if !slices.Contains(files, pin.File) {
 			files = append(files, pin.File)

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 801 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "ff7a7d8b4ae4d45fd927aed7249e7aa64d086bb9664cf7d3596a3f7f51bfb2fa" {
+	if err != nil || len(rows) != 814 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "0c29f1adbd3d1792bd7e52b54395806fe640efeb0522156fd7245b73e6b89d70" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -39,6 +39,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			if remaining, err := checkpointRecipes([]byte("package proof\n"), []recipe{finite}); err != nil || len(remaining) != 0 {
 				t.Fatalf("exact helper retirement failed: %s/%v", row.Function, err)
 			}
+			continue
+		}
+		if family145CheckStopWitnessAmendment(t, row.File, row.Function, row.After) {
 			continue
 		}
 		source := []byte("package proof\n" + row.Before)
