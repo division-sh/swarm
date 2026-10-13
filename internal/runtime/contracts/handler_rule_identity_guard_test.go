@@ -93,13 +93,9 @@ func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling Handl
 
 func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
 	return map[string]handlerRuleDisplayLabelAllowance{
-		"internal/runtime/contracts/workflow_contract_emit.go::HandlerDeclarativeEmitSites":             {Count: 4, Reason: "emit-site presentation label"},
-		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":            {Count: 1, Reason: "emit-template presentation label"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue": {Count: 2, Reason: "keyed-map presentation projection"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":  {Count: 1, Reason: "authored rule presentation label projection"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRulePolicyValue": {Count: 1, Reason: "policy value-row diagnostic label; relocated from projectNodeRuleEntryValue"},
-		"internal/runtime/contracts/workflow_fan_out_semantics.go::HandlerFanOutSites":                  {Count: 2, Reason: "fan-out-site presentation label"},
-		"internal/runtime/contracts/workflow_transition_carriers.go::handlerAdvanceCarriers":            {Count: 1, Reason: "transition diagnostic carrier label"},
 	}
 }
 
