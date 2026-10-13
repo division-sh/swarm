@@ -120,9 +120,6 @@ func singletonCoordinatorContainedKind(primary PrimaryEntityContract, typeRef st
 	if err != nil {
 		return "", err
 	}
-	if err := singletonCoordinatorValidateResolvedType(primary.Types, resolved); err != nil {
-		return "", err
-	}
 	switch resolved.Kind {
 	case CatalogTypeMap:
 		return "map", nil
@@ -133,38 +130,8 @@ func singletonCoordinatorContainedKind(primary PrimaryEntityContract, typeRef st
 }
 
 func singletonCoordinatorValidateTypeRef(types TypeCatalogDocument, typeRef string) error {
-	resolved, err := (CatalogTypeReference{Type: typeRef, Catalog: types}).Resolve()
-	if err != nil {
-		return err
-	}
-	return singletonCoordinatorValidateResolvedType(types, resolved)
-}
-
-func singletonCoordinatorValidateResolvedType(types TypeCatalogDocument, resolved ResolvedCatalogType) error {
-	switch resolved.Kind {
-	case CatalogTypeMap:
-		if err := singletonCoordinatorValidateResolvedMapKey(types, *resolved.Key); err != nil {
-			return err
-		}
-		return singletonCoordinatorValidateResolvedType(types, *resolved.Value)
-	case CatalogTypeList:
-		return singletonCoordinatorValidateResolvedType(types, *resolved.Element)
-	case CatalogTypeObject:
-		for _, field := range resolved.Fields {
-			if err := singletonCoordinatorValidateResolvedType(types, field.Type); err != nil {
-				return fmt.Errorf("field %s: %w", field.Name, err)
-			}
-		}
-	}
-	return nil
-}
-
-func singletonCoordinatorValidateResolvedMapKey(types TypeCatalogDocument, key ResolvedCatalogType) error {
-	_, enum := types.Enums[key.Name]
-	if key.PlainText() || key.Format == "uuid" || enum {
-		return nil
-	}
-	return fmt.Errorf("map key type is unsupported; use text, uuid, or enum")
+	_, err := (CatalogTypeReference{Type: typeRef, Catalog: types}).Resolve()
+	return err
 }
 
 func validateTemplateInstanceField(flowID string, field TemplateInstanceField, primary PrimaryEntityContract) (TemplateInstanceField, error) {

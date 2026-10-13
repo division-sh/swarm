@@ -1,6 +1,76 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Current S03 Consumer Amendment: Coding Frozen
+
+The approved native-array/final-key delta is implemented locally from f06979d4b,
+with real repair receipts, but the stronger public template journey identifies
+two omitted live leaf-role reference interpreters. No production repair of these
+new consumers is authorized or implemented. B closure and the single push remain
+held pending a compact independent delta gate; C stays frozen. All tentative key
+and native coding-stop paragraphs below are historical, not current policy.
+
+The compiled `TestCatalogTypeAdmissionTemplateRoutingBothStores` copies the real
+template-select-or-create example, changes only the type declarations to a
+visible `Label: text` alias, and runs public verify/describe/serve/reconstruction.
+Its first run refuses at verify on BOTH SQLite and PostgreSQL with
+`template_instance_validation`: account.account_id does not resolve to a scalar
+or enum leaf. `ResolveFlowTemplateInstance` itself now accepts the same evidence;
+the second check calls the unchanged `entityruntime.ResolveLeafField`.
+
+| Added row | Live owner/consumers | Counterexample and exact bounded repair/proof |
+|---|---|---|
+| S03a scalar-leaf role | entityruntime.ResolveFieldPath -> pathKind -> ResolveLeafField; bootverify.checkTemplateInstanceValidation, tools.entityToolSchema.field, tools.entityToolReadFilterPropertySchema, pipeline.pipelineEngineEvaluator.queryEntityCount | pathKind checks text spelling without resolving Label. Move only its common-reference subdecision to CatalogTypeReference.Resolve, keep scalar/enum versus json/object/list/map eligibility distinct, retain field Type/refinements/presence. TestCatalogAdmissionLeafDomains covers top-level/nested text aliases and admitted domain controls; the compiled both-store template-routing root must become green through real routing/readback/restart, not bypass the second boot check. |
+| S03b generated read selectors | tools.entityToolLeafSelectorNames -> collectEntityToolLeafSelectors; ReadLeafSelectorNames, SelectableFieldNames -> builtin catalog/filter properties and executor_entity_query validation; deliveryTextType independently checks raw spelling | The same Label and nested Item.label are omitted from generated leaf selectors despite admitted scalar evidence. Consume canonical resolved shape for the existing leaf role and named traversal; no new schema/validator framework, whole-value normalization or authorization rewrite. TestCatalogAdmissionToolLeafSelectors must prove exact alias selectors and string property schemas, with enum/UUID controls and opaque/collection exclusion. Existing declared/nested query, role/schema and JSON-domain controls remain mandatory. |
+
+Targeted caller sweep: exactly one pathKind caller (ResolveFieldPath), four
+production ResolveLeafField callers above, and generated selector/filter consumers
+in platform_builtin_catalog.go and executor_entity_query.go. The selector's
+named-type helpers also support writable-path/role projections: their role laws
+are retained; this amendment does not authorize arbitrary rewrites. LeafKind is
+consumed for the scalar/enum gate, not value normalization. Imported admitted JSON,
+literal collection mutation, scalar route widening and #2287 grammar remain
+separate. No full re-census or additional semantic parent is proposed.
+
+This adds consumer/proof subrows to existing S03, not a new issue or a changed key
+decision. Proposed ceiling remains hosted lifecycle/no extras, local focused,
+original race controls and repo-wide guards/census. Request: approve common
+reference consumption in these two existing leaf-role owners and the complete
+both-store template proof, then finish B's original S01-S11/K01-K06 class in one
+PR. If the reviewer finds a wider role obligation, implementation stays frozen.
+
+### Completed Native/Key Delta Proof, Not Complete B Closure
+
+- `b-delta-red.jsonl` is the real new native-array/text-family counterexample on
+  signed2d889991f with f06979d4b production, not an invented expected failure.
+- `b-delta-first-green.jsonl`:408 passing checks, race x3 across contracts,
+  entityruntime and pinrouting, no fail/skip. All fourteen deferred controls are
+  actually executed. Original broader red receipts remain recorded.
+- `b-delta-startup-controls.jsonl`:62 passing checks, no fail/skip, through the
+  four original startup roots on both stores: recovery-disabled executable
+  inventory admission, constructed-actor restart/rebind, and historical-fork
+  guard termination. Native platform.boot has real startup proof, not helper credit.
+- `b-public-seventh.jsonl`: compiled public map/list verify/describe, both-store
+  serve/whole-map/contained set+merge, actual lexical fan-out emission chronology,
+  closed/fired seven-member join with exact ordered outputs, retained entity and
+  describe restart, and public unknown/cycle/three nontext-key/two retired-list
+  refusals PASS. Durable-text and refinement role controls also PASS. This does
+  not prove the separate template journey, which remains RED.
+- `b-public-sixth.jsonl` separately retains passing generated entity schema,
+  provider/admitted input schema and runtime operand/mutation parity/collision
+  controls. Its earlier public refusal-output assertion was RED because verify
+  reports the typed loader diagnostic as a structured source_loading finding,
+  not a serialized loader-code string; no product gate was weakened to repair it.
+- The fresh full repo-wide guard/census sweep is running; no completed result is
+  claimed until it exits. Independent review/hosted qualification remain required.
+
+Evidence lives in the owned local state directory
+`~/.local/state/agent-g-2447-catalog-type-preaudit/`. Focused commands used the
+swarm-test admission wrapper and PostgreSQL16; no duplicate Local tier or full
+run. The template and leaf counterexamples are proof blockers, not flakes.
+
 ## Binding Coding Amendment
+
+Reviewer-g delta gate6137204758 APPROVES complete B coding, including final text-family map-key convergence and S09's native platform-array producer. The stop described below is historical and lifted for this exact amendment. Native lowering must produce canonical [T], preserving element type, optionality and separately represented description. Required distinct proof rows: inbound_recorded schema/actual payload, platform.boot arrays/actual both-store startup, supported annotated-array control, and authored suffix/prefix negatives. No resolver exception, new framework or compatibility; complete B proof/guard/public/backend obligations still block merge, and C remains frozen.
 
 FINAL map-key ruling6137134002 supersedes tentative6136017129: keys are text-family (text, enum, UUID), with existing enum/UUID normalization and validation preserved; integer/numeric/boolean refuse on presence. Kind:text is string representation plus retained enum Name/UUID Format, not scalarization. Teach `map keys must be text, enum or uuid`, and retain exact lexical numeric-looking text ordering. Routing key_types_compatible is untouched. The #2287 map-collapse note is RETRACTED6137134387; map[K]V stays. This settles the LEAD dependency but does not waive reviewer-g's independent gate for the formerly frozen key delta or the new native-array producer amendment below.
 
