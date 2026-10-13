@@ -515,15 +515,34 @@ func proveMixedRequestSourceHandoff(t *testing.T, ctx context.Context, h *runtim
 	if err != nil || len(outcomes) != 1 || outcomes[0].Ordinal != 0 || outcomes[0].EventID != row.RequestEventID || outcomes[0].Kind != "committed" {
 		t.Fatalf("source request did not come from its one real committed ordinal: outcomes=%+v error=%v", outcomes, err)
 	}
+	// Snapshot validates the claim but does not project the physical handoff stamp.
+	phases, err := storetest.ReadWorkspaceInvocationPhases(ctx, selected)
+	if err != nil {
+		t.Fatalf("read actual native source handoffs: %v", err)
+	}
 	for _, route := range publication.DeliveryRoutes {
 		id, err := deliverylifecycle.DeliveryID(row.RequestEventID, route)
 		if err != nil || !route.Recipient.IsNode() {
 			t.Fatalf("source handoff substituted its original node recipient: route=%+v error=%v", route, err)
 		}
 		delivery, err := selected.Snapshot(ctx, id)
-		if err != nil || delivery.ContinuationHandoffAt.IsZero() || delivery.StartedAt.IsZero() ||
-			delivery.ContinuationHandoffAt.After(delivery.StartedAt) || !delivery.Authority.Equal(authority) {
+		if err != nil || delivery.StartedAt.IsZero() || !delivery.Authority.Equal(authority) {
 			t.Fatalf("source recipient did not consume an acknowledged current-generation handoff: delivery=%+v error=%v", delivery, err)
+		}
+		matched := 0
+		for _, phase := range phases.Deliveries {
+			if phase.DeliveryID != id {
+				continue
+			}
+			matched++
+			if phase.EventID != row.RequestEventID || phase.RunID != catalogRuntimeRunID || phase.HandoffAt == nil || *phase.HandoffAt == "" ||
+				phase.Status != string(delivery.Status) || phase.ClaimVersion != delivery.ClaimVersion {
+				t.Fatalf("source recipient lacks its physical acknowledged handoff: phase=%+v delivery=%+v", phase, delivery)
+			}
+			t.Logf("actual source handoff: delivery=%s stamp=%s status=%s claim=%d", id, *phase.HandoffAt, phase.Status, phase.ClaimVersion)
+		}
+		if matched != 1 {
+			t.Fatalf("source recipient physical handoff count=%d for delivery=%s", matched, id)
 		}
 	}
 	t.Logf("source one-item mixed publication acknowledged before independent claims: request=%s receipt=%+v", row.RequestEventID, receipt)
