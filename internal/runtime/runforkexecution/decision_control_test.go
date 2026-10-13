@@ -86,10 +86,10 @@ func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 	if actual, found := managedexecution.FromContext(use.ctx); !found || actual.ID != admission.ID {
 		t.Fatal("control did not retain its own execution admission")
 	}
-	if err := use.close(); err != nil {
+	if err := use.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := use.close(); err != nil {
+	if err := use.Close(); err != nil {
 		t.Fatal(err)
 	}
 	for _, phase := range []string{"preactivation", "retiring", "closed", "unreconciled", "process_retired", "no_context", "wrong_occurrence", "wrong_generation"} {
@@ -118,7 +118,7 @@ func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 				runtime.controlContext = managedexecution.WithAdmission(owned, next)
 			}
 			if use, err := owner.acquireDecisionControl(context.Background(), binding, runfork.ControlMailboxDefer); err == nil {
-				_ = use.close()
+				_ = use.Close()
 				t.Fatal("decision admitted without its exact live retained occurrence")
 			}
 		})

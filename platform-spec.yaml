@@ -32266,6 +32266,11 @@ api_specification:
         consumes the actual child executor without starting another runtime, and preserves both
         caller cancellation and execution retirement. Classification read failure or missing
         owner fails closed. Other selected-fork controls retain their own existing restrictions.
+        Channel action, final text/skip and partial ordered-input callers use that same retained
+        child occurrence rather than an ordinary bundle runtime. Current prompt and candidate
+        discovery may read exact frozen evidence without acquiring execution; those reads mint
+        no control authority. Each input preview and mutation revalidates its own native grant,
+        and the write rechecks current principal, draft, receipt and field position atomically.
         Readback, navigation, delivery and notice acknowledgment are distinct concepts and
         remain admitted by their existing owners. Callback acknowledgment may settle
         independently; it is never a successful business decision.
