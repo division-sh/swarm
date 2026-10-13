@@ -67,17 +67,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
-		switch collector {
-		case debtEventNameCollectorTo:
-			return debtEventNameUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		case debtDeliveryRetirementCollectorTo:
-			return debtDeliveryRetirementUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		case debtDeliveryStatusCollectorTo:
-			return debtDeliveryStatusUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		case debtRunScalarCollectorTo:
-			return debtRunScalarUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		case debtRequestKeyCollectorTo:
-			return debtRequestKeyUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
+		if current, transitionErr, handled := debtSourceUnrefreshedBaseline(root, metadataBytes, data, baseline, collector, historical, err); handled {
+			return current, transitionErr
 		}
 		if collector == debtReceiverReadbackCollectorTo {
 			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
@@ -137,6 +128,28 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 	return baseline, nil
 }
 
+func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
+	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
+	switch collector {
+	case debtWorkflowStateCollectorTo:
+		owner = debtWorkflowStateUnrefreshedBaseline
+	case debtEventNameCollectorTo:
+		owner = debtEventNameUnrefreshedBaseline
+	case debtDeliveryRetirementCollectorTo:
+		owner = debtDeliveryRetirementUnrefreshedBaseline
+	case debtDeliveryStatusCollectorTo:
+		owner = debtDeliveryStatusUnrefreshedBaseline
+	case debtRunScalarCollectorTo:
+		owner = debtRunScalarUnrefreshedBaseline
+	case debtRequestKeyCollectorTo:
+		owner = debtRequestKeyUnrefreshedBaseline
+	default:
+		return baseline, prior, false
+	}
+	current, err := owner(root, metadata, data, baseline, historical, prior)
+	return current, err, true
+}
+
 func debtDeliveryStatusUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
 	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
 		return baseline, prior
@@ -185,6 +198,23 @@ func debtEventNameUnrefreshedBaseline(root string, metadata, data []byte, baseli
 		return baseline, err
 	}
 	baseline.Collector = debtEventNameCollectorTo
+	return baseline, nil
+}
+
+func debtWorkflowStateUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtEventNameCollectorTo); err != nil {
+		return baseline, err
+	}
+	if baseline.Collector != debtCacheCollectorFrom {
+		return baseline, fmt.Errorf("historical TSV collector header changed")
+	}
+	if err := debtWorkflowStateSourcePins(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtWorkflowStateCollectorTo
 	return baseline, nil
 }
 

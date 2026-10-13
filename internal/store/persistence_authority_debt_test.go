@@ -1270,7 +1270,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtRequestKeySourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		previous, err := debtWorkflowStateSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err = debtRequestKeySourcePrevious(root, body.File, body.Function, previous)
 		if err != nil {
 			return err
 		}
@@ -1289,6 +1293,89 @@ func debtServedDebugSourcePins(root string) error {
 		return fmt.Errorf("served-debug source proof lacks required callers/owners/captures: %v", needed)
 	}
 	return nil
+}
+
+const debtWorkflowStateFile = "internal/serveapp/selected_fork_pending_input_mixed_test.go"
+const debtWorkflowStateFunction = "TestSelectedForkPendingInputMixedCompletionBothStores"
+const debtWorkflowStateManifest = "tools/fixture-codemod/pipeline-observations/family145-workflow-state-preimages.json"
+
+func debtWorkflowStateBody(root string) (debtRequestKeyBody, error) {
+	var selected debtRequestKeyBody
+	raw, err := os.ReadFile(filepath.Join(root, debtWorkflowStateManifest))
+	if err != nil || debtBaselineChecksum(raw) != "25d031ef995292f317b42fcd901405ca22945818948369ef40a0b4735540cb1f" {
+		return selected, fmt.Errorf("exact workflow-state source manifest changed: %v", err)
+	}
+	var bodies []debtRequestKeyBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 12 {
+		return selected, fmt.Errorf("workflow-state complete declaration inventory changed: %v", err)
+	}
+	count := 0
+	for _, body := range bodies {
+		if body.File == debtWorkflowStateFile && body.Function == debtWorkflowStateFunction {
+			selected, count = body, count+1
+		}
+	}
+	if count != 1 || selected.SHA256 != "0d53178f013abec650c211c09b504834e05118d95ac818ec13330af35529de72" ||
+		debtBaselineChecksum([]byte(selected.Before)) != selected.SHA256 ||
+		debtBaselineChecksum([]byte(selected.After)) != "fa0ee686114e34250674dadf96618abc3f3ded16800da56048b77d2b08559748" {
+		return selected, fmt.Errorf("workflow-state mixed-completion predecessor/current source is not exact")
+	}
+	return selected, nil
+}
+
+func debtWorkflowStateNativePins(root string) error {
+	for _, pin := range [][2]string{
+		{"internal/store/internal/backend/pipelinepersistence/workflow_state_entity_observation.go", "5b0614e523e1ea8b709dd83de935cf26712e3219449211e625cab607112ef22c"},
+		{"internal/store/internal/backend/entityruntime/run_state_cardinality.go", "0e28ecd04a85bc32e5c0288502aed08173fc1e22bd98e29497a79ec6bff438fc"},
+		{"internal/store/internal/runtimepersistence/test_workflow_state_observation.go", "4f3a45e563a3edf79abcd6ab26871cd5955da67e8f0e8e1088762dfe71bad336"},
+	} {
+		raw, err := os.ReadFile(filepath.Join(root, pin[0]))
+		if err != nil || debtBaselineChecksum(raw) != pin[1] {
+			return fmt.Errorf("workflow-state native owner changed: %s: %v", pin[0], err)
+		}
+	}
+	return nil
+}
+
+// This one complete inverse composes source evidence, never census occurrences.
+func debtWorkflowStateSourcePrevious(root, file, function, current string) (string, error) {
+	if file != debtWorkflowStateFile || function != debtWorkflowStateFunction ||
+		debtBaselineChecksum([]byte(current)) != "fa0ee686114e34250674dadf96618abc3f3ded16800da56048b77d2b08559748" {
+		return current, nil
+	}
+	body, err := debtWorkflowStateBody(root)
+	if err != nil {
+		return "", err
+	}
+	if err := debtWorkflowStateNativePins(root); err != nil {
+		return "", err
+	}
+	return body.Before, nil
+}
+
+func debtWorkflowStateSourcePins(root string) error {
+	body, err := debtWorkflowStateBody(root)
+	if err != nil {
+		return err
+	}
+	declarations, err := debtServedDebugDeclarations(filepath.Join(root, debtWorkflowStateFile))
+	if err != nil || declarations[debtWorkflowStateFunction] != body.After {
+		return fmt.Errorf("workflow-state mixed-completion current source changed: %v", err)
+	}
+	return debtWorkflowStateNativePins(root)
+}
+
+func debtWorkflowStateCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtWorkflowStateCollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != head.BootstrapSource || debtWorkflowStateSourcePins(proofs[0].Root) != nil {
+		return false
+	}
+	if base == debtEventNameCollectorTo {
+		return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, trusted.Sites, trusted.Sites, proofs...)) == 0
+	}
+	intermediate := head
+	intermediate.Collector = debtEventNameCollectorTo
+	return debtEventNameCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...)
 }
 
 func debtServedDebugSourceTransition(root string, actual, source map[string]authorityDebtSite) error {
@@ -1975,7 +2062,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) {
+	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
