@@ -270,6 +270,10 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
 				t.Fatalf("mixed child publication rewrote source domain: %v", err)
 			}
+			sourceReplyRows, err := storetest.ReadReplyContextRecords(cleanup, selected, catalogRuntimeRunID)
+			if err != nil || !reflect.DeepEqual(sourceRows, sourceReplyRows) {
+				t.Fatalf("reviewer: mixed child changed original source reply rows: before=%+v after=%+v error=%v", sourceRows, sourceReplyRows, err)
+			}
 		})
 	}
 }

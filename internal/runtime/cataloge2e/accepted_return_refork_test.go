@@ -55,6 +55,10 @@ func TestIssue642AcceptedReturnRepeatedPhysicalReforkBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(after, original) {
 				t.Fatalf("repeated return changed the original source: %v", err)
 			}
+			sourceReplyRows, err := storetest.ReadReplyContextRecords(cleanup, selected, catalogRuntimeRunID)
+			if err != nil || !reflect.DeepEqual(rows, sourceReplyRows) {
+				t.Fatalf("reviewer: repeated return changed original source reply rows: before=%+v after=%+v error=%v", rows, sourceReplyRows, err)
+			}
 		})
 	}
 }
@@ -198,6 +202,10 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 			}
 		}
 		t.Fatalf("refork changed the immediate source domain: %v", err)
+	}
+	sourceReplyRows, err := storetest.ReadReplyContextRecords(wait, selected, sourceRun)
+	if err != nil || !reflect.DeepEqual(beforeRows, sourceReplyRows) {
+		t.Fatalf("reviewer: physical-return child changed source reply rows: before=%+v after=%+v error=%v", beforeRows, sourceReplyRows, err)
 	}
 	return staged.ForkRunID, inputID
 }

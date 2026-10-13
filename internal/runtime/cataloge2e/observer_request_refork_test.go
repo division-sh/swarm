@@ -136,6 +136,10 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 		}
 		t.Fatalf("observer-only child changed its immediate source: %v", err)
 	}
+	sourceReplyRows, err := storetest.ReadReplyContextRecords(ctx, selected, sourceRun)
+	if err != nil || !reflect.DeepEqual(beforeRows, sourceReplyRows) {
+		t.Fatalf("reviewer: observer-only child changed source reply rows: before=%+v after=%+v error=%v", beforeRows, sourceReplyRows, err)
+	}
 	return staged.ForkRunID, inputID
 }
 
