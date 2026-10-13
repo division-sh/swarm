@@ -888,6 +888,40 @@ seam_families:
       typed payload value independently of constructor state. The canonical
       constructor normalizes its type; descriptor address strings are selection
       projections, never typed creating arguments or configuration authority.
+  - id: selected_fixed_cut_reply_continuation_consumers
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/selected_fork_recipient_plan.go
+      - internal/runtime/bus/selected_fork_recipient_plan_test.go
+      - internal/runtime/bus/selected_fork_recipient_context_test.go
+      - internal/runtime/bus/selected_fork_request_reply_test.go
+      - internal/runtime/bus/selected_fork_reply_return_test.go
+      - internal/runtime/core/pinrouting/reply_request_continuation.go
+      - internal/runtime/core/pinrouting/reply_return_continuation.go
+      - internal/runtime/cataloge2e/mixed_request_reply_fork_test.go
+      - internal/runtime/tools/emit_refusal_taxonomy_test.go
+      - internal/store/internal/backend/runforkpersistence/run_fork_reply_request_continuation_test.go
+      - internal/store/internal/backend/runforkpersistence/run_fork_reply_return_claim_test.go
+    search_dimensions: [connect_route_plan, route_plan_source_reason, typed_connect_recipient_evaluation]
+    invalid_authority:
+      - captured context as a new recipient or execution grant
+      - terminal reply evidence authorizing provider re-execution
+      - requester address alone identifying a reply recipient
+      - retained plan omitting final native claim and child fencing
+    notes: >
+      #642's fixed-cut publication consumers reuse the existing compiled
+      ConnectRoutePlan and context-owned return binding. Captured recipient
+      partitions and reply rows narrow resolution and restore exact context;
+      they do not grant execution or replace native admission. Existing request
+      and terminal-return obligations retain their original complete claims.
+      Reply-context and compiled response-pin identity distinguish a return
+      from an ordinary connection to the same requester. Mixed publications
+      keep pending observers and ordinary recipients without re-executing a
+      settled provider. Component claim/context/refusal controls and the
+      accepted whole-publication/refork receipts have separate proof scopes.
+      C owns #2617's plan-only/indexed receiver and shared historical-reader
+      integration; classifying these consumers does not qualify that seam.
   - id: descriptor_evidence_non_authority
     layer: descriptor_evidence_non_authority
     classification: non_authoritative_observer_projection
@@ -986,6 +1020,7 @@ seam_families:
       - internal/runtime/manager/runtime_reset_test.go
       - internal/runtime/manager/types.go
       - internal/runtime/pipeline/activity_boring_proof_test.go
+      - internal/runtime/pipeline/activity_published_generation_native_test.go
       - internal/runtime/pipeline/handler_engine_transaction_test.go
       - internal/runtime/pipeline/fixture_module_test.go
       - internal/runtime/pipeline/coordinator.go
@@ -1013,6 +1048,9 @@ seam_families:
       Direct delivery uses explicit caller recipients and delivery policy. It is
       a direct RoutePlan-backed producer/consumer path, not subscribed RoutePlan
       authority; #1496 removes its old eventDeliveryPlan compatibility crossing.
+      The retained activity-generation native fixture uses the existing direct
+      publication entry with exact delivery context and current child authority;
+      it does not make explicit recipients into fresh subscribed-route truth.
   - id: committed_static_connect_readiness_proof
     layer: route_plan_authority
     classification: valid_consumer
