@@ -3,6 +3,7 @@ package cataloge2e
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -73,18 +74,22 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			expectTerminalShutdownFailure(t, h, injected)
+			var reader runtimemanager.AgentLifecycleStateReader
+			if h.pg != nil {
+				reader = h.pg
+			} else {
+				reader = h.sqlite
+			}
+			middleBefore, found, err := reader.LoadAgentLifecycleState(ctx, identities[1])
+			if err != nil || !found {
+				t.Fatalf("read failed member predecessor: found=%t err=%v", found, err)
+			}
 			request := runtimepipeline.FlowInstanceDeactivationRequest{Instance: flowidentity.Stored(nil, "worker-flow", path, "worker-001", entity, ""), FinalState: "complete"}
 			if err := h.rt.Manager.DeactivateFlowInstanceModel(ctx, request); err == nil || !strings.Contains(err.Error(), injected) {
 				t.Fatalf("terminal caller lost middle-member failure: %v", err)
 			}
 			if err := h.rt.Manager.WaitForQuiescence(ctx); err == nil || !strings.Contains(err.Error(), injected) {
 				t.Fatalf("terminal join lost middle-member failure: %v", err)
-			}
-			var reader runtimemanager.AgentLifecycleStateReader
-			if h.pg != nil {
-				reader = h.pg
-			} else {
-				reader = h.sqlite
 			}
 			for i, identity := range identities {
 				state, found, err := reader.LoadAgentLifecycleState(ctx, identity)
@@ -96,6 +101,9 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 				}
 				if i == 1 && state.Phase == runtimemanager.AgentLifecycleTerminated {
 					t.Fatal("failed member mutation did not roll back")
+				}
+				if i == 1 && !reflect.DeepEqual(middleBefore, state) {
+					t.Fatalf("failed terminal owner was replaced by a competing cleanup write: before=%+v after=%+v", middleBefore, state)
 				}
 			}
 			for _, cfg := range h.rt.Manager.ListAgentConfigs() {

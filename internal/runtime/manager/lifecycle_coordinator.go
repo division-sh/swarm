@@ -1577,6 +1577,26 @@ func (c *agentLifecycleCoordinator) executionSnapshotByIdentity(identity runtime
 	return snapshotExecution(cell.execution), true
 }
 
+func executionPublishable(cell *agentLifecycleCell) bool {
+	return cell != nil && cell.execution != nil && cell.execution.agent != nil &&
+		!cell.execution.fenced && cell.execution.settlementErr == nil && cell.retirement == nil && cell.terminalSet == nil &&
+		cell.execution.token == lifecycleToken(cell.identity, cell.view.RuntimeEpoch, cell.view.Generation) &&
+		cell.view.Phase != AgentLifecycleTerminated && cell.view.Phase != AgentLifecycleFailed
+}
+
+func (c *agentLifecycleCoordinator) publishedExecutionSnapshotByIdentity(identity runtimeagentidentity.Identity) (agentExecutionSnapshot, bool) {
+	if c == nil {
+		return agentExecutionSnapshot{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[identity.Normalize()]
+	if !executionPublishable(cell) {
+		return agentExecutionSnapshot{}, false
+	}
+	return snapshotExecution(cell.execution), true
+}
+
 func (c *agentLifecycleCoordinator) executionIdentities() []runtimeagentidentity.Identity {
 	if c == nil {
 		return nil
@@ -1603,7 +1623,7 @@ func (c *agentLifecycleCoordinator) executionConfigs() []models.AgentConfig {
 	defer c.mu.Unlock()
 	configs := make([]models.AgentConfig, 0, len(c.cells))
 	for _, cell := range c.cells {
-		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.view.Phase != AgentLifecycleTerminated && cell.view.Phase != AgentLifecycleFailed {
+		if executionPublishable(cell) {
 			configs = append(configs, cell.execution.config)
 		}
 	}
@@ -2008,6 +2028,10 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		return errors.Join(err, errors.New("settling agent's durable row is unavailable"))
 	}
 	current := lifecycleToken(cell.identity, currentView.RuntimeEpoch, currentView.Generation) == token
+	terminalOwned, err := terminalLoopSettlementOwned(cell, token)
+	if err != nil {
+		return err
+	}
 	store := c.persistence()
 	if execution.deferredTerminal != nil {
 		if !current {
@@ -2029,7 +2053,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		cell.view = view
 		execution.deferredTerminal = nil
 		cell.retirement = nil
-	} else if cell.view.Phase == AgentLifecycleRunning && current {
+	} else if cell.view.Phase == AgentLifecycleRunning && current && !terminalOwned {
 		plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
 		if err != nil {
 			return err

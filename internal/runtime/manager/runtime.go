@@ -239,7 +239,7 @@ func (am *AgentManager) ResolveAgentConfig(runID, agentID, flowInstance string) 
 	if err != nil {
 		return runtimeactors.AgentConfig{}, err
 	}
-	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
+	execution, ok := am.lifecycle.publishedExecutionSnapshotByIdentity(identity)
 	if !ok {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, identity.Description())
 	}
@@ -284,6 +284,7 @@ func (am *AgentManager) ResolveAgentFrameConfig(runID, agentID, flowInstance str
 }
 
 func (am *AgentManager) getAgentConfigIdentity(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
+	// Attachment reconciliation needs retained predecessor facts, not live admission.
 	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	return execution.Config, ok
 }
@@ -611,7 +612,7 @@ func (am *AgentManager) directiveOperationStore() (runtimeagentcontrol.Directive
 }
 
 func (am *AgentManager) directiveBoardAgentIdentity(identity runtimeagentidentity.Identity) (BoardInteractiveAgent, error) {
-	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
+	execution, ok := am.lifecycle.publishedExecutionSnapshotByIdentity(identity)
 	if !ok {
 		return nil, agentControlNotFound(identity.Description())
 	}

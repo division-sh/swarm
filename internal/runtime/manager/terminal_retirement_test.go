@@ -298,7 +298,7 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 				rec.Config.ID = fmt.Sprintf("terminal-agent-%d", i)
 				rec.Config.Identity = runtimeagentidentitytest.RootRuntime(t, rec.Config.ID, "terminal-set-test")
 				plan.RunID = rec.Config.Identity.RunID
-				if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
+				if err := c.registerExecution(ctx, rec, true, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 					t.Fatal(err)
 				}
 				records[i] = rec
@@ -339,8 +339,41 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 			if mode == "middle_fence_panic" && len(fenced) != len(records) {
 				t.Fatal("failed route fence abandoned suffix")
 			}
+			inspection := &AgentManager{lifecycle: c}
+			for _, rec := range records {
+				if _, published := c.publishedExecutionSnapshotByIdentity(rec.Config.Identity); published {
+					t.Fatal("terminal fence published executable authority")
+				}
+				if _, retained := c.executionSnapshotByIdentity(rec.Config.Identity); !retained && mode != "existing_retirement" {
+					t.Fatal("publication fence hid exact retained evidence")
+				}
+				if mode != "existing_retirement" {
+					if _, retained := inspection.getAgentConfigIdentity(rec.Config.Identity); !retained {
+						t.Fatal("fence hid attachment reconciliation's predecessor facts")
+					}
+				}
+				if _, err := inspection.ResolveAgentConfig(rec.Config.Identity.RunID, rec.Config.ID, rec.Config.Identity.FlowInstance()); err == nil {
+					t.Fatal("public config lookup published a fenced execution")
+				}
+				if _, err := inspection.directiveBoardAgentIdentity(rec.Config.Identity); err == nil {
+					t.Fatal("new directive admission published a fenced execution")
+				}
+				if lease, err := c.acquireExecutionIdentity(ctx, rec.Config.Identity, "hostile post-fence admission", false); err == nil || lease != nil {
+					if lease != nil {
+						lease.Release()
+					}
+					t.Fatal("fenced retained evidence granted a new execution lease")
+				}
+			}
+			if len(c.executionIdentities()) == 0 {
+				t.Fatal("fence hid retained process enumeration")
+			}
 			attempts := 0
+			selfReleases := 0
 			probe.before = func(req AgentLifecycleTransition) error {
+				if req.OperationKind == "self_release" {
+					selfReleases++
+				}
 				if req.Trigger != "flow_instance_terminal" {
 					return nil
 				}
@@ -373,6 +406,12 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if selfReleases != 0 {
+				t.Fatalf("retained terminal set competed with %d loop self-release writes", selfReleases)
+			}
+			if configs := c.executionConfigs(); len(configs) != 0 {
+				t.Fatalf("fenced terminal set exposed executable configurations: %+v", configs)
+			}
 			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
 			lease, err := am.beginWork(ctx, "test terminal completion")
 			if err != nil {
@@ -383,6 +422,37 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 				t.Fatalf("owned completion lost failure: %v", err)
 			}
 		})
+	}
+}
+
+func TestTerminalLoopSettlementRejectsForeignRetirementMember(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
+	ctx := testAuthorActivityContext(context.Background())
+	rec := lifecycleTestPersistedAgent(t)
+	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
+		t.Fatal(err)
+	}
+	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := c.fenceTerminalFlow(terminalFlowInstanceSideEffectPlan{RunID: rec.Config.Identity.RunID, FlowPath: rec.Config.Identity.FlowInstance()})
+	if err != nil || set == nil || len(set.members) != 1 {
+		t.Fatalf("exact terminal owner: set=%+v err=%v", set, err)
+	}
+	before, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	set.members[0].token.Generation++
+	if err := releaseCoordinatorLoop(c, token, done); err == nil || !strings.Contains(err.Error(), "retained terminal owner") {
+		t.Fatalf("foreign terminal member bypassed exact settlement: %v", err)
+	}
+	after, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+	if err != nil || !found || !sameAgentRowObservation(before, after) || len(probe.requestsFor("self_release")) != 0 {
+		t.Fatalf("foreign terminal owner changed durable state: before=%+v after=%+v err=%v", before, after, err)
 	}
 }
 

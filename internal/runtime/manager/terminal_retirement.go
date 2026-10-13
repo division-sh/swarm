@@ -168,6 +168,19 @@ type terminalFlowRetirement struct {
 	result      error
 }
 
+// The caller holds the coordinator lock while resolving retained ownership.
+func terminalLoopSettlementOwned(cell *agentLifecycleCell, token runtimeeffects.LifecycleToken) (bool, error) {
+	if cell.terminalSet == nil {
+		return false, nil
+	}
+	for _, member := range cell.terminalSet.members {
+		if member.cell == cell && member.token == token {
+			return true, nil
+		}
+	}
+	return false, errors.New("agent loop settlement differs from its retained terminal owner")
+}
+
 func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceSideEffectPlan) (*terminalFlowRetirement, error) {
 	c.mu.Lock()
 	set := &terminalFlowRetirement{runID: plan.RunID, flowPath: plan.FlowPath, trigger: "flow_instance_terminal"}
