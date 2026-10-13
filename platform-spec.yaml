@@ -6114,6 +6114,9 @@ engine:
           native receipt never selects historical provenance, and neither arm may rewrite or ignore crossed versions.
           Desired attachment/readiness belongs to the current selected executable source and keeps that source's
           version and artifact, independently of the historical header's captured version.
+          Selected-contract boot/resume consumes the same exact admitted index observation for the captured header
+          and current readiness. It MUST NOT compare the historical construction version with the selected execution
+          version or reinitialize business state to make those independent coordinates match.
           operation-local admitted observations instantiate their recipients. No mutable or persisted per-instance route
           membership proves existence, construction, source authority or executable readiness. Declaration applicability
           is not concrete existence, and existence is not attachment permission.
