@@ -54,7 +54,11 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 	}
 	var nodeRoute, agentRoute events.DeliveryRoute
 	var agentPlan agentidentity.Plan
-	for _, subscriber := range table.Resolve("sink/work.completed") {
+	definitions, err := table.PubsubDeclarationDefinitions("sink", []string{"sink/work.completed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subscriber := range definitions {
 		route := events.DeliveryRoute{Recipient: subscriber.Recipient}
 		if route.Recipient.IsNode() {
 			nodeRoute = route
@@ -131,7 +135,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if route.Target.MaterializingEntity() {
 						// This native historical-wire control carries the complete
 						// publication binding, not proof of installed construction.
-						route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+						route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, agentPlan.Route)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -341,7 +345,7 @@ func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture autho
 	rollbackEvent := eventtest.PersistedProjection(uuid.NewString(), "route.rollback", "route-proof", "", []byte(`{}`), 0, event.RunID(), "", events.EventEnvelope{}, event.CreatedAt())
 	if route.Target.MaterializingEntity() {
 		var err error
-		route.Initialization, err = events.AdmitFlowReceiverInitialization(rollbackEvent, route.Target)
+		route.Initialization, err = events.AdmitFlowReceiverInitialization(rollbackEvent, route.Target, route.Initialization.ReceiverRoute())
 		if err != nil {
 			t.Fatal(err)
 		}

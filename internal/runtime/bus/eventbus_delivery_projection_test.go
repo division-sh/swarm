@@ -283,23 +283,12 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	}.Normalized()
 	targetNode := testFlowNode(t, "worker", "target-node")
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
-	routeTable := newRouteTable(nil)
-	routeTable.eventPath[eventType] = struct{}{}
-	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
-		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
-		Path:           "worker/inst-1",
-		LocalizedEvent: "work.started",
-		handlerNode:    targetNode,
-		targetHandler:  targetHandler,
-		routeSource:    subscriberRouteSourceSubscription,
-	}}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
 			t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
 		)),
-		RouteTable: routeTable,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
 				Recipient: events.MustNodeDeliveryRecipient(targetNode),
@@ -485,8 +474,7 @@ func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *test
 
 func TestPayloadCarriesAreNotPersistedInDeliveryProjection(t *testing.T) {
 	plan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
-	projection, err := syntheticDeliveryPayloadProjection(plan, TemplateInstanceLifecycleDecision{
-		Action:      templateInstanceLifecycleActionSelectedExisting,
+	projection, err := syntheticDeliveryPayloadProjection(plan, connectInstanceSelection{
 		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}},
 	})
 	if err != nil {

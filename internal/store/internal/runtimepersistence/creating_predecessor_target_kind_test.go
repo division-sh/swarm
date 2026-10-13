@@ -28,6 +28,7 @@ func TestCreatingPredecessorTargetKindsBothStores(t *testing.T) {
 func proveCreatingPredecessorTargetKind(t *testing.T, backend, kind string) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+	f.constructKeylessRoot(t)
 	req := f.request("target-kinds", "target-kinds", "initial")
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {

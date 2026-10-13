@@ -313,8 +313,6 @@ func platformTableOrder(name string) int {
 		return 65
 	case "conversation_fork_turn_completions":
 		return 68
-	case "routing_rules":
-		return 70
 	case "event_deliveries":
 		return 80
 	case "event_delivery_handler_rule_selections":

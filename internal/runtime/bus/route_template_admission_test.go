@@ -29,17 +29,24 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 			}
 			_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 			for path, template := range table.templates {
+				scope, found := source.FlowScopeByID(template.FlowID)
+				if !found {
+					t.Fatalf("compiled template has no source declaration: %s", template.FlowID)
+				}
+				localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
 				authorityPath := path
 				if template.FlowID == semanticview.RootExecutionFlowID(source) {
 					authorityPath = ""
 				}
 				for _, subscriber := range template.Subscribers {
 					for _, pattern := range subscriber.Patterns {
+						admission := routeClassifyAuthoredSubscription(source, subscriber.Kind, scope.ID, scope.InputEvents, authorityPath, localEvents, pattern.raw)
+						if !admission.Admitted() {
+							t.Fatal(admission.Message())
+						}
+						inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
 						for _, instancePath := range []string{path + "/first", path + "/second"} {
-							want, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriber.Kind, template.FlowID, template.InputEvents, authorityPath, instancePath, template.LocalEvents, pattern.raw, inputProducers)
-							if err != nil {
-								t.Fatal(err)
-							}
+							want := routeProjectAdmittedSubscriberPatterns(admission, template.FlowID, instancePath, inputEvent, inputProducers)
 							got := routeProjectAdmittedSubscriberPatterns(pattern.admission, template.FlowID, instancePath, pattern.inputEvent, inputProducers)
 							if !reflect.DeepEqual(got, want) {
 								t.Fatalf("%s %s %s: compiled projection = %#v, fresh admission = %#v", path, pattern.raw, instancePath, got, want)
@@ -95,16 +102,21 @@ func TestTemplateMaterializationDoesNotRepeatDeclarationAdmission(t *testing.T) 
 	if checked == 0 {
 		t.Fatal("fixture has no concrete template node handler")
 	}
-	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	source.inputLookups.Store(0)
 	source.nodeLookups.Store(0)
 	var inputLookups, nodeLookups []int64
 	for _, id := range []string{"alpha", "beta", "gamma"} {
-		if _, err := table.addFlowInstanceRouteForTopology(FlowInstanceRouteMaterializationRequest{
-			Identity: topologyOperationIdentity(t, id),
-			Instance: ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID),
-		}, &inputProducers); err != nil {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID)
+		subscribers, err := table.PubsubReceiverDefinitions(busInternalTestRunID, instance, []string{instance.InstancePath + "/item.finished"})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(subscribers) != 1 || subscribers[0].Path != instance.InstancePath || subscribers[0].LocalizedEvent != "item.finished" {
+			t.Fatalf("compiled receiver binding = %#v, want its exact local handler", subscribers)
+		}
+		want := table.templates[instance.ScopeKey].Subscribers[0].TargetHandler
+		if !subscribers[0].targetHandler.Equal(want) {
+			t.Fatalf("receiver binding changed its admitted target handler: %#v", subscribers[0])
 		}
 		inputLookups = append(inputLookups, source.inputLookups.Load())
 		nodeLookups = append(nodeLookups, source.nodeLookups.Load())

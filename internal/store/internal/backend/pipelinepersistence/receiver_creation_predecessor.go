@@ -14,34 +14,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
-// Private composition port: the fixed-snapshot owner supplies evidence only;
-// delivery admission remains the sole interpreter of predecessor outcomes.
-type ReceiverConstructionHistory interface {
-	ReadReceiverConstructionHistoryTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (bool, error)
-}
-
-func (s *PipelinePostgresOwner) BindReceiverConstructionHistory(owner ReceiverConstructionHistory) error {
-	if owner == nil || s.receiverHistory != nil {
-		return fmt.Errorf("receiver construction history must be bound exactly once")
-	}
-	s.receiverHistory = owner
-	return nil
-}
-
-func (s *PipelineSQLiteOwner) BindReceiverConstructionHistory(owner ReceiverConstructionHistory) error {
-	if owner == nil || s.receiverHistory != nil {
-		return fmt.Errorf("receiver construction history must be bound exactly once")
-	}
-	s.receiverHistory = owner
-	return nil
-}
-
 func (s *PipelinePostgresOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
 	run, err := s.LoadSnapshotTx(ctx, tx, runID, false)
 	if err != nil {
 		return "", err
 	}
-	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.receiverHistory, false)
+	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.historicalInstances, false)
 }
 
 func (s *PipelineSQLiteOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
@@ -49,10 +27,10 @@ func (s *PipelineSQLiteOwner) ReceiverCreatingEventTx(ctx context.Context, tx *s
 	if err != nil {
 		return "", err
 	}
-	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.receiverHistory, true)
+	return ordinaryReceiverCreatingEventTx(ctx, tx, run, route, s.historicalInstances, true)
 }
 
-func ordinaryReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+func ordinaryReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history HistoricalFlowInstanceReader, sqlite bool) (string, error) {
 	if err := run.Validate(); err != nil {
 		return "", err
 	}
@@ -67,7 +45,7 @@ func (s *PipelinePostgresOwner) SelectedReceiverCreatingEventTx(ctx context.Cont
 	if err != nil {
 		return "", err
 	}
-	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.receiverHistory, false)
+	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.historicalInstances, false)
 }
 
 func (s *PipelineSQLiteOwner) SelectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute) (string, error) {
@@ -75,12 +53,12 @@ func (s *PipelineSQLiteOwner) SelectedReceiverCreatingEventTx(ctx context.Contex
 	if err != nil {
 		return "", err
 	}
-	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.receiverHistory, true)
+	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.historicalInstances, true)
 }
 
 // The delivery owner has checked the exact selected-execution fence. A missing
 // native receipt is never historical authority: the fixed cut must prove it.
-func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute, run runlifecycle.Snapshot, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute, run runlifecycle.Snapshot, history HistoricalFlowInstanceReader, sqlite bool) (string, error) {
 	if tx == nil || authority.Kind() != deliverylifecycle.ExecutionAuthoritySelectedContractFork || authority.Validate() != nil || route.Target.Empty() {
 		return "", fmt.Errorf("selected creating-turn identity requires its admitted fork authority and transaction")
 	}
@@ -93,7 +71,7 @@ func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority 
 	return historicalReceiverCreatingEventTx(ctx, tx, run, route, history, sqlite)
 }
 
-func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, route events.DeliveryRoute, history HistoricalFlowInstanceReader, sqlite bool) (string, error) {
 	if tx == nil || history == nil || route.Target.Empty() || run.Validate() != nil {
 		return "", fmt.Errorf("creating-turn history requires its bound run, exact receiver and original transaction")
 	}
@@ -104,7 +82,7 @@ func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runl
 	if err != nil {
 		return "", err
 	}
-	historical, err := history.ReadReceiverConstructionHistoryTx(ctx, tx, run, header)
+	_, historical, err := history.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return "", err
 	}

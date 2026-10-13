@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -441,7 +439,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, source)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
-			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio/selected-period", selectedOwner)
+			requireSelectedRunTargetOwner(t, ctx, backend, source, runID, "portfolio/selected-period", selectedOwner)
 
 			eventID := uuid.NewString()
 			sourceKey := eventtest.UUID("fan-in-operating-key-" + tc.name)
@@ -588,11 +586,6 @@ func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceS
 	}), joinEvents...)
 	if err != nil {
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
-	}
-	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, route); err != nil {
-			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.Route.InstancePath, err)
-		}
 	}
 	return eventBus
 }
@@ -758,21 +751,16 @@ func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend 
 	}
 }
 
-func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, runID, flowInstance, entityID string) {
+func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, source semanticview.Source, runID, flowInstance, entityID string) {
 	t.Helper()
-	owners, err := backend.ListSelectedRunTargetOwners(ctx, runID)
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute("portfolio", "selected-period", flowInstance)}
+	request, err := runtimepipeline.NewExactFlowInstanceLookup(source, conformanceSourceArtifactFact(t, source), owner)
 	if err != nil {
-		t.Fatalf("list selected-run target owners: %v", err)
+		t.Fatal(err)
 	}
-	matches := make([]runtimebus.ActiveTargetDescriptor, 0, 1)
-	for _, owner := range owners {
-		owner = owner.Normalized()
-		if owner.FlowInstance == flowInstance {
-			matches = append(matches, owner)
-		}
-	}
-	if len(matches) != 1 || matches[0].EntityID != entityID {
-		t.Fatalf("selected-run owner for %s = %#v, want exact entity %s", flowInstance, matches, entityID)
+	observed, found, err := backend.LookupFlowInstance(ctx, request)
+	if err != nil || !found || observed.Owner() != owner || observed.Identity().EntityID != entityID {
+		t.Fatalf("selected-run owner for %s = %#v found=%t err=%v, want exact entity %s", flowInstance, observed, found, err, entityID)
 	}
 }
 
@@ -842,11 +830,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 			t.Errorf("stop exact join scheduling: %v", err)
 		}
 	})
-	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, route); err != nil {
-			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
-		}
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
@@ -870,7 +853,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		DecisionCardDraftExpiry: backend,
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
-		FlowRoutes:              eventBus,
 		GenericSchedules:        schedules, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
@@ -1064,24 +1046,6 @@ func requireFanInBarrierReportTargets(
 	if len(sourceEntities) != wantCount {
 		t.Fatalf("fan-in report source entities = %#v, want %d distinguishable child owners", sourceEntities, wantCount)
 	}
-}
-
-func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) []runtimebus.FlowInstanceRouteMaterializationRequest {
-	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
-	routes, err := backend.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		t.Fatalf("ListFlowInstanceRoutes: %v", err)
-	}
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, 0, len(routes))
-	for _, route := range routes {
-		readiness, found, err := backend.LoadDynamicFlowRuntimeReadiness(ctx, route.RunID, route.Route)
-		if err != nil || !found {
-			t.Fatalf("load constructed fan-in owner %s: found=%v err=%v", route.Route.InstancePath, found, err)
-		}
-		out = append(out, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route, Instance: readiness.Plan.Identity})
-	}
-	return out
 }
 
 func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, eventID, flowID, localEvent string, payload map[string]any) {

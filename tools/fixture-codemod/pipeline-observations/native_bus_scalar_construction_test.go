@@ -48,7 +48,11 @@ func TestNativeBusScalarConstructionPreservesDescriptorDriftAndDurableReplay(t *
 			t.Fatal("scalar source, identity, clock, descriptor drift or replay assertion changed")
 		}
 		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		want, wantErr := canonicalFunction(current.After)
+		currentSource := current.After
+		if current.Successor != "" {
+			currentSource = current.Successor
+		}
+		want, wantErr := canonicalFunction(currentSource)
 		if err != nil || wantErr != nil || actual != want {
 			t.Fatal("scalar construction diverged from finite migration")
 		}

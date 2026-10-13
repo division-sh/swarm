@@ -8,9 +8,10 @@ func receiverMaterializationBoundaryAllowances() map[string]historicalBoundaryAl
 		"runtime/deliverylifecycle::DecodeHistoricalSnapshot/reference:events::RestoreReceiverMaterializationRecord": {
 			1, "historical delivery hydration retains exact construction evidence",
 		},
-		"events::RestoreReceiverMaterializationRecord/reference:events::decodeReceiverInitialization": {1, "the strict durable record consumes the same construction receipt decoder"},
-		"events::ReceiverInitialization.UnmarshalJSON/reference:events::decodeReceiverInitialization": {1, "the standalone wire consumes the same construction receipt decoder"},
-		"runtime/bus::flowReceiverInitialization/reference:events::AdmitFlowReceiverInitialization":   {1, "canonical activation plan supplies exact flow initialization"},
+		"events::RestoreReceiverMaterializationRecord/reference:events::decodeReceiverInitialization":                                 {1, "the strict durable record consumes the same construction receipt decoder"},
+		"events::ReceiverInitialization.UnmarshalJSON/reference:events::decodeReceiverInitialization":                                 {1, "the standalone wire consumes the same construction receipt decoder"},
+		"runtime/bus::flowReceiverInitialization/reference:events::AdmitFlowReceiverInitialization":                                   {1, "canonical activation plan supplies exact flow initialization"},
+		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency/reference:events::AdmitFlowReceiverInitialization": {1, "canonical planned construction supplies the agent's separate exact flow dependency"},
 	}
 }
 

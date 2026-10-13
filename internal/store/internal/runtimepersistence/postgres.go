@@ -35,7 +35,6 @@ import (
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	storeroutingrules "github.com/division-sh/swarm/internal/store/internal/routingrules"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -70,7 +69,6 @@ type PostgresStore struct {
 	pipelinePostgresOwner          *storepipeline.PipelinePostgresOwner
 	replyPostgresOwner             *storereplycontext.ReplyPostgresOwner
 	runForkPostgresOwner           *storerunfork.RunForkPostgresOwner
-	routingPostgresOwner           *storeroutingrules.RoutingPostgresOwner
 	runLifecyclePostgresOwner      *storerunlifecycle.RunLifecyclePostgresOwner
 	startupPostgresOwner           *storestartupownership.StartupPostgresOwner
 	timerObligationPostgresReader  *storetimerobligation.PostgresReader

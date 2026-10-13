@@ -276,7 +276,11 @@ func recipientAuthorityRecoveryEvidence(t *testing.T) []forkrecipient.Evidence {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, subscriber := range table.Resolve(endpoint.ResolvedEvent) {
+		definitions, err := table.PubsubDeclarationDefinitions("sink", []string{endpoint.ResolvedEvent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, subscriber := range definitions {
 			in := forkrecipient.Input{
 				Recipient: subscriber.Recipient, Path: "sink", HandlerEvent: plan.ReceiverLocalEvent(),
 				RouteSource: "selected-source-fixture", AgentPlan: subscriber.AgentPlan,

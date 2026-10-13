@@ -96,10 +96,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 						want[actor] = child
 						entered := time.Now().UTC()
 						row := runfork.RunForkEntityState{EntityID: child.EntityID, CurrentState: "active", EnteredStateAt: &entered,
-							MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-								Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-								Mode: "static", FlowTemplate: flow, FlowInstance: child.InstancePath, FlowConfig: selectedAgentHeaderConfig(t, child),
-							}}
+							MaterializationMetadata: selectedAgentConstructionMetadata(t, source, runID, child, "", entered)}
 						if fields {
 							row.MaterializationMetadata.EntityType = "child_state"
 							row.Fields = map[string]any{"value": key}

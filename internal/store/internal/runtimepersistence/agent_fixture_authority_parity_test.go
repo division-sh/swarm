@@ -48,15 +48,8 @@ type agentFixtureFlowActivationCommitter struct {
 }
 
 func (o agentFixtureFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	var topology []runtimebus.FlowInstanceRouteRecordSet
-	for _, construction := range plan.ConstructionPlans() {
-		topology = append(topology, runtimebus.FlowInstanceRouteRecordSet{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: construction.Readiness.RunID, Route: construction.Identity.Route()},
-		})
-	}
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
-		Plan:          plan,
-		RouteTopology: topology,
+		Plan: plan,
 	})
 }
 
@@ -110,9 +103,6 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 				PersistenceRoles: runtimemanager.PersistenceRoles{
 					AgentRoutes:    bus,
 					FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
-					RouteInstaller: bus,
-					RouteVerifier:  bus,
-					RouteRestorer:  bus,
 				},
 				ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected))
@@ -120,6 +110,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			activate := func(instanceID string) error {
 				return manager.ActivateFlowInstance(ctx, sqliteKeyedFlowActivationRequest(t, ctx, bundle, instanceID))
 			}
+			activateFixtureStructuralRoot(t, ctx, manager, bundle, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
 			if err := activate("sequential-a"); err != nil {
 				t.Fatalf("activate first sequential flow: %v", err)
 			}

@@ -93,15 +93,15 @@ func TestIssue2589FullEngineCommandStatementCount(t *testing.T) {
 				if postgres {
 					mock.ExpectExec(`^SELECT\s+pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)$`).WithArgs("36:" + runID + "root").WillReturnResult(sqlmock.NewResult(0, 1))
 				}
-				cas := `(?s)^UPDATE\s+flow_instances SET .*WHERE run_id = \? AND instance_path = \? AND entity_id = \? AND revision = \? AND current_state = \? AND flow_template = \? AND mode = \? AND entity_type IS NULLIF\(\?, ''\) RETURNING CAST\(run_id AS TEXT\), CAST\(entity_id AS TEXT\)$`
+				cas := `(?s)^UPDATE\s+flow_instances SET .*WHERE run_id = \? AND instance_path = \? AND entity_id = \? AND revision = \? AND current_state = \? AND flow_template = \? AND mode = \? AND entity_type IS NULLIF\(\?, ''\) AND parent_instance IS NULLIF\(\?, ''\) AND instance_key IS NULLIF\(\?, ''\) RETURNING CAST\(run_id AS TEXT\), CAST\(entity_id AS TEXT\)$`
 				if postgres {
-					cas = `(?s)^UPDATE\s+flow_instances SET .*WHERE run_id = \$12::uuid AND instance_path = \$13 AND entity_id = \$14::uuid AND revision = \$15 AND current_state = \$16 AND flow_template = \$17 AND mode = \$18 AND entity_type IS NOT DISTINCT FROM NULLIF\(\$19, ''\) RETURNING CAST\(run_id AS TEXT\), CAST\(entity_id AS TEXT\)$`
+					cas = `(?s)^UPDATE\s+flow_instances SET .*WHERE run_id = \$12::uuid AND instance_path = \$13 AND entity_id = \$14::uuid AND revision = \$15 AND current_state = \$16 AND flow_template = \$17 AND mode = \$18 AND entity_type IS NOT DISTINCT FROM NULLIF\(\$19, ''\) AND parent_instance IS NOT DISTINCT FROM NULLIF\(\$20, ''\) AND instance_key IS NOT DISTINCT FROM NULLIF\(\$21, ''\) RETURNING CAST\(run_id AS TEXT\), CAST\(entity_id AS TEXT\)$`
 				}
 				casRows := issue2589Rows("run_id entity_id")
 				if !casLost {
 					casRows.AddRow(runID, entityID)
 				}
-				mock.ExpectQuery(cas).WithArgs("", "", string(record.Config), "active", "done", "{}", "{}", "{}", record.EnteredStageAt, record.UpdatedAt, nil, runID, "root", entityID, int64(1), "ready", "root", "static", "task").WillReturnRows(casRows)
+				mock.ExpectQuery(cas).WithArgs("", "", string(record.Config), "active", "done", "{}", "{}", "{}", record.EnteredStageAt, record.UpdatedAt, nil, runID, "root", entityID, int64(1), "ready", "root", "static", "task", "", "").WillReturnRows(casRows)
 				if casLost {
 					mock.ExpectRollback()
 				} else {
@@ -236,8 +236,8 @@ func issue2589ExpectEngineRevision(mock sqlmock.Sqlmock, postgres bool, state pi
 	}
 	mock.ExpectQuery(`(?s)^WITH\s+requested\(family,fact_key\).*run_fork_fact_revisions.*`).WillReturnRows(issue2589Rows("family fact_key fact present"))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(e.entity_id AS TEXT\).*FROM .*flow_instances.*UNION ALL.*WHERE e.run_id = .*`).WillReturnRows(issue2589Rows(
-		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at",
-		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil,
+		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at parent_instance instance_key initial_materialization",
+		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil, nil, nil, nil,
 	))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(m.mutation_id AS TEXT\).*FROM entity_mutations m WHERE m.run_id = .*`).WillReturnRows(mutations)
 	routing, _ := json.Marshal(timer.RoutingSource)

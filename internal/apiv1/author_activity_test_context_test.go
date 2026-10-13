@@ -71,19 +71,13 @@ type apiTestRuntimeMutationOwner interface {
 }
 
 type apiTestDurableEventStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -213,22 +207,18 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			return nil, fmt.Errorf("API durable event-store fixture %T lacks exact durable roles", eventStore)
 		}
 		opts.Durable = runtimebus.DurableDependencies{
+			Instances:                durable,
 			ConstructionPublications: durable,
 			ReplyContext:             durable,
 			RunLifecycle:             durable,
 			DeliveryLifecycle:        durable,
-			FlowRoutes:               durable,
-			FlowRouteRecords:         durable,
-			FlowRouteSets:            durable,
-			FlowRouteTopology:        durable,
-			FlowRouteRollback:        durable,
-			ActiveAgents:             durable,
-			ActiveFlows:              durable,
-			TargetOwners:             durable,
-			PreparedEvents:           durable,
-			TargetFailureRecorder:    durable,
-			RunOrigins:               durable,
-			StandingRestarts:         durable,
+
+			ActiveAgents: durable,
+
+			PreparedEvents:        durable,
+			TargetFailureRecorder: durable,
+			RunOrigins:            durable,
+			StandingRestarts:      durable,
 		}
 	}
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)

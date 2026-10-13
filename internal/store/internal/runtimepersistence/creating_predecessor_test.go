@@ -23,6 +23,7 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 		for _, scenario := range []string{"pending", "claimed", "retry", "delivered", "dead_letter", "no_delivery", "different_sender", "missing_receipt"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+				f.constructKeylessRoot(t)
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 				defer cancel()
 				req := f.request("ordered", "ti-ordered", "initial")
@@ -213,6 +214,7 @@ func TestCreatingPredecessorCanceledTurnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixture(t, backend)
+			f.constructKeylessRoot(t)
 			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 			defer cancel()
 			req := f.request("canceled", "ti-canceled", "initial")

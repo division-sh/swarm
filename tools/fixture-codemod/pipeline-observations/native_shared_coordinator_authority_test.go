@@ -64,7 +64,11 @@ func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *t
 		want, err := canonicalFunction(nativeSharedCoordinatorSource(t, row.Before))
 		got, afterErr := canonicalFunction(row.After)
 		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		currentAfter, currentErr := canonicalFunction(current.After)
+		currentSource := current.After
+		if current.Successor != "" {
+			currentSource = current.Successor
+		}
+		currentAfter, currentErr := canonicalFunction(currentSource)
 		if err != nil || afterErr != nil || sourceErr != nil || currentErr != nil || want != got || actual != currentAfter {
 			t.Fatalf("%s changed outside unused authority propagation", row.Function)
 		}

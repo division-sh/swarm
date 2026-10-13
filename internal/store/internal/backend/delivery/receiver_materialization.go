@@ -37,8 +37,21 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 	if err != nil || !ready {
 		return ready, err
 	}
-	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() {
+	if !record.Route.Recipient.IsAgent() {
 		return true, nil
+	}
+	if record.Route.Initialization.Empty() {
+		if record.Route.Target.MaterializingEntity() {
+			return false, fmt.Errorf("receiver claim omitted its construction dependency")
+		}
+		if record.Route.Target.Empty() {
+			return true, nil
+		}
+		tx, ok := q.(*sql.Tx)
+		if !ok || a.receiverExecution == nil {
+			return false, fmt.Errorf("receiver execution admission requires its transactional owner")
+		}
+		return a.receiverExecution.ReceiverExecutionReadyTx(ctx, tx, record.Route, record.Authority, claimTx != nil)
 	}
 	if !record.Route.Initialization.FlowLifecycle() {
 		return false, fmt.Errorf("receiver claim requires a canonical flow construction receipt, not node completion")

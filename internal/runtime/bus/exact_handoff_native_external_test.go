@@ -150,7 +150,7 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 func TestSubscribedRoutePreparationNativeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runtimebus.VerifySubscribedRoutePreparationNativeForTest(t, openExactHandoffNative(t, backend, false))
+			verifyNativeObserverCreationOrder(t, backend, false)
 		})
 	}
 }

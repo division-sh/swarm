@@ -396,9 +396,18 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	if err != nil {
 		t.Fatal(err)
 	}
+	instanceKey := ""
+	if mode == "template" {
+		instanceKey, err = pipeline.AdmitFlowInstanceKey(source, flow, "item")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := workflowOwnershipConstructionRecord(t, source, runID, instance, entityType, mode, instanceKey, initial.ID(), graph.StageCount() != 0, enteredAt)
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
 		FlowTemplate: flow, Mode: mode, FlowConfig: config,
+		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: instanceKey, InitialMaterialization: record.InitialMaterialization,
 	}}}}
 	if flow == "branch/left" || flow == "branch/right" {
 		sibling := "branch/right"
@@ -411,6 +420,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		metadata := *other.MaterializationMetadata
 		metadata.FlowInstance = otherInstance.InstancePath
 		metadata.FlowTemplate = sibling
+		metadata.ParentInstance = otherInstance.ParentRoute.FlowInstance
 		payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(otherInstance, source.WorkflowVersion())
 		if err != nil {
 			t.Fatal(err)
@@ -419,6 +429,8 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		if err != nil {
 			t.Fatal(err)
 		}
+		otherRecord := workflowOwnershipConstructionRecord(t, source, runID, otherInstance, entityType, mode, instanceKey, initial.ID(), graph.StageCount() != 0, enteredAt)
+		metadata.InitialMaterialization = otherRecord.InitialMaterialization
 		other.MaterializationMetadata = &metadata
 		plan.Entities = append(plan.Entities, other)
 	}
@@ -493,6 +505,37 @@ func workflowOwnershipKeylessInstance(t *testing.T, source semanticview.Source, 
 	return instance
 }
 
+func workflowOwnershipConstructionRecord(t *testing.T, source semanticview.Source, runID string, instance flowidentity.Instance, entityType, mode, instanceKey, initialState string, staged bool, at time.Time) pipeline.FlowInstanceActivationRecord {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("construction fixture requires its admitted source bundle")
+	}
+	hash, err := contracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := pipeline.FlowInstanceActivationPlan{
+		Identity: instance, OccurredAt: at,
+		Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: instance, RunID: runID, BundleHash: hash,
+			WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+		},
+		Instance: pipeline.WorkflowInstance{
+			InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID,
+			EntityType: entityType, InstanceKind: mode, Mode: mode, Status: "active", InstanceKey: instanceKey,
+			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance,
+			ParentEntityID: instance.ParentEntityID, WorkflowName: instance.TemplateID, WorkflowVersion: source.WorkflowVersion(),
+			CurrentState: initialState, StageDefined: staged, EnteredStageAt: at, CreatedAt: at,
+		},
+	}
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
 func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	t.Helper()
 	var db *sql.DB
@@ -513,7 +556,7 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	// crosses full-schema materialization, revision, and rollback ownership.
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TEMP TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, PRIMARY KEY(run_id,entity_id))`, idType, idType),
-		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, gates %s NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, gates %s NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_hash TEXT NOT NULL, activation_attempt_id BIGINT NOT NULL DEFAULT 1, activation_attempt_grant_id %s, activation_attempt_state TEXT NOT NULL DEFAULT 'planned', phase TEXT NOT NULL DEFAULT 'planned', creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, timeType, timeType, timeType),
 	} {
 		if _, err := db.Exec(query); err != nil {

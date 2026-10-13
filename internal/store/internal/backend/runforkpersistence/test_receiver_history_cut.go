@@ -13,7 +13,7 @@ import (
 
 // Corrupt only the persisted cut reference, preserving all source history.
 func CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, missingRevision int64) error {
-	historical, err := readReceiverConstructionHistoryTx(ctx, tx, run, header)
+	_, historical, err := readHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return err
 	}

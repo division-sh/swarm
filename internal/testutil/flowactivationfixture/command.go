@@ -14,7 +14,7 @@ import (
 
 // Command packages already-prepared component fixture data for the real
 // selected-store owner. It neither prepares lifecycle nor persists anything.
-// Empty route sets are not evidence of public construction or route readiness.
+// Prepared fixture data is not executable attachment evidence.
 func Command(ctx context.Context, initialized pipeline.WorkflowInstance, lifecycle pipeline.WorkflowLifecycleMutationPlan, at time.Time) (bus.FlowInstanceActivationCommand, error) {
 	source, found := correlation.SourceArtifactFactFromContext(ctx)
 	if !found {
@@ -42,10 +42,5 @@ func Command(ctx context.Context, initialized pipeline.WorkflowInstance, lifecyc
 		return bus.FlowInstanceActivationCommand{}, err
 	}
 	command := bus.FlowInstanceActivationCommand{Plan: plan}
-	for _, construction := range plan.ConstructionPlans() {
-		command.RouteTopology = append(command.RouteTopology, bus.FlowInstanceRouteRecordSet{
-			Identity: flowidentity.RunScopedFlowInstance{RunID: construction.Readiness.RunID, Route: construction.Identity.Route()},
-		})
-	}
 	return command, command.Validate()
 }

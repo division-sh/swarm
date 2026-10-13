@@ -26,7 +26,6 @@ import (
 type deploymentRunCreationWriter interface {
 	CreateRunTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
-	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
 	deploymentFeedWriterTx
 	mutationprotocol.CandidateWriter
 }
@@ -117,9 +116,6 @@ func commitDeploymentRunCreationTx(
 		result.Activations, err = writer.CommitFlowInstanceActivationsTx(ctx, attempt, []runtimepipeline.FlowInstanceActivationPlan{root.Plan})
 		if err != nil {
 			return fmt.Errorf("construct deployment root tree: %w", err)
-		}
-		if _, err := writer.ReplaceFlowInstanceRouteTopologyTx(ctx, tx, root.RouteTopology); err != nil {
-			return fmt.Errorf("stage deployment root routes: %w", err)
 		}
 		result.Record, err = storedurabledata.CompleteRunCreationTx(owner, ctx, tx, &plan, "", "running")
 		if err != nil {

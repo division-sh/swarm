@@ -341,7 +341,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 }
 
 func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t *testing.T) {
-	currentArtifact := authorActivityTestSourceArtifact
+	currentBundle := loadEntitylessStartupRecoveryBundle(t)
+	currentArtifact := currentBundle.SourceArtifact
 	currentSource, err := runtimecorrelation.NewSourceArtifactFact(currentArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct current startup source: %v", err)
@@ -488,7 +489,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					if backend == "sqlite" {
 						workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 					}
-					module := loadStartupRecoveryWorkflowModule(t)
+					module := newRuntimeTestWorkflowModule(t, semanticview.Wrap(currentBundle))
 					processOwner := worklifetime.NewProcess()
 					activationProbe := &startupRecoveryActivationProbe{Store: selected}
 					handlerStarts := atomic.Int64{}
@@ -728,11 +729,6 @@ func seedStartupRecoverySourceRun(
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
 
-func loadStartupRecoveryWorkflowModule(t *testing.T) runtimepipeline.WorkflowModule {
-	t.Helper()
-	return newRuntimeTestWorkflowModule(t, semanticview.Wrap(loadEntitylessStartupRecoveryBundle(t)))
-}
-
 func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
@@ -890,7 +886,6 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       deliveryOwner,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 			})
 
 			instance := artifactActionResultWorkflowInstance()
@@ -982,7 +977,6 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       selected,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 			})
 
 			healthyInstance := artifactActionResultWorkflowInstance()
@@ -1125,7 +1119,6 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       deliveryOwner,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 				TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 					select {
 					case handlerStarted <- struct{}{}:

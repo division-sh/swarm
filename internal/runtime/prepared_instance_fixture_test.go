@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -78,7 +79,11 @@ func seedRuntimeTestKeylessSource(t testing.TB, ctx context.Context, selected bu
 	source := pc.SemanticSource()
 	runID := correlation.RunIDFromContext(ctx)
 	var result flowidentity.Instance
-	for _, id := range []string{semanticview.RootExecutionFlowID(source), flowID} {
+	ids := []string{semanticview.RootExecutionFlowID(source)}
+	if flowID != ids[0] {
+		ids = append(ids, flowID)
+	}
+	for _, id := range ids {
 		instance, err := flowidentity.StandingForGeneration(source, id, runID)
 		if err != nil {
 			t.Fatal(err)
@@ -95,13 +100,33 @@ func seedRuntimeTestKeylessSource(t testing.TB, ctx context.Context, selected bu
 		if err != nil {
 			t.Fatal(err)
 		}
+		entityType := ""
+		if entity, declared := entityruntime.ResolveForFlow(source, id); declared {
+			entityType = entity.EntityType
+		}
 		committed := seedRuntimeTestPreparedInstance(t, ctx, selected, pc, pipeline.WorkflowInstance{
 			WorkflowName: id, WorkflowVersion: source.WorkflowVersion(), StorageRef: instance.InstancePath,
 			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
 			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
-			CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Fields: map[string]any{}, EntityType: "test_entity",
+			Mode: schema.EffectiveMode(), CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Fields: map[string]any{}, EntityType: entityType,
 		})
 		result = committed.Plan.Identity
 	}
 	return result
+}
+
+func assertRuntimeTestConstructedInstance(t testing.TB, ctx context.Context, reader pipeline.FlowInstanceIndexReader, source semanticview.Source, instance flowidentity.Instance) {
+	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("constructed fixture requires its admitted source fact")
+	}
+	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(ctx), Route: instance.Route()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := reader.LookupFlowInstance(ctx, lookup)
+	if err != nil || !found || observed.Identity() != instance {
+		t.Fatalf("constructed fixture index = %+v, found=%t err=%v, want %+v", observed.Identity(), found, err, instance)
+	}
 }

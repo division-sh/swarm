@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -136,30 +135,11 @@ func (r CommittedAPIEventPublication) Validate() error {
 }
 
 type FlowInstanceActivationCommand struct {
-	Plan          runtimepipeline.FlowInstanceActivationPlan
-	RouteTopology []FlowInstanceRouteRecordSet
+	Plan runtimepipeline.FlowInstanceActivationPlan
 }
 
 func (c FlowInstanceActivationCommand) Validate() error {
-	if err := c.Plan.Validate(); err != nil {
-		return err
-	}
-	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
-		return err
-	}
-	if len(c.RouteTopology) == 0 {
-		return errors.New("flow instance activation requires exact route topology")
-	}
-	owners := make(map[runtimeflowidentity.RunScopedFlowInstance]bool, len(c.RouteTopology))
-	for _, set := range c.RouteTopology {
-		owners[set.Identity] = true
-	}
-	for _, plan := range c.Plan.ConstructionPlans() {
-		if !owners[runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}] {
-			return fmt.Errorf("construction %s omitted its exact route topology", plan.Identity.InstancePath)
-		}
-	}
-	return nil
+	return c.Plan.Validate()
 }
 
 type FlowInstanceActivationCommitOwner interface {
@@ -173,7 +153,6 @@ type PublicationCommand struct {
 	prospective         runtimepipeline.PreparedWorkflowPublicationState
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
-	RouteTopology       []FlowInstanceRouteRecordSet
 	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	AuthorScope         runtimeauthoractivity.Scope
 	HasAuthorScope      bool
@@ -228,12 +207,6 @@ func (c PublicationCommand) validatePublicationFacts() error {
 			return fmt.Errorf("publication activation %d: %w", index, err)
 		}
 	}
-	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
-		return fmt.Errorf("publication route topology: %w", err)
-	}
-	if len(c.RouteTopology) > 0 && len(c.Activations) == 0 {
-		return fmt.Errorf("publication route topology requires a flow activation")
-	}
 	if c.DynamicFlowCreation != nil {
 		if err := c.DynamicFlowCreation.Validate(); err != nil {
 			return err
@@ -277,7 +250,6 @@ type CommittedPublication struct {
 	AppendOutcome    EventAppendOutcome
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 	Activations      []CommittedFlowInstanceActivation
-	RouteTopology    []FlowInstanceRouteRecordSet
 	AcceptedStage    *runtimepipelineobligation.CommittedStageReceipt
 	// Acknowledged is false for transaction-local publication evidence.
 	Acknowledged bool
@@ -319,9 +291,6 @@ func (r CommittedPublication) Validate() error {
 		if err := activation.Validate(); err != nil {
 			return fmt.Errorf("committed flow activation %d: %w", index, err)
 		}
-	}
-	if err := validateFlowInstanceRouteTopology(r.RouteTopology); err != nil {
-		return fmt.Errorf("committed route topology: %w", err)
 	}
 	return nil
 }
@@ -542,72 +511,6 @@ func (r CommittedSelectedForkEvent) Validate() error {
 	return nil
 }
 
-type FlowInstanceRouteRecord struct {
-	Identity       runtimeflowidentity.RunScopedFlowInstance
-	EventPattern   string
-	SubscriberType string
-	SubscriberID   string
-	SourceFlow     string
-}
-
-type FlowInstanceRoutePersistence interface {
-	UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
-}
-
-// FlowInstanceRouteSetPersistence replaces one materialized route owner's
-// complete active record set inside the selected mutation.
-type FlowInstanceRouteSetPersistence interface {
-	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error
-}
-
-// FlowInstanceRouteRecordSet is one exact route owner's complete materialized
-// record set within a topology replacement.
-type FlowInstanceRouteRecordSet struct {
-	Identity runtimeflowidentity.RunScopedFlowInstance
-	Routes   []FlowInstanceRouteRecord
-}
-
-func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error {
-	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(sets))
-	for setIndex, set := range sets {
-		identity := set.Identity.Normalize()
-		if err := identity.Validate(); err != nil || identity != set.Identity {
-			return fmt.Errorf("route set %d requires canonical exact identity", setIndex)
-		}
-		if _, exists := seen[identity]; exists {
-			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.Key())
-		}
-		seen[identity] = struct{}{}
-		for routeIndex, route := range set.Routes {
-			if route.Identity != identity || strings.TrimSpace(route.EventPattern) == "" ||
-				strings.TrimSpace(route.SubscriberType) == "" || strings.TrimSpace(route.SubscriberID) == "" {
-				return fmt.Errorf("route set %d record %d requires exact owner, event pattern, and subscriber", setIndex, routeIndex)
-			}
-		}
-	}
-	return nil
-}
-
-// FlowInstanceRouteTopologyPersistence atomically replaces every affected
-// route owner in one closed selected-store operation.
-type FlowInstanceRouteTopologyResult struct {
-	Acknowledged bool
-}
-
-type FlowInstanceRouteTopologyPersistence interface {
-	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error)
-}
-
-type FlowInstanceRouteRecordReader interface {
-	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error)
-}
-
-type FlowInstanceRouteRollbackPersistence interface {
-	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
-}
-
 type ActiveAgentDescriptor struct {
 	Identity agentidentity.Identity
 	EntityID string
@@ -635,78 +538,6 @@ type ActiveAgentDescriptorLister interface {
 	ListActiveAgentDescriptors(ctx context.Context, runID string) ([]ActiveAgentDescriptor, error)
 }
 
-type ActiveFlowInstanceDescriptor struct {
-	Identity        runtimeflowidentity.Instance
-	RunID           string
-	InstanceID      string
-	EntityID        string
-	FlowInstance    string
-	FlowTemplate    string
-	BundleHash      string
-	WorkflowVersion string
-	AddressFields   map[string]string
-}
-
-func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor {
-	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
-	instanceID := strings.TrimSpace(d.InstanceID)
-	if flowInstance == "" {
-		flowInstance = strings.Trim(strings.TrimSpace(instanceID), "/")
-	}
-	if instanceID == "" && flowInstance != "" {
-		instanceID = runtimeflowidentity.LogicalInstanceID(flowInstance)
-	}
-	entityID := strings.TrimSpace(d.EntityID)
-	return ActiveFlowInstanceDescriptor{
-		Identity:        d.Identity,
-		RunID:           strings.TrimSpace(d.RunID),
-		InstanceID:      instanceID,
-		EntityID:        entityID,
-		FlowInstance:    flowInstance,
-		FlowTemplate:    strings.TrimSpace(d.FlowTemplate),
-		BundleHash:      strings.TrimSpace(d.BundleHash),
-		WorkflowVersion: strings.TrimSpace(d.WorkflowVersion),
-		AddressFields:   normalizeDescriptorAddressFields(d.AddressFields),
-	}
-}
-
-func (d ActiveFlowInstanceDescriptor) HasSemanticSource() bool {
-	d = d.Normalized()
-	return d.BundleHash != "" && d.WorkflowVersion != ""
-}
-
-func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
-	d = d.Normalized()
-	return ActiveTargetDescriptor{
-		FlowID:        d.FlowTemplate,
-		ID:            d.InstanceID,
-		EntityID:      d.EntityID,
-		FlowInstance:  d.FlowInstance,
-		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
-	}.Normalized()
-}
-
-// ActiveFlowInstanceDescriptorLister exposes active dynamic flow instances as
-// routable target descriptors. Stores implement this from persisted flow
-// instance state, not from live subscriptions or readback.
-type ActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
-// ScopedActiveFlowInstanceDescriptorLister loads only graph-selected context
-// descriptors. Template IDs and instance paths are exact alternatives; an
-// empty scope is never interpreted as a full-run request.
-type ScopedActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
-// Key-matched lookup must return every selected descriptor with the supplied
-// canonical key value, including hostile rows at a noncanonical instance
-// path. The compiled lifecycle owner, not SQL, decides the expected identity.
-type KeyedActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
 type ActiveTargetDescriptor struct {
 	FlowID        string
 	Availability  runtimepipeline.DeliveryTargetAvailability
@@ -728,20 +559,6 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 		Materializing: d.Materializing,
 	}
-}
-
-// SelectedRunTargetOwnerLister exposes exact receiver ownership rows from the
-// selected run. It is deliberately separate from template route descriptors:
-// static and root owners come from entity_state, while template descriptors
-// additionally carry readiness and address evidence.
-type SelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]ActiveTargetDescriptor, error)
-}
-
-// ScopedSelectedRunTargetOwnerLister consumes exact graph-selected instance
-// paths. It does not decide which receiver or entity owns an event.
-type ScopedSelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
@@ -791,24 +608,9 @@ func (InMemoryEventStore) CommitPublication(_ context.Context, command Publicati
 	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
-		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
-}
-
-func cloneFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) []FlowInstanceRouteRecordSet {
-	if len(sets) == 0 {
-		return nil
-	}
-	out := make([]FlowInstanceRouteRecordSet, len(sets))
-	for index, set := range sets {
-		out[index] = FlowInstanceRouteRecordSet{
-			Identity: set.Identity,
-			Routes:   append([]FlowInstanceRouteRecord(nil), set.Routes...),
-		}
-	}
-	return out
 }
 
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

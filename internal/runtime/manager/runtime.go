@@ -1143,7 +1143,7 @@ func (am *AgentManager) RecoverAfterStartupAdmission(ctx context.Context) (Start
 
 type RecoverableStateSnapshot struct {
 	PersistedAgentCount                         int
-	PersistedFlowInstanceRouteCount             int
+	PersistedFlowAttachmentCount                int
 	PersistedSelectedContractRouteRecoveryCount int
 	PendingDynamicFlowRuntimeReadinessCount     int
 	ReplayEligibleEventPresent                  bool
@@ -1151,7 +1151,7 @@ type RecoverableStateSnapshot struct {
 
 func (s RecoverableStateSnapshot) HasRecoverableWork() bool {
 	return s.PersistedAgentCount > 0 ||
-		s.PersistedFlowInstanceRouteCount > 0 ||
+		s.PersistedFlowAttachmentCount > 0 ||
 		s.PersistedSelectedContractRouteRecoveryCount > 0 ||
 		s.PendingDynamicFlowRuntimeReadinessCount > 0 ||
 		s.ReplayEligibleEventPresent
@@ -1162,8 +1162,8 @@ func (s RecoverableStateSnapshot) Classes() []string {
 	if s.PersistedAgentCount > 0 {
 		classes = append(classes, "persisted agents")
 	}
-	if s.PersistedFlowInstanceRouteCount > 0 {
-		classes = append(classes, "persisted flow instance routes")
+	if s.PersistedFlowAttachmentCount > 0 {
+		classes = append(classes, "persisted flow attachments")
 	}
 	if s.PersistedSelectedContractRouteRecoveryCount > 0 {
 		classes = append(classes, "selected-contract route recoveries")
@@ -1181,7 +1181,7 @@ func (s RecoverableStateSnapshot) Classes() []string {
 func (s RecoverableStateSnapshot) Detail() map[string]any {
 	return map[string]any{
 		"persisted_agent_count":                            s.PersistedAgentCount,
-		"persisted_flow_instance_route_count":              s.PersistedFlowInstanceRouteCount,
+		"persisted_flow_attachment_count":                  s.PersistedFlowAttachmentCount,
 		"persisted_selected_contract_route_recovery_count": s.PersistedSelectedContractRouteRecoveryCount,
 		"pending_dynamic_flow_runtime_readiness_count":     s.PendingDynamicFlowRuntimeReadinessCount,
 		"replay_eligible_event_present":                    s.ReplayEligibleEventPresent,

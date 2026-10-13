@@ -190,11 +190,15 @@ const (
 )
 
 type RunForkMaterializedEntitySnapshotMetadata struct {
+	InitialMaterialization json.RawMessage                        `json:"initial_materialization,omitempty"`
+	HistoricalConstruction *RunForkCapturedHistoricalConstruction `json:"historical_construction,omitempty"`
 	// FlowConfig is the exact flow_instances.config envelope recorded with
 	// the entity metadata at the selected revision, not current flow state.
 	FlowConfig     json.RawMessage `json:"flow_config,omitempty"`
 	Owner          string          `json:"owner"`
 	FlowInstance   string          `json:"flow_instance"`
+	ParentInstance string          `json:"parent_instance"`
+	InstanceKey    string          `json:"instance_key"`
 	EntityType     string          `json:"entity_type"`
 	Slug           string          `json:"slug,omitempty"`
 	Name           string          `json:"name,omitempty"`
@@ -207,6 +211,14 @@ type RunForkMaterializedEntitySnapshotMetadata struct {
 	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
 	TerminatedAt   time.Time       `json:"terminated_at,omitempty"`
 	EnteredStateAt time.Time       `json:"entered_state_at,omitempty"`
+}
+
+// RunForkCapturedHistoricalConstruction records an immediate immutable source
+// cut, not a constructor execution or native receipt in the projected run.
+type RunForkCapturedHistoricalConstruction struct {
+	SourceRunID    string             `json:"source_run_id"`
+	SourceRevision int64              `json:"source_revision"`
+	SourceEntity   RunForkEntityState `json:"source_entity"`
 }
 
 const (
@@ -278,7 +290,6 @@ type RunForkPlan struct {
 	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
 	FanOutObligations         []RunForkFanOutObligation         `json:"fan_out_obligations,omitempty"`
 	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
-	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
 	historicalRevision        int64
 	historicalEventIDs        []string
 	historicalInputs          map[string]InputPublication
@@ -522,15 +533,6 @@ func (p RunForkPoint) Validate() error {
 	return nil
 }
 
-const (
-	RunForkRouteHistoryNotApplicable      = "not_applicable"
-	RunForkRouteHistoryUnknownUnversioned = "unknown_unversioned"
-)
-
-type RunForkRouteHistoryProjection struct {
-	State string `json:"state"`
-}
-
 type RunForkEntityState struct {
 	EntityID                string                                     `json:"entity_id"`
 	CurrentState            string                                     `json:"current_state,omitempty"`
@@ -592,7 +594,6 @@ const (
 	RunForkReplayResumeFactDeliveryCanceledHistory   = "delivery_canceled_history"
 	RunForkReplayResumeFactCommittedReplayScope      = "committed_replay_scope"
 	RunForkReplayResumeFactTimerHistory              = "timer_history"
-	RunForkReplayResumeFactRouteHistory              = "flow_route_history"
 	RunForkReplayResumeFactSessionHistory            = "session_history"
 	RunForkReplayResumeFactConversationAuditHistory  = "conversation_audit_history"
 	RunForkReplayResumeFactActiveTurnHistory         = "active_turn_history"
@@ -608,7 +609,6 @@ const (
 	RunForkBlockerNonAgentDeliveryReplayUnsupported     = "non_agent_delivery_replay_unsupported"
 	RunForkBlockerCommittedReplayScopeReplayUnsupported = "committed_replay_scope_replay_unsupported"
 	RunForkBlockerTimerHistoryUnproven                  = "timer_history_unproven"
-	RunForkBlockerFlowRouteHistoryUnproven              = "flow_route_history_unproven"
 	RunForkBlockerSessionHistoryUnproven                = "session_history_unproven"
 	RunForkBlockerConversationAuditUnproven             = "conversation_audit_history_unproven"
 	RunForkBlockerActiveTurnHistoryUnproven             = "active_turn_history_unproven"
@@ -638,31 +638,6 @@ type RunForkReplayResumeDisposition struct {
 	SubscriberType string `json:"subscriber_type,omitempty"`
 	SubscriberID   string `json:"subscriber_id,omitempty"`
 	Message        string `json:"message"`
-}
-
-// RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the
-// unversioned route-history blocker after the selected route topology and its
-// persisted fork-local recovery have been validated by the caller.
-func RunForkReplayResumeAdmissionWithSelectedRouteResolution(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
-	filtered := make([]RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
-	for _, blocker := range admission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == RunForkBlockerFlowRouteHistoryUnproven {
-			continue
-		}
-		filtered = append(filtered, blocker)
-	}
-	admission.UnsupportedBlockers = filtered
-	for i := range admission.Dispositions {
-		if strings.TrimSpace(admission.Dispositions[i].Fact) != RunForkReplayResumeFactRouteHistory {
-			continue
-		}
-		admission.Dispositions[i].Disposition = RunForkReplayResumeDispositionReconstruct
-		admission.Dispositions[i].BlockerCode = ""
-		admission.Dispositions[i].Owner = RunForkSelectedContractRoutePersistenceOwner
-		admission.Dispositions[i].Classification = RunForkRouteHistoryUnknownUnversioned
-		admission.Dispositions[i].Message = "selected frontier, binding, and static/dynamic topology proof resolve unversioned source routes into persisted fork-local route recovery"
-	}
-	return runForkReplayResumeAdmissionRecalculateReadiness(admission)
 }
 
 // RunForkPendingWorkReplayableForHistoricalReplay is the shared taxonomy predicate
@@ -747,6 +722,7 @@ const (
 	RunForkBlockerSelectedContractRouteAdmissionNonMutating              = "selected_contract_route_admission_non_mutating"
 	RunForkBlockerSelectedContractRouteTopologyNonMutating               = "selected_contract_route_topology_non_mutating"
 	RunForkBlockerSelectedContractDynamicRouteTopologyUnproven           = "selected_contract_dynamic_route_topology_unproven"
+	RunForkBlockerSelectedContractRouteRecoveryUnproven                  = "selected_contract_route_recovery_unproven"
 	RunForkBlockerSelectedContractRecipientPlanningNonMutating           = "selected_contract_recipient_planning_non_mutating"
 	RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported = "selected_contract_agent_handler_materialization_unsupported"
 	RunForkBlockerContractSwapBootResumeAdmissionNonMutating             = "contract_swap_boot_resume_admission_non_mutating"
@@ -844,7 +820,6 @@ type RunForkSelectedContractRouteAdmission struct {
 	NonMutating                    bool                                       `json:"non_mutating"`
 	RouteReconstructionSupported   bool                                       `json:"route_reconstruction_supported"`
 	ContractSelection              RunForkContractSelection                   `json:"contract_selection"`
-	SourceRouteFactsPresent        bool                                       `json:"source_route_facts_present"`
 	SelectedRouteEvents            []RunForkSelectedContractRouteEvent        `json:"selected_route_events,omitempty"`
 	DynamicFlowInstances           []string                                   `json:"dynamic_flow_instances,omitempty"`
 	FrontierAdmissionOwner         string                                     `json:"frontier_admission_owner,omitempty"`
@@ -868,7 +843,6 @@ type RunForkSelectedContractRouteTopology struct {
 	StaticTopologySupported        bool                                          `json:"static_topology_supported"`
 	DynamicTopologySupported       bool                                          `json:"dynamic_topology_supported"`
 	DynamicTopologyOwner           string                                        `json:"dynamic_topology_owner,omitempty"`
-	SourceRouteFactsPresent        bool                                          `json:"source_route_facts_present"`
 	StaticRouteEvents              []RunForkSelectedContractRouteEvent           `json:"static_route_events,omitempty"`
 	DynamicFlowInstances           []string                                      `json:"dynamic_flow_instances,omitempty"`
 	DynamicTopologyProofs          []RunForkSelectedContractDynamicTopologyProof `json:"dynamic_topology_proofs,omitempty"`

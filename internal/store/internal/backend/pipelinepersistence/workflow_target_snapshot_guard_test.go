@@ -35,19 +35,19 @@ func TestWorkflowTargetPersistenceReadersUseOneAggregateStatement(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundMaterializer := false
+	foundMaterializers := 0
 	for _, decl := range materialization.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "receiverMaterializedTx" {
+		if !ok || (fn.Name.Name != "receiverMaterializedTx" && fn.Name.Name != "receiverConstructionEvidenceTx") {
 			continue
 		}
-		foundMaterializer = true
+		foundMaterializers++
 		if err := requireAggregateDelegation(fn); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if !foundMaterializer {
-		t.Fatal("transactional materializer consumer missing")
+	if foundMaterializers != 2 {
+		t.Fatal("transactional materializer or construction evidence consumer missing")
 	}
 
 	constants := map[string]string{}
@@ -82,7 +82,7 @@ func TestWorkflowTargetPersistenceReadersUseOneAggregateStatement(t *testing.T) 
 	}
 }
 func requireAggregateDelegation(fn *ast.FuncDecl) error {
-	shared, queries, split, receipts, validations := 0, 0, 0, 0, 0
+	shared, queries, split, receipts, validations, construction, historical := 0, 0, 0, 0, 0, 0, 0
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -93,36 +93,60 @@ func requireAggregateDelegation(fn *ast.FuncDecl) error {
 			if callee.Name == "loadWorkflowTargetPersistence" {
 				shared++
 			}
+			if callee.Name == "receiverConstructionEvidenceTx" {
+				construction++
+			}
+			if callee.Name == "ReadStoredFlowConstructionReceiptTx" && exactReceiverReceiptArguments(call) {
+				receipts++
+			}
 		case *ast.SelectorExpr:
 			switch callee.Sel.Name {
 			case "QueryRowContext", "QueryContext":
-				// The immutable creating-delivery receipt is a separate fact,
-				// read in the same transaction after the aggregate is admitted.
-				if fn.Name.Name == "receiverMaterializedTx" && callee.Sel.Name == "QueryRowContext" && len(call.Args) == 5 {
-					if literal, ok := call.Args[1].(*ast.BasicLit); ok && literal.Kind == token.STRING {
-						query, err := strconv.Unquote(literal.Value)
-						if err == nil && strings.Join(strings.Fields(query), " ") == "SELECT projection FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3" {
-							receipts++
-							break
-						}
-					}
-				}
 				queries++
 			case "LoadWorkflowEntityState", "LoadWorkflowInstance":
 				split++
-			case "ValidateFlowConstructionPublication":
+			case "ValidateStoredMode":
 				validations++
+			case "ReadHistoricalFlowInstanceConstructionEvidenceTx":
+				historical++
 			}
 		}
 		return true
 	})
+	if fn.Name.Name == "receiverConstructionEvidenceTx" {
+		if shared != 0 || queries != 0 || split != 0 || receipts != 1 || validations != 1 || historical != 1 {
+			return fmt.Errorf("construction must consume exact native and historical owners once: aggregate=%d queries=%d split=%d receipts=%d validations=%d historical=%d", shared, queries, split, receipts, validations, historical)
+		}
+		return nil
+	}
 	if shared != 1 || queries != 0 || split != 0 {
 		return fmt.Errorf("%s must delegate once to aggregate owner: shared=%d queries=%d split=%d", fn.Name.Name, shared, queries, split)
 	}
-	if fn.Name.Name == "receiverMaterializedTx" && (receipts != 1 || validations != 1) {
-		return fmt.Errorf("receiver must verify its exact creating receipt once: receipts=%d validations=%d", receipts, validations)
+	if fn.Name.Name == "receiverMaterializedTx" && construction != 1 {
+		return fmt.Errorf("receiver must delegate exact construction once: construction=%d", construction)
 	}
 	return nil
+}
+
+func exactReceiverReceiptArguments(call *ast.CallExpr) bool {
+	if len(call.Args) != 4 {
+		return false
+	}
+	for _, argument := range []struct {
+		index int
+		name  string
+	}{{0, "ctx"}, {1, "tx"}, {3, "header"}} {
+		value, ok := call.Args[argument.index].(*ast.Ident)
+		if !ok || value.Name != argument.name {
+			return false
+		}
+	}
+	run, ok := call.Args[2].(*ast.SelectorExpr)
+	if !ok || run.Sel.Name != "RunID" {
+		return false
+	}
+	owner, ok := run.X.(*ast.Ident)
+	return ok && owner.Name == "run"
 }
 
 func checkWorkflowTargetAggregateConsumers(file *ast.File) error {
@@ -274,9 +298,9 @@ func TestReceiverAggregateGuardRequiresExactConstructionReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ name, from, to string }{
-		{"foreign receipt", "WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3", "WHERE instance_path=$2 AND entity_id=$3"},
-		{"split read", "var receipt []byte", "tx.QueryRowContext(ctx, \"SELECT 1\"); var receipt []byte"},
-		{"missing validation", "ValidateFlowConstructionPublication", "OtherConstructionValidation"},
+		{"foreign receipt", "ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header)", "ReadStoredFlowConstructionReceiptTx(ctx, tx, \"foreign\", header)"},
+		{"split read", "target := initialization.ConstructionTarget().Route()", "tx.QueryRowContext(ctx, \"SELECT 1\"); target := initialization.ConstructionTarget().Route()"},
+		{"missing validation", "original.ValidateStoredMode", "original.OtherConstructionValidation"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if !strings.Contains(string(raw), tc.from) {
@@ -287,7 +311,7 @@ func TestReceiverAggregateGuardRequiresExactConstructionReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, decl := range file.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "receiverMaterializedTx" {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "receiverConstructionEvidenceTx" {
 					if err := requireAggregateDelegation(fn); err == nil {
 						t.Fatal("hostile construction receipt passed aggregate guard")
 					}

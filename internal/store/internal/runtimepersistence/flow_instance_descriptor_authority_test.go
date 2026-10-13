@@ -4,39 +4,28 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-type flowInstanceDescriptorAuthorityStore interface {
-	storetest.RunFixtureStore
-	externalStoreTestDurableEventBusStore
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.ScopedActiveFlowInstanceDescriptorLister
-}
-
 type dynamicFlowSourceProjectionStore interface {
+	nativeReadinessFixtureStore
 	storetest.RunFixtureStore
 	sourceartifactfixture.Writer
 	runtimerunlifecycle.OperationOwner
@@ -72,39 +61,27 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			ctx := testAuthorActivityContext()
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA})
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB)
-			seedStaticFlowInstanceRouteWithoutReadiness(t, db, sqlite, runA, "standing/a")
-			if _, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA); err == nil || !strings.Contains(err.Error(), "no dynamic runtime readiness owner") {
-				t.Fatalf("static route without readiness was admitted: %v", err)
-			}
-			if _, err := db.ExecContext(ctx, `UPDATE routing_rules SET status='inactive' WHERE run_id=$1 AND flow_instance=$2`, runA, "standing/a"); err != nil {
-				t.Fatal(err)
-			}
+			seedExactFlowInstanceDescriptorOwner(t, store, runA, uuid.NewString(), "account/a", hashA)
+			seedExactFlowInstanceDescriptorOwner(t, store, runB, uuid.NewString(), "account/b", hashB)
 			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
 			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(projection.CurrentCompleted) != 1 || projection.CurrentCompleted[0].InstancePath != "account/a" || len(projection.CurrentPending) != 0 {
+			if len(projection.CurrentCompleted) != 1 || projection.CurrentCompleted[0].InstancePath != "account/a" || len(projection.CurrentPending) != 1 || projection.CurrentPending[0].InstancePath != runA {
 				t.Fatalf("source A projection = %#v", projection)
 			}
 			deleteQuery := `DELETE FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`
-			routeQuery := `INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES (?, ?, 'node', 'receiver', ?, 'account', TRUE, 'active', ?)`
 			deleteArgs := []any{runB, "account/b"}
-			routeArgs := []any{runB, "account/b/event", "account/b", time.Now().UTC()}
 			if !sqlite {
 				deleteQuery = `DELETE FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`
-				routeQuery = `INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ($1::uuid, $2, 'node', 'receiver', $3, 'account', TRUE, 'active', $4)`
 			}
 			if _, err := db.ExecContext(ctx, deleteQuery, deleteArgs...); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(ctx, routeQuery, routeArgs...); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceB); err == nil || !strings.Contains(err.Error(), "no dynamic runtime readiness owner") {
-				t.Fatalf("invalid source-owned route error = %v", err)
+			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
+			if _, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceB); !errors.As(err, &corruption) || corruption.RunID != runB || corruption.InstancePath != "account/b" {
+				t.Fatalf("missing source-owned attachment evidence error = %v", err)
 			}
 		})
 	}
@@ -147,22 +124,29 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 				{uuid.NewString(), "account/transition-pending", predecessorHash, false},
 			}
 			for _, row := range rows {
-				requireReadinessRun(t, ctx, selected, row.runID, currentHash)
-				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, row.runID, uuid.NewString(), row.path, row.planHash)
+				if row.planHash == predecessorHash {
+					requireReadinessRun(t, ctx, selected, row.runID, predecessorHash, predecessorArtifact)
+				} else {
+					requireReadinessRun(t, ctx, selected, row.runID, currentHash)
+				}
+				seedExactFlowInstanceDescriptorOwner(t, selected, row.runID, uuid.NewString(), row.path, row.planHash)
+				if row.planHash == predecessorHash {
+					setReadinessRunSource(t, selected, ctx, row.runID, current, sourceartifactfixture.Artifact())
+				}
 				if row.complete {
 					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "phase", time.Now().UTC())
 				}
 			}
 			foreignRun := uuid.NewString()
 			requireReadinessRun(t, ctx, selected, foreignRun, foreignHash, foreignArtifact)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
+			seedExactFlowInstanceDescriptorOwner(t, selected, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
 			setReadinessPlanRaw(t, db, sqlite, foreignRun, "account/foreign-malformed", `{}`)
 
 			projection, err := selected.InspectDynamicFlowRuntimeReadinessForSource(ctx, current)
 			if err != nil {
 				t.Fatalf("inspect current source: %v", err)
 			}
-			if len(projection.CurrentCompleted) != 1 || len(projection.CurrentPending) != 1 || len(projection.SourceTransitionRequired) != 2 {
+			if len(projection.CurrentCompleted) != 1 || len(projection.CurrentPending) != 3 || len(projection.SourceTransitionRequired) != 4 {
 				t.Fatalf("projection classes = %#v", projection)
 			}
 			transitionPending := 0
@@ -174,12 +158,20 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 					t.Fatalf("transition owning source = %#v", item.OwningRunSource)
 				}
 			}
-			if transitionPending != 1 {
-				t.Fatalf("pending transition count = %d, want 1", transitionPending)
+			if transitionPending != 3 {
+				t.Fatalf("pending transition count = %d, want one receiver and both actual parents", transitionPending)
 			}
 			exactRun, err := selected.InspectDynamicFlowRuntimeReadinessForRun(ctx, rows[2].runID, current)
-			if err != nil || len(exactRun) != 1 || exactRun[0].InstancePath != rows[2].path {
+			if err != nil || len(exactRun) != 2 {
 				t.Fatalf("exact run projection = %#v err=%v", exactRun, err)
+			}
+			if exactRun[0].InstancePath == exactRun[1].InstancePath {
+				t.Fatalf("exact run projection duplicated an owner: %#v", exactRun)
+			}
+			for _, item := range exactRun {
+				if item.InstancePath != rows[2].path && item.InstancePath != rows[2].runID {
+					t.Fatalf("exact run projection included a foreign owner: %#v", item)
+				}
 			}
 			wrongSource, err := selected.InspectDynamicFlowRuntimeReadinessForRun(ctx, rows[2].runID, foreign)
 			if err != nil || len(wrongSource) != 0 {
@@ -219,7 +211,7 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					path := "account/guard-" + race + "-" + uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 					requireReadinessRun(t, ctx, selected, runID, bundleHash)
-					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash)
+					seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load observation: found=%v err=%v", found, err)
@@ -291,13 +283,13 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected, _, _ := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			runID := uuid.NewString()
 			path := "account/aba-" + uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 			requireReadinessRun(t, ctx, selected, runID, source.BundleHash())
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, source.BundleHash())
+			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, source.BundleHash())
 			load := func() runtimepipeline.DynamicFlowRuntimeReadiness {
 				t.Helper()
 				item, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
@@ -362,7 +354,7 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 				requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, 2)
 				for index := range 2 {
 					path := fmt.Sprintf("account/%s-%d-%s", label, index, uuid.NewString())
-					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash)
+					seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load batch observation %s: found=%v err=%v", path, found, err)
@@ -443,149 +435,58 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 	}
 }
 
-func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlite bool, runID, instancePath string) {
-	t.Helper()
-	now := time.Now().UTC()
-	entityID := uuid.NewString()
-	if sqlite {
-		if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES (?, ?, ?, 'standing', 'standing', 'static', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)`, runID, instancePath, entityID, now, now, now); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'standing', 'active', '{}', ?, ?)`, entityID, runID, instancePath, now, now); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Exec(`INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES (?, ?, 'node', 'receiver', ?, 'standing', TRUE, 'active', ?)`, runID, instancePath+"/event", instancePath, now); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1::uuid, $2, $4::uuid, 'standing', 'standing', 'static', '{}'::jsonb, 'active', TRUE, 'active', $3, $3, $3, '{}', '{}', '{}', 1)`, runID, instancePath, now, entityID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', 'active', '{}'::jsonb, $4, $4)`, entityID, runID, instancePath, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ($1::uuid, $2, 'node', 'receiver', $3, 'standing', TRUE, 'active', $4)`, runID, instancePath+"/event", instancePath, now); err != nil {
-		t.Fatal(err)
-	}
+type nativeReadinessFixtureStore interface {
+	CommitFlowInstanceActivation(context.Context, bus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
+	LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
+	LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error)
 }
 
-func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t *testing.T) {
-	type backendCase struct {
-		name  string
-		setup func(*testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool)
-	}
-	backends := []backendCase{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db, false
-			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.Database(selected), true
-			},
-		},
-	}
-
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			selected, db, sqlite := backend.setup(t)
-			runA, runB := uuid.NewString(), uuid.NewString()
-			entityA, entityB := uuid.NewString(), uuid.NewString()
-			source := mustExternalStoreTestSourceArtifactFact()
-			bundleHash := source.BundleHash()
-			ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(), runA)
-			ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(), runB)
-			storetest.RequireRun(t, ctxA, selected, storetest.RunFixture{
-				Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: bundleHash,
-			})
-			storetest.RequireRun(t, ctxB, selected, storetest.RunFixture{
-				Origin: storetest.ScenarioSetupOrigin(), RunID: runB, BundleHash: bundleHash,
-			})
-
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash)
-
-			for _, check := range []struct {
-				ctx   context.Context
-				runID string
-				path  string
-			}{
-				{ctx: ctxA, runID: runA, path: "account/a"},
-				{ctx: ctxB, runID: runB, path: "account/b"},
-			} {
-				descriptors, err := selected.ListActiveFlowInstanceDescriptors(check.ctx, check.runID)
-				if err != nil {
-					t.Fatalf("ListActiveFlowInstanceDescriptors(%s): %v", check.path, err)
-				}
-				if len(descriptors) != 1 || descriptors[0].FlowInstance != check.path {
-					t.Fatalf("descriptors for %s = %#v, want exact run-owned descriptor", check.path, descriptors)
-				}
-			}
-		})
-	}
-}
-
-func seedExactFlowInstanceDescriptorOwner(
-	t *testing.T,
-	db *sql.DB,
-	sqlite bool,
-	runID, entityID, instancePath, bundleHash string,
-) {
+// These are prepared attachment-component fixtures, not public constructor eligibility proofs.
+func seedExactFlowInstanceDescriptorOwner(t *testing.T, selected nativeReadinessFixtureStore, runID, entityID, instancePath, bundleHash string) {
 	t.Helper()
-	readiness := exactFlowInstanceDescriptorReadinessJSON(
-		t, runID, bundleHash, "1.0.0", "account", instancePath, entityID,
-	)
-	planHash := readinessPlanFixtureHash(t, readiness)
-	if sqlite {
-		if _, err := db.Exec(`
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status,
-				stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-			VALUES (?, ?, 'account', ?, 'account', 'template', '{}', 'active',
-				TRUE, 'active', '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, runID, instancePath, entityID); err != nil {
-			t.Fatalf("seed sqlite flow instance %s: %v", instancePath, err)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(testAuthorActivityContext(), runID), fact)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", bundleHash))
+	rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}
+	root, found, err := selected.LoadWorkflowInstance(ctx, rootOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	commit := func(instance runtimepipeline.WorkflowInstance) {
+		t.Helper()
+		command, err := flowactivationfixture.Command(ctx, instance, runtimepipeline.WorkflowLifecycleMutationPlan{}, at)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if _, err := db.Exec(`
-			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-			VALUES (?, ?, ?, 'account', 'active', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, entityID, runID, instancePath); err != nil {
-			t.Fatalf("seed sqlite entity state %s: %v", instancePath, err)
+		result, err := selected.CommitFlowInstanceActivation(ctx, command)
+		if err != nil || !result.Acknowledged || !result.Created {
+			t.Fatalf("construct attachment component: acknowledged=%t created=%t err=%v", result.Acknowledged, result.Created, err)
 		}
-		if _, err := db.Exec(`
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, runID, instancePath, readiness, planHash); err != nil {
-			t.Fatalf("seed sqlite readiness %s: %v", instancePath, err)
+	}
+	if !found {
+		root = runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: ".", WorkflowVersion: "1.0.0",
+			Mode: "static", CurrentState: "active", CreatedAt: at, EnteredStageAt: at,
 		}
-		return
+		commit(root)
 	}
-	if _, err := db.Exec(`
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status,
-			stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-		VALUES ($1::uuid, $2, 'account', $3::uuid, 'account', 'template', '{}'::jsonb, 'active',
-			TRUE, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())
-	`, runID, instancePath, entityID); err != nil {
-		t.Fatalf("seed postgres flow instance %s: %v", instancePath, err)
+	if _, err := selected.LoadFlowConstructionPublication(ctx, rootOwner, root.EntityID); err != nil {
+		t.Fatalf("reuse actual captured parent: %v", err)
 	}
-	if _, err := db.Exec(`
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, 'account', 'active', '{}'::jsonb, NOW(), NOW())
-	`, entityID, runID, instancePath); err != nil {
-		t.Fatalf("seed postgres entity state %s: %v", instancePath, err)
+	instanceID := strings.TrimPrefix(instancePath, "account/")
+	if instanceID == "" || instanceID == instancePath || strings.Contains(instanceID, "/") {
+		t.Fatal("attachment fixture requires its exact account child")
 	}
-	if _, err := db.Exec(`
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
-	`, runID, instancePath, readiness, planHash); err != nil {
-		t.Fatalf("seed postgres readiness %s: %v", instancePath, err)
-	}
+	commit(runtimepipeline.WorkflowInstance{
+		InstanceID: instanceID, StorageRef: instancePath, EntityID: entityID, EntityType: "account",
+		WorkflowName: "account", WorkflowVersion: "1.0.0", Mode: "template", InstanceKey: instanceID,
+		ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: root.EntityID,
+		StageDefined: true, CurrentState: "active", Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
+	})
 }
 
 func requireReadinessRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID, bundleHash string, artifacts ...*sourceartifact.AdmittedSourceArtifact) {
@@ -677,374 +578,4 @@ func setReadinessInstanceStatus(t *testing.T, db *sql.DB, sqlite bool, runID, in
 	if _, err := db.Exec(query, status, runID, instancePath); err != nil {
 		t.Fatalf("set readiness instance status for %s: %v", instancePath, err)
 	}
-}
-
-func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenanceBothStores(t *testing.T) {
-	type backendCase struct {
-		name  string
-		setup func(*testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool)
-	}
-	backends := []backendCase{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db, false
-			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.Database(selected), true
-			},
-		},
-	}
-	cases := []struct {
-		name                string
-		readiness           string
-		readinessOnWrongRun bool
-		foreignBundle       bool
-		wantListError       string
-		wantError           string
-	}{
-		{name: "no readiness row", wantListError: "missing exact readiness plan"},
-		{name: "wrong-run readiness row", readiness: "exact", readinessOnWrongRun: true, wantListError: "missing exact readiness plan"},
-		{name: "incomplete readiness plan", readiness: `{}`, wantListError: "validate"},
-		{name: "stale readiness version", readiness: `{"version":3}`, wantListError: "unsupported version 3"},
-		{name: "malformed readiness plan", readiness: `{"workflow_version":{"unexpected":true}}`, wantListError: "decode"},
-		{name: "exact readiness owner", readiness: "exact"},
-		{name: "foreign run source", readiness: "exact", foreignBundle: true, wantListError: "readiness source does not match persisted run"},
-	}
-
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			for _, tc := range cases {
-				t.Run(tc.name, func(t *testing.T) {
-					selected, db, sqlite := backend.setup(t)
-					runID := uuid.NewString()
-					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-					bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
-					source := semanticview.Wrap(bundle)
-					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
-					scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-					if !ok {
-						t.Fatal("test author-activity scope is unavailable")
-					}
-					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, bundle.SourceArtifact.BundleHash()))
-					storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
-					planBundleHash := bundle.SourceArtifact.BundleHash()
-					bundleHash := planBundleHash
-					if tc.foreignBundle {
-						foreign := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
-						sourceartifactfixture.RequireArtifact(t, ctx, selected, foreign)
-						bundleHash = foreign.BundleHash()
-					}
-					wrongRunID := uuid.NewString()
-					seedFlowInstanceDescriptorAuthorityCase(
-						t,
-						ctx,
-						selected,
-						db,
-						sqlite,
-						runID,
-						wrongRunID,
-						bundleHash,
-						planBundleHash,
-						source.WorkflowVersion(),
-						tc.readiness,
-						tc.readinessOnWrongRun,
-					)
-
-					descriptors, err := selected.ListActiveFlowInstanceDescriptors(ctx, runID)
-					if tc.wantListError != "" {
-						if err == nil || !strings.Contains(err.Error(), tc.wantListError) {
-							t.Fatalf("ListActiveFlowInstanceDescriptors error = %v, want %q", err, tc.wantListError)
-						}
-						return
-					}
-					if err != nil {
-						t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
-					}
-					var testedDescriptor, stagedDescriptor *runtimebus.ActiveFlowInstanceDescriptor
-					for idx := range descriptors {
-						if descriptors[idx].FlowInstance == "account/existing" {
-							testedDescriptor = &descriptors[idx]
-						}
-						if descriptors[idx].FlowInstance == "account/current" {
-							stagedDescriptor = &descriptors[idx]
-						}
-					}
-					if testedDescriptor == nil {
-						t.Fatalf("active descriptors = %#v, want account/existing", descriptors)
-					}
-					if !testedDescriptor.HasSemanticSource() {
-						t.Fatalf("descriptor semantic source = %#v, want exact source", *testedDescriptor)
-					}
-
-					flowIdentity := runtimeflowidentity.RunScopedFlowInstance{
-						RunID: runID,
-						Route: runtimeflowidentity.DeriveRoute(notifyallchildren.ChildFlowID, "current"),
-					}
-					prior := runtimebus.FlowInstanceRouteRecord{
-						Identity:       flowIdentity,
-						EventPattern:   flowIdentity.Route.InstancePath + "/prior.event",
-						SubscriberType: "agent",
-						SubscriberID:   "prior-agent",
-						SourceFlow:     notifyallchildren.ChildFlowID,
-					}
-					if err := selected.ReplaceFlowInstanceRouteRecords(ctx, flowIdentity, []runtimebus.FlowInstanceRouteRecord{prior}); err != nil {
-						t.Fatalf("seed prior exact route set: %v", err)
-					}
-					before, err := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-					if err != nil {
-						t.Fatalf("read prior exact route set: %v", err)
-					}
-
-					eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-						ContractBundle:     source,
-						SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
-					})
-					if err != nil {
-						t.Fatalf("NewEventBusWithOptions: %v", err)
-					}
-					for _, resolution := range []struct {
-						name       string
-						localEvent string
-					}{
-						{name: "select", localEvent: "account.notify.requested"},
-						{name: "select-or-create", localEvent: "account.registered"},
-					} {
-						raw, err := json.Marshal(map[string]any{
-							"account_id": "existing",
-							"command":    "inspect",
-						})
-						if err != nil {
-							t.Fatalf("marshal %s event: %v", resolution.name, err)
-						}
-						evt := eventtest.RunCreatingRootIngress(
-							uuid.NewString(),
-							events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, resolution.localEvent)),
-							notifyallchildren.OwnerFlowID,
-							"",
-							raw,
-							0,
-							runID,
-							"",
-							events.EventEnvelope{},
-							time.Now().UTC(),
-						)
-						_, pinErr := eventBus.CheckPublishRecipientPlan(ctx, evt)
-						if tc.wantError != "" {
-							if pinErr == nil || !strings.Contains(pinErr.Error(), tc.wantError) {
-								t.Fatalf("%s source admission error = %v, want %q", resolution.name, pinErr, tc.wantError)
-							}
-						} else if pinErr != nil {
-							t.Fatalf("%s exact source admission: %v", resolution.name, pinErr)
-						}
-						afterPin, readErr := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-						if readErr != nil {
-							t.Fatalf("read exact route set after %s pin: %v", resolution.name, readErr)
-						}
-						if !reflect.DeepEqual(afterPin, before) {
-							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
-						}
-					}
-					if stagedDescriptor == nil {
-						t.Fatal("route staging requires its exact constructed descriptor")
-					}
-					_, err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-						Identity: flowIdentity,
-						Instance: stagedDescriptor.Identity,
-						ActivationVariables: map[string]string{
-							"account_id": "current",
-						},
-					})
-					if tc.wantError != "" {
-						if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-							t.Fatalf("StageFlowInstanceRouteContext error = %v, want %q", err, tc.wantError)
-						}
-						after, readErr := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-						if readErr != nil {
-							t.Fatalf("read exact route set after rejection: %v", readErr)
-						}
-						if !reflect.DeepEqual(after, before) {
-							t.Fatalf("exact route set changed across provenance rejection: before=%#v after=%#v", before, after)
-						}
-						return
-					}
-					if err != nil {
-						t.Fatalf("StageFlowInstanceRouteContext exact owner: %v", err)
-					}
-					after, err := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-					if err != nil {
-						t.Fatalf("read exact route set after replacement: %v", err)
-					}
-					if len(after) == 0 || reflect.DeepEqual(after, before) {
-						t.Fatalf("exact readiness owner did not replace prior route set: before=%#v after=%#v", before, after)
-					}
-				})
-			}
-		})
-	}
-}
-
-func seedFlowInstanceDescriptorAuthorityCase(
-	t *testing.T,
-	ctx context.Context,
-	selected storetest.RunFixtureStore,
-	db *sql.DB,
-	sqlite bool,
-	runID string,
-	wrongRunID string,
-	bundleHash string,
-	planBundleHash string,
-	workflowVersion string,
-	readiness string,
-	readinessOnWrongRun bool,
-) {
-	t.Helper()
-	const instancePath = "account/existing"
-	const stagedInstancePath = "account/current"
-	const config = `{"workflow_version":"1.0.0"}`
-	entityID := uuid.NewString()
-	stagedEntityID := uuid.NewString()
-	stagedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, workflowVersion, notifyallchildren.ChildFlowID, stagedInstancePath, stagedEntityID)
-	if readiness == "exact" {
-		readiness = exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, workflowVersion, notifyallchildren.ChildFlowID, instancePath, entityID)
-	}
-	if sqlite {
-		now := time.Now().UTC()
-		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-			RunID: runID, StartedAt: now, BundleHash: bundleHash,
-		})
-		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash,
-		})
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-			VALUES
-				(?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1),
-				(?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)
-		`, runID, instancePath, notifyallchildren.ChildFlowID, config, entityID, now, now, now, runID, stagedInstancePath, notifyallchildren.ChildFlowID, config, stagedEntityID, now, now, now); err != nil {
-			t.Fatalf("seed sqlite flow instance: %v", err)
-		}
-		if readinessOnWrongRun {
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-				VALUES (?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)
-			`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config, entityID, now, now, now); err != nil {
-				t.Fatalf("seed sqlite wrong-run flow instance: %v", err)
-			}
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-			VALUES
-				(?, ?, ?, 'account', 'active', '{"account_id":"existing"}', ?, ?),
-				(?, ?, ?, 'account', 'active', '{"account_id":"current"}', ?, ?)
-		`, entityID, runID, instancePath, now, now, stagedEntityID, runID, stagedInstancePath, now, now); err != nil {
-			t.Fatalf("seed sqlite entity state: %v", err)
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`, runID, stagedInstancePath, stagedReadiness, readinessPlanFixtureHash(t, stagedReadiness), now, now); err != nil {
-			t.Fatalf("seed sqlite staged-owner readiness: %v", err)
-		}
-		if readiness != "" {
-			readinessRunID := runID
-			if readinessOnWrongRun {
-				readinessRunID = wrongRunID
-			}
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`, readinessRunID, instancePath, readiness, readinessPlanFixtureHash(t, readiness), now, now); err != nil {
-				t.Fatalf("seed sqlite readiness: %v", err)
-			}
-		}
-		return
-	}
-
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: runID, BundleHash: bundleHash,
-	})
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: wrongRunID, BundleHash: bundleHash,
-	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-		VALUES
-			($1::uuid, $2, $3, 'template', $4::jsonb, 'active', $6::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1),
-			($1::uuid, $5, $3, 'template', $4::jsonb, 'active', $7::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1)
-	`, runID, instancePath, notifyallchildren.ChildFlowID, config, stagedInstancePath, entityID, stagedEntityID); err != nil {
-		t.Fatalf("seed postgres flow instance: %v", err)
-	}
-	if readinessOnWrongRun {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-			VALUES ($1::uuid, $2, $3, 'template', $4::jsonb, 'active', $5::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1)
-		`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config, entityID); err != nil {
-			t.Fatalf("seed postgres wrong-run flow instance: %v", err)
-		}
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES
-			($1::uuid, $2::uuid, $3, 'account', 'active', '{"account_id":"existing"}'::jsonb, now(), now()),
-			($4::uuid, $2::uuid, $5, 'account', 'active', '{"account_id":"current"}'::jsonb, now(), now())
-	`, entityID, runID, instancePath, stagedEntityID, stagedInstancePath); err != nil {
-		t.Fatalf("seed postgres entity state: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3::jsonb, $4, now(), now())
-		`, runID, stagedInstancePath, stagedReadiness, readinessPlanFixtureHash(t, stagedReadiness)); err != nil {
-		t.Fatalf("seed postgres staged-owner readiness: %v", err)
-	}
-	if readiness != "" {
-		readinessRunID := runID
-		if readinessOnWrongRun {
-			readinessRunID = wrongRunID
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3::jsonb, $4, now(), now())
-		`, readinessRunID, instancePath, readiness, readinessPlanFixtureHash(t, readiness)); err != nil {
-			t.Fatalf("seed postgres readiness: %v", err)
-		}
-	}
-}
-
-func exactFlowInstanceDescriptorReadinessJSON(
-	t *testing.T,
-	runID string,
-	bundleHash string,
-	workflowVersion string,
-	templateID string,
-	instancePath string,
-	entityID string,
-) string {
-	t.Helper()
-	plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: runtimeflowidentity.Instance{
-			TemplateID: templateID, ScopeKey: templateID,
-			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
-			EntityID: entityID, HasStoredPath: true,
-			ParentEntityID: runtimeflowidentity.EntityID(runID),
-			ParentRoute: runtimeflowidentity.ParentRoute{
-				FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID),
-			},
-		},
-		RunID: runID, BundleHash: bundleHash, WorkflowVersion: workflowVersion, ExecutionMode: "live",
-	}).Normalized()
-	if err != nil {
-		t.Fatalf("normalize exact descriptor readiness: %v", err)
-	}
-	raw, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatalf("marshal exact descriptor readiness: %v", err)
-	}
-	return string(raw)
 }

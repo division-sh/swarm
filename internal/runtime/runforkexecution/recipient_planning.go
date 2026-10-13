@@ -181,8 +181,8 @@ func selectedContractRecipientPlanningBlockedSiblings() []runfork.RunForkSelecte
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
-			Reason:      "dynamic topology remains fail-closed without fork-local topology proof",
+			Owner:       "internal/runtime/pipeline.FlowInstanceIndexReader",
+			Reason:      "dynamic execution remains fail-closed without admitted fork-local instance evidence",
 		},
 		{
 			Concept:     "timer_reconstruction",

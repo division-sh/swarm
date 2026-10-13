@@ -263,7 +263,9 @@ func TestFailedFlowActivationRetirementIsPendingBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(projection.CurrentPending) != 1 || len(projection.CurrentCompleted) != 0 {
+			if len(projection.CurrentPending) != 1 || projection.CurrentPending[0].Plan.Identity != f.plan.Identity ||
+				len(projection.CurrentCompleted) != 1 || projection.CurrentCompleted[0].Plan.Identity.TemplateID != "." ||
+				projection.CurrentCompleted[0].Plan.Identity.InstancePath != f.runID || projection.CurrentCompleted[0].Plan.RunID != f.runID {
 				t.Fatalf("failed attempt is not retry-visible: pending=%d completed=%d", len(projection.CurrentPending), len(projection.CurrentCompleted))
 			}
 		})

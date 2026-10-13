@@ -1,6 +1,8 @@
 package bus
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -173,9 +175,9 @@ func TestActiveTargetDescriptorsRequireExactEntityOwner(t *testing.T) {
 		descriptor ActiveTargetDescriptor
 	}{
 		{name: "selected target descriptor", descriptor: ActiveTargetDescriptor{ID: "portfolio", FlowInstance: "portfolio"}},
-		{name: "active flow descriptor", descriptor: ActiveFlowInstanceDescriptor{
-			InstanceID: "one", FlowInstance: "operating/one",
-		}.TargetDescriptor()},
+		{name: "keyed target descriptor", descriptor: ActiveTargetDescriptor{
+			FlowID: "operating", ID: "one", FlowInstance: "operating/one",
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -192,10 +194,11 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	agentIdentity := agentidentitytest.Runtime(t, "reviewer", "target-owner-proof", "review", "one", "review/one")
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: agentOwner}
 	projection := selectedRunTargetOwnerProjection{
-		required:    true,
-		descriptors: []ActiveTargetDescriptor{{ID: "reviewer", FlowInstance: target.FlowInstance, EntityID: agentOwner}},
+		required: true,
+		agents:   map[agentidentity.Identity]ActiveAgentDescriptor{agentIdentity: {Identity: agentIdentity, EntityID: agentOwner}},
 	}
-	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-publication"), "work.ready", "operator", "", nil, 0, agentIdentity.RunID, events.EventEnvelope{}, time.Now().UTC())
+	plan := RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
 		TargetBlueprint: target, Producer: routeIntentProducerAgentPolicy, Persist: true,
 	}}}.Normalized()
@@ -209,7 +212,7 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 		t.Fatalf("resolved routes = %#v, want exact existing agent owner", routes)
 	}
 
-	untargeted := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	untargeted := RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
 		Producer: routeIntentProducerDirectPolicy, Persist: true,
 	}}}.Normalized()
@@ -263,7 +266,7 @@ func TestRootAgentTargetAgreementRequiresExactRunFlowAndEntity(t *testing.T) {
 
 func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "entityless-target-proof", "review", "one", "review/one")
-	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	plan := RoutePlan{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("entityless-agent-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC()), DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 		TargetBlueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}, Persist: true,
 	}}}.Normalized()
@@ -297,6 +300,11 @@ func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testin
 		t.Fatalf("borrowed entity target error = %v, want rejection", err)
 	}
 	projection.agents[identity] = ActiveAgentDescriptor{Identity: identity, EntityID: selectedOwner}
+	plan.DeliveryIntents[0].TargetBlueprint.EntityID = ""
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "disagrees with exact active agent entity") {
+		t.Fatalf("empty actor entity became a wildcard: %v", err)
+	}
+	plan.DeliveryIntents[0].TargetBlueprint.EntityID = selectedOwner
 	resolved, err := projection.resolveRoutePlan(plan)
 	if err != nil {
 		t.Fatalf("resolve selected agent target: %v", err)
@@ -325,9 +333,9 @@ func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testin
 }
 
 func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
-	rootIdentity := agentidentitytest.RootDeclared(t, "root-reviewer", "same-flow-agent-root")
-	nestedIdentity := agentidentitytest.Declared(t, "nested-reviewer", "same-flow-agent-nested", "review", "one", "review/one")
 	runID := eventtest.UUID("same-flow-agent-run")
+	rootIdentity := agentidentitytest.RootDeclaredForRun(t, runID, "root-reviewer", "same-flow-agent-root")
+	nestedIdentity := agentidentitytest.DeclaredForRun(t, runID, "nested-reviewer", "same-flow-agent-nested", "consumer", "consumer", "consumer")
 	rootOwner := eventtest.UUID("same-flow-agent-root-owner")
 	nestedOwner := eventtest.UUID("same-flow-agent-nested-owner")
 	source := connectRoutePlanRootProducerSingletonSource(t)
@@ -343,14 +351,15 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 		},
 		descriptors: []ActiveTargetDescriptor{
 			{ID: "root", FlowInstance: runID, EntityID: rootOwner},
-			{ID: "review-one", FlowInstance: "review/one", EntityID: nestedOwner},
+			{ID: "consumer", FlowInstance: "consumer", EntityID: nestedOwner},
 		},
 		targetsAvailable: true,
 		required:         true,
 		source:           source,
 	}
+	projection.context = admittedAgentConstructionContext(t, source, runID)
 	plan := RoutePlan{
-		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-agent-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
 			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
 			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
@@ -367,7 +376,7 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	}
 	want := map[agentidentity.Identity]events.RouteIdentity{
 		rootIdentity:   {FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: rootOwner},
-		nestedIdentity: {FlowID: "review", FlowInstance: "review/one", EntityID: nestedOwner},
+		nestedIdentity: {FlowID: "consumer", FlowInstance: "consumer", EntityID: nestedOwner},
 	}
 	for _, route := range routes {
 		if !route.Target.ExistingEntity() || route.Target.Route() != want[route.AgentIdentity].Normalized() {
@@ -377,8 +386,8 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 }
 
 func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
-	identity := agentidentitytest.RootRuntime(t, "workflow-runtime", "same-flow-runtime-carrier")
 	runID := eventtest.UUID("same-flow-runtime-carrier-run")
+	identity := agentidentitytest.RootRuntimeForRun(t, runID, "workflow-runtime", "same-flow-runtime-carrier")
 	ownerID := eventtest.UUID("same-flow-runtime-carrier-owner")
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
@@ -391,7 +400,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 		source:           connectRoutePlanRootProducerSingletonSource(t),
 	}
 	plan := RoutePlan{
-		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-runtime-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{{
 			Recipient: events.MustAgentDeliveryRecipient("workflow-runtime"), AgentIdentity: identity,
 			Producer: routeIntentProducerAgentPolicy, Persist: true,
@@ -408,10 +417,62 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	runID := eventtest.UUID("independent-runtime-native-observation")
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("independent-runtime-publication"), "work.ready", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	for _, root := range []bool{true, false} {
+		for _, prospective := range []bool{false, true} {
+			t.Run(fmt.Sprintf("root=%t/prospective=%t", root, prospective), func(t *testing.T) {
+				identity := agentidentitytest.RootRuntimeForRun(t, runID, "workflow-runtime", "independent-runtime")
+				flow := semanticview.RootExecutionFlowID(source)
+				if !root {
+					flow = "consumer"
+					identity = agentidentitytest.RuntimeForRun(t, runID, "workflow-runtime", "independent-runtime", flow, flow, flow)
+				}
+				projection := selectedRunTargetOwnerProjection{required: true, source: source, agentsAvailable: true,
+					agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}},
+				}
+				if prospective {
+					instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+					owner := newTestFlowInstanceActivationOwner(nil)
+					activation, err := owner.PrepareFlowInstanceActivation(constructionIndexContext(t, source), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, TriggerEvent: event, OccurredAt: event.CreatedAt()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					projection, err = projection.withActivationPlans([]runtimepipeline.FlowInstanceActivationPlan{activation})
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					projection.context = admittedAgentConstructionContext(t, source, runID)
+				}
+				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Producer: routeIntentProducerAgentPolicy, Persist: true}
+				resolved, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() {
+					t.Fatalf("independent targetless actor acquired flow ownership: %+v", routes)
+				}
+				instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+				intent.TargetBlueprint = events.RouteIdentity{FlowID: flow, FlowInstance: instance.InstancePath}
+				if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err != nil {
+					t.Fatalf("explicit matching runtime target refused: %v", err)
+				}
+				intent.TargetBlueprint.EntityID = instance.EntityID
+				if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err == nil {
+					t.Fatal("explicit foreign actor entity was erased")
+				}
+			})
+		}
+	}
+}
+
 func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testing.T) {
-	rootIdentity := agentidentitytest.RootDeclared(t, "root-reviewer", "same-flow-entityless-root")
-	nestedIdentity := agentidentitytest.Declared(t, "nested-reviewer", "same-flow-entityless-nested", "review", "one", "review/one")
 	runID := eventtest.UUID("same-flow-entityless-run")
+	rootIdentity := agentidentitytest.RootDeclaredForRun(t, runID, "root-reviewer", "same-flow-entityless-root")
+	nestedIdentity := agentidentitytest.DeclaredForRun(t, runID, "nested-reviewer", "same-flow-entityless-nested", "consumer", "consumer", "consumer")
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
@@ -420,14 +481,15 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 		},
 		descriptors: []ActiveTargetDescriptor{
 			{ID: "root", FlowInstance: runID, EntityID: eventtest.UUID("same-flow-root-node-owner")},
-			{ID: "review-one", FlowInstance: "review/one", EntityID: eventtest.UUID("same-flow-nested-node-owner")},
+			{ID: "consumer", FlowInstance: "consumer", EntityID: eventtest.UUID("same-flow-nested-node-owner")},
 		},
 		targetsAvailable: true,
 		required:         true,
 		source:           connectRoutePlanRootProducerSingletonSource(t),
 	}
+	projection.context = admittedAgentConstructionContext(t, projection.source, runID)
 	plan := RoutePlan{
-		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-entityless-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
 			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
 			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
@@ -439,15 +501,25 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 		t.Fatalf("resolve entityless declared agents: %v", err)
 	}
 	for _, route := range resolved.DeliveryRoutes() {
-		if !route.Target.Empty() {
-			t.Fatalf("entityless declared agent route = %#v, want explicit target absence", route)
+		if !route.Target.EntitylessReceiver() || route.Target.Route().EntityID != "" || route.Initialization.Empty() || route.Initialization.ConstructionTarget().Route().EntityID == "" {
+			t.Fatalf("entityless declared agent route = %#v, want independent header dependency", route)
 		}
 	}
 }
 
+func admittedAgentConstructionContext(t testing.TB, source semanticview.Source, runID string) context.Context {
+	t.Helper()
+	var observations []runtimepipeline.FlowInstanceObservation
+	for _, flow := range []string{semanticview.RootExecutionFlowID(source), "consumer"} {
+		instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+		observations = append(observations, constructionIndexObservation(t, source, runID, instance, ""))
+	}
+	return context.WithValue(constructionIndexContext(t, source), selectedTargetOwnerLookupScopeKey{}, selectedTargetOwnerLookupScope{observations: observations})
+}
+
 func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
-	identity := agentidentitytest.RootDeclared(t, "reviewer", "same-flow-agent-contradiction")
 	runID := eventtest.UUID("same-flow-agent-contradiction-run")
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "same-flow-agent-contradiction")
 	source := connectRoutePlanRootProducerSingletonSource(t)
 	activeOwner := eventtest.UUID("root-active-owner")
 	projection := selectedRunTargetOwnerProjection{
@@ -461,11 +533,13 @@ func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 		required:         true,
 		source:           source,
 	}
+	projection.context = admittedAgentConstructionContext(t, source, runID)
 	plan := RoutePlan{
-		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-contradiction-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{{
 			Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
-			Producer: routeIntentProducerAgentPolicy, Persist: true,
+			TargetBlueprint: events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: eventtest.UUID("foreign-agent-owner")},
+			Producer:        routeIntentProducerAgentPolicy, Persist: true,
 		}},
 	}
 
@@ -479,12 +553,13 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 	target := events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-future-owner"),
 	}
-	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	plan := RoutePlan{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("pending-agent-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC()), DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 		TargetBlueprint: target, AgentLifecycle: agentLifecycleAdmissionMaterializingFlow, Persist: true,
 	}}}.Normalized()
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
+		agents:          map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: target.EntityID}},
 		descriptors: []ActiveTargetDescriptor{{
 			ID: "review/one", FlowInstance: target.FlowInstance, EntityID: target.EntityID, Materializing: true,
 		}},
@@ -499,37 +574,45 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 	// Ownership alone cannot substitute for a compiled activation or node
 	// initializer. The real activation's positive case is exercised through
 	// EventBus, publication and both stores, not a fabricated descriptor here.
-	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "no admitted initialization supplier") {
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "independent construction dependency") {
 		t.Fatalf("future owner without initialization: %v", err)
 	}
 
 	projection.descriptors[0].Materializing = false
-	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
-		t.Fatalf("existing owner for pending lifecycle error = %v, want materializing ownership rejection", err)
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "independent construction dependency") {
+		t.Fatalf("existing owner for pending lifecycle error = %v, want construction dependency rejection", err)
 	}
 }
 
-func TestStaticAgentLifecycleConsumesExistingOwnerButConnectLifecycleDoesNot(t *testing.T) {
+func TestPendingAgentLifecyclesConsumeIndependentStoredDependency(t *testing.T) {
 	identity := agentidentitytest.Declared(t, "reviewer", "static-owner", "review", "one", "review/one")
 	target := events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-owner"),
 	}
-	owner := events.MustExistingEntityTarget(target)
+	dependency := events.MustExistingEntityTarget(target)
+	target.EntityID = ""
+	owner := events.MustEntitylessReceiverTarget(target)
 	base := RoutePlanDeliveryIntent{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 		TargetBlueprint: target, TargetOwnership: owner, Persist: true,
 	}
 
-	static := base
-	static.AgentLifecycle = agentLifecycleAdmissionStaticDeclaration
-	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{static}}); err != nil {
-		t.Fatalf("resolve static lifecycle against existing owner: %v", err)
-	}
-
-	connect := base
-	connect.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
-	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{connect}}); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
-		t.Fatalf("connect lifecycle existing-owner error = %v, want materializing owner rejection", err)
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("stored-pending-agent-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC())
+	for _, lifecycle := range []agentLifecycleAdmission{agentLifecycleAdmissionStaticDeclaration, agentLifecycleAdmissionMaterializingFlow} {
+		intent := base
+		intent.AgentLifecycle = lifecycle
+		projection := selectedRunTargetOwnerProjection{required: true, agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}}}
+		if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err == nil || !strings.Contains(err.Error(), "independent construction dependency") {
+			t.Fatalf("pending lifecycle=%d escaped dependency admission: %v", lifecycle, err)
+		}
+		var err error
+		intent.Initialization, err = events.AdmitStoredFlowReceiverInitialization(identity.RunID, eventtest.UUID("original-construction"), dependency, identity.Route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err != nil {
+			t.Fatalf("pending lifecycle=%d refused original stored dependency: %v", lifecycle, err)
+		}
 	}
 }
 
@@ -558,7 +641,7 @@ func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("admitted-target-owner"),
 	}
 	owner := events.MustExistingEntityTarget(target)
-	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	plan := RoutePlan{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("admitted-agent-publication"), "work.ready", "operator", "", nil, 0, agentIdentity.RunID, events.EventEnvelope{}, time.Now().UTC()), DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
 		TargetBlueprint: target, TargetOwnership: owner, Producer: routeIntentProducerDirectPolicy, Persist: true,
 	}}}.Normalized()
@@ -581,16 +664,15 @@ func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
 
 func TestResolvedTargetOwnerCanonicalizesBlueprintForReplay(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "target-replay-proof", "review", "one", "review/one")
-	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one")}
+	plan := RoutePlan{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("replayed-agent-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC()), DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient:       events.MustAgentDeliveryRecipient("reviewer"),
 		AgentIdentity:   identity,
-		TargetBlueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
+		TargetBlueprint: target,
 		Persist:         true,
 	}}}.Normalized()
 	projection := selectedRunTargetOwnerProjection{
-		descriptors: []ActiveTargetDescriptor{{
-			ID: "reviewer", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one"),
-		}},
+		agents:   map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: target.EntityID}},
 		required: true,
 	}
 

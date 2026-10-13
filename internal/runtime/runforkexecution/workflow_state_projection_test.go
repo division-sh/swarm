@@ -15,6 +15,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -23,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
 func selectedContractReadinessFixture(t *testing.T, declarations int) LoadedSelectedContractSource {
@@ -370,9 +373,9 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 	if err := instance.ValidateConstruction(source, selectedContractAgentTestRunID); err != nil {
 		t.Fatal(err)
 	}
-	configValues := map[string]any{}
+	instanceKey := ""
 	if scope.Mode == "template" {
-		configValues["worker_id"] = "recorded-business-key"
+		instanceKey = "recorded-business-key"
 	}
 	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 	if err != nil {
@@ -383,12 +386,36 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 		t.Fatal(err)
 	}
 	entered := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("captured construction fixture requires its admitted source")
+	}
+	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(effects.WithExecutionMode(context.Background(), executionmode.Live), fact), selectedContractAgentTestRunID)
+	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), Mode: scope.Mode,
+		InstanceID: instance.InstanceID, StorageRef: path, EntityID: id, InstanceKey: instanceKey,
+		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
+		EntityType: entityType, StageDefined: graph.StageCount() != 0, CurrentState: initial.ID(), Fields: map[string]any{}, CreatedAt: entered, EnteredStageAt: entered,
+	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, entered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := command.Plan.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runfork.RunForkEntityState{EntityID: id, CurrentState: initial.ID(), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			FlowConfig:   config,
-			Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
-			Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-			FlowInstance: path, EntityType: entityType, FlowTemplate: flowID, Mode: scope.Mode,
+			InitialMaterialization: record.InitialMaterialization,
+			FlowConfig:             config,
+			Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+			Source:                 runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+			FlowInstance:           path, EntityType: entityType, FlowTemplate: flowID, Mode: scope.Mode,
+			ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: instanceKey,
 			StageDefined: graph.StageCount() != 0, Status: "active", CreatedAt: entered, UpdatedAt: entered, EnteredStateAt: entered,
 		}}
 }

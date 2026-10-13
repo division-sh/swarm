@@ -17,6 +17,7 @@ func TestReceiverConfigActivationRollbackLeavesNoDurableResidueBothStores(t *tes
 		t.Run(backend, func(t *testing.T) {
 			barrier := newForkContentionBarrier(t, backend, true)
 			f := newReceiverConfigActivationFixture(t, backend)
+			f.constructKeylessRoot(t)
 			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 			defer cancel()
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, f.request("business-key", "ti-rollback", "uncommitted"))
@@ -89,6 +90,7 @@ func TestHeaderOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixture(t, backend)
+			f.constructKeylessRoot(t)
 			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, f.request("business-key", "ti-config-only", "committed"))
 			if err != nil {
 				t.Fatal(err)

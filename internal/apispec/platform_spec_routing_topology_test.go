@@ -42,7 +42,7 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 		"immutable compiled inter_flow_connect edge",
 		"MUST NOT search ancestors, descendants, or the all-flow catalog",
 		"Slash-qualified node, timer, or agent patterns are rejected",
-		"materialization can only specialize an already admitted same-flow relation or compiled connect edge",
+		"Binding an exact admitted instance can only specialize an already admitted same-flow relation or compiled connect edge",
 		"every declared same-flow materializable event independently of current producer-census membership",
 		"runtime route admission",
 		"including when a caller supplies a prebuilt route table",

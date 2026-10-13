@@ -960,7 +960,8 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	at := time.Unix(1700003610, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -968,22 +969,32 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	postForkRouteNode := mustPersistenceNode("flow-a", "post-t-source-route-node").Key()
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
-			is_materialized, status, created_at
-		)
-		VALUES ('item.received', 'node', $1, 'flow-a/1', 'flow-a', false, 'active', $2)
-	`, postForkRouteNode, at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed post-T route: %v", err)
+	beforeRecovery, found, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, materialized.ForkRunID)
+	if err != nil || !found || beforeRecovery.SourceRunID != sourceRunID || beforeRecovery.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("canonical materialization recovery: record=%#v found=%t err=%v", beforeRecovery, found, err)
 	}
+	unrelatedRunID := uuid.NewString()
+	bundle := loadCanonicalSelectedContractStoreSource(t)
+	unrelatedCtx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+	requireRunFixtureForTest(t, unrelatedCtx, pg, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID,
+		Artifact: bundle.SourceArtifact, StartedAt: at.Add(time.Minute),
+	})
+	commitPreparedWorkflowAggregateFixture(t, unrelatedCtx, pg, unrelatedRunID, runtimepipeline.WorkflowInstance{
+		InstanceID: unrelatedRunID, StorageRef: unrelatedRunID, EntityID: unrelatedRunID,
+		WorkflowName: ".", WorkflowVersion: semanticview.Wrap(bundle).WorkflowVersion(), Mode: "static", CurrentState: "pending",
+		CreatedAt: at.Add(time.Minute), EnteredStageAt: at.Add(time.Minute),
+	}, at.Add(time.Minute))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
 		AllowSourceFreeze:     true,
 		AllowedSourceEventIDs: []string{eventID},
+		DataPins:              materialized.DataPins,
+		ExecutionSource:       semanticview.Wrap(bundle),
+		FrontierAdmission:     request.FrontierAdmission,
+		RouteTopology:         request.RouteTopology,
+		RecipientPlanning:     request.RecipientPlanning,
 	})
 	if err != nil {
 		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
@@ -1009,7 +1020,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("run statuses source=%q fork=%q, want source forked and fork running after activation", sourceStatus, forkStatus)
 	}
 
-	var branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows int
+	var branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM run_fork_selected_contract_branch_divergences
@@ -1026,10 +1037,10 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM routing_rules
-		WHERE subscriber_id = $1
-	`, postForkRouteNode).Scan(&sourceRouteRows); err != nil {
-		t.Fatalf("count source route rows: %v", err)
+		FROM flow_instances
+		WHERE run_id = $1::uuid AND instance_path = $1::text
+	`, unrelatedRunID).Scan(&unrelatedInstances); err != nil {
+		t.Fatalf("count unrelated native instance: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1038,8 +1049,12 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	`, materialized.ForkRunID).Scan(&routeRecoveryRows); err != nil {
 		t.Fatalf("count route recovery rows: %v", err)
 	}
-	if branchRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
-		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, one untouched global route, and no invented recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
+	if branchRows != 0 || unrelatedInstances != 1 || routeRecoveryRows != 1 {
+		t.Fatalf("branch rows=%d fork delivery rows=%d unrelated instances=%d route recovery rows=%d, want no divergence, one untouched unrelated owner, and only the original recovery", branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows)
+	}
+	afterRecovery, found, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, materialized.ForkRunID)
+	if err != nil || !found || !reflect.DeepEqual(afterRecovery, beforeRecovery) {
+		t.Fatalf("unrelated native construction changed fixed recovery: before=%#v after=%#v found=%t err=%v", beforeRecovery, afterRecovery, found, err)
 	}
 	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -1665,11 +1680,20 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "flow-a/1")
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: selectedEventID})
-	if err != nil || plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
-		t.Fatalf("route fixture must require selected resolution: state=%q err=%v", plan.RouteHistory.State, err)
+	if err != nil || plan.ForkPoint.EventID != selectedEventID || len(plan.Entities) != 5 || plan.ReconstructedEntityCount != len(plan.Entities) {
+		t.Fatalf("fixed selected fixture: plan=%+v err=%v", plan, err)
+	}
+	found := false
+	for _, entity := range plan.Entities {
+		if entity.EntityID == entityID && entity.MaterializationMetadata != nil && entity.MaterializationMetadata.FlowInstance == "flow-a/1" && entity.MaterializationMetadata.Owner == runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fixed selected fixture lost its exact constructed subject")
 	}
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	// Even with valid preparation, unversioned routes require their own proof.
+	// Valid fixed construction does not replace the selected frontier proof.
 	request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{}
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -1677,7 +1701,7 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 		t.Fatalf("materialization error = %v, want exact prepared route proof refusal", err)
 	}
 	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
+		t.Fatalf("materialized fork despite missing frontier proof: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 	if after := snapshotForkHistoricalExecutionTables(t, db, true); !reflect.DeepEqual(before, after) {
@@ -1819,8 +1843,6 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, db *sql.DB, run 
 		}
 		parentCommand.Plan.Children = []runtimepipeline.FlowInstanceActivationPlan{leafCommand.Plan}
 		rootCommand.Plan.Children = append(rootCommand.Plan.Children, parentCommand.Plan)
-		rootCommand.RouteTopology = append(rootCommand.RouteTopology, parentCommand.RouteTopology...)
-		rootCommand.RouteTopology = append(rootCommand.RouteTopology, leafCommand.RouteTopology...)
 	}
 	committed, err := selected.CommitFlowInstanceActivation(ctx, rootCommand)
 	if err != nil || !committed.Acknowledged || !committed.Created {

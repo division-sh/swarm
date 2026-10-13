@@ -29,6 +29,7 @@ func TestCreatingPredecessorClaimHistoryBothStores(t *testing.T) {
 func proveCreatingPredecessorClaimHistory(t *testing.T, backend, state string) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+	f.constructKeylessRoot(t)
 	req := f.request("claim-history", "claim-history", "initial")
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {

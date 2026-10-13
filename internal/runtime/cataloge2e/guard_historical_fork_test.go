@@ -120,7 +120,8 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 				}
 				instance, err := pipeline.DecodeWorkflowInstancePersistenceRecord(pipeline.WorkflowInstancePersistenceRecord{
 					EntityID: entity.EntityID, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType,
-					Slug: metadata.Slug, Name: metadata.Name, WorkflowName: guarded.WorkflowName,
+					ParentInstance: metadata.ParentInstance, InstanceKey: metadata.InstanceKey, Mode: metadata.Mode,
+					Slug: metadata.Slug, Name: metadata.Name, WorkflowName: metadata.FlowTemplate,
 					CurrentState: entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,
 					StageDefined: metadata.StageDefined,
 				})

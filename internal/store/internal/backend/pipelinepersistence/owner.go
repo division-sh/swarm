@@ -141,17 +141,15 @@ type PipelinePostgresOwner struct {
 	events                 EventCommitOwner
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
-	receiverHistory        ReceiverConstructionHistory
+	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 }
 
 type PipelineSQLiteOwner struct {
-	channelChanges          *render.ReconcileSignal
-	activeFlowDescriptors   sqlitebackend.FixedReadStatement
-	selectedRunTargetOwners sqlitebackend.FixedReadStatement
-	fanOutReadiness         FanOutReadiness
-	apiIdempotency          *storeapiidempotency.SQLiteOwner
+	channelChanges  *render.ReconcileSignal
+	fanOutReadiness FanOutReadiness
+	apiIdempotency  *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
@@ -166,7 +164,7 @@ type PipelineSQLiteOwner struct {
 	events                 EventCommitOwner
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
-	receiverHistory        ReceiverConstructionHistory
+	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 	nowFn                  func() time.Time

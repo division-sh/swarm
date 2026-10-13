@@ -46,6 +46,7 @@ type ordinaryForkPredecessorFixture struct {
 func newOrdinaryForkPredecessorFixture(t *testing.T, backend string) ordinaryForkPredecessorFixture {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+	f.constructKeylessRoot(t)
 	plan := constructHistoricalSourceFixture(t, f.ctx, f.store, f.request("original", "ti-original", "source"))
 	runID := correlation.RunIDFromContext(f.ctx)
 	other := constructHistoricalSourceFixture(t, f.ctx, f.store, f.request("other", "ti-other", "unrelated"))
@@ -104,6 +105,7 @@ func proveOrdinaryForkCreatingPredecessor(t *testing.T, backend, scenario string
 		commitPreparedWorkflowAggregateFixture(t, f.ctx, f.store, f.owner.RunID, pipeline.WorkflowInstance{
 			InstanceID: "ti-later", StorageRef: f.owner.Route.InstancePath, EntityID: f.entityID,
 			EntityType: "review_item", WorkflowName: "review", WorkflowVersion: "1", Mode: "template",
+			InstanceKey: "later", ParentFlowID: ".", ParentFlowInstance: f.owner.RunID, ParentEntityID: f.owner.RunID,
 			StageDefined: true, CurrentState: "pending", Fields: map[string]any{"request_id": "later", "label": "native"},
 			CreatedAt: time.Now().UTC(), EnteredStageAt: time.Now().UTC(),
 		}, time.Now().UTC())
@@ -179,7 +181,7 @@ func proveOrdinaryForkClaimEntrances(t *testing.T, f ordinaryForkPredecessorFixt
 	if scenario == "dual_evidence" && (claim.Invariant == nil || !strings.Contains(claim.Invariant.Error(), "contradictory historical and native construction evidence")) {
 		t.Fatalf("dual evidence did not reach the specific history/native guard: %+v", claim)
 	}
-	if scenario == "missing_cut" && (claim.Invariant == nil || !strings.Contains(claim.Invariant.Error(), "read receiver's exact fork cut")) {
+	if scenario == "missing_cut" && (!errors.Is(claim.Invariant, sql.ErrNoRows) || !strings.Contains(claim.Invariant.Error(), "read admitted historical instance cut")) {
 		t.Fatalf("missing cut did not reach fixed-snapshot refusal: %+v", claim)
 	}
 	if want == deliverylifecycle.ClaimInvariantInvalid {

@@ -3,10 +3,27 @@ package storetest
 import (
 	"context"
 	"encoding/json"
+	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
+
+func SetWorkflowProjectionForeignDeclaration(t testing.TB, ctx context.Context, selected any, owner flowidentity.RunScopedFlowInstance) error {
+	t.Helper()
+	restore, err := private.FaultFlowConstructorHeaderForTest(ctx, selected, owner, pipelinepersistence.FlowConstructorHeaderFaultField("flow_template"), "other-flow")
+	if err != nil {
+		return err
+	}
+	t.Cleanup(func() {
+		if err := restore(context.WithoutCancel(ctx)); err != nil {
+			t.Error(err)
+		}
+	})
+	return nil
+}
 
 func SetWorkflowProjectionFieldsArray(ctx context.Context, selected any, run, key string) (int64, error) {
 	return private.SetWorkflowProjectionFieldsArrayForTest(ctx, selected, run, key)

@@ -216,7 +216,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	am := manager.NewAgentManagerWithOptions(eventBus, factory, manager.AgentManagerOptions{
 		SourceArtifactFact: fact, SemanticSource: source, DeliveryStore: selected, ExecutionPosture: executionposture.MockOnly, LLMBackend: llmselection.BackendAnthropic,
 		WorkflowInstances: coordinator,
-		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus, RouteRestorer: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
+		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
 		WorkOwner:         work, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, fixture.store.(manager.ManagerPersistence))
 	t.Cleanup(func() {

@@ -14,6 +14,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -373,9 +374,10 @@ func TestCommittedDispatchRetiredPreflightReleasesEveryExactClaim(t *testing.T) 
 
 func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T, stop func(*worklifetime.Process, *worklifetime.RuntimeOccurrence) error, wantErr error) {
 	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, nil, nil))
+	ctx := testAuthorActivityContext(constructionIndexContext(t, source))
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "review-committed-dispatch"})
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +390,7 @@ func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T,
 		}
 	})
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store, EventBusOptions{WorkOwner: owner})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{WorkOwner: owner, ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}
