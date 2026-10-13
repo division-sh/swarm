@@ -378,11 +378,11 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				assertExactJoinDeliveryCount(t, selected, ctx, eventsByMember[1].ID(), joinNode.Key(), 1)
 				assertPersistedHandlerRuleSelectionInFlow(
 					t, selected, ctx, completionID, handlerselection.ContextJoinComplete,
-					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "",
+					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "join.on_complete",
 				)
 				assertTraceHandlerRuleSelectionInFlow(
 					t, selected, ctx, runID, completionID, handlerselection.ContextJoinComplete,
-					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "",
+					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "join.on_complete",
 				)
 			})
 		}
@@ -399,9 +399,10 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 		closeReason   joinruntime.CloseReason
 		context       handlerselection.Context
 		semanticPath  string
+		display       string
 	}{
-		{name: "completion", expected: []any{}, timeout: "1h", eventName: "platform.join_complete", terminalState: "ready", closeReason: joinruntime.CloseReasonComplete, context: handlerselection.ContextJoinComplete, semanticPath: `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`},
-		{name: "deadline", expected: []any{"a"}, timeout: "20ms", eventName: "platform.join_timeout", terminalState: "attention", closeReason: joinruntime.CloseReasonDeadline, context: handlerselection.ContextJoinTimeout, semanticPath: `nodes["join-node"].handlers["item.completed"].join.on_deadline[0]`},
+		{name: "completion", expected: []any{}, timeout: "1h", eventName: "platform.join_complete", terminalState: "ready", closeReason: joinruntime.CloseReasonComplete, context: handlerselection.ContextJoinComplete, semanticPath: `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, display: "join.on_complete"},
+		{name: "deadline", expected: []any{"a"}, timeout: "20ms", eventName: "platform.join_timeout", terminalState: "attention", closeReason: joinruntime.CloseReasonDeadline, context: handlerselection.ContextJoinTimeout, semanticPath: `nodes["join-node"].handlers["item.completed"].join.on_deadline[0]`, display: "join.on_deadline"},
 	}
 	for _, storeCase := range []struct {
 		name string
@@ -529,11 +530,11 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					assertExactJoinFiredSchedule(t, selected, ctx, pendingSchedule, eventID)
 					assertPersistedHandlerRuleSelectionInFlow(
 						t, selected, ctx, eventID, outcome.context, handlerselection.DispositionSelected,
-						exactJoinFlowPath(flowID), outcome.semanticPath, "",
+						exactJoinFlowPath(flowID), outcome.semanticPath, outcome.display,
 					)
 					assertTraceHandlerRuleSelectionInFlow(
 						t, selected, ctx, runID, eventID, outcome.context, handlerselection.DispositionSelected,
-						exactJoinFlowPath(flowID), outcome.semanticPath, "",
+						exactJoinFlowPath(flowID), outcome.semanticPath, outcome.display,
 					)
 
 					prepared, found, err := store.LoadPreparedPublishEvent(ctx, eventID)
