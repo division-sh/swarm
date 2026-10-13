@@ -37,7 +37,20 @@ Method-only, global, resource-ID and other physical predicates are distinct
 surviving parent work. The seven other rollback queries are intentionally
 retained with their original DB carrier and faults. They are not compatibility
 paths for the migrated cardinality concept. No other same-predicate reader was
-found in the complete owned helper-reference census.
+found in that complete owned helper-reference census. This is NOT a complete
+query-level census of the predicate: reviewer-b found three retained sibling
+interpreters, explicitly tracked below under the staged parent migration.
+
+| Retained same-predicate manifestation | Binding disposition |
+| --- | --- |
+| `servedConversationForkRequestArtifactCounts` | migrate the complete four-count footprint, retaining refusal/no-mutation cuts |
+| `root_publication_ack_loss_test.go` | preserve lost ACK, same-key replay, instance/event conservation and one commit |
+| `TestServePostgresGracefulContract` | after-close independent observation; never substitute the closed serving reader |
+
+All three remain counted in #2542/#2151. Reviewer ruling6145735720 retains them
+in the approved parent stream without requiring immediate expansion of this
+signed shared-helper checkpoint. Query-level residual probing supplements,
+rather than replaces, the helper-reference inventory in subsequent waves.
 
 ## Accounting and immutable evidence
 
@@ -57,7 +70,7 @@ Manifest: `family145-request-key-preimages.json`, SHA256
 The original 28 predecessor bodies/arguments/assertions are verified against
 the signed source. Historical companion/debug inverses consume only exact
 new bodies, never overwrite newer source, and never change old manifests.
-The final corpus has **1471 recipes / 774 transitions**, transition SHA256
+The final corpus has **1470 recipes / 774 transitions**, transition SHA256
 `54b43fd056fb7f6531b559eb7a7985f08472697c4f26564578f1faea9954eafe`.
 Only these 28 recipe rows changed; existing unrelated rows and E's reserved
 Successors are retained.
@@ -116,9 +129,10 @@ frozen. No test timeout, job budget or guard permission was increased.
 
 ## Closure and remaining work
 
-Achieved closure: **touched request-key seam canonicalized**. Every currently
-known caller in this bounded predicate family is migrated and source/execution
-proved; the symptom-shaped helper was an entry point, not the boundary.
+Achieved closure: **the named shared request-key dependency canonicalized**.
+Every currently known caller of that dependency is migrated and source/
+execution proved; this does not eliminate the entire semantic predicate class.
+The symptom-shaped helper was an entry point, not the whole parent boundary.
 The broad raw-authority migration remains open: 7026 findings / 4781 raw sites,
 plus explicit classification and integrated qualification obligations. Tail
 estimate remains the existing whole-family queue, not a new child/issue split.
