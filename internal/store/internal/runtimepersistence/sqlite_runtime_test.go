@@ -508,11 +508,13 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		DeliveryStore:      sqliteStore,
 		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			AgentRoutes:    bus,
-			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller: bus,
-			RouteVerifier:  bus,
-			RouteRestorer:  bus,
+			LifecycleState:   sqliteStore,
+			LifecycleOutcome: sqliteStore,
+			AgentRoutes:      bus,
+			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
+			RouteInstaller:   bus,
+			RouteVerifier:    bus,
+			RouteRestorer:    bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -603,11 +605,13 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		DeliveryStore:      sqliteStore,
 		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			AgentRoutes:    bus,
-			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller: bus,
-			RouteVerifier:  bus,
-			RouteRestorer:  bus,
+			LifecycleState:   sqliteStore,
+			LifecycleOutcome: sqliteStore,
+			AgentRoutes:      bus,
+			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
+			RouteInstaller:   bus,
+			RouteVerifier:    bus,
+			RouteRestorer:    bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -1867,15 +1871,16 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	}
 
 	var count int
-	var entityID, flowInstance, conversation, persistedRunID, status string
+	var entityID, flowInstance, persistedRunID, status string
+	var transcriptTurns int
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), ''),
+		       (SELECT COUNT(*) FROM agent_turns WHERE session_id = ?), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), ''),
 		       MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &entityID, &flowInstance, &conversation, &persistedRunID, &status, &memoryEnabled); err != nil {
+	`, sessionID, sessionID).Scan(&count, &entityID, &flowInstance, &transcriptTurns, &persistedRunID, &status, &memoryEnabled); err != nil {
 		t.Fatalf("read stateless audit row: %v", err)
 	}
 	if count != 1 {
@@ -1887,8 +1892,8 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	if persistedRunID != runID || status != "active" {
 		t.Fatalf("audit run/status = %q/%q, want %q/active", persistedRunID, status, runID)
 	}
-	if conversation != "[]" {
-		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
+	if transcriptTurns != 1 {
+		t.Fatalf("transcript turns = %d, want one persisted stateless turn", transcriptTurns)
 	}
 
 	var turns int
@@ -1928,14 +1933,15 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	}
 
 	var count int
-	var gotEntityID, flowInstance, conversation string
+	var gotEntityID, flowInstance string
+	var transcriptTurns int
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), MAX(memory_enabled)
+		       (SELECT COUNT(*) FROM agent_turns WHERE session_id = ?), MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &memoryEnabled); err != nil {
+	`, sessionID, sessionID).Scan(&count, &gotEntityID, &flowInstance, &transcriptTurns, &memoryEnabled); err != nil {
 		t.Fatalf("read entity stateless audit row: %v", err)
 	}
 	if count != 1 {
@@ -1944,8 +1950,8 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	if gotEntityID != entityID || flowInstance != "" || memoryEnabled {
 		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", gotEntityID, flowInstance, memoryEnabled)
 	}
-	if conversation != "[]" {
-		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
+	if transcriptTurns != 1 {
+		t.Fatalf("transcript turns = %d, want one persisted stateless turn", transcriptTurns)
 	}
 
 	var linkedTurns int
@@ -1985,14 +1991,15 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	}
 
 	var count int
-	var entityID, gotFlowInstance, conversation string
+	var entityID, gotFlowInstance string
+	var transcriptTurns int
 	var memoryEnabled bool
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), MAX(memory_enabled)
+		       (SELECT COUNT(*) FROM agent_turns WHERE session_id = ?), MAX(memory_enabled)
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &memoryEnabled); err != nil {
+	`, sessionID, sessionID).Scan(&count, &entityID, &gotFlowInstance, &transcriptTurns, &memoryEnabled); err != nil {
 		t.Fatalf("read flow stateless audit row: %v", err)
 	}
 	if count != 1 {
@@ -2001,8 +2008,8 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled {
 		t.Fatalf("audit entity=%q flow_instance=%q memory=%v ", entityID, gotFlowInstance, memoryEnabled)
 	}
-	if conversation != "[]" {
-		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
+	if transcriptTurns != 1 {
+		t.Fatalf("transcript turns = %d, want one persisted stateless turn", transcriptTurns)
 	}
 
 	var linkedTurns int
