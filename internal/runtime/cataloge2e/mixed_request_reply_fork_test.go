@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -79,10 +80,14 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			}
 			h.waitForCatalogStoreQuiescence(20 * time.Second)
 			if returnedRequester {
-				progress, err := storetest.ReadFanOutRunProgressStorage(h.ctx, selected, catalogRuntimeRunID)
-				if err != nil || len(progress.Intents) != 1 || progress.Outcomes != 1 ||
-					progress.Intents[0].Cardinality != 1 || progress.Intents[0].Cursor != 1 || progress.Intents[0].Status != "closed" {
+				progress, err := selected.ListFanOutIntents(h.ctx, fanoutobligation.ListQuery{RunID: catalogRuntimeRunID, Limit: 10})
+				if err != nil || len(progress.Intents) != 1 || progress.NextCursor != "" ||
+					progress.Intents[0].Cardinality != 1 || progress.Intents[0].Cursor != 1 || progress.Intents[0].Status != fanoutobligation.StatusClosed {
 					t.Fatalf("one-item source did not complete its actual pump issuance: progress=%+v error=%v", progress, err)
+				}
+				outcomes, err := storetest.ReadFanOutPublishedOutcomeStorage(h.ctx, selected, catalogRuntimeRunID)
+				if err != nil || len(outcomes) != 1 || outcomes[0].Ordinal != 0 || outcomes[0].Kind != "committed" {
+					t.Fatalf("one-item source did not retain its once-only physical ordinal: outcomes=%+v error=%v", outcomes, err)
 				}
 			}
 			sourceRows, err := storetest.ReadReplyContextRecords(h.ctx, selected, catalogRuntimeRunID)
