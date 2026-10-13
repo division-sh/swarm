@@ -5,9 +5,7 @@ test-node:
   event_handlers:
     item.received:
       rules:
-        type_a:
-          when: payload.kind == 'a'
-        unknown:
-          else: true
+        - when: payload.kind == 'a'
+        - else: true
           emit:
             event: routed.unknown
