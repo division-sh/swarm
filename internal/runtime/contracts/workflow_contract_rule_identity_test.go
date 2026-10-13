@@ -25,8 +25,8 @@ func TestHandlerRuleIdentityDerivesFromCanonicalDeclarationSite(t *testing.T) {
 		return handler.Rules[0]
 	}
 
-	before := decode("rules:\n  - when: payload.ready\n")
-	after := decode("rules:\n  - when: payload.ready == true\n")
+	before := decode("rules:\n  - when: payload.ready\n  - else: true\n")
+	after := decode("rules:\n  - when: payload.ready == true\n  - else: true\n")
 	beforeRef, beforeOK := before.DeclarationIdentity()
 	afterRef, afterOK := after.DeclarationIdentity()
 	if !beforeOK || !afterOK || !beforeRef.Equal(afterRef) {
