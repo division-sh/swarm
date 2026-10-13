@@ -27,7 +27,7 @@ numeric.completed:
   fraction: numeric
   explicit_double: numeric
 `,
-		"types.yaml": "types:\n  NumericInput:\n    numbers: list<integer>\n    fraction: numeric\n",
+		"types.yaml": "types:\n  NumericInput:\n    numbers: [integer]\n    fraction: numeric\n",
 		"nodes.yaml": `numeric:
   execution_type: system_node
   subscribes_to: [numeric.requested]

@@ -70,7 +70,7 @@ pins:
   inputs:
     - items.ready
 `
-	events := "items.ready:\n  items: '[text]'\nitems.child:\n  value: text\nbatch.completed:\n  total: integer\n"
+	events := "items.ready:\n  items: [text]\nitems.child:\n  value: text\nbatch.completed:\n  total: integer\n"
 	nodes := `fan-out-source:
   execution_type: system_node
   subscribes_to: [items.ready]
@@ -84,7 +84,7 @@ pins:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `
-		events = "items.ready:\n  items: '[text]'\n  revision_id: text\nitems.child:\n  value: text\n  revision_id: text\nbatch.completed:\n  total: integer\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.closed:\n  revision_id: text\n"
+		events = "items.ready:\n  items: [text]\n  revision_id: text\nitems.child:\n  value: text\n  revision_id: text\nbatch.completed:\n  total: integer\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.closed:\n  revision_id: text\n"
 		nodes += "      loop: {admit: revision, from: review}\n"
 	}
 	nodes += `      fan_out:
@@ -143,7 +143,7 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: {type: integer, initial: 0}\n  decimal: {type: numeric, initial: 0.0}\n")
 	if resourceRows {
 		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
-		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: '[ResourceRow]'\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
+		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [ResourceRow]\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
   execution_type: system_node
   subscribes_to: [items.ready]

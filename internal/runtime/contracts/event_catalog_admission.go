@@ -341,7 +341,7 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 	const context = "event payload field"
 	switch value.Presence() {
 	case yamlsource.PresenceScalar:
-		rawType, err := requiredLiteralString(value, context+" type")
+		rawType, err := listDeclarationScalar(value, context, false)
 		if err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, err
 		}
@@ -353,25 +353,18 @@ func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamls
 			return EventFieldSpec{}, false, yamlsource.Value{}, err
 		}
 		return EventFieldSpec{Type: typeName}, optional, value, nil
-	case yamlsource.PresenceSequence:
-		values, err := value.Sequence()
+	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
+		typeName, err := listDeclarationSequence(value, context)
 		if err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, err
 		}
-		if len(values) != 1 {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s list shorthand requires exactly one element type", context)
-		}
-		element, err := requiredLiteralString(values[0], context+" element type")
-		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
-		}
-		typeName := "[" + strings.TrimSpace(element) + "]"
 		if err := rejectEventTypeOptionalMarker(typeName, context); err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, err
 		}
 		if err := validateWave1TypeRef(typeName, context); err != nil {
 			return EventFieldSpec{}, false, yamlsource.Value{}, err
 		}
+		values, _ := value.Sequence()
 		return EventFieldSpec{Type: typeName}, false, values[0], nil
 	case yamlsource.PresenceMapping:
 	case yamlsource.PresenceEmptyMapping:
@@ -388,6 +381,9 @@ func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, yam
 	if err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
 	}
+	if err := rejectLongListField(fields, context); err != nil {
+		return EventFieldSpec{}, false, yamlsource.Value{}, err
+	}
 	byName := make(map[string]yamlsource.MappingField, len(fields))
 	for _, field := range fields {
 		if _, ok := eventPayloadFieldMappingKeys[field.Name]; !ok {
@@ -399,22 +395,13 @@ func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, yam
 	if !hasType {
 		return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s type is required", context)
 	}
-	rawType, err := requiredLiteralString(typeField.Value, context+" type")
+	rawType, err := listDeclarationScalar(typeField.Value, context, true)
 	if err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
 	}
 	typeName, optional, err := admitEventFieldTypeMarker(rawType, context)
 	if err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
-	}
-	if strings.EqualFold(strings.TrimSpace(typeName), "list") {
-		element, err := requiredLiteralString(eventFieldValue(byName, "of"), context+" list element type")
-		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s list declarations require an of: element type", context)
-		}
-		typeName = "[" + strings.TrimSpace(element) + "]"
-	} else if source, hasOf := byName["of"]; hasOf {
-		return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, "of", eventPayloadFieldMappingKeys, source)
 	}
 	if err := rejectEventTypeOptionalMarker(typeName, context); err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
@@ -494,7 +481,7 @@ func rejectEventTypeOptionalMarker(typeName, context string) error {
 }
 
 var eventPayloadFieldMappingKeys = map[string]struct{}{
-	"type": {}, "of": {}, "description": {}, "pattern": {}, "length": {}, "range": {}, "equal_to": {}, "citation": {},
+	"type": {}, "description": {}, "pattern": {}, "length": {}, "range": {}, "equal_to": {}, "citation": {},
 }
 
 func admitEventPattern(value yamlsource.Value) (string, error) {

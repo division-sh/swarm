@@ -341,6 +341,9 @@ func catalogComparableDomain(resolved ResolvedCatalogType) string {
 }
 
 func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, resolving map[string]struct{}) (ResolvedCatalogType, error) {
+	if err := rejectAlternateListReference(typeRef, "catalog type"); err != nil {
+		return ResolvedCatalogType{}, err
+	}
 	if typeRef == "" {
 		return ResolvedCatalogType{}, catalogReferenceError("catalog type reference is required")
 	}

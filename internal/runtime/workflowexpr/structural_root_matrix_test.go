@@ -74,7 +74,7 @@ func TestStructuralPresenceRootShapeAndDecisionMatrix(t *testing.T) {
 					opts.AllowJoin = true
 					opts.JoinResultType = rc.CatalogTypeReference{Type: "MatrixRecord", Catalog: rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{
 						"MatrixLeaf":   {Fields: map[string]rc.TypeFieldSpec{"id": {Type: "text"}, "note": {Type: "text", IsOptional: true}}},
-						"MatrixRecord": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}, "child": {Type: "MatrixLeaf"}, "maybe": {Type: "MatrixLeaf", IsOptional: true}, "children": {Type: "list<MatrixLeaf>"}, "labels": {Type: "map[text]MatrixLeaf"}}},
+						"MatrixRecord": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}, "child": {Type: "MatrixLeaf"}, "maybe": {Type: "MatrixLeaf", IsOptional: true}, "children": {Type: "[MatrixLeaf]"}, "labels": {Type: "map[text]MatrixLeaf"}}},
 					}}}
 					ctx.Join = map[string]any{"results": []any{value}}
 					alias = "r"

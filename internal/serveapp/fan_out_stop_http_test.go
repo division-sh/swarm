@@ -239,7 +239,7 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 		HandlerEventKey: "item.received", ProducerSource: producer,
 		Lineage: events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
 	}
-	collection := contracts.CatalogTypeReference{Type: "list<text>"}
+	collection := contracts.CatalogTypeReference{Type: "[text]"}
 	projection, err := contracts.AdmitCollectionProjection(collection)
 	if err != nil {
 		t.Fatal(err)

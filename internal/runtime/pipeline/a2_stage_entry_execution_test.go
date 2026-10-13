@@ -20,7 +20,7 @@ func VerifyNativeA2NonLoopStageReentryOnBothStoresForTest(t *testing.T, open pip
 			t.Run(backend.name+"/"+pipelineDeclarationFlowPath(flow), func(t *testing.T) {
 				files := workflowJoinLifecycleFixtureFiles(false, "")
 				for _, prefix := range []string{"", "orders/"} {
-					files[prefix+"events.yaml"] = strings.Replace(files[prefix+"events.yaml"], "manual.abort:\n", "manual.abort:\n  expected: list<text>\n", 1)
+					files[prefix+"events.yaml"] = strings.Replace(files[prefix+"events.yaml"], "manual.abort:\n", "manual.abort:\n  expected: [text]\n", 1)
 					files[prefix+"nodes.yaml"] = strings.Replace(files[prefix+"nodes.yaml"], "    manual.abort:\n      advances_to: dispatching", "    manual.abort:\n      data_accumulation:\n        writes:\n          - target_field: expected\n            value: payload.expected\n      advances_to: dispatching", 1)
 				}
 				h := newNativeExactWorkflowJoinHarness(t, backend.name, flow, "awaiting", []any{"a", "b"}, loadWorkflowTempBundle(t, files), open)

@@ -586,7 +586,7 @@ func singletonCoordinatorTypesYAML() string {
 types:
   VerticalState:
     status: text
-    active_jobs: "[Job]"
+    active_jobs: [Job]
   Job:
     id: text
     title: text

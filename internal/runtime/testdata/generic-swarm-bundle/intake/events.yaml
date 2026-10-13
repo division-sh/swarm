@@ -1,6 +1,6 @@
 item.created:
   item_id: string
-  items: "[IntakeItem]"
+  items: [IntakeItem]
 item.processed:
   item_id: string?
   score: number

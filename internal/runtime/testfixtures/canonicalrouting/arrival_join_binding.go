@@ -105,7 +105,7 @@ pins:
   inputs:
     - item.completed
 `,
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
+		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
 		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
   execution_type: system_node
@@ -144,7 +144,7 @@ pins:
   outputs:
     - provider.requested
 `,
-		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n",
+		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
 		"requester/events.yaml":   "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
 		"requester/nodes.yaml": `requester:
   execution_type: system_node
