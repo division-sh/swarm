@@ -24,6 +24,7 @@ func TestLifecycleBusinessStoragePreservesLeftJoinNullFieldsAndExactBytesBothSto
 			if len(want) != 5 || !want[0].Fields.Valid || want[3].Fields.Valid || want[4].Fields.Valid || want[0].EntityID >= want[1].EntityID {
 				t.Fatalf("physical lifecycle fixture lost LEFT JOIN NULLs/order: %+v", want)
 			}
+			requireDistinctLifecycleOracleColumns(t, want[0])
 			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
 			if err != nil {
 				t.Fatal(err)
@@ -46,6 +47,13 @@ func TestLifecycleBusinessStoragePreservesLeftJoinNullFieldsAndExactBytesBothSto
 			}
 			requireLifecycleBusinessDetachedRunIsolation(t, ctx, fixture.store, runID, sibling, got, want)
 		})
+	}
+}
+
+func requireDistinctLifecycleOracleColumns(t *testing.T, row LifecycleBusinessStorageRow) {
+	t.Helper()
+	if row.Config == row.Accumulator || !strings.Contains(row.Config, "native-reader-config") || !strings.Contains(row.Accumulator, "native-reader-accumulator") {
+		t.Fatalf("physical lifecycle oracle cannot discriminate config/accumulator scan destinations: %+v", row)
 	}
 }
 
@@ -394,7 +402,7 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 				(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
 				gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at,terminated_at)
-				VALUES($1,$2,$3,$4,'inventory','static',$5,'{}',TRUE,'{}','{}','{}',1,$6,$6,$6,$7)`,
+				VALUES($1,$2,$3,$4,'inventory','static',$5,'{"configuration":"native-reader-config","nested":{"limit":7}}',TRUE,'{}','{}','{"native_reader":{"label":"native-reader-accumulator","values":[null,7.0,"exact"]}}',1,$6,$6,$6,$7)`,
 				row.headerRun, row.headerEntity, row.headerPath, row.state, status, now, ended); err != nil {
 				return err
 			}

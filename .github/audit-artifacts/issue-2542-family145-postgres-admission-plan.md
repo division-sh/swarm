@@ -6242,3 +6242,21 @@ qualification holds, including the static-fork initial publication intake,
 remain open.
 
 Receipts:~/.cache/swarm-2542-family145/entity-state-* and entity-debug-*.
+
+### Carried Nonblocking Oracle Hardening
+
+Reviewer-b6135168868/6136011599 requested distinct nonempty Config/Accumulator
+values in the existing private lifecycle witness. The shared fixture now uses
+distinct nested config and a valid map-of-map workflow state bucket, with raw
+decimal/NULL/text evidence retained. The independent original SQL oracle checks
+those distinctions before comparing every row; no selected consumer, SQL port,
+schema policy or read behavior changes. The first flat accumulator attempt was
+rejected by real completion before observation, so neither that RED nor its
+swap attempt is claimed as a counterexample. After using valid native bucket
+shape, the baseline passes on BOTH stores. A real compilable swapped Scan
+destination then fails specifically at the full row/config/accumulator
+comparison on BOTH stores. Exact original Scan restored: all seven affected
+lifecycle/joined-inventory/writer-stage roots, fourteen backend cells, PASS
+31.43s under race. Existing late-NULL view restoration, counters, detached
+values, run isolation and all original assertions remain. No runtime reader
+change, weakened assertion, extra gate or new debt allowance.
