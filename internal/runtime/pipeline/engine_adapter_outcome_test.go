@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -58,11 +59,19 @@ func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, Wor
 	runID := eventtest.UUID("outcome-run")
 	flow := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	header, err := WorkflowInstanceHeaderPayloadForRoute(flow.Route, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := canonicaljson.MarshalPreservingNumberKinds(header)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command := WorkflowEngineMutationCommand{State: WorkflowEngineStateRecord{
 		Identity: flow, EntityID: eventtest.UUID("outcome-entity"), WorkflowName: ".", WorkflowVersion: "v1",
 		Mode: "static", Status: "active", CurrentState: "pending", StageDefined: true,
 		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
-		Accumulator: json.RawMessage(`{}`), Config: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`),
+		Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, ExpectedState: "pending", ExpectedRevision: 1,
 		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion,
 	}}
@@ -70,6 +79,22 @@ func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, Wor
 		t.Fatal(err)
 	}
 	return runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}, command
+}
+
+func TestOutcomeConstructedMutationRetainsExactRecordedHeader(t *testing.T) {
+	mutation, command := outcomeConstructedMutation(t)
+	header, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, command.State.Config)
+	if err != nil || header.WorkflowVersion() != command.State.WorkflowVersion || !header.ParentRoute().Empty() {
+		t.Fatalf("constructed root header = %+v, error = %v", header, err)
+	}
+	if mutation.Address.FlowInstance != command.State.Identity {
+		t.Fatalf("mutation changed the constructed receiver: %+v", mutation.Address)
+	}
+	invalid := command
+	invalid.State.Config = json.RawMessage(`{}`)
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("constructed mutation accepted an absent recorded identity")
+	}
 }
 
 func outcomeCommittedStage(t *testing.T) runtimeengine.CommittedStage {
