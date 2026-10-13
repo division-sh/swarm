@@ -157,9 +157,10 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 		flowID           string
 		wantKind         events.RoutingSourceKind
 		wantFlowInstance string
+		instanceKey      string
 	}{
 		{name: "explicit root", flowID: "", wantKind: events.RoutingSourceRoot},
-		{name: "flow owned", flowID: "orders", wantKind: events.RoutingSourceFlowOwnedControl, wantFlowInstance: "orders/order-1"},
+		{name: "flow owned", flowID: "orders", wantKind: events.RoutingSourceFlowOwnedControl, wantFlowInstance: "orders/order-1", instanceKey: "order-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := tc.wantFlowInstance
@@ -177,6 +178,9 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 			}
 			instance := WorkflowInstance{
 				WorkflowName: ref.FlowPath(), StorageRef: path, InstanceID: instanceRoute.InstanceID, EntityID: entityID,
+			}
+			if tc.instanceKey != "" {
+				instance.Fields = map[string]any{"instance_key": tc.instanceKey}
 			}
 			if tc.flowID != "" {
 				instance = materializedWorkflowInstanceForSource(t, source, runtimecorrelation.WithRunID(context.Background(), runID), instance)
