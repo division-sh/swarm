@@ -42314,11 +42314,15 @@ llm_completion_execution_authority:
       full contributor collection. A terminal model or exactly one contributor supplies resolved_model; multiple contributors
       without a terminal label or missing observations leave it absent. Sorting never chooses the first model. Labels are
       observations, not certification of a pinned concrete model. Mock work never manufactures provider labels or billing.
-      CLI evidence follows the last exact type=result candidate, independently of dimension validation. A malformed or
-      contradictory later result never certifies an earlier result's facts. Case-variant metadata does not override
+      CLI JSON and stream-json evidence frame complete top-level documents before terminal selection; document-internal
+      newlines or nested objects never create stream frames. Evidence follows the last exact type=result candidate,
+      independently of dimension validation. A malformed or contradictory later result never certifies an earlier
+      result's facts. Terminal candidacy does not depend on Unicode validity of unrelated dimensions, including when
+      type appears after an invalid model or contributor string. Case-variant metadata does not override
       exact protocol keys, including token totals and nested cache counts; wrong-case-only fields never establish
-      exact usage. Contributor key lexemes undergo strict Unicode admission before decoding; invalid surrogate
-      escapes do not become replacement-character model labels, and valid sibling contributors remain independent.
+      exact usage. Model values and contributor key lexemes undergo strict Unicode admission before decoding;
+      invalid UTF-8 bytes or surrogate escapes do not become replacement-character model labels, and valid sibling
+      contributors, counts and price remain independent.
       Process exit, cancellation, observation acknowledgment and heartbeat failures carry owned terminal observations
       through the existing failure settlement without successful session/head adoption or automatic replay.
     price_owner: >-
