@@ -72,7 +72,7 @@ coordinator_state:
 }
 
 func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
-	bundle := loadSingletonCoordinatorFixtureBundle(t, `
+	root := writeSingletonCoordinatorFixtureRoot(t, `
 name: coordinator
 pins:
   inputs:
@@ -82,10 +82,20 @@ coordinator_state:
   verticals: map[text]MissingType
 `, "", "")
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if _, err := bundle.ResolveFlowSingletonCoordinator("coordinator"); err == nil || !strings.Contains(err.Error(), "MissingType") {
-		t.Fatalf("coordinator demand must reject unresolved contained type, got %v (report=%#v)", err, report.Errors())
+	repoRoot := repoRootForBootverifyTest(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err == nil || bundle != nil {
+		t.Fatalf("unresolved contained type escaped source admission: bundle=%v err=%v", bundle != nil, err)
+	}
+	diagnostic, typed := runtimecontracts.AsLoaderDiagnostic(err)
+	if !typed || diagnostic.Code != "contract_loader.invalid_type_reference" {
+		t.Fatalf("unresolved contained type lost typed admission refusal: %v", err)
+	}
+	if diagnostic.Location.File != "coordinator/entities.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
+		t.Fatalf("unresolved contained type lost exact source location: %+v", diagnostic.Location)
+	}
+	if !strings.Contains(err.Error(), `coordinator/entities.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
+		t.Fatalf("unresolved contained type lost source and cause: %v", err)
 	}
 }
 
@@ -541,6 +551,16 @@ func loadCanonicalSingletonCoordinatorFixtureBundle(t *testing.T, variant canoni
 func loadSingletonCoordinatorFixtureBundle(t *testing.T, flowSchema, flowEntities, flowAgents, flowNodes string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)
+	root := writeSingletonCoordinatorFixtureRoot(t, flowSchema, flowEntities, flowAgents, flowNodes)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func writeSingletonCoordinatorFixtureRoot(t *testing.T, flowSchema, flowEntities, flowAgents, flowNodes string) string {
+	t.Helper()
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
@@ -558,11 +578,7 @@ job.received:
 	if strings.TrimSpace(flowNodes) != "" {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "nodes.yaml"), strings.TrimSpace(flowNodes)+"\n")
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return bundle
+	return root
 }
 
 func singletonCoordinatorTypesYAML() string {
