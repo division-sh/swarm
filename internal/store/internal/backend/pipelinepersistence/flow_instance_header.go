@@ -88,26 +88,74 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 
 // Historical selected execution projects admitted lifecycle evidence; it does
 // not rerun construction, creating delivery, or initial-entry contributions.
-func CommitSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, postgres bool, record pipeline.WorkflowEngineStateRecord) error {
+func CommitSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, postgres bool, record pipeline.WorkflowEngineStateRecord, receipt pipeline.FlowConstructionReceipt) error {
 	if err := record.Validate(); err != nil {
 		return err
 	}
 	if !record.Transition.CreatesState() {
 		return fmt.Errorf("selected historical header requires a fresh projected identity")
 	}
+	raw, err := pipeline.EncodeFlowConstructionReceipt(receipt)
+	if err != nil {
+		return err
+	}
+	if _, err := pipeline.DecodeFlowConstructionReceipt(raw, record.Identity, record.EntityID); err != nil {
+		return err
+	}
+	if receipt.WorkflowName != record.WorkflowName || !receipt.OccurredAt.Equal(record.CreatedAt) || receipt.Persisted.Control.EntityType != record.EntityType {
+		return fmt.Errorf("historical construction contradicts projected header")
+	}
 	if record.EntityType == "" {
 		if err := requireFieldlessWorkflowStateAbsent(ctx, tx, postgres, record); err != nil {
 			return err
 		}
 	}
-	_, err := commitWorkflowInstanceHeader(ctx, tx, postgres, record, true)
-	return err
+	if _, err := commitWorkflowInstanceHeader(ctx, tx, postgres, record, true); err != nil {
+		return err
+	}
+	return insertFlowConstructionReceipt(ctx, tx, postgres, receipt.RunID, receipt.EntityID, receipt.FlowInstance, raw, receipt.OccurredAt)
 }
 
 // Materialize-only reuse consumes the same paired reader and immutable record
 // as the historical writer. It cannot repair or accept changed snapshot facts.
 func RequireSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord) error {
-	return requireWorkflowHeaderProjection(ctx, tx, postgres, expected, 1)
+	if err := requireWorkflowHeaderProjection(ctx, tx, postgres, expected, 1); err != nil {
+		return err
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, expected.Identity.RunID, expected.Identity.Route.InstancePath, expected.EntityID).Scan(&raw); err != nil {
+		return fmt.Errorf("read historical construction receipt: %w", err)
+	}
+	receipt, err := pipeline.DecodeFlowConstructionReceipt(raw, expected.Identity, expected.EntityID)
+	if err != nil {
+		return err
+	}
+	if receipt.WorkflowName != expected.WorkflowName || !receipt.OccurredAt.Equal(expected.CreatedAt) || receipt.Persisted.Control.EntityType != expected.EntityType {
+		return fmt.Errorf("historical construction contradicts persisted header")
+	}
+	return nil
+}
+
+// Exact materialization reuse also compares immutable initialization. Header
+// equality alone cannot prove that later fields have not replaced the receipt.
+func RequireSelectedHistoricalWorkflowReceipt(ctx context.Context, tx *sql.Tx, expected pipeline.FlowConstructionReceipt) error {
+	raw, err := pipeline.EncodeFlowConstructionReceipt(expected)
+	if err != nil {
+		return err
+	}
+	var persisted []byte
+	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, expected.RunID, expected.FlowInstance, expected.EntityID).Scan(&persisted); err != nil {
+		return fmt.Errorf("read immutable historical construction: %w", err)
+	}
+	if _, err := pipeline.DecodeStoredFlowConstructionReceipt(persisted, expected.RunID, expected.EntityID, expected.FlowInstance, expected.WorkflowName); err != nil {
+		return err
+	}
+	if !workflowCommitJSONEqual(persisted, raw) {
+		return fmt.Errorf("historical construction receipt disagrees with admitted initialization")
+	}
+	return nil
 }
 
 func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord, revision int64) error {

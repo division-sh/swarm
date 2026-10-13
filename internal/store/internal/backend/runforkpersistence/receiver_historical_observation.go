@@ -76,7 +76,7 @@ func capturedReceiverMetadata(snapshot *runForkRevisionSnapshot, sourceRunID, fo
 
 func matchesCapturedReceiver(sourceRunID, forkRunID string, header pipeline.WorkflowInstance, state runfork.RunForkEntityState) (bool, error) {
 	captured := state.MaterializationMetadata
-	expected, err := selectedContractWorkflowIdentity(selectedContractWorkflowState{
+	expected, _, err := selectedContractWorkflowIdentity(selectedContractWorkflowState{
 		SourceRunID: sourceRunID, RunID: forkRunID, EntityID: header.EntityID,
 		WorkflowName: captured.FlowTemplate, Route: header.StorageRef, History: state,
 	})

@@ -3,10 +3,15 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
 type genericScheduleRuntimeLogger struct {
 	logger *RuntimeLogger
+}
+
+func NewGenericScheduleRuntimeLogger(logger *RuntimeLogger) genericschedule.Logger {
+	return genericScheduleRuntimeLogger{logger: logger}
 }
 
 func (l genericScheduleRuntimeLogger) GenericScheduleFailure(ctx context.Context, action, activationID string, err error) {

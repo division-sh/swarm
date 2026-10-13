@@ -31,7 +31,7 @@ func requireSelectedDeploymentDrainedTx(ctx context.Context, tx *sql.Tx, forkRun
 		{"missing ordinal evidence", `SELECT COUNT(*) FROM fan_out_intents i
 			WHERE i.run_id=$1 AND i.origin_kind='deployment' AND i.cursor<>
 			(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.deployment_feed_id=i.deployment_feed_id)`},
-		{"noncommitted ordinal", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND deployment_feed_id IS NOT NULL AND outcome_kind<>'committed'`},
+		{"noncommitted ordinal", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND deployment_feed_id IS NOT NULL AND outcome_kind NOT IN ('committed','continued')`},
 	}
 	for _, check := range checks {
 		var count int

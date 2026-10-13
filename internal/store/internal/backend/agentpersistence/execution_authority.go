@@ -429,6 +429,15 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		return errors.New("selected-fork grant proof requires a transaction and live selected evidence")
 	}
 	binding := evidence.SelectedFork
+	// Revision-only timer admission holds the run before its execution row.
+	// Do not let the joined proof take those rows in the reverse order.
+	hash, bindingID, err := loadRunExecutionBindingModeTx(ctx, tx, binding.ForkRunID, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if hash != evidence.BundleHash || !bindingID.Valid || bindingID.String != binding.BindingID {
+		return errors.New("selected-fork generation grant run binding changed")
+	}
 	row, err := loadSelectedForkGrantExecutionTx(ctx, tx, *binding, sqlite)
 	if err != nil {
 		return err
@@ -484,6 +493,31 @@ type selectedForkGrantExecutionRow struct {
 }
 
 func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite bool) (selectedForkGrantExecutionRow, error) {
+	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, binding, sqlite, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return selectedForkGrantExecutionRow{}, errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
+	}
+	return row, err
+}
+
+// ObserveSelectedForkGenerationGrantTx reports current serving eligibility,
+// not mutation authority. Claim admission still validates and locks the full
+// grant, preparation receipts, process, executor and run in its own attempt.
+func ObserveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, sqlite bool) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	if tx == nil || evidence.SelectedFork == nil || evidence.State != startupownership.GrantAdmitted {
+		return false, errors.New("selected serving observation requires an admitted grant and read transaction")
+	}
+	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, *evidence.SelectedFork, sqlite, false)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && row.Binding == *evidence.SelectedFork && row.BundleHash == evidence.BundleHash, err
+}
+
+func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite, lock bool) (selectedForkGrantExecutionRow, error) {
 	query := `SELECT execution.binding_id, execution.fork_run_id,
 		execution.generation, execution.fence_generation, execution.execution_owner,
 		execution.admission_fingerprint, execution.container_plan_fingerprint,
@@ -504,11 +538,17 @@ func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding s
 		AND execution.state = 'running'
 		AND (binding.mode = 'selected_contracts' OR (binding.mode = 'bundle_hash' AND binding.bundle_hash = run.bundle_hash))`
 	args := []any{binding.ExecutionID}
+	if !lock {
+		query += ` AND run.status = 'running'`
+	}
 	if sqlite {
 		query += ` AND execution.lease_expires_at > $2`
 		args = append(args, time.Now().UTC())
 	} else {
-		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP FOR UPDATE OF execution, binding, run`
+		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP`
+		if lock {
+			query += ` FOR UPDATE OF execution, binding, run`
+		}
 	}
 	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
@@ -517,9 +557,6 @@ func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding s
 		&row.Binding.ContainerPlanFingerprint, &row.Binding.ActorCensusFingerprint,
 		&row.Binding.EffectiveConfigFingerprint, &row.Binding.DeclarationPlanFingerprint, &row.Declaration,
 		&row.Binding.PreparationFingerprint, &row.Preparation, &row.BundleHash)
-	if err == sql.ErrNoRows {
-		return selectedForkGrantExecutionRow{}, errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
-	}
 	if err != nil {
 		return selectedForkGrantExecutionRow{}, fmt.Errorf("prove selected-fork grant execution: %w", err)
 	}

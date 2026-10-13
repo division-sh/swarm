@@ -123,21 +123,22 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
 	return runfork.RunForkMaterializedEntitySnapshotMetadata{
-		FlowConfig:     append([]byte(nil), sourceState.FlowConfig...),
-		Owner:          runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
-		FlowInstance:   flowInstance,
-		EntityType:     entityType,
-		Slug:           strings.TrimSpace(sourceState.Slug),
-		Name:           strings.TrimSpace(sourceState.Name),
-		Source:         source,
-		StageDefined:   sourceState.StageDefined,
-		FlowTemplate:   sourceState.FlowTemplate,
-		Mode:           sourceState.Mode,
-		Status:         sourceState.Status,
-		CreatedAt:      sourceState.CreatedAt,
-		UpdatedAt:      sourceState.UpdatedAt,
-		TerminatedAt:   sourceState.TerminatedAt,
-		EnteredStateAt: sourceState.EnteredStateAt,
+		InitialMaterialization: append([]byte(nil), sourceState.InitialMaterialization...),
+		FlowConfig:             append([]byte(nil), sourceState.FlowConfig...),
+		Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+		FlowInstance:           flowInstance,
+		EntityType:             entityType,
+		Slug:                   strings.TrimSpace(sourceState.Slug),
+		Name:                   strings.TrimSpace(sourceState.Name),
+		Source:                 source,
+		StageDefined:           sourceState.StageDefined,
+		FlowTemplate:           sourceState.FlowTemplate,
+		Mode:                   sourceState.Mode,
+		Status:                 sourceState.Status,
+		CreatedAt:              sourceState.CreatedAt,
+		UpdatedAt:              sourceState.UpdatedAt,
+		TerminatedAt:           sourceState.TerminatedAt,
+		EnteredStateAt:         sourceState.EnteredStateAt,
 	}, "", true
 }
 

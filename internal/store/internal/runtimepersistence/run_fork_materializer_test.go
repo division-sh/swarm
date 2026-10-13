@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -1044,11 +1045,12 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	sourceRunID := uuid.NewString()
-	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: store}, sourceRunID, selectedActivityProducerSource(t))
+	source := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: store}, sourceRunID, source)
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000840, 0).UTC()
-	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
+	constructReplaySettlementSourceState(t, ctx, store, source, sourceRunID, entityID, rootEventID, at)
 
 	sourceID := uuid.NewString()
 	sourceEvent := eventtest.ChildWithLineageAndRoutingSource(
@@ -1201,11 +1203,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	pg := newTestPostgresStore(t, db)
 
 	sourceRunID := uuid.NewString()
-	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, selectedActivityProducerSource(t))
+	source := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, source)
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
+	constructReplaySettlementSourceState(t, ctx, pg, source, sourceRunID, entityID, rootEventID, at)
 	eventID := uuid.NewString()
 	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
 	sourceEnvelope := events.EventEnvelope{
@@ -2133,6 +2136,22 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)
+}
+
+// Settlement controls contribute a prepared component aggregate through the
+// constructor owner; they do not qualify public constructor selection.
+func constructReplaySettlementSourceState(t *testing.T, ctx context.Context, selected *PostgresStore, source semanticview.Source, runID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	event := semanticEventRecordFixture(eventID, runID, "fork.ready", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	if err := insertCanonicalEventRecordFixture(ctx, selected, event); err != nil {
+		t.Fatal(err)
+	}
+	commitPreparedWorkflowAggregateFixture(t, ctx, selected, runID, runtimepipeline.WorkflowInstance{
+		InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "fork_entity",
+		Name: "Activation Entity", WorkflowName: "flow-a", WorkflowVersion: source.WorkflowVersion(),
+		Mode: "static", StageDefined: true, CurrentState: "ready", Fields: map[string]any{"name": "Activation Entity"},
+		CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
+	}, at)
 }
 
 func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {

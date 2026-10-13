@@ -27,17 +27,17 @@ func (s *selectedFiniteFeedBindingReader) RequireRunForkSelectedContractBinding(
 }
 
 func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T) {
-	recovered, entry := selectedFiniteFeedRecoveryEvidence()
-	recovered.Resume.ForkRunStatus = runfork.RunForkMaterializedStatus
+	recovered, entry := selectedRecoveryEvidence()
+	recovered.Continuation.ForkRunStatus = runfork.RunForkMaterializedStatus
 	store := &selectedFiniteFeedBindingReader{binding: entry.Binding}
 	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{fork: store}}
 	request := SelectedContractExecutionRequest{}
-	admitted, err := owner.admitSelectedFiniteFeedRecovery(context.Background(), recovered, request)
+	admitted, err := owner.admitSelectedRecovery(context.Background(), recovered, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if admitted.action != selectedRecoveryResumeFiniteFeed || admitted.binding.ForkRunID != recovered.RunID ||
-		admitted.request.ForkOperation == nil || admitted.request.ForkOperation.OperationID != recovered.Resume.Operation.OperationID ||
+	if admitted.action != selectedRecoveryResume || admitted.binding.ForkRunID != recovered.RunID ||
+		admitted.request.ForkOperation == nil || admitted.request.ForkOperation.OperationID != recovered.Operation.Request.OperationID ||
 		admitted.request.SourceRunID != entry.Binding.SourceRunID || admitted.request.ExpectedBundleHash != entry.BundleHash {
 		t.Fatalf("recovery admission lost durable identity: %+v", admitted)
 	}
@@ -59,11 +59,12 @@ func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T)
 		{"foreign_source", SelectedContractExecutionRequest{SourceRunID: uuid.NewString()}},
 		{"matching_source_is_not_caller_authority", SelectedContractExecutionRequest{SourceRunID: entry.Binding.SourceRunID}},
 		{"event_selector", SelectedContractExecutionRequest{At: uuid.NewString()}},
+		{"start_selector", SelectedContractExecutionRequest{AtStart: true}},
 		{"foreign_bundle", SelectedContractExecutionRequest{ExpectedBundleHash: "other"}},
 		{"matching_bundle_is_not_caller_authority", SelectedContractExecutionRequest{ExpectedBundleHash: entry.BundleHash}},
 		{"fork_operation", SelectedContractExecutionRequest{ForkOperation: &runfork.ForkOperationRequest{}}},
 		{"empty_supplied_pins", SelectedContractExecutionRequest{DataPinOverrides: []durabledata.ExplicitPin{}}},
-		{"supplied_pin", SelectedContractExecutionRequest{DataPinOverrides: []durabledata.ExplicitPin{{Declaration: recovered.Resume.Pins[0].Declaration, VersionID: recovered.Resume.Pins[0].VersionID}}}},
+		{"supplied_pin", SelectedContractExecutionRequest{DataPinOverrides: []durabledata.ExplicitPin{{Declaration: recovered.Continuation.Pins[0].Declaration, VersionID: recovered.Continuation.Pins[0].VersionID}}}},
 		{"matching_selection_is_not_caller_authority", SelectedContractExecutionRequest{ContractSelection: entry.Binding.ContractSelection}},
 		{"conflicting_selection", SelectedContractExecutionRequest{ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: entry.BundleHash}}},
 		{"source_freeze", SelectedContractExecutionRequest{AllowSourceFreeze: true}},
@@ -72,7 +73,7 @@ func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T)
 		{"recovery_override", SelectedContractExecutionRequest{Recovery: &recovered}},
 	} {
 		t.Run(hostile.name, func(t *testing.T) {
-			if _, err := owner.admitSelectedFiniteFeedRecovery(context.Background(), recovered, hostile.request); err == nil {
+			if _, err := owner.admitSelectedRecovery(context.Background(), recovered, hostile.request); err == nil {
 				t.Fatalf("caller-selected recovery context was admitted: %+v", hostile.request)
 			}
 			if store.calls != 1 {
@@ -84,13 +85,13 @@ func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T)
 		t.Fatalf("hostile request reached durable binding reader %d times", store.calls-1)
 	}
 	store.binding.ForkPoint.Revision++
-	if _, err := owner.admitSelectedFiniteFeedRecovery(context.Background(), recovered, request); err == nil {
+	if _, err := owner.admitSelectedRecovery(context.Background(), recovered, request); err == nil {
 		t.Fatal("foreign durable revision was admitted")
 	}
-	recovered.Disposition = runfork.SelectedForkRecoveryActivateFiniteFeed
+	recovered.Disposition = runfork.SelectedForkRecoveryActivate
 	store.binding = entry.Binding
-	admitted, err = owner.admitSelectedFiniteFeedRecovery(context.Background(), recovered, request)
-	if err != nil || admitted.action != selectedRecoveryActivateFiniteFeed {
+	admitted, err = owner.admitSelectedRecovery(context.Background(), recovered, request)
+	if err != nil || admitted.action != selectedRecoveryActivate {
 		t.Fatalf("quiesced activation admission=%+v err=%v", admitted, err)
 	}
 }

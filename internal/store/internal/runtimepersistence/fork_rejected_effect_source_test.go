@@ -46,6 +46,7 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 				requireRunningRunForTest(t, sourceCtx, selected, sourceRun, now)
 				requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: childRun, BundleHash: target.BundleHash, Artifact: targetBundle.SourceArtifact, StartedAt: now})
 				card, effect := newRootProposedEffectTestCard(t, sourceRun, now)
+				card, effect = runForkProposedEffectWithoutReplyForTest(t, card, effect)
 				if err := selected.CreateProposedEffectCard(sourceCtx, card, effect); err != nil {
 					t.Fatal(err)
 				}
@@ -79,13 +80,14 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
+				plan := runfork.RunForkPlan{SourceRunID: sourceRun, ForkPoint: point}
 				apply := func() error {
 					return runSelectedFixtureMutation(targetCtx, selected, "materialize rejected effect history", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 						switch s := selected.(type) {
 						case *PostgresStore:
-							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, plan, childRun, target, projection, correspondence, now.Add(2*time.Minute), nil)
 						case *SQLiteRuntimeStore:
-							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, plan, childRun, target, projection, correspondence, now.Add(2*time.Minute), nil)
 						default:
 							t.Fatalf("unsupported selected owner %T", selected)
 							return nil
@@ -118,7 +120,7 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 						t.Fatalf("child inherited later source rejection: %+v, %v", child, err)
 					}
 					pending, err := selected.LoadProposedEffectContinuation(targetCtx, child.CardID)
-					if err != nil || pending.Validate(child) != nil || pending.RequestEventID == effect.RequestEventID || pending.ReplyContextID != "" || pending.State != decisioncard.ProposedEffectPending || pending.DecisionEventID != "" {
+					if err != nil || pending.Validate(child) != nil || pending.RequestEventID == effect.RequestEventID || effect.ReplyContextID != "" || pending.ReplyContextID != "" || pending.State != decisioncard.ProposedEffectPending || pending.DecisionEventID != "" {
 						t.Fatalf("child continuation inherited historical authority: %+v, %v", pending, err)
 					}
 				}
