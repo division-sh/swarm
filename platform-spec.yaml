@@ -5147,6 +5147,10 @@ handler_specification:
           their default derives from node id, handler event key and tool id. Rule labels, predicate display and row positions
           never supply activity identity. Admission, compiled catalog generation and execution reject unnamed rule activities
           before effects; no positional or presentation fallback exists.
+        selection_ownership: >
+          Activity selection determines its ownership context and position in the same operation. Selecting an ordinary
+          on_complete row does not make handler.activity rule-owned or change its default ID. Only a selected rules activity
+          supplies a rule site. Join completion/deadline remain closed outcomes; handler.join continues to reject activity.
         materialization: Generated result events are contract-derived, visible in the resolved event catalog, schema registry,
           verifier output, and effective node produces. They are not authored in events.yaml. The verifier MUST reject any
           generated result-event name that collides with an authored event or another generated activity result event after
