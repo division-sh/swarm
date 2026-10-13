@@ -219,6 +219,10 @@ func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *t
 		t.Fatal("scatter diagnostic changed more than its single bounded failure-only call")
 	}
 	helper := selectedCausalObservationBody(t, diagnostic.Pin.File, "logScatterGatherContinuationOwners")
+	const helperPin = "de9d49b8a0a2035d917c42fc7291d6ce4920d65986a6b814aa8186641c01a826"
+	if !historicalCurrentSourcePinned(helper, helperPin) {
+		t.Fatal("reviewed read-only diagnostic helper changed")
+	}
 	if strings.Count(helper, ".ScanDeliveryContinuations(") != 1 ||
 		!strings.Contains(helper, "deliverylifecycle.ContinuationCursor{}, 64)") ||
 		strings.Count(helper, "h.workflow.Load(ctx, owner)") != 1 {
@@ -227,6 +231,12 @@ func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *t
 	for _, write := range []string{".Claim(", ".ClaimDelivery(", ".SettleSuccess(", ".SettleFailure(", ".Commit(", ".Publish(", ".ExecContext(", "go func", "for {"} {
 		if strings.Contains(helper, write) {
 			t.Fatalf("scatter diagnostic gained mutation/retry: %s", write)
+		}
+	}
+	for _, cut := range []string{"ScanDeliveryContinuations", "{}, 64)", "h.workflow.Load", "catalogRuntimeRunID"} {
+		mutant := strings.Replace(helper, cut, "unreviewedCut", 1)
+		if mutant == helper || historicalCurrentSourcePinned(mutant, helperPin) {
+			t.Fatalf("changed diagnostic owner/bound admitted: %s", cut)
 		}
 	}
 	// Static actors are exactly entityless; distinction is reply/projection, not arbitrary entity IDs.
