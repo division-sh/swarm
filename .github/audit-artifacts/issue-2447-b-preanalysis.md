@@ -1,5 +1,27 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Singleton Refusal-Phase Oracle Correction (S20)
+
+Reviewer-g6143845068 approves d8d8's code; hosted38384935732 instead exposes
+an old load-then-verify test expecting an invalid contained type to survive
+bundle admission. User authorizes a test-only correction. The unchanged
+TestRun_RejectsSingletonCoordinatorUnresolvedContainedType reproduces RED
+locally: loading coordinator/entities.yaml refuses the same MissingType before
+Run. Keep that invalid source and assert nil bundle, invalid_type_reference
+diagnostic, exact file/entity-field location and unknown-type cause at the
+canonical admission boundary. Positive singleton/template/contained-state
+controls must still load and run. No product or spec-policy change.
+
+| Row | Canonical owner and consumer | Required proof |
+|---|---|---|
+| S20 singleton invalid reference test expects late refusal | complete scoped bundle admission/validateScopedCatalogReference; singleton fixture load and existing verifier negatives | Preserve the original root name and invalid map source, assert exact typed early refusal; sweep file-loaded negatives separately from constructed/post-load-corrupted verifier inputs. Full bootverify and contracts, touched census/guards and clean preflight before one push. |
+
+Pre-edit record6144181362 refines the existing B proof/watchlist class, not a
+new semantic owner or issue. broad-04 is the only hosted test failure; timing
+and Required summary are consequences, not qualifying proof. Lifecycle/no
+extras, open parents and frozen C/D allocation remain unchanged. No diagnostic,
+assertion-preservation, baseline, selector or deadline weakening is authorized.
+
 ## Allocated Retirement Boundary Correction (S18)
 
 Hosted38379193464 at0ce86506c fails the unchanged cliapp accumulator verify
