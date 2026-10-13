@@ -20,17 +20,7 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 	}
 	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
 		base := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
-		if base == "" {
-			return "", fmt.Errorf("state_schema list type requires an element type")
-		}
-		if strings.ContainsAny(base, "[]<>") {
-			return "", fmt.Errorf("unsupported state_schema list element %q; use a scalar or declared named type", base)
-		}
-		normalizedBase, err := NormalizeNodeStateFieldType(base)
-		if err != nil {
-			return "", err
-		}
-		return "[" + normalizedBase + "]", nil
+		return normalizeNodeStateListElement(base)
 	}
 	if strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") {
 		base := strings.TrimSpace(raw[len("list<") : len(raw)-1])
@@ -78,6 +68,20 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 		return raw, nil
 	}
 	return "", fmt.Errorf("unsupported state_schema field type %q; use a canonical scalar, numeric(p,s), [NamedType], or [] form", raw)
+}
+
+func normalizeNodeStateListElement(base string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("state_schema list type requires an element type")
+	}
+	if strings.ContainsAny(base, "[]<>") {
+		return "", fmt.Errorf("unsupported state_schema list element %q; use a scalar or declared named type", base)
+	}
+	normalizedBase, err := NormalizeNodeStateFieldType(base)
+	if err != nil {
+		return "", err
+	}
+	return "[" + normalizedBase + "]", nil
 }
 
 func NodeStateNamedTypeName(raw string) (string, bool) {
