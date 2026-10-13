@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -80,32 +79,7 @@ type receiverPublicDeliveryEvidence struct {
 	owner           events.DeliveryTargetOwnership
 }
 
-func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, runID string) {
-	t.Helper()
-	want := map[string]receiverPublicDeliveryEvidence{}
-	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,status,CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE run_id=$1`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var id, raw string
-		var record receiverPublicDeliveryEvidence
-		if err := rows.Scan(&id, &record.eventID, &record.status, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &record.owner); err != nil {
-			t.Fatal(err)
-		}
-		want[id] = record
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	requireReceiverPublicReadbackEvidence(t, rt.Endpoint, runID, want)
-}
-
-func requireWorkspaceProofReceiverPublicReadback(t *testing.T, endpoint string, owner runtimebus.EventStore, runID string) {
+func requireReceiverPublicReadback(t *testing.T, endpoint string, owner receiverProofStateReader, runID string) {
 	t.Helper()
 	rows, err := storetest.ReadReceiverDeliveryStorage(context.Background(), owner, runID)
 	if err != nil {

@@ -30,9 +30,13 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var reader receiverProofStateReader
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+			})
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "receiver.sqlite"))
 			} else {
@@ -123,7 +127,7 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			if duplicate.EventID != published.EventID {
 				t.Fatal("restart duplicate reminted source")
 			}
-			requireReceiverPublicReadback(t, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend}, published.RunID)
+			requireReceiverPublicReadback(t, endpoint, reader, published.RunID)
 			if code := second.stop(); code != 0 {
 				t.Fatalf("second serve exit=%d\n%s", code, second.outputString())
 			}

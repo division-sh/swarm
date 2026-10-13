@@ -78,7 +78,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 				if attempt == 2 && producer != firstProducer {
 					t.Fatal("proof changed the producer entity identity between runs")
 				}
-				requireReceiverPublicReadback(t, rt, seed.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID)
 				if attempt == 1 {
 					firstProducer = producer
 					firstRun = seed.RunID
@@ -88,7 +88,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 					if got := repeatedStaticRunSnapshot(t, rt.DB, firstRun); !reflect.DeepEqual(got, firstSnapshot) {
 						t.Fatalf("run 2 mutated run 1: before=%#v after=%#v", firstSnapshot, got)
 					}
-					requireReceiverPublicReadback(t, rt, firstRun)
+					requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, firstRun)
 				}
 			}
 		})

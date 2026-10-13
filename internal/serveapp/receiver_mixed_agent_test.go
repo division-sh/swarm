@@ -51,7 +51,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 				opts.StoreMode, opts.StoreModeSet = backendselection.BackendPostgres.String(), true
 			}
-			endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+			endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
 			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
@@ -123,7 +123,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			if nodeOwners != 1 || agentOwners != 1 {
 				t.Fatalf("mixed event owners node/agent=%d/%d, want 1/1", nodeOwners, agentOwners)
 			}
-			requireReceiverPublicReadback(t, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, Runtime: runtime, BundleHash: bundle}, published.RunID)
+			requireReceiverPublicReadback(t, endpoint, reader, published.RunID)
 		})
 	}
 }

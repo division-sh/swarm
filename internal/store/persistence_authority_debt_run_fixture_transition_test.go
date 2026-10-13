@@ -203,8 +203,8 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtPublicA2EndpointCollectorTo {
-		t.Fatalf("reviewed role-preserving successor=%s actual=%s error=%v", debtPublicA2EndpointCollectorTo, digest, err)
+	if err != nil || digest != debtActiveCollectorTo {
+		t.Fatalf("reviewed role-preserving successor=%s actual=%s error=%v", debtActiveCollectorTo, digest, err)
 	}
 	prior := materializeDebtBase(t, root, "40c0b18bf315a949959417688adb32e358413b78")
 	if digest, err := debtCollectorDigest(prior); err != nil || digest != debtRunFixtureCollectorTo {

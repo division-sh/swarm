@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 715 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "c8de8b56edfaf09f04bf05d3736742dde66825589e5afc5a98af8a63d6dbf780" {
+	if err != nil || len(rows) != 721 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fd2d7074c99ba8e62c4162f53a5f82270665d0d8848b4ff129cb53d923aa7f74" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -57,6 +57,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			continue
 		}
 		if family145CheckPublicA2EndpointWholeRule(t, row.File, row.Function, row.After) {
+			continue
+		}
+		if family145CheckReceiverPublicReadbackWholeRule(t, row.File, row.Function, row.After) {
 			continue
 		}
 		if family145CLIForkRow(row.File, row.Function) {

@@ -40,7 +40,7 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 				t.Fatal("root export fabricated receiver state")
 			}
 			requireReceiverConstructedInstance(t, rt, published.RunID, published.RunID, ".", published.RunID, "", "pending", "", "ready", 2, nil)
-			requireReceiverPublicReadback(t, rt, published.RunID)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 		})
 	}
 }

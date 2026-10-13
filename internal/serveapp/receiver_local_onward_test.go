@@ -45,7 +45,7 @@ func TestReceiverCompositionEntitylessLocalOnwardBothStores(t *testing.T) {
 				t.Fatalf("local emission borrowed source state: %s", raw)
 			}
 			requireReceiverConstructedInstance(t, rt, published.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "done", published.RunID, "ready", 3, map[string]any{"result": "emitted"})
-			requireReceiverPublicReadback(t, rt, published.RunID)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 		})
 	}
 }

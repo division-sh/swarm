@@ -20,7 +20,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "c8de8b56edfaf09f04bf05d3736742dde66825589e5afc5a98af8a63d6dbf780"
+const targetDigest = "fd2d7074c99ba8e62c4162f53a5f82270665d0d8848b4ff129cb53d923aa7f74"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -268,6 +268,7 @@ var files = []string{
 func main() {
 	includeServedDebugTargets()
 	includePublicA2EndpointTargets()
+	includeReceiverPublicReadbackTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -328,6 +329,32 @@ func includePublicA2EndpointTargets() {
 		}
 		if targets, limited := gateRecoveryTargets[pin.File]; limited {
 			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeReceiverPublicReadbackTargets() {
+	raw, err := os.ReadFile("tools/fixture-codemod/pipeline-observations/family145-receiver-public-readback-preimages.json")
+	must(err)
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "a75db13f04646436e22522c83c9a04d929d12e384d9b48bfa585fe5bdf499709" {
+		panic("receiver public readback complete source inventory changed")
+	}
+	var rows []struct{ File, Function string }
+	must(json.Unmarshal(raw, &rows))
+	if len(rows) != 15 {
+		panic("receiver public readback declaration inventory changed")
+	}
+	for _, row := range rows {
+		found := false
+		for _, path := range files {
+			found = found || path == row.File
+		}
+		if !found {
+			files = append(files, row.File)
+			gateRecoveryTargets[row.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[row.File]; limited {
+			targets[row.Function] = true
 		}
 	}
 }
@@ -567,6 +594,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		case "QueryRowContext/activityForkFixtureDB", "ExecContext/activityForkFixtureDB", "query/activityForkFixtureDB", "seedSelectedContractActivityRequest", "selectedContractActivityJSON":
 			return "", true
 		}
+	}
+	if path == "internal/serveapp/receiver_public_readback_test.go" && key == "requireWorkspaceProofReceiverPublicReadback" {
+		return "", true
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
 }

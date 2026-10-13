@@ -62,7 +62,7 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 				if duplicate.EventID != started.EventID {
 					t.Fatal("exact duplicate created a second source event")
 				}
-				requireReceiverPublicReadback(t, rt, started.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 			})
 		}
 	}

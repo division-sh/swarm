@@ -152,8 +152,8 @@ func TestPersistenceAuthorityDebtPublicA2SourceAndManifestRejectUnknownBodies(t 
 func TestPersistenceAuthorityDebtPublicA2CollectorIsPinnedAndConservesDebt(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtPublicA2EndpointCollectorTo {
-		t.Fatalf("current A2 collector=%s pinned=%s err=%v", digest, debtPublicA2EndpointCollectorTo, err)
+	if err != nil || digest != debtActiveCollectorTo {
+		t.Fatalf("current collector=%s pinned=%s err=%v", digest, debtActiveCollectorTo, err)
 	}
 	ancestor, _ := debtQuiescenceUncertaintyTransition()
 	old, current := debtPublicA2EndpointTransition()

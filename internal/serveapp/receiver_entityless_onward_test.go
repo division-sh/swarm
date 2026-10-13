@@ -76,7 +76,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if fields["result"] != "emitted" {
 					t.Fatalf("grandchild did not consume the emitted payload: %#v", fields)
 				}
-				requireReceiverPublicReadback(t, rt, started.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 				var readback operatorread.OperatorEventListResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": started.RunID}, "limit": 100}, &readback)
 				var onward int

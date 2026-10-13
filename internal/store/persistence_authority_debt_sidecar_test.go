@@ -67,6 +67,22 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
+		if collector == debtReceiverReadbackCollectorTo {
+			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+				return baseline, err
+			}
+			if _, priorErr := debtParseCollectorMetadata(metadataBytes, data, debtPublicA2EndpointCollectorTo); priorErr != nil {
+				return baseline, priorErr
+			}
+			if baseline.Collector != debtCacheCollectorFrom {
+				return baseline, fmt.Errorf("historical TSV collector header changed")
+			}
+			if err := debtServedDebugSourcePins(root); err != nil {
+				return baseline, err
+			}
+			baseline.Collector = collector
+			return baseline, nil
+		}
 		if collector == debtPublicA2EndpointCollectorTo {
 			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
 				return baseline, err

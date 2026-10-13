@@ -183,8 +183,8 @@ func TestPersistenceAuthorityDebtStageCompletionSourceAndFactoryPins(t *testing.
 		t.Fatal(err)
 	}
 	collector, err := debtCollectorDigest(root)
-	if err != nil || collector != debtPublicA2EndpointCollectorTo {
-		t.Fatalf("source-pinned collector=%s expected=%s error=%v", collector, debtPublicA2EndpointCollectorTo, err)
+	if err != nil || collector != debtActiveCollectorTo {
+		t.Fatalf("source-pinned collector=%s expected=%s error=%v", collector, debtActiveCollectorTo, err)
 	}
 	prior := t.TempDir()
 	for _, path := range []string{

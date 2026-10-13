@@ -770,7 +770,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		if body.After == "" || loaded[body.File][body.Function] != body.After {
+		previous, err := debtReceiverReadbackSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		if body.After == "" || previous != body.After {
 			return fmt.Errorf("reviewed served-debug reader provenance/body changed: %s/%s", body.File, body.Function)
 		}
 		for _, key := range keys {
@@ -912,6 +916,47 @@ func debtPublicA2EndpointCollectorTransition(base, current string, trusted, head
 	}
 	if head.Sites[ancestor.identity()] != ancestor && head.Sites[old.identity()] != old && head.Sites[successor.identity()] != successor {
 		return false
+	}
+	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
+}
+
+// Ruling6140617142 permits one full-body successor, not another identity pair.
+func debtReceiverReadbackSourcePrevious(root, file, function, current string) (string, error) {
+	if file != "internal/serveapp/receiver_failure_settlement_test.go" || function != "TestReceiverCompositionFailureSettlementBothStores" {
+		return current, nil
+	}
+	const beforeHash = "2f7cfdc7e2c181c70f1eea10c631613f3dcb6b63d9d3ba3b8b9e79e58461d27c"
+	if debtBaselineChecksum([]byte(current)) == beforeHash {
+		return current, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/family145-receiver-public-readback-preimages.json"))
+	if err != nil || debtBaselineChecksum(raw) != "a75db13f04646436e22522c83c9a04d929d12e384d9b48bfa585fe5bdf499709" {
+		return "", fmt.Errorf("receiver readback complete source manifest changed: %v", err)
+	}
+	var pins []struct{ File, Function, Before, After, SHA256 string }
+	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 15 {
+		return "", fmt.Errorf("receiver readback exact inventory changed: %v", err)
+	}
+	for _, pin := range pins {
+		if pin.File == file && pin.Function == function && pin.After == current &&
+			pin.SHA256 == beforeHash && debtBaselineChecksum([]byte(pin.Before)) == beforeHash &&
+			debtBaselineChecksum([]byte(current)) == "aa4f1230b22b93fa4e5b8674607a35cab21f709d33d329076371d75371c5a775" {
+			return pin.Before, nil
+		}
+	}
+	return "", fmt.Errorf("receiver readback source escaped the one reviewed complete successor")
+}
+
+func debtReceiverReadbackCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtReceiverReadbackCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtPublicA2EndpointCollectorTo {
+		intermediate := trusted
+		intermediate.Collector = debtPublicA2EndpointCollectorTo
+		if debtValidateCollectorIdentity(base, intermediate.Collector, trusted, intermediate, "") != nil {
+			return false
+		}
 	}
 	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
 }
@@ -1432,6 +1477,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return nil
 	}
 	if debtPublicA2EndpointCollectorTransition(base, current, trusted, head) {
+		return nil
+	}
+	if debtReceiverReadbackCollectorTransition(base, current, trusted, head) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

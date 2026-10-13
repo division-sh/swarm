@@ -96,8 +96,8 @@ func TestPersistenceAuthorityDebtWriterStageModelMatchesReviewedManifestAndBodie
 		}
 	}
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtPublicA2EndpointCollectorTo {
-		t.Fatalf("reviewed exact A2 successor=%s pinned=%s error=%v", digest, debtPublicA2EndpointCollectorTo, err)
+	if err != nil || digest != debtActiveCollectorTo {
+		t.Fatalf("reviewed exact current successor=%s pinned=%s error=%v", digest, debtActiveCollectorTo, err)
 	}
 }
 

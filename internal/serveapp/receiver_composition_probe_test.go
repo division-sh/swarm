@@ -62,7 +62,7 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 				}
 				rows.Close()
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 1, map[string]any{})
-				requireReceiverPublicReadback(t, rt, started.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 			})
 		}
 	}

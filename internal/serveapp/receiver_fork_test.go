@@ -288,8 +288,8 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, forkRunID).Scan(&companions); err != nil || companions != wantCompanions {
 					t.Fatalf("fork field companion census: got=%d want=%d err=%v", companions, wantCompanions, err)
 				}
-				requireReceiverPublicReadback(t, rt, forkRunID)
-				requireReceiverPublicReadback(t, rt, request.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, forkRunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, request.RunID)
 			})
 		}
 	}

@@ -662,7 +662,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status<>'delivered'`, seed.RunID).Scan(&incomplete); err != nil || incomplete != 0 {
 				t.Fatalf("dynamic source did not settle: %d %v", incomplete, err)
 			}
-			requireReceiverPublicReadback(t, rt, seed.RunID)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID)
 			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
