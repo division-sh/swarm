@@ -75,7 +75,6 @@ func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T)
 		},
 	}
 	rule := HandlerRuleEntry{
-		ID:        "render_bundle",
 		PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindModule, Module: spec},
 		Compute: &ComputeSpec{
 			Operation: ComputeOpModule,

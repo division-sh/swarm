@@ -72,7 +72,6 @@ func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 		},
 		"request": {
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:       "fallback",
 				Activity: runtimecontracts.ActivitySpec{ID: "activity_node_request_fallback_send", Tool: "send"},
 			}},
 		},

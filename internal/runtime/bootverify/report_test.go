@@ -721,7 +721,6 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing.T) {
-
 	t.Parallel()
 
 	cases := []struct {
@@ -1575,7 +1574,6 @@ func TestRun_ValidatesHandlerSetsGateWhenRulesExist(t *testing.T) {
 			}, runtimecontracts.SystemNodeEventHandler{
 				SetsGate: &runtimecontracts.GateSpec{Name: tc.setsGate, Value: true},
 				Rules: []runtimecontracts.HandlerRuleEntry{{
-					ID:        "matched",
 					Condition: "else",
 				}},
 			})
@@ -1614,7 +1612,6 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 			name: "rule",
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Rules: []runtimecontracts.HandlerRuleEntry{{
-					ID:        "missing",
 					Condition: `payload.missing == "x"`,
 				}},
 			},
@@ -3268,7 +3265,6 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 		From:  "entity",
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		ID:        "full",
 		Condition: "else",
 		Emit: runtimecontracts.EmitSpec{
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3411,7 +3407,6 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 	handler.Emit = runtimecontracts.EmitSpec{}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{
 		{
-			ID:        "complete",
 			Condition: "payload.mode == 'full'",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "market_research.scan_assigned",
@@ -3421,7 +3416,6 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 			},
 		},
 		{
-			ID:        "partial",
 			Condition: "payload.mode == 'partial'",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "market_research.scan_assigned",
@@ -3463,7 +3457,6 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{
 		{
-			ID:        "full",
 			Condition: "payload.mode == 'full'",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3472,7 +3465,6 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 			},
 		},
 		{
-			ID:        "partial",
 			Condition: "else",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3508,7 +3500,6 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{
 		{
-			ID:        "full",
 			Condition: "payload.mode == 'full'",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3517,7 +3508,6 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 			},
 		},
 		{
-			ID:        "partial",
 			Condition: "else",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3560,7 +3550,6 @@ func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
 		Emit: runtimecontracts.EmitSpec{Event: "market_research.audit_logged"},
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		ID:        "complete",
 		Condition: "else",
 		Emit: runtimecontracts.EmitSpec{
 			Event: "market_research.scan_assigned",
@@ -3590,7 +3579,6 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 	handler.Emit = runtimecontracts.EmitSpec{}
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{
 		{
-			ID: "complete",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "market_research.scan_assigned",
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -3599,7 +3587,6 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 			},
 		},
 		{
-			ID: "partial",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "market_research.scan_assigned",
 				Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4777,7 +4764,6 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 		Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
 	}}
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		ID:        "retry",
 		Condition: "entity.revision_count < 3",
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -4893,7 +4879,6 @@ func TestRun_RejectsLegacyEventReceiverProjectionReferences(t *testing.T) {
 			handler.CreateEntity = false
 			if tt.condition != "" {
 				handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-					ID:        "legacy",
 					Condition: tt.condition,
 				}}
 			}
@@ -4919,7 +4904,6 @@ func TestRun_RejectsRuleConditionReferenceToUndeclaredEntityField(t *testing.T) 
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		ID:        "missing",
 		Condition: "entity.missing_rule_score > 0",
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)

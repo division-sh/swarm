@@ -28,7 +28,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 				case "guard":
 					handler.Guard = &rc.GuardSpec{Check: value + ` == "fallback"`}
 				case "rule":
-					handler.Rules = []rc.HandlerRuleEntry{{ID: "accept", Condition: value + ` == "fallback"`}}
+					handler.Rules = []rc.HandlerRuleEntry{{Condition: value + ` == "fallback"`}}
 				case "write":
 					handler.DataAccumulation = rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(value)}}}
 				case "emit":

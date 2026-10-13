@@ -173,13 +173,17 @@ rules:
 			t.Fatalf("source_event confused with retired config_from: %#v, %v", handler.DataAccumulation, err)
 		}
 	})
-	t.Run("retired_names_are_not_reserved_rule_labels", func(t *testing.T) {
+	t.Run("retired_names_cannot_become_rule_labels", func(t *testing.T) {
 		for _, label := range []string{"action", "template", "config_from", "evidence_target", "instance_id_from"} {
 			var handler SystemNodeEventHandler
 			err := decodeNodeTestYAML([]byte("rules: {"+label+": {else: true, emit: result}}\n"), &handler)
-			if err != nil || len(handler.Rules) != 1 || handler.Rules[0].ID != label || handler.Rules[0].Emit.EventType() != "result" {
-				t.Fatalf("display label %q became reserved: %#v, %v", label, handler.Rules, err)
+			if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+				t.Fatalf("keyed label %q must fail as an unordered collection: %v", label, err)
 			}
+		}
+		var handler SystemNodeEventHandler
+		if err := decodeNodeTestYAML([]byte("rules: [{else: true, emit: result}]\n"), &handler); err != nil || len(handler.Rules) != 1 || handler.Rules[0].Emit.EventType() != "result" {
+			t.Fatalf("canonical fallback output changed: %#v, %v", handler.Rules, err)
 		}
 	})
 }
