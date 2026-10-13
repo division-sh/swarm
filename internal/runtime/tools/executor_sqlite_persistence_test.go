@@ -205,7 +205,7 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: list<text>\n")
+	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: [text]\n")
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-structured",

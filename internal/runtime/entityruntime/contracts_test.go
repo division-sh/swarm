@@ -37,7 +37,7 @@ func TestNormalizeFieldValue_AcceptsBuiltInNumberAndJSONTypes(t *testing.T) {
 
 func TestNamedJSONFieldPreservesScalarAcrossEntityNormalization(t *testing.T) {
 	contract := Contract{
-		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{"rows": {Type: "list<Row>"}}},
+		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{"rows": {Type: "[Row]"}}},
 		Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"Row": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "json"}}},
 		}},

@@ -70,8 +70,8 @@ func TestEntityResetProjectionUsesWholeNodeOwnership(t *testing.T) {
   execution_type: system_node
   state_schema:
     fields:
-      first_items: '[Item]'
-      second_items: '[Item]'
+      first_items: [Item]
+      second_items: [Item]
   event_handlers:
     work.first:
       accumulate: {into: first_items, key: payload.id}
@@ -81,7 +81,7 @@ peer:
   execution_type: system_node
   state_schema:
     fields:
-      peer_items: '[Item]'
+      peer_items: [Item]
   event_handlers:
     work.peer:
       accumulate: {into: peer_items, key: payload.id}

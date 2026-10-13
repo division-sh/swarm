@@ -1,4 +1,4 @@
 agent.requested:
-  request: "[text]?"
+  request: {type: "[text]?"}
 agent.completed:
   flow_result: text?

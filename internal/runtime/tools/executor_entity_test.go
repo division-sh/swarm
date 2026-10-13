@@ -1913,12 +1913,12 @@ types:
   BrandCandidate:
     name: text
   MvpSpec:
-    core_features: "[Feature]"
-    out_of_scope: "[text]"
+    core_features: [Feature]
+    out_of_scope: [text]
   Brand:
-    alternatives: "[BrandCandidate]"
+    alternatives: [BrandCandidate]
   ValidationKit:
-    risk_flags: "[text]"
+    risk_flags: [text]
 `, `
 validation_case:
   mvp_spec:
@@ -2665,7 +2665,7 @@ types:
     headline: text
     approved: boolean
   ValidationKit:
-    checklist: list<text>
+    checklist: [text]
 `, `
 accounts:
   status: text
@@ -2711,7 +2711,7 @@ types:
     headline: text
     approved: boolean
   ValidationKit:
-    checklist: list<text>
+    checklist: [text]
 `, `
 validation:
   business_brief: Brief
@@ -2745,7 +2745,7 @@ types:
     headline: text
     approved: boolean
   ValidationKit:
-    checklist: list<text>
+    checklist: [text]
 `, `
 accounts:
   status: text
