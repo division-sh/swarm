@@ -2995,6 +2995,11 @@ type_system:
       their canonical runtime/default behavior. Citation scalar/list elements
       and original loop revision carriage consume the flow-scoped plain-text
       domain, not raw type spelling; enum/UUID/timestamp are not plain text.
+      Loop revision checks consume the effective semantic Source's admitted
+      event schema, including imported overlays and ExactSchema fields without
+      an authored type reference; underlying bundle residency is not required.
+      Required string fields retain their enum/format domain evidence rather
+      than deriving plain text from structural string lowering alone.
       Requiredness, citation criteria/classes and exact loop.revision_id mapping
       remain separately required. An expression context may omit its optional
       join result-schema evidence and retain dynamic results; this is absence

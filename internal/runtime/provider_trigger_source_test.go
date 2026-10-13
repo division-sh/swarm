@@ -130,6 +130,34 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	}
 }
 
+func TestProviderTriggerLoopRevisionUsesEffectiveImportedSchema(t *testing.T) {
+	source, catalog := schemaOnlyTelegramDeclarationSource(t)
+	imported, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const event = "inbound.telegram.text_message"
+	bundle, ok := semanticview.Bundle(imported)
+	if !ok {
+		t.Fatal("imported source lost its bundle")
+	}
+	if _, found := runtimecontracts.ResolveEventFieldType(bundle, "coordinator", event, "text"); found {
+		t.Fatal("provider import unexpectedly resides in the underlying bundle")
+	}
+	resolution := semanticview.ResolveEventSchema(imported, "coordinator", event)
+	if !resolution.HasCompiled || resolution.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("effective schema is not an admitted provider import: %#v", resolution)
+	}
+	if !runtimecontracts.RequiresLoopRevision(resolution.Schema, "text") {
+		t.Fatal("required imported text field was refused as loop revision evidence")
+	}
+	for _, field := range []string{"provider_message_reference", "reply_to_message_reference", "command_invocation", "missing"} {
+		if runtimecontracts.RequiresLoopRevision(resolution.Schema, field) {
+			t.Fatalf("non-text, optional or absent imported field %q admitted", field)
+		}
+	}
+}
+
 func TestProviderSchemaOnlyImportRetainsBindingWithoutInputPin(t *testing.T) {
 	source, catalog := schemaOnlyTelegramDeclarationSource(t)
 	bundle, ok := semanticview.Bundle(source)
