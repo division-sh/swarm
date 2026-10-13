@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -83,4 +84,64 @@ func issue2655PreparedProjection(t *testing.T) *PreparedSelectedFork {
 		}
 	})
 	return prepared
+}
+
+func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
+	plan := runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{
+		Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), EventName: "work.ready", Revision: 3,
+		Timestamp: time.Now().UTC(), ProducedBy: "producer", ProducedByType: "node",
+	}}
+	base := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request",
+		SourceRunID: plan.SourceRunID, TargetBundleHash: runForkTestBundleHash, ContractSelection: testContractSelection(),
+	}
+	for _, supplied := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unresolved", true: "equal"}[supplied], func(t *testing.T) {
+			operation := base
+			if supplied {
+				point := plan.ForkPoint
+				operation.ResolvedPoint = &point
+			}
+			_, beforeHash, err := operation.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, err := bindPreparedSelectedForkOperation(&operation, plan)
+			if err != nil || bound == &operation || bound.ResolvedPoint == nil || *bound.ResolvedPoint != plan.ForkPoint {
+				t.Fatalf("bind admitted point: bound=%+v err=%v", bound, err)
+			}
+			_, afterHash, err := bound.Canonical()
+			if err != nil || beforeHash != afterHash || (!supplied && operation.ResolvedPoint != nil) || (supplied && operation.ResolvedPoint == bound.ResolvedPoint) {
+				t.Fatalf("binding changed caller/hash or retained its pointer: before=%s after=%s err=%v", beforeHash, afterHash, err)
+			}
+		})
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*runfork.ForkOperationRequest)
+	}{
+		{"source", func(o *runfork.ForkOperationRequest) { o.SourceRunID = uuid.NewString() }},
+		{"selector", func(o *runfork.ForkOperationRequest) { o.ForkEventID = uuid.NewString(); o.ResolvedPoint = nil }},
+		{"revision", func(o *runfork.ForkOperationRequest) { o.ResolvedPoint.Revision++ }},
+		{"timestamp", func(o *runfork.ForkOperationRequest) {
+			o.ResolvedPoint.Timestamp = o.ResolvedPoint.Timestamp.Add(time.Nanosecond)
+		}},
+		{"input", func(o *runfork.ForkOperationRequest) { o.ResolvedPoint.Input = o.ResolvedPoint.EventID }},
+		{"event_name", func(o *runfork.ForkOperationRequest) { o.ResolvedPoint.EventName = "work.changed" }},
+		{"producer", func(o *runfork.ForkOperationRequest) { o.ResolvedPoint.ProducedBy = "another producer" }},
+		{"cause", func(o *runfork.ForkOperationRequest) { o.ResolvedPoint.SourceEventID = uuid.NewString() }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			operation := base
+			point := plan.ForkPoint
+			operation.ResolvedPoint = &point
+			test.change(&operation)
+			if _, err := bindPreparedSelectedForkOperation(&operation, plan); err == nil {
+				t.Fatal("conflicting operation replaced the admitted point")
+			}
+		})
+	}
+	if operation, err := bindPreparedSelectedForkOperation(nil, plan); err != nil || operation != nil {
+		t.Fatalf("event without operation minted an invocation: operation=%+v err=%v", operation, err)
+	}
 }
