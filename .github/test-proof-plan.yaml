@@ -688,6 +688,7 @@ units:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
     run: '^(Test($|[^CS].*|Stage.*|StaticDataInvocationGoldenConsumesAdmittedIdentity|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
     required_children:
+      TestTerminalMiddleMemberFailureRetainsSuffixBothStores: [sqlite, postgres]
       TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores: [sqlite/collector, sqlite/renamed-observer, postgres/collector, postgres/renamed-observer]
       TestReceiverSuppliedStateMutationReuseRestartAndSelectedHistoryBothStores: [sqlite, postgres]
     count_mode: count-1
