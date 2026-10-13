@@ -7,6 +7,11 @@ The earlier f2d intake/receipts remain historical, not relabelled integrated
 proof. No production, source-test, spec, plan, baseline or workflow edits.
 IMPLEMENTER_GUIDELINES and SEMANTIC_DRIFT re-read. **Coding gate NOT satisfied.**
 
+Latest disposition: independent gate6135075259 is **insufficient; widen class**.
+The focused A/B/C split amendment at the end supersedes only the affected
+consumer/proof/scope rows below. Retained censuses/receipts are unchanged;
+no full re-census, new test, production edit or qualification run.
+
 ## Class, Context And Stop
 
 Category: high-risk maintenance, with independently reproduced correctness
@@ -115,9 +120,9 @@ No row is labelled merely "same seam". No consumer has been moved in this work.
 | contracts/collection_projection.go | A: collection source, copied item; D08 | C03 A2CollectionProjectionAdmissionAndOrdering/CatalogAndDigestWitness |
 | contracts/compiled_connection_input.go | C: producer/receiver field evidence; D09 | C04 instance-source and root-reply controls |
 | contracts/compiled_event_schema.go | C + E: exact JSON shape/declaration augmentation/required-field addition, shallow D01/D02 | C07 CompiledEventSchemasOwnOptionalityAndCanonicalSchema/PreserveFilesystemFlowOwner |
-| contracts/durable_data_catalog.go | A: exact compiled file-field import shape, not storage identity | C08 DurableDataImportShapeUsesCompiledStructuralFields |
-| contracts/schema_refinement_validation.go | A: resolved refinement targets; richer constraints differ from shape | C09 ValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefinements |
-| contracts/schema_registry.go | A: shape -> acceptance projection adds enum/refinement meaning | C09 EventSchemaRegistryFromBundle_PreservesWave1TypeMeaning |
+| contracts/durable_data_catalog.go | E/S11: compiledFileTextField additionally classifies raw TypeRef after the shape check; text-only file policy is distinct but its shared reference subdecision belongs in B | C08/S11 DurableDataImportShapeUsesCompiledStructuralFields plus planned TestCatalogAdmissionDurableTextPolicy: text alias positive, UUID/timestamp/enum/nontext refusal, unknown/list/map/cycle refusal |
+| contracts/schema_refinement_validation.go | E/S10: schemaRefinementKind/ComparableType independently classify raw references; refinement eligibility and same-declared-domain equality remain distinct laws, not shape equality | C09/S10 ValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefinements plus planned TestCatalogAdmissionRefinementPolicy: aliases, nested list/map, unknown/cycles, distinct enum/named identities, integer vs numeric and uuid/timestamp distinctions |
+| contracts/schema_registry.go | E/S09: eventSchemaForResolvedType independently parses list/map, enum/named/alias/primitive references; only the named branch resolves canonically. Common subdecision belongs in B; richer acceptance constraints stay separate | C09/S09 EventSchemaRegistryFromBundle_PreservesWave1TypeMeaning plus planned TestCatalogAdmissionSchemaProjection: alias/list/map accepted bytes, enum/refinement/format/requiredness retained, unknown/cycle refusal with no empty placeholder |
 | contracts/standalone_projection_type.go | A: type resolution then concrete value validation | C03 planned TestCatalogStructuralConsumerCharacterization/C03/standalone, type/value positive and malformed/unknown negatives |
 | contracts/workflow_contract_emit_lowering.go | A: exact admitted source/target fields, not event routing | C10 HandleEmitTool_FailsClosedOnNamedTypeViolation |
 | contracts/workflow_contract_wave1_accessors.go | C + E: primary composition, shallow declaration clones, duplicated singleton/template interpretation | D03-D07, S01-S08 |
@@ -176,8 +181,11 @@ The typed evidence enumerates every constructor/initializer/assignment, not
 only resolver calls. Outside the owner, admitted shape is composed by primary
 entity, newCompiledEventSchema/withRequiredField, query item projection, join
 wrapper projection, activity result lowering and CEL language interop. Other
-constructors are zero/error returns or call the resolver; none supplies a second
-named-catalog parser. Clone consumers are readbacks/snapshots, not business writes.
+constructors are zero/error returns or call the resolver. Gate6135075259 corrects
+the reader classification: registry/refinement/durable-text helpers retain live
+raw-reference subdecisions even where one branch consumes resolved evidence;
+S09-S11 below include them in B. Clone consumers are readbacks/snapshots,
+not business writes.
 No production post-admission bound mutation was found by this sweep; the
 counterexample shows a reachable mutable API and broken immutable readback,
 not an asserted payload validation bypass or persisted-store corruption.
@@ -232,8 +240,11 @@ the intake remains complete, with these proof IDs bound to it:
 | S04 | nested map/list + enum/UUID/timestamp | both interpreters agree on actual loaded supported cases; retain field path/kind and role-specific demands |
 | S05 | unknown reference and empty alias | same canonical refusal, raw/catalog/load preconditions separately named |
 | S06 | alias chain/cycle | loader rejects non-built-in alias bases; defensive resolver cycle controls cannot earn authored acceptance credit |
-| S07 | named recursive declaration | loader/resolver/coordinator currently accept [Cycle] with child:Cycle, while spec says unsupported; checker probe finds only writer coverage, NOT a recursion rejection. Explicit off-spec escalation, not an approved stopping rule |
-| S08 | list spellings and map-key subset | loaded list<Item>/Item[]/[]Item agree; spec explicitly names list<...>/[...], suffix/prefix and coordinator integer-key status need governing disposition. No compatibility claim by observation |
+| S07 | named recursive declaration | B must refuse at authored/catalog admission and the canonical resolution boundary under the existing spec retirement: self/mutual cycles through direct fields/list/map and exact scoped catalogs; real load/public verify and retained both-store reconstruction negatives. Repeated nonrecursive named types remain valid. No placeholder/empty object or recursive stopping acceptance; recursion needs no LEAD exception |
+| S08 | list spellings and map-key subset | B pending exactly two LEAD decisions below. Once ruled, prove admitted spellings/key domains at load, canonical resolution, singleton/template, registry/refinement and durable-data readers; disallowed forms fail closed. Existing acceptance is not a compatibility contract |
+| S09 | registry raw-reference shape projection | B common reference subdecision -> canonical owner; planned TestCatalogAdmissionSchemaProjection through actual authored/imported compiled entrances. Alias/list/map positives retain exact acceptance constraints/bytes/requiredness; unknown/recursive inputs refuse before projection; runtimefailures envelope is a separate intrinsic schema and keeps its explicit owner |
+| S10 | refinement kind and same-declared-domain classification | B common reference resolution -> canonical owner; planned TestCatalogAdmissionRefinementPolicy through real load-time refinement/equal_to admission. Pattern/length/range eligibility and equality retain enum/named/uuid/timestamp/integer/numeric distinctions; structural shape equality is insufficient |
+| S11 | durable-data file text-only policy | B common reference resolution -> canonical owner, with file-text eligibility kept explicit; planned TestCatalogAdmissionDurableTextPolicy at actual BuildDurableDataImportShapeCatalog/file entrance. Text aliases agree; UUID/timestamp/enum and nontext do not silently become file-content text; unresolved/recursive types cannot acquire file authority |
 | Q01 | public structural readers | compiled verify + describe on authored/nested/refined/optional fixture; exact output/error/provenance; no operational readiness credit |
 | Q02 | public compiled runtime | NamedRecordEmitSurvivesServedRestartBothStores, exact named values then served restart and completed-conversation fork/restart |
 | Q03 | public retained source readback | PayloadlessEventPublicPersistenceJourneyBothStores, compiled verify/describe/serve, persist exact bytes/hash, relocate same tree and restart |
@@ -410,3 +421,67 @@ unsupported-recursion/spelling/map-key ruling or tracked split; complete new
 case/consumer characterization before extraction; final overlap check on the
 actual coding base; independent coding outcome explicitly on issue2447.
 Current result: **READ-ONLY AUDIT / REPAIR-FIRST RE-GATE REQUEST, NOT CODING**.
+
+## Focused Gate Amendment: Explicit A/B/C Split
+
+Binding independent gate:
+https://github.com/division-sh/swarm/issues/2447#issuecomment-6135075259 .
+Keep both retained censuses and all original receipts; this amendment changes
+only the three misclassified consumer rows, S07-S08 and three additional
+same-reference proof rows S09-S11. Original60 rows remain; current plan63 rows.
+No new proof is claimed. The earlier optional combined-repair/split disposition
+is superseded by **three explicitly tracked work units under open #2447**:
+
+| Work unit | Complete chosen failure class and owners | Scope/closure obligation | Order/status |
+|---|---|---|---|
+| A: D detachment repair | retained_catalog_type_evidence_not_detached_at_copy_boundaries; existing SchemaRefinements.Clone + recursive carrier Clone + declaration/compiled copy/capture owners | ALL D01-D10, including root/flow/resolved/primary getters, original-input capture, required-field successors, collection and connection/join/fan-out evidence; switch same-carrier correct local four-bound copies to the existing clone owner where appropriate. Every accessor gets real retained mutation/control proof, all four bounds, stable schema/provenance/error facts and both-store retained reconstruction. Not an extraction or payload-admission change | FIRST proposed; coding still frozen until compact A gate |
+| B: S admission repair | catalog_type_reference_admission_drift; canonical catalog reference resolver and authored admission, consumed by singleton/template + registry/refinement/durable-text subdecisions | ALL S01-S11. Scalar/enum/identity/cardinality policy remains explicit. Recursion is fail-closed under existing spec, not a decision to preserve stopping placeholders. Shared resolution moves to the canonical owner; richer acceptance/equal_to and file-text policy are not replaced by shape equality. Both-store/public and real loaded/refusal/provenance proofs required | SECOND, after A; spelling/key decisions and compact B gate required |
+| C: original 14-function extraction | complete_catalog_structural_type_family_complexity; full catalog_type_reference.go maintenance family | ALL F01-F14/C consumer/Q surface/X mutation obligations, on merged corrected A+B baseline. Characterize first, preserve exact accepted/rejected outputs/errors/catalog precedence, complete-family under25/ratchet/size targets. No correctness fix hidden in maintenance | LAST; frozen until A+B land and corrected characterization/re-gate |
+
+A and B differ in invariant and owner: A preserves value isolation across
+existing admitted copies without deciding supported types; B decides admission
+and shared reference interpretation without relying on mutable-view repair.
+C is behavior-preserving extraction only after both laws are corrected. This
+is not convenience staging or partial closure inside either chosen repair class.
+Each A/B PR commits to eliminating its whole named class; no D or S row is
+left watchlist-only. No new issue is needed for this explicitly assignable split
+under2447 unless the compact reviewer gate requires child trackers.
+
+**Recommend A first.** Its immutable/detached contract is already binding and
+the 40-cell counterexamples identify the correct existing copy owner. It can
+proceed independently of the two open grammar/key decisions; B follows on that
+stable baseline, and C never blesses either defect as correct. Expected source
+overlap A/B is the carrier/accessor/schema projection cluster; sequential PRs
+and corrected-base characterization avoid parallel ownership/conflict churn.
+
+### LEAD Contract Questions (B Only)
+
+1. Should authored `T[]` and `[]T` fail on presence, leaving the explicitly
+   specified `[T]` and `list<T>` forms (recommended), or should either spelling
+   be explicitly supported by the authoritative grammar? No compatibility path.
+2. Should integer map keys fail in every authored map, retaining text/string
+   aliases, UUID and enum key domains (recommended), or be supported in named
+   contexts? If supported, specify those contexts and canonical key encoding;
+   existing acceptance must not choose policy by inference.
+
+No recursion question: the explicit Wave1 retirement governs B/S07. No type-model
+redesign question: long-run mutable-carrier feedback remains2349, not an
+implementation prerequisite or substitute correctness tracker.
+
+Qualification proposal to compact gate: A/B hosted lifecycle/no extras only
+after their actual semantic diff/proof roots are mapped through the existing
+planner; Local focused/race, affected guards/debt/complexity and named real
+loaded/public/both-store retained controls, no duplicate Local tier. C retains
+its provisional lifecycle/no extras maintenance ceiling, re-confirmed after
+A+B. No automatic full, timeout/baseline increase, new runner or vendoring.
+
+Tracker-state amendment: current2447 body must record A -> B -> C, insufficient
+gate and LEAD questions; existing semantic-correctness and maintenance/proof
+watchlist nodes must record the split before the compact re-gate.2407/2349 stay
+OPEN as proof/model parents, not concrete D/S owners;2250 remains adjacent.
+Old audit claims of already-canonical registry/refinement/durable-text readers
+are explicitly superseded by E/S09-S11, not silently retained.
+
+No production/test edits, no full re-census or expensive qualification. Request
+the compact A-first re-gate; B stays blocked on exactly the two routed contract
+decisions and its explicit admission gate, C stays frozen on corrected baseline.
