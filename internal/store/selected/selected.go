@@ -231,6 +231,10 @@ func (o RunFork) CommitSelectedDecisionCardMutation(ctx context.Context, runID s
 	return o.executionOwner.CommitSelectedDecisionCardMutation(ctx, runID, request, mutation)
 }
 
+func (o RunFork) AcquireSelectedDecisionCardControl(ctx context.Context, runID string, operation runfork.SelectedControl) (*runtimerunforkexecution.SelectedDecisionCardControl, bool, error) {
+	return o.executionOwner.AcquireSelectedDecisionCardControl(ctx, runID, operation)
+}
+
 func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.RetireSelectedContexts(ctx)
 }

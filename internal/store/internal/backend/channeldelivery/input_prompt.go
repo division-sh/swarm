@@ -196,8 +196,12 @@ func inputPromptCurrent(ctx context.Context, q intentQueryer, frozen render.Froz
 		!expiresAt.Equal(frozen.Prompt.ExpiresAt) || !expiresAt.After(time.Now()) {
 		return false, nil
 	}
-	if err := decisionpersistence.RequireCardRunControl(ctx, q, runID, runfork.ControlMailboxDecide, postgres, lock); err != nil {
-		return false, err
+	// Presentation/discovery can name an exact current draft without acquiring
+	// execution. Its mutation consumers reprove the selected grant in their TX.
+	if lock {
+		if err := decisionpersistence.RequireCardRunControl(ctx, q, runID, runfork.ControlMailboxDecide, postgres, true); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
 }

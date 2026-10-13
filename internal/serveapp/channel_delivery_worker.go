@@ -277,7 +277,14 @@ func (d *serveChannelDeliveryDispatcher) processCurrentCardAction(ctx context.Co
 }
 
 func (d *serveChannelDeliveryDispatcher) processInputSkip(ctx context.Context, intent runtimechanneldelivery.PendingAction,
-	expected runtimechanneldelivery.ResolvedAction) error {
+	expected runtimechanneldelivery.ResolvedAction) (finalErr error) {
+	ctx, use, err := d.acquireChannelCardInput(ctx, expected.Action.CardID)
+	if err != nil {
+		return err
+	}
+	if use != nil {
+		defer func() { finalErr = errors.Join(finalErr, use.Close()) }()
+	}
 	resolved, progress, draft, err := d.store.PreviewChannelInputSkip(ctx, intent.Fact, intent.ReceivedAt)
 	if err != nil {
 		return err
@@ -293,7 +300,14 @@ func (d *serveChannelDeliveryDispatcher) processInputSkip(ctx context.Context, i
 }
 
 func (d *serveChannelDeliveryDispatcher) processDraftChoice(ctx context.Context, intent runtimechanneldelivery.PendingAction,
-	resolved runtimechanneldelivery.ResolvedAction) error {
+	resolved runtimechanneldelivery.ResolvedAction) (finalErr error) {
+	ctx, use, err := d.acquireChannelCardInput(ctx, resolved.Action.CardID)
+	if err != nil {
+		return err
+	}
+	if use != nil {
+		defer func() { finalErr = errors.Join(finalErr, use.Close()) }()
+	}
 	candidate, text, progress, principalID, err := d.store.PreviewChosenChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt)
 	if err != nil {
 		if errors.Is(err, decisioncard.ErrDraftNotAuthority) {
@@ -383,7 +397,7 @@ func (d *serveChannelDeliveryDispatcher) processPendingChannelText(ctx context.C
 	return err
 }
 
-func (d *serveChannelDeliveryDispatcher) processPendingInputText(ctx context.Context, intent runtimechanneldelivery.PendingText) error {
+func (d *serveChannelDeliveryDispatcher) processPendingInputText(ctx context.Context, intent runtimechanneldelivery.PendingText) (finalErr error) {
 	var selected runtimechanneldelivery.InputDraftCandidate
 	multiple := false
 	cursor := ""
@@ -421,6 +435,13 @@ func (d *serveChannelDeliveryDispatcher) processPendingInputText(ctx context.Con
 		_, err := d.store.PlanChannelTextResponse(ctx, intent.Fact,
 			"That reply does not match a current card prompt. Open inbox to review current actions.", "teaching")
 		return err
+	}
+	ctx, use, err := d.acquireChannelCardInput(ctx, selected.CardID)
+	if err != nil {
+		return err
+	}
+	if use != nil {
+		defer func() { finalErr = errors.Join(finalErr, use.Close()) }()
 	}
 	progress, principalID, err := d.store.PreviewCurrentChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt, selected.DraftID)
 	if err != nil {
