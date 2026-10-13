@@ -292,3 +292,45 @@ func TestListSpellingRetirementNestedReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
+	for _, name := range []string{"List", "LIST"} {
+		t.Run(name, func(t *testing.T) {
+			for _, surface := range []string{"types", "entities", "events", "nodes"} {
+				for _, source := range []string{name, "{type: '" + name + "'}", "[" + name + "]"} {
+					typeRef, optional, initial, err := listRetirementDecode(t, surface, listRetirementField(t, source))
+					want := name
+					if strings.HasPrefix(source, "[") {
+						want = source
+					}
+					if err != nil || typeRef != want || optional || initial != nil {
+						t.Fatalf("%s %s lost named-type identity: %q/%v/%#v/%v", surface, source, typeRef, optional, initial, err)
+					}
+				}
+			}
+			root := t.TempDir()
+			for file, source := range map[string]string{
+				"schema.yaml":   "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
+				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
+				"entities.yaml": "probe:\n  item: " + name + "\n",
+				"events.yaml":   "proof.received:\n  item: " + name + "\n",
+				"nodes.yaml":    "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",
+			} {
+				writeFixtureFile(t, root+"/"+file, source)
+			}
+			repo := repoRootForContractsTest(t)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := (CatalogTypeReference{Type: name, Catalog: bundle.RootTypes}).Resolve()
+			if err != nil || resolved.Kind != CatalogTypeObject || resolved.Name != name {
+				t.Fatalf("named object changed meaning: %+v / %v", resolved, err)
+			}
+			list, err := (CatalogTypeReference{Type: "[" + name + "]", Catalog: bundle.RootTypes}).Resolve()
+			if err != nil || list.Kind != CatalogTypeList || list.Element == nil || !StructuralCatalogTypesEqual(*list.Element, resolved) {
+				t.Fatalf("named list changed meaning: %+v / %v", list, err)
+			}
+		})
+	}
+}
