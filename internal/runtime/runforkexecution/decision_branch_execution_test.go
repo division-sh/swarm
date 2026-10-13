@@ -91,9 +91,14 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// A is an actually activated pending-effect start fork. Its own start
+			// cut is the supported source for B, not an empty event frontier.
+			sourceActivation := activatePendingDecisionFork(t, ctx, owner, sourceRun, page.Events[0].EventID, loader, loaded)
+			sourceRun = sourceActivation.Materialization.ForkRunID
+			sourceCard = requirePendingReplyCard(t, ctx, store, sourceRun)
 			request, mutation := branchCardDecision(sourceCard, principal.ID, "reject")
-			if _, replayed, err := rt.Pipeline.CommitDecisionCardMutation(ctx, request, mutation); err != nil || replayed {
-				t.Fatalf("source's own rejection: replay=%t error=%v causes=%v", replayed, err, pendingReplyDecisionCauses(err))
+			if _, replayed, selectedRun, err := owner.CommitSelectedDecisionCardMutation(ctx, sourceRun, request, mutation); err != nil || replayed || !selectedRun {
+				t.Fatalf("source's own rejection: selected=%t replay=%t error=%v causes=%v", selectedRun, replayed, err, pendingReplyDecisionCauses(err))
 			}
 			sourceRejected, err := store.GetDecisionCard(ctx, sourceCard.CardID)
 			sourceEffect, effectErr := store.LoadProposedEffectContinuation(ctx, sourceCard.CardID)
@@ -104,9 +109,11 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 				t.Fatalf("source rejection did not own its effect: card=%+v effect=%+v calls=%d errors=%v/%v/%v/%v",
 					sourceRejected, sourceEffect, calls.Load(), err, effectErr, rowsErr, domainErr)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: page.Events[0].EventID,
-				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}})
+			selection := runforkadmission.SelectedContractSelection(loaded.Source)
+			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, AtStart: true,
+				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
+				AgentRuntime:  SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability},
+				ForkOperation: pendingDecisionStartInvocation(sourceRun, loaded, selection)})
 			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen {
 				t.Fatalf("fork at the earlier open card inherited or froze the later rejection: %+v error=%v", result, err)
 			}
