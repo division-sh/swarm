@@ -437,7 +437,7 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 		wantState = decisioncard.ProposedEffectRequestReleased
 		expected.eventID = current.RequestEventID
 		expected.eventName = "platform.activity_requested"
-		expected.sourceEventID = current.SourceEventID
+		expected.sourceEventID = current.DecisionEventID
 	} else {
 		expected.eventID = decisioncard.ProposedEffectOutcomeEventID(card.CardID, current.DecisionEventID, current.Verdict)
 		expected.sourceEventID = current.DecisionEventID

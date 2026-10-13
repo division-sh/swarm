@@ -32252,11 +32252,20 @@ api_specification:
         principal-owned input draft. A verdict with no declared input fields cannot start a draft.'
       selected_fork_control_admission: >
         Decide, defer, begin_input and cancel_input, and all partial or final ordered-field
-        text, chosen-answer and skip writes, consume the same exact durable selected-fork
-        classification before mutation at their shared selected-store owners. These controls
-        remain unsupported for selected forks; ordinary bundle execution or channel principal
-        authority cannot bypass that restriction. API admission may refuse earlier but is not
-        the mutation authority. Classification read failure or missing owner fails closed.
+        text, chosen-answer and skip writes, consume the same exact durable run classification
+        before mutation at their shared selected-store owners. A selected fork's own card may
+        be controlled by the same admitted operator principal as an ordinary card, only through
+        that child's current retained execution. Its exact selected execution admission,
+        admitted generation grant, binding, preparation evidence and current physical process
+        are revalidated by the existing native generation owner inside the mutation transaction.
+        A read-only preflight does not authorize the commit. Bundle selection, historical
+        provenance, channel principal authority or a binding alone cannot admit selected work.
+        Source and sibling decisions are not inherited; decided-before-cut cards remain state.
+        A selected context cannot mutate an ordinary source card. Retired, absent, preactivation
+        or stale-generation execution refuses, including defer and input writes. API admission
+        consumes the actual child executor without starting another runtime, and preserves both
+        caller cancellation and execution retirement. Classification read failure or missing
+        owner fails closed. Other selected-fork controls retain their own existing restrictions.
         Readback, navigation, delivery and notice acknowledgment are distinct concepts and
         remain admitted by their existing owners. Callback acknowledgment may settle
         independently; it is never a successful business decision.

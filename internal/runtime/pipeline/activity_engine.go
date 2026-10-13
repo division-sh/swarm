@@ -93,9 +93,10 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 }
 
 type pipelineActivityDispatcher struct {
-	coordinator *PipelineCoordinator
-	client      *http.Client
-	emissions   *pipelineEmissionPlan
+	coordinator              *PipelineCoordinator
+	client                   *http.Client
+	emissions                *pipelineEmissionPlan
+	publicationParentEventID string
 }
 
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
@@ -673,7 +674,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 		return true, runtimepipelineobligation.Continue(), err
 	}
 	intent.Context = events.DeliveryContextFromContext(ctx).ReplyOnly()
-	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions, publicationParentEventID: evt.ParentEventID()}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
 			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
@@ -793,6 +794,12 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 }
 
 func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
+	return activityRequestEmitIntentWithParent(intent, firstNonEmptyString(intent.SourceEventID, intent.ParentEventID))
+}
+
+// Approval resumes an existing activity identity. Its physical causal parent is
+// the new decision, not an inherited source identity without a child event row.
+func activityRequestEmitIntentWithParent(intent runtimeengine.ActivityIntent, parentEventID string) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
 	if !intent.ExecutionMode.Valid() {
 		return runtimeengine.EmitIntent{}, fmt.Errorf("activity %s requires typed causal execution mode", intent.ActivityID)
@@ -826,7 +833,7 @@ func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIn
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: parentEventID,
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1568,7 +1575,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: firstNonEmptyString(d.publicationParentEventID, intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
