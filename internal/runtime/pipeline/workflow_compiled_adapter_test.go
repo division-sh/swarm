@@ -440,7 +440,7 @@ func VerifyNativePipelineCompiledTransitionNoOpOnBothStoresForTest(t *testing.T,
 				if event == "emit_only" && f.bus.publishedCount() != 1 {
 					t.Fatal("emit-only effect was lost")
 				}
-				if event == "fallback" && requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "fallback-choice" {
+				if event == "fallback" && requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "rules[1]: else" {
 					t.Fatalf("fallback selection = %#v", result.RuleSelection)
 				}
 			})
@@ -835,7 +835,7 @@ func VerifyNativeFallbackClaimSettlesWithoutBusinessTransitionBothStoresForTest(
 				t.Fatalf("fallback did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
 			}
 			selection, err := snapshot.FinalSelection.Fact()
-			if err != nil || selection.Disposition() != handlerselection.DispositionSelected || selection.DisplayLabel() != "fallback-choice" {
+			if err != nil || selection.Disposition() != handlerselection.DispositionSelected || selection.DisplayLabel() != "rules[1]: else" {
 				t.Fatalf("fallback selection=%#v err=%v", selection, err)
 			}
 			outcomes, err := owner.Outcomes(f.ctx, id)
@@ -1111,7 +1111,7 @@ func requireGuardedPreviewEvidence(t *testing.T, f *compiledAdapterFixture, prev
 	t.Helper()
 	handler := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)["guarded"]
 	wantRef, qualified := handler.Rules[0].DeclarationIdentity()
-	if !qualified || requireResolvedSelection(t, preview.RuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, preview.RuleSelection).Ref().Equal(wantRef) || preview.RuleID != "explicit-choice" {
+	if !qualified || requireResolvedSelection(t, preview.RuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, preview.RuleSelection).Ref().Equal(wantRef) || preview.RuleID != "rules[0]: when true" {
 		t.Fatal("preview selected a display-label alias instead of the exact authored rule")
 	}
 	if !slices.Equal(preview.GuardsEvaluated, []string{"first-pass", "true"}) || preview.Metadata["marker"] != "guarded" {
