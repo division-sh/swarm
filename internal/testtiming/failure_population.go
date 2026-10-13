@@ -4,6 +4,7 @@ import "fmt"
 
 type FailureRun struct {
 	ID         int64            `json:"id"`
+	RunAttempt int              `json:"run_attempt"`
 	Event      string           `json:"event"`
 	HeadSHA    string           `json:"head_sha"`
 	Status     string           `json:"status"`
@@ -83,8 +84,22 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 	return summary, nil
 }
 
+func completeFailureHistory(run FailureRun) bool {
+	if run.RunAttempt <= 0 || len(run.Attempts) != run.RunAttempt {
+		return false
+	}
+	seen := make(map[int]bool)
+	for _, attempt := range run.Attempts {
+		if attempt.Number < 1 || attempt.Number > run.RunAttempt || seen[attempt.Number] {
+			return false
+		}
+		seen[attempt.Number] = true
+	}
+	return true
+}
+
 func countFailureExposure(run FailureRun, summary *FailurePopulation) {
-	incomplete := len(run.Attempts) == 0 && run.Status == "completed"
+	incomplete := !completeFailureHistory(run)
 	for _, attempt := range run.Attempts {
 		summary.CancelledJobs += len(attempt.CancelledJobs)
 		summary.UnstartedJobs += len(attempt.UnstartedJobs)
@@ -108,6 +123,9 @@ func countFailureExposure(run FailureRun, summary *FailurePopulation) {
 // substitutes for the whole-run non-PR-only lower bound.
 func (l FailureLedger) countFailurePhenomena(run FailureRun, summary *FailurePopulation) {
 	seen, nonPR := map[string]bool{}, map[string]bool{}
+	if !completeFailureHistory(run) {
+		seen["unknown-variance"] = true
+	}
 	for _, attempt := range run.Attempts {
 		if len(attempt.Problems) != 0 || ((attempt.Conclusion == "failure" || attempt.Conclusion == "timed_out") && len(attempt.Failures) == 0) {
 			seen["unknown-variance"] = true
@@ -142,10 +160,13 @@ func (l FailureLedger) countFailurePhenomena(run FailureRun, summary *FailurePop
 
 func (l FailureLedger) failureRunClasses(run FailureRun) (map[string]bool, bool, error) {
 	classes := map[string]bool{}
+	if !completeFailureHistory(run) {
+		classes["unknown"] = true
+	}
 	seen := map[int]bool{}
 	red := false
 	for _, attempt := range run.Attempts {
-		if attempt.Number <= 0 || seen[attempt.Number] {
+		if attempt.Number <= 0 || seen[attempt.Number] || run.RunAttempt > 0 && attempt.Number > run.RunAttempt {
 			return nil, false, fmt.Errorf("duplicate/invalid attempt on run %d", run.ID)
 		}
 		seen[attempt.Number] = true
@@ -158,20 +179,11 @@ func (l FailureLedger) failureRunClasses(run FailureRun) (map[string]bool, bool,
 				classes["unknown"] = true
 			}
 		}
-		for _, failure := range attempt.Failures {
-			if failure.RunID != run.ID || failure.Attempt != attempt.Number || failure.HeadSHA != run.HeadSHA {
-				return nil, false, fmt.Errorf("foreign failure observation on run %d", run.ID)
-			}
-			if failure.Conclusion == "cancelled" {
-				continue
-			}
-			match, err := l.Match(failure)
-			if err != nil {
-				return nil, false, err
-			}
-			classes[match.Attribution] = true
-			red = true
+		observedRed, err := l.mergeFailureObservations(run, attempt, classes)
+		if err != nil {
+			return nil, false, err
 		}
+		red = red || observedRed
 	}
 	if run.Conclusion == "failure" || run.Conclusion == "timed_out" {
 		red = true
@@ -180,4 +192,23 @@ func (l FailureLedger) failureRunClasses(run FailureRun) (map[string]bool, bool,
 		}
 	}
 	return classes, red, nil
+}
+
+func (l FailureLedger) mergeFailureObservations(run FailureRun, attempt FailureAttempt, classes map[string]bool) (bool, error) {
+	red := false
+	for _, failure := range attempt.Failures {
+		if failure.RunID != run.ID || failure.Attempt != attempt.Number || failure.HeadSHA != run.HeadSHA {
+			return false, fmt.Errorf("foreign failure observation on run %d", run.ID)
+		}
+		if failure.Conclusion == "cancelled" {
+			continue
+		}
+		match, err := l.Match(failure)
+		if err != nil {
+			return false, err
+		}
+		classes[match.Attribution] = true
+		red = true
+	}
+	return red, nil
 }

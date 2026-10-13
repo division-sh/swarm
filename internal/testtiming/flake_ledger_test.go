@@ -155,7 +155,7 @@ func TestFailureLedgerMatchingNeverAdoptsForeignAttribution(t *testing.T) {
 
 func TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts(t *testing.T) {
 	ledger, failure := failureLedgerFixture()
-	runs := []FailureRun{{ID: 1, Event: "pull_request", HeadSHA: failure.HeadSHA, Status: "completed", Conclusion: "success", Attempts: []FailureAttempt{
+	runs := []FailureRun{{ID: 1, RunAttempt: 2, Event: "pull_request", HeadSHA: failure.HeadSHA, Status: "completed", Conclusion: "success", Attempts: []FailureAttempt{
 		{Number: 1, Conclusion: "failure", Failures: []ObservedFailure{failure}}, {Number: 2, Conclusion: "success"},
 	}}}
 	summary, err := ledger.Summarize(runs)
@@ -177,11 +177,58 @@ func TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts(t *testing.T) {
 	if err != nil || summary.PRRuns != 3 || summary.InFlight != 1 || summary.Cancelled != 1 {
 		t.Fatalf("missing exposure accounting: %+v / %v", summary, err)
 	}
-	if summary.Incomplete != 1 {
+	if summary.Incomplete != 2 {
 		t.Fatalf("missing attempts were counted as complete population evidence: %+v", summary)
 	}
 	runs[0].Attempts[0].Failures[0].Attempt = 3
 	if _, err := ledger.Summarize(runs); err == nil {
 		t.Fatal("foreign attempt qualified population")
+	}
+	checkFailureAttemptHistory(t)
+}
+
+func checkFailureAttemptHistory(t *testing.T) {
+	for _, mode := range []string{"missing-first", "missing-middle", "missing-final", "missing-count", "complete", "extra"} {
+		t.Run(mode, func(t *testing.T) {
+			ledger, f := failureLedgerFixture()
+			run := FailureRun{ID: 1, RunAttempt: 3, Event: "pull_request", HeadSHA: f.HeadSHA, Status: "completed", Conclusion: "success", Attempts: []FailureAttempt{{Number: 1, Conclusion: "failure", Failures: []ObservedFailure{f}}, {Number: 2, Conclusion: "success"}, {Number: 3, Conclusion: "success"}}}
+			switch mode {
+			case "missing-first":
+				run.Attempts = run.Attempts[1:]
+			case "missing-middle":
+				run.Attempts = append(run.Attempts[:1], run.Attempts[2:]...)
+			case "missing-final":
+				run.Attempts = run.Attempts[:2]
+			case "missing-count":
+				run.RunAttempt = 0
+			case "extra":
+				run.RunAttempt = 2
+			}
+			raw, err := json.Marshal(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var offline FailureRun
+			if err := json.Unmarshal(raw, &offline); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ledger.Summarize([]FailureRun{offline})
+			if mode == "extra" {
+				if err == nil {
+					t.Fatal("attempt outside declared history accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "complete" {
+				if got.Incomplete != 0 || got.NonPROnly != 1 || got.EarlierRedNowGreen != 1 {
+					t.Fatalf("complete history: %+v", got)
+				}
+			} else if got.Incomplete != 1 || got.NonPROnly != 0 {
+				t.Fatalf("missing history became complete/attributed: %+v", got)
+			}
+		})
 	}
 }

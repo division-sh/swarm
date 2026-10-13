@@ -11,12 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/testtiming"
 )
 
-type configuration struct {
-	Tool, Toolchain, Checks, Matrix, Packages, TargetGo, GOFLAGS, GOWORK, GOENV, U1000Directives string
-	Tests, ShowIgnored                                                                           bool
-}
+type configuration = testtiming.UnusedConfiguration
 
 func pinnedConfig() configuration {
 	return configuration{
@@ -26,41 +25,18 @@ func pinnedConfig() configuration {
 	}
 }
 
-type evidence struct {
-	Schema       int           `json:"schema"`
-	State        string        `json:"state"`
-	SourceSHA    string        `json:"source_sha"`
-	Config       configuration `json:"config"`
-	Native       native        `json:"native"`
-	ResultSHA256 string        `json:"result_sha256"`
-	ResultBytes  int64         `json:"result_bytes"`
-}
+type evidence = testtiming.UnusedEvidence
 
 func validateNative(n native, platform string) error {
-	if (platform != "linux" && platform != "darwin") || n.GOOS != platform || n.GOHOSTOS != platform ||
-		n.GOARCH == "" || n.GOARCH != n.GOHOSTARCH || n.CGO_ENABLED != "1" ||
-		n.GOVERSION != toolchain || n.GOEXPERIMENT != "" {
-		return fmt.Errorf("invalid native %s environment: %+v (native CGO and pinned toolchain required)", platform, n)
-	}
-	return nil
+	return testtiming.ValidateUnusedNative(n, platform, toolchain)
 }
 
 func validateEvidence(e evidence, head, platform string) error {
-	if e.Schema != 1 || e.State != "complete" {
-		return errors.New("missing, failed, skipped or unsupported evidence")
-	}
-	if e.SourceSHA != head || len(head) != 40 {
-		return errors.New("stale evidence: source SHA must match current Git HEAD")
+	if err := testtiming.ValidateUnusedIdentity(e, head, platform); err != nil {
+		return err
 	}
 	if e.Config != pinnedConfig() {
 		return errors.New("evidence configuration does not match pinned guard")
-	}
-	if err := validateNative(e.Native, platform); err != nil {
-		return err
-	}
-	b, err := hex.DecodeString(e.ResultSHA256)
-	if err != nil || len(b) != sha256.Size || e.ResultBytes <= 0 {
-		return errors.New("empty result or invalid result hash")
 	}
 	return nil
 }
@@ -162,25 +138,18 @@ func readEvidence(dir, head, platform string) (string, error) {
 		return "", fmt.Errorf("missing %s evidence: %w", platform, err)
 	}
 	defer f.Close()
-	dec := json.NewDecoder(f)
-	dec.DisallowUnknownFields()
-	var e evidence
-	if err := dec.Decode(&e); err != nil {
-		return "", fmt.Errorf("invalid %s metadata: %w", platform, err)
-	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		return "", errors.New("trailing or corrupt metadata")
-	}
-	if err := validateEvidence(e, head, platform); err != nil {
-		return "", fmt.Errorf("%s: %w", platform, err)
-	}
 	path := filepath.Join(dir, resultFile)
-	hash, size, err := hashResult(path)
+	result, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	if hash != e.ResultSHA256 || size != e.ResultBytes {
-		return "", fmt.Errorf("corrupt %s result: size/hash mismatch", platform)
+	defer result.Close()
+	e, err := testtiming.ReadUnusedIdentity(f, result, head, platform)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s evidence: %w", platform, err)
+	}
+	if err := validateEvidence(e, head, platform); err != nil {
+		return "", fmt.Errorf("%s: %w", platform, err)
 	}
 	return path, nil
 }

@@ -161,7 +161,7 @@ func readFailurePopulation(ctx context.Context, options failureOptions) ([]testt
 	}
 	var runs []testtiming.FailureRun
 	for _, run := range metadata {
-		observed := testtiming.FailureRun{ID: run.ID, Event: run.Event, HeadSHA: run.HeadSHA, Status: run.Status, Conclusion: run.Conclusion}
+		observed := testtiming.FailureRun{ID: run.ID, RunAttempt: run.RunAttempt, Event: run.Event, HeadSHA: run.HeadSHA, Status: run.Status, Conclusion: run.Conclusion}
 		for number := 1; number <= run.RunAttempt; number++ {
 			attempt := observeFailureAttempt(ctx, run, number)
 			observed.Attempts = append(observed.Attempts, attempt)
