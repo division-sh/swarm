@@ -154,7 +154,8 @@ func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
-	persistedSource, err := runtimecorrelation.NewSourceArtifactFact(authorActivityTestSourceArtifactFact.BundleHash())
+	bundle := loadEntitylessStartupRecoveryBundle(t)
+	persistedSource, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct persisted startup bundle source: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
-				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
+				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
@@ -185,7 +186,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
-				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
+				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
@@ -198,7 +199,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			ctx, _, _, selected := backend.setup(t)
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
-			bundle := loadEntitylessStartupRecoveryBundle(t)
 			const agentID = "startup-order-agent"
 			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
