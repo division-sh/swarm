@@ -11,7 +11,15 @@ import (
 	"github.com/division-sh/swarm/internal/testplanning"
 )
 
-func TestPromotedCatalogChildEvidenceFailsClosed(t *testing.T) {
+type catalogEvidenceFixture struct {
+	policy    testplanning.Policy
+	inventory testplanning.RootInventory
+	proofs    []testplanning.ParityProof
+	packages  []string
+}
+
+func loadCatalogEvidenceFixture(t *testing.T) catalogEvidenceFixture {
+	t.Helper()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -33,18 +41,19 @@ func TestPromotedCatalogChildEvidenceFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const parent = "TestTerminalMiddleMemberFailureRetainsSuffixBothStores"
-	children := []string{"postgres", "reviewer-required-child", "sqlite"}
-	proofs = append(proofs, testplanning.ParityProof{ID: "catalog-child-validation-regression", Kind: "go_test", Name: parent,
-		Path: "internal/runtime/cataloge2e/terminal_retirement_failure_test.go", Profile: testplanning.ProfileFull, Children: children})
 	var packages []string
 	for pkg := range inventory.Packages {
 		packages = append(packages, pkg)
 	}
-	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "catalog-child-proof"}, packages,
-		testplanning.ProfileLifecycle, "catalog child validation", "test-head")
+	return catalogEvidenceFixture{policy, inventory, proofs, packages}
+}
+
+func (f catalogEvidenceFixture) unit(t *testing.T, tier string, extras ...string) testplanning.ProofUnit {
+	t.Helper()
+	plan, err := testplanning.BuildPlan(f.policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "catalog-child-proof"}, f.packages,
+		tier, "catalog child validation", "test-head", testplanning.BuildOptions{ExtraUnits: extras})
 	if err == nil {
-		err = testplanning.BindExecution(&plan, inventory, proofs, policy)
+		err = testplanning.BindExecution(&plan, f.inventory, f.proofs, f.policy)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +62,35 @@ func TestPromotedCatalogChildEvidenceFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return unit
+}
+
+func TestPromotedCatalogChildEvidenceFailsClosed(t *testing.T) {
+	f := loadCatalogEvidenceFixture(t)
+	const parent = "TestTerminalMiddleMemberFailureRetainsSuffixBothStores"
+	children := []string{"postgres", "reviewer-required-child", "sqlite"}
+	f.proofs = append(f.proofs, testplanning.ParityProof{ID: "catalog-child-validation-regression", Kind: "go_test", Name: parent,
+		Path: "internal/runtime/cataloge2e/terminal_retirement_failure_test.go", Profile: testplanning.ProfileFull, Children: children})
+	assertCatalogChildEvidence(t, f.unit(t, testplanning.ProfileLifecycle), parent, children)
+}
+
+func TestCatalogTerminalMiddlePolicyChildrenFailClosed(t *testing.T) {
+	f := loadCatalogEvidenceFixture(t)
+	const parent = "TestTerminalMiddleMemberFailureRetainsSuffixBothStores"
+	children := []string{"postgres", "sqlite"}
+	for _, tier := range []string{testplanning.ProfileFull, testplanning.ProfileLifecycle, testplanning.ProfileCore} {
+		t.Run(tier, func(t *testing.T) {
+			var extras []string
+			if tier == testplanning.ProfileCore {
+				extras = []string{"catalog-runtime"}
+			}
+			assertCatalogChildEvidence(t, f.unit(t, tier, extras...), parent, children)
+		})
+	}
+}
+
+func assertCatalogChildEvidence(t *testing.T, unit testplanning.ProofUnit, parent string, children []string) {
+	t.Helper()
 	found := false
 	var report Report
 	for _, selected := range unit.SelectedRoots {
