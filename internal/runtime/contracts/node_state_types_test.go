@@ -56,6 +56,28 @@ func TestNormalizeNodeStateFieldType_RejectsPseudoTypes(t *testing.T) {
 	}
 }
 
+func TestNormalizeNodeStateFieldType_CanonicalPrimitiveLists(t *testing.T) {
+	for raw, want := range map[string]string{
+		"[text]": "[text]", "[bool]": "[boolean]", "[uuid]": "[uuid]",
+		"[numeric(5, 2)]": "[numeric(5,2)]", "[jsonb]": "[jsonb]",
+		"[DimensionScore]": "[DimensionScore]",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			got, err := NormalizeNodeStateFieldType(raw)
+			if err != nil || got != want {
+				t.Fatalf("canonical node list %q = %q, %v; want %q", raw, got, err, want)
+			}
+		})
+	}
+	for _, raw := range []string{"[]", "[[text]]", "[text[]]", "[list<DimensionScore>]", "[Missing-Type]"} {
+		t.Run("invalid_"+raw, func(t *testing.T) {
+			if _, err := NormalizeNodeStateFieldType(raw); err == nil {
+				t.Fatalf("invalid node list %q admitted", raw)
+			}
+		})
+	}
+}
+
 func TestDecodeNodeStateFields_RejectsPseudoTypesInSequenceForm(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`
 - name: dimensions_received

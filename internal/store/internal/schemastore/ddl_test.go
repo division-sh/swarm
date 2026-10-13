@@ -67,6 +67,30 @@ func TestNodeStateFieldTypeToDDL_AllowsNamedTypesAsJSONB(t *testing.T) {
 	}
 }
 
+func TestNodeStateFieldTypeToDDL_CanonicalListsPreservePhysicalTypes(t *testing.T) {
+	for _, tc := range []struct{ canonical, physical, ddl string }{
+		{"[text]", "text[]", "TEXT[]"},
+		{"[numeric(5,2)]", "numeric(5,2)[]", "NUMERIC(5,2)[]"},
+		{"[boolean]", "boolean[]", "BOOLEAN[]"},
+		{"[jsonb]", "jsonb[]", "JSONB[]"},
+		{"[uuid]", "uuid[]", "UUID[]"},
+		{"[DimensionScore]", "DimensionScore[]", "JSONB"},
+		{"numeric(5,2)", "numeric(5,2)", "NUMERIC(5,2)"},
+		{"jsonb", "jsonb", "JSONB"},
+	} {
+		t.Run(tc.canonical, func(t *testing.T) {
+			physical, err := NodeStateFieldTypeToDDL(tc.physical)
+			if err != nil || physical != tc.ddl {
+				t.Fatalf("internal physical type %q = %q, %v; want %q", tc.physical, physical, err, tc.ddl)
+			}
+			canonical, err := NodeStateFieldTypeToDDL(tc.canonical)
+			if err != nil || canonical != physical {
+				t.Fatalf("canonical type %q = %q, %v; want same physical type %q", tc.canonical, canonical, err, physical)
+			}
+		})
+	}
+}
+
 func TestGeneratePlatformTableDDLs(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {

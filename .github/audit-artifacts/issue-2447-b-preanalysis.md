@@ -1,6 +1,29 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
-## Current S03 Consumer Amendment: Coding Frozen
+## Current Boundary: Approved Coding, D Integration Required
+
+Reviewer-g6138208732 approves S03a/b and G's S08 normalized-reference/physical
+projection. The earlier S03 coding freeze below is historical. G repairs
+ResolveFieldPath/pathKind and collectEntityToolLeafSelectors through canonical
+resolved Kind/Name/Format, retaining role eligibility, refinements, recursion
+refusal and authorization. Direct and compiled template RED receipts must become
+GREEN; shared resolver consumption alone is not execution proof.
+
+D remains the sole editor of projectNodeStateFieldValue YAML shape/style and its
+authored call hunk: exact admitted reference -> G suffix/prefix refusal -> existing
+normalizer. G owns canonical primitive node-list normalization and physical array
+projection. Internal text[]/numeric(p,s)[] DDL stays valid; named lists stay JSONB.
+Canonical [text] must work. Parameterized numeric uses one plain block-sequence
+item, not the two-item YAML spelling [numeric(5,2)]; G supplies valid specialized
+teaching. D consumes G's policy, and G consumes D's reference without a YAML parser.
+
+B closure remains blocked on D's decoder integration and authored named/primitive
+refusal/positive verify, boot and real generated-table proofs on both stores.
+Final repo-wide guard/census and #2645 preflight, if merged, remain required.
+A stays closed; C stays frozen. No new issue, compatibility, framework, DDL policy,
+vendoring or broad re-census is authorized.
+
+## Historical S03 Consumer Amendment: Coding Frozen
 
 The approved native-array/final-key delta is implemented locally from f06979d4b,
 with real repair receipts, but the stronger public template journey identifies
