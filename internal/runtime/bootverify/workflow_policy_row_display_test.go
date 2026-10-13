@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -20,6 +21,7 @@ func TestPolicyValueRowDiagnosticsKeepPositionAndAdmittedKind(t *testing.T) {
 		{runtimecontracts.PolicySheetRowKindModule, checkComputeModuleValueRows, computeModuleCheckID, "compute_module row must lower to compute-owned module operation"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {
+			nodeKey := identitytest.RootNode(t, "worker").Key()
 			row := runtimecontracts.HandlerRuleEntry{PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: tc.kind}}
 			bundle := &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -31,8 +33,8 @@ func TestPolicyValueRowDiagnosticsKeepPositionAndAdmittedKind(t *testing.T) {
 				t.Fatalf("value-row refusals = %#v, want both distinct positional rows", findings)
 			}
 			for i, finding := range findings {
-				want := fmt.Sprintf("flow root node worker handler request %s row rules[%d]: %s: %s", tc.kind, i, tc.kind, tc.detail)
-				if finding.CheckID != tc.id || finding.Severity != SeverityHardInvalidity || finding.Location != "worker" || finding.Message != want {
+				want := fmt.Sprintf("flow root node %s handler request %s row rules[%d]: %s: %s", nodeKey, tc.kind, i, tc.kind, tc.detail)
+				if finding.CheckID != tc.id || finding.Severity != SeverityHardInvalidity || finding.Location != nodeKey || finding.Message != want {
 					t.Fatalf("value-row finding[%d] = %#v, want exact refusal %q", i, finding, want)
 				}
 			}
@@ -54,7 +56,7 @@ func TestDuplicateComputedBindingUsesBothPositionalDisplays(t *testing.T) {
 
 func TestInvalidResultConsumerDiagnosticRetainsRuleIndexAndPredicate(t *testing.T) {
 	findings := bootverifyValidationFindings(bootverifyValidationHandler(true, "deploy.other_invalid"))
-	want := `flow root node deploy_node handler deploy.requested validate row rules[0]: validate: invalid-result consumer row "rules[1]: when computed.validation.deploy_manifest.valid == false" emits "deploy.other_invalid", which is not declared as a rules.yaml class disposition`
+	want := "flow root node " + identitytest.RootNode(t, "deploy_node").Key() + ` handler deploy.requested validate row rules[0]: validate: invalid-result consumer row "rules[1]: when computed.validation.deploy_manifest.valid == false" emits "deploy.other_invalid", which is not declared as a rules.yaml class disposition`
 	for _, finding := range findings {
 		if finding.Message == want && finding.CheckID == policySheetValidationCheckID && finding.Severity == SeverityHardInvalidity {
 			return
