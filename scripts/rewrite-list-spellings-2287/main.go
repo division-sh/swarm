@@ -19,6 +19,42 @@ import (
 
 var angle = regexp.MustCompile(`list<([^<>]+)>`)
 
+// These finite source fragments are assembled after YAML parsing would be
+// possible; their declaration role is pinned by the corpus inventory.
+var generatedSourceEdits = map[string][][2]string{
+	"internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go": {
+		{"  audit_log: \"[AuditEntry]\"", "  audit_log: [AuditEntry]"},
+	},
+	"internal/runtime/testfixtures/canonicalrouting/notify_all_children.go": {
+		{"  account_ids: \"[text]\"", "  account_ids: [text]"},
+		{"  account_ids: \"[NumericAccount]\"", "  account_ids: [NumericAccount]"},
+	},
+	"internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go": {
+		{"  task_ids: '[text]'", "  task_ids: [text]"},
+	},
+	"internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go": {
+		{"  expected: \"[text]\"", "  expected: [text]"},
+		{"  missing: \"[text]\"", "  missing: [text]"},
+		{"  results: \"[JoinResult]\"", "  results: [JoinResult]"},
+	},
+	"internal/runtime/testfixtures/canonicalrouting/publication_sites.go": {
+		{"  items: '[%s]'", "  items: [%s]"},
+	},
+	"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go": {
+		{"  items: \"[text]\"", "  items: [text]"},
+	},
+	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go": {
+		{"  final_missing: \"[text]\"", "  final_missing: [text]"},
+		{"  members_list: \"[text]\"", "  members_list: [text]"},
+	},
+	"internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go": {
+		{"  unused_members: '[text]'", "  unused_members: [text]"},
+	},
+	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go": {
+		{"  account_ids: \"[NumericAccount]\"", "  account_ids: [NumericAccount]"},
+	},
+}
+
 type edit struct {
 	start, end int
 	text       string
@@ -261,7 +297,7 @@ func enclosingSourceFamily(lit *ast.BasicLit, parents map[ast.Node]ast.Node) str
 	return ""
 }
 
-func rewriteGoLiteral(lit *ast.BasicLit, parents map[ast.Node]ast.Node) (string, bool) {
+func rewriteGoLiteral(path string, lit *ast.BasicLit, parents map[ast.Node]ast.Node) (string, bool) {
 	text, err := strconv.Unquote(lit.Value)
 	if err != nil {
 		return "", false
@@ -274,6 +310,9 @@ func rewriteGoLiteral(lit *ast.BasicLit, parents map[ast.Node]ast.Node) (string,
 	}
 	if strings.Contains(text, "\n") {
 		next = rewriteYAML(text, enclosingSourceFamily(lit, parents))
+	}
+	for _, replacement := range generatedSourceEdits[filepath.ToSlash(path)] {
+		next = strings.ReplaceAll(next, replacement[0], replacement[1])
 	}
 	if next == text {
 		return "", false
@@ -310,7 +349,7 @@ func rewriteGo(path, body string) string {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		if rendered, changed := rewriteGoLiteral(lit, parents); changed {
+		if rendered, changed := rewriteGoLiteral(path, lit, parents); changed {
 			edits = append(edits, edit{fset.Position(lit.Pos()).Offset, fset.Position(lit.End()).Offset, rendered})
 		}
 		return true

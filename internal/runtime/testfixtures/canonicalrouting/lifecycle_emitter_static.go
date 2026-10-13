@@ -297,7 +297,7 @@ completion-dispatcher:
 `
 	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher"} {
 		request := "request." + strings.ReplaceAll(node, "-", "_")
-		events += request + ":\n  score: integer\n  items: \"[text]\"\n"
+		events += request + ":\n  score: integer\n  items: [text]\n"
 		nodes = strings.Replace(nodes, "    request:\n", "    "+request+":\n", 1)
 	}
 	writeClosedVariantFile(t, root, "families/events.yaml", events)

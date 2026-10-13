@@ -109,7 +109,7 @@ types:
 coordinator_state:
   coordinator_id: text
   lead_index: map[text]LeadScore
-  audit_log: "[AuditEntry]"
+  audit_log: [AuditEntry]
 `
 	if variant == SingletonCoordinatorPilotDemandProjection {
 		entities += "  unused_index: map[text]json\n"
