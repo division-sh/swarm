@@ -114,7 +114,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                                 ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Cancel:http_do:1":                                                                          ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Submit:http_do:1":                                                                          ownerRuntimeDependency,
-	"internal/runtime/runforkexecution/runtime_container.go:Publish:http_do:1":                                                            ownerRuntimeDependency,
+	"internal/runtime/runforkexecution/decision_control.go:Close:http_do:1":                                                               ownerRuntimeDependency, // sync.Once selected control-turn release, not HTTP.
 	"internal/runtime/runforkexecution/agent_runtime_materialization.go:Close:http_do:1":                                                  ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/control_lifetime.go:Done:http_do:1":                                                                ownerRuntimeDependency,
 	"internal/runtime/sessions/heartbeat.go:StartLeaseHeartbeatWithErrorHandler:http_do:1":                                                ownerRuntimeDependency,
