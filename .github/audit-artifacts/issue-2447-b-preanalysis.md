@@ -1,5 +1,63 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S08 Renderer Gate And Complete-Domain Counterexample
+
+Reviewer-g6139336433 approves the narrow SQLite renderer correction inside B,
+not a split. The existing schema type owner or exact finite canonical equivalent
+must validate scalar array elements; nested/empty/malformed/unsupported arrays
+remain invalid. Preserve scalar NUMERIC(p,s), named JSONB and TEXT[] behavior.
+No D decoder edit, migration, SQL parser, permissive suffix mapping or new
+runtime data owner is authorized. Table creation alone is not encoding proof.
+
+The expanded existing TestNodeStateCanonicalListsBootstrapBothStores now includes
+all physical primitive families and actual column writes/readback through the
+schema owner's native construction fixtures: TEXT[], BIGINT[], DOUBLE PRECISION[],
+NUMERIC[], NUMERIC(5,2)[], BOOLEAN[], UUID[], TIMESTAMPTZ[], JSONB[], plus named
+JSONB and scalar regressions. This remains distinct from actual public verify,
+boot, mutation and retained restart proof. Private schema-owner native evidence
+is not a public-surface or runtime generated-table writer claim.
+
+The pre-repair diagnostic b-renderer-domain-red.jsonl reproduces SQLite refusal
+and a newly uncovered S08d same-concept reader gap on PostgreSQL: table creation
+succeeds, but InspectSchema -> inspectStatePlans -> loadPostgresSchemaShape ->
+normalizeSchemaType reads timestamp with time zone[] and compares it with
+timestamptz[]. The scalar alias is already recognized; its array counterpart
+is not. Actual failure: column canonical_list_state.times type is timestamp
+with time zone[], want timestamptz[]. No compatible-table assertion is removed.
+
+| Added row | Owner/consumers | Bounded repair and proof |
+|---|---|---|
+| S08c SQLite physical primitive arrays | schemastore.sqliteRenderType -> SQLiteStatementsForPlan -> expectedSchemaShape, BootstrapSchema and InspectSchema | Approved6139336433: only schema-owner-supported canonical scalar array elements become existing SQLite TEXT; complete-domain renderer positives/refusals and real native value round-trips on both stores. |
+| S08d PostgreSQL array type evidence | schemastore.normalizeSchemaType, used by expected column parsing and native loadPostgresSchemaShape; inspectStatePlans governs both InspectSchema and boot's existing-table check | Request compact amendment: recognize only the existing timestamp-with-time-zone alias with one array dimension as timestamptz[], preserving scalar/array/dimension distinctions and every other drift refusal. Direct alias/distinctness controls plus complete-domain real bootstrap/inspection/readback and mismatched-column controls. compatibility.go is untouched pending that ruling. |
+
+The earlier template timeout is classified by retained actual event evidence:
+the delivery was already terminal producer/account.ready, while G's test waited
+for the unqualified account.ready. The corrected exact scoped predicate passes
+both public roots on both stores race x3 at545de5b0c (633 checks, zero fail/skip,
+18 public root/backend checks). No runtime routing change or replay occurred.
+This corrects the stale template-hold sentence in6139336433, not the renderer gate.
+S08d blocks complete-domain closure until independently disposed; C stays frozen.
+
+The approved renderer implementation validates its candidate scalar element
+through SchemaFieldTypeToDDL and requires exact canonical physical spelling,
+rejecting any nested array before delegation. Complete-domain renderer controls
+pass race x3 (108 checks); that selector did not execute the native bootstrap
+root and is not claimed as physical encoding proof. A fresh combined selector
+remains required, including the still-red PostgreSQL inspection cut.
+
+Public source now declares canonical primitive/named generated state columns
+and the exact numeric block carrier in the existing both-store restart fixture;
+public node suffix/prefix refusals cover text, numeric(p,s) and Item at all three
+verify/describe/serve entrances. The full raw entity snapshot is cleared before
+each restart read so missing response fields cannot survive JSON map reuse.
+
+D's updated node-only allocation6139529813 supplies the exact two-line style
+correction in list_declaration_value.go from signed442e7c64a. G consumes that
+file unchanged with attribution; bare bracket-like styled scalars also refuse
+leading-whitespace and block styles, while explicit metadata type slots remain
+valid. Direct node negatives include all those carriers. No global D decoder,
+corpus or shape-call edits are imported.
+
 ## Pre-Push Checkpoint After 2645 Integration
 
 The complete guard/census selector at 77158295b finished all 299 packages:

@@ -52,6 +52,8 @@ explicit: {type: '[text]', default: []}
 	}
 	for _, source := range []string{
 		"items: '[text]'\n", "items: ['text']\n", "items: [numeric(5,2)]\n",
+		"items: ' [text]'\n", "items: \" [text]\"\n",
+		"items: |\n  [text]\n", "items: >\n  [text]\n",
 		"items: {type: [text]}\n", "items: []\n", "items: [[text]]\n",
 	} {
 		t.Run(source, func(t *testing.T) {
