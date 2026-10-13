@@ -543,6 +543,6 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("real join continuation did not complete %s: %+v\n%s", path, period, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("real join continuation did not complete %s: %+v\n%s", path, period, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return period
 }

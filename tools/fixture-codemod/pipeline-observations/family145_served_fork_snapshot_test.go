@@ -67,6 +67,7 @@ func family145ServedForkSnapshotProofError(before, after string) error {
 }
 
 func family145ServedSnapshotConsumerProofError(function, before, after string) error {
+	after = family145ServedDebugCallerInverse(function, after)
 	normalized := after
 	normalized = strings.ReplaceAll(normalized, "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)", "snapshotForkReceiverApplication(t, rt)")
 	switch function {

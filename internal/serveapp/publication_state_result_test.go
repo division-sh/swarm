@@ -51,7 +51,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 						time.Sleep(20 * time.Millisecond)
 					}
 					if eventID == "" {
-						t.Fatalf("missing state-result %s\n%s\n%s", outcome, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID), first.outputString())
+						t.Fatalf("missing state-result %s\n%s\n%s", outcome, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID), first.outputString())
 					}
 					readback := func() string {
 						waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)

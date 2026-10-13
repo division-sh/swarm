@@ -129,7 +129,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
 			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, "", "waiting")
 			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
-			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
+			waitServedEventPublishEventID(t, db, reader, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			probe.Expect(seed.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			probe.Expect(spinup.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
@@ -143,7 +143,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			}
 			var stopped any
 			requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "audit2277-stop"}, &stopped)
-			requireServedRunStatusWithDebug(t, endpoint, db, backend, seed.RunID, "cancelled")
+			requireServedRunStatusWithDebug(t, endpoint, reader, backend, seed.RunID, "cancelled")
 			before := repeatedStaticRunSnapshot(t, db, seed.RunID)
 			var readinessBefore string
 			if err := db.QueryRow(`SELECT CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1`, seed.RunID).Scan(&readinessBefore); err != nil {
@@ -162,7 +162,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			second := startServeRuntimeTestProcess(t, opts)
 			second.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString()) + "/v1/rpc"
-			requireServedRunStatusWithDebug(t, endpoint, db, backend, seed.RunID, "cancelled")
+			requireServedRunStatusWithDebug(t, endpoint, reader, backend, seed.RunID, "cancelled")
 			var readinessAfter string
 			if err := db.QueryRow(`SELECT CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1`, seed.RunID).Scan(&readinessAfter); err != nil {
 				t.Fatal(err)

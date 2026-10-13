@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "4af41ac3ab17e18137385675972543cbec897491ae2cfcdf5491fdda32f25bb2"
+const targetDigest = "57299f75b5ac17086c95f0a7a30eff118e3589d809f24da2a2c463e6e6f622fe"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -264,6 +264,7 @@ var files = []string{
 }
 
 func main() {
+	includeServedDebugTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -328,7 +329,9 @@ var renamedHelpers = map[string]map[string]string{
 
 var retiredEventFixtureHelpers = map[string]map[string]bool{
 	"internal/serveapp/main_runtime_test.go": {
-		"servedEventPublishEntityState": true,
+		"servedEventPublishEntityState":  true,
+		"servedEventPublishDebugSummary": true,
+		"servedEventPublishDebugQuery":   true,
 	},
 	"internal/serveapp/fork_receiver_ownership_test.go": {
 		"readForkReceiverRows": true,
@@ -343,8 +346,35 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 	},
 }
 
+func includeServedDebugTargets() {
+	raw, err := os.ReadFile("tools/fixture-codemod/pipeline-observations/family145-served-debug-preimages.json")
+	must(err)
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSuffix(string(raw), "\n")))) != "31f62531eda187d22fa6d08b1379ab1df88a4d4f75aa6c997b00fdb06d89700e" {
+		panic("served diagnostic dependency differs from exact inspected source")
+	}
+	var rows []struct{ File, Function string }
+	must(json.Unmarshal(raw, &rows))
+	known := map[string]bool{}
+	for _, file := range files {
+		known[file] = true
+	}
+	for _, row := range rows {
+		if strings.HasPrefix(row.Function, "type/") {
+			continue
+		}
+		if !known[row.File] {
+			files = append(files, row.File)
+			known[row.File] = true
+			gateRecoveryTargets[row.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[row.File]; limited {
+			targets[row.Function] = true
+		}
+	}
+}
+
 var gateRecoveryTargets = map[string]map[string]bool{
-	"internal/serveapp/constructed_decision_deferral_test.go": {"TestServedFieldlessGateDeferralBothStores": true},
+	"internal/serveapp/constructed_decision_deferral_test.go":         {"TestServedFieldlessGateDeferralBothStores": true},
 	"internal/serveapp/lifecycle_transition_served_test.go":           {"lifecycleStoredSnapshot": true, "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores": true},
 	"internal/serveapp/lifecycle_transition_nested_test.go":           {"TestServedCompiledTransitionNestedCarrierCollisionOnBothStores": true},
 	"internal/serveapp/lifecycle_transition_static_fork_test.go":      {"TestServedCompiledTransitionStaticForkEvidenceOnBothStores": true},

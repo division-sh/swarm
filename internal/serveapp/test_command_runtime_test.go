@@ -544,6 +544,8 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 
 func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	t.Setenv("PATH", t.TempDir())
@@ -554,7 +556,6 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
-	var db *sql.DB
 	var configPath string
 	var postgresDSN string
 	if backend == servedparity.BackendExplicitPostgres {
@@ -573,9 +574,6 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 			})
 		} else {
 			stores, err = oldBuildStores(ctx, selection, cfg)
-		}
-		if err == nil {
-			db = selectedStoreDatabaseForTest(t, stores)
 		}
 		return stores, err
 	}
@@ -635,7 +633,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 
 	runID := requireSingleServedBundleRun(t, endpoint, bundleHash)
 	requirePublicMockApprovalEvents(t, endpoint, runID)
-	requireServedParitySettlementPostconditions(t, endpoint, db, servedBackendLabel(backend), runID, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle))
+	requireServedParitySettlementPostconditions(t, endpoint, reader, servedBackendLabel(backend), runID, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle))
 }
 
 func requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t *testing.T, serverURL string) {
@@ -1127,6 +1125,8 @@ func mustBundleFromSource(t *testing.T, source semanticview.Source) *runtimecont
 
 func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	configureStandingLifecycleCredentials(t)
@@ -1236,7 +1236,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	if !reflect.DeepEqual(payload, wantPayload) {
 		t.Fatalf("%s persisted event %s payload = %#v, want %#v", backend, eventID, payload, wantPayload)
 	}
-	requireServedParitySettlementPostconditions(t, endpoint, db, servedBackendLabel(backend), runID, servedparity.MustScenario(servedparity.ScenarioGeneratedInputFixtureLifecycle))
+	requireServedParitySettlementPostconditions(t, endpoint, reader, servedBackendLabel(backend), runID, servedparity.MustScenario(servedparity.ScenarioGeneratedInputFixtureLifecycle))
 }
 
 func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) string {

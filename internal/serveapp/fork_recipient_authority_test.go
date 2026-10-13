@@ -57,7 +57,7 @@ func requireServedForkConsumerAuthority(t *testing.T, rt servedControlProofRunti
 		}
 		if status != "delivered" || outcome != "delivered" || claimVersion != 1 || outcomeVersion != claimVersion || outcomes != 1 {
 			t.Logf("failed consumer entity-state rows run=%s: %v", runID, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), runID)["entity_state"])
-			t.Logf("failed consumer run=%s event=%s delivery=%s\n%s", runID, eventID, id, servedEventPublishDebugQuery(t, rt.DB, rt.Backend, "runtime_logs", runID))
+			t.Logf("failed consumer run=%s event=%s delivery=%s\n%s", runID, eventID, id, servedInspectionRuntimeLogDebugSummary(rt.ReceiverStateReader, runID))
 			logServedForkHandlerDiagnostics(t, rt)
 			t.Fatalf("consumer did not settle exactly once: status=%s outcome=%s claim=%d outcome_claim=%d outcomes=%d failure=%s", status, outcome, claimVersion, outcomeVersion, outcomes, failure)
 		}

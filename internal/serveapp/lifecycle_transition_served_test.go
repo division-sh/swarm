@@ -63,7 +63,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 								}
 								path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
 								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != choice || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
-									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID), servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 								}
 								var entity operatorread.OperatorEntityFull
 								requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
@@ -109,7 +109,7 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return ""
 }
 

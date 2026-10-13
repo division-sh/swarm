@@ -1897,6 +1897,22 @@ func ReadPublicationEventIdentityStorageForTest(ctx context.Context, selected an
 	return out, nil
 }
 
+func ReadServedEventRunIDStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return "", err
+	}
+	var runID string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		runID, err = eventrecord.ReadEventRunIDStorageTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return runID, nil
+}
+
 func ReadOperatorReferenceStorageForTest(ctx context.Context, selected any, eventID string) (OperatorReferenceStorage, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return OperatorReferenceStorage{}, err

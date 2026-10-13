@@ -146,6 +146,8 @@ func TestServedParityHarnessStandingServiceLifecycle(t *testing.T) {
 
 func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	isolateCLIAPIConfigEnv(t)
 	managerProbe := &servedManagerScheduleProjectionProbe{}
 	telegramGate := &servedTelegramDeliveryGate{}
@@ -214,10 +216,6 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	default:
 		t.Fatalf("unknown standing served parity backend %q", backend)
 	}
-	debugBackend := "postgres"
-	if backend == servedparity.BackendDefaultSQLite {
-		debugBackend = "sqlite"
-	}
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 2)
 	opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) {
 		contextsReady <- manager
@@ -237,7 +235,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Fatalf("%s initial standing service returned wrong binding: %+v", backend, binding)
 	}
 	firstSchedules := waitForServedManagerScheduleProjection(t, firstScheduleResult, backend, "suspend", func() string {
-		return first.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
+		return first.outputString() + "\n" + servedInspectionRunDebugSummary(reader, firstRunID)
 	})
 	telegramGate.waitForStart(t, firstRouteStarted, backend, "suspend")
 	suspendKey := "standing-suspend-" + string(backend)
@@ -277,7 +275,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Fatalf("%s resumed standing service returned wrong binding: %+v", backend, binding)
 	}
 	resumedSchedules := waitForServedManagerScheduleProjection(t, resumedScheduleResult, backend, "reset", func() string {
-		return second.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
+		return second.outputString() + "\n" + servedInspectionRunDebugSummary(reader, firstRunID)
 	})
 	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
 	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
@@ -316,10 +314,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
 	debugRun := func(runID string) func() string {
-		return func() string { return servedEventPublishDebugSummary(t, db, debugBackend, runID) }
+		return func() string { return servedInspectionRunDebugSummary(reader, runID) }
 	}
-	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(firstRunID))
-	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(reset.RunID))
+	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, reader, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(firstRunID))
+	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, reader, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(reset.RunID))
 	assertServedStandingResetAndShutdownJoin(t, backend, second, secondManager, secondEndpoint, db, reset, freshOwner)
 }
 

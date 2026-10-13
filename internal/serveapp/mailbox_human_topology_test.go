@@ -58,7 +58,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						}
 						var id string
 						if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
-							t.Fatalf("real ask_human card: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, f.base.RunID))
+							t.Fatalf("real ask_human card: %v\n%s", err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, f.base.RunID))
 						}
 						card, err := owner.GetDecisionCard(f.ctx, id)
 						if err != nil {
@@ -158,7 +158,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						if count != 1 {
-							t.Fatalf("requester outcome deliveries=%d, want exactly one\n%s", count, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, f.base.RunID))
+							t.Fatalf("requester outcome deliveries=%d, want exactly one\n%s", count, servedInspectionRunDebugSummary(rt.ReceiverStateReader, f.base.RunID))
 						}
 					})
 				}

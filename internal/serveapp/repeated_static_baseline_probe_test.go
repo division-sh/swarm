@@ -42,10 +42,10 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 					time.Sleep(20 * time.Millisecond)
 				}
 				if count != 1 {
-					t.Fatalf("independent run %d failed static materialization before any transition history read\n%s", attempt, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("independent run %d failed static materialization before any transition history read\n%s", attempt, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, seed.RunID, "completed")
+				requireServedRunStatusWithDebug(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, seed.RunID, "completed")
 				for _, check := range []struct {
 					query string
 					want  int
@@ -61,7 +61,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 						t.Fatal(err)
 					}
 					if count != check.want {
-						t.Fatalf("run %d: %s = %d, want %d\n%s", attempt, check.query, count, check.want, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+						t.Fatalf("run %d: %s = %d, want %d\n%s", attempt, check.query, count, check.want, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 					}
 				}
 				var producer, rawFields string

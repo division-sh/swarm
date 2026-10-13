@@ -27,7 +27,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 				}
 				t.Cleanup(func() {
 					if t.Failed() {
-						t.Log(servedEventPublishDebugSummary(t, rt.DB, rt.Backend, created.RunID))
+						t.Log(servedInspectionRunDebugSummary(rt.ReceiverStateReader, created.RunID))
 					}
 				})
 				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, created.RunID, "", "review")

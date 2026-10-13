@@ -856,6 +856,24 @@ func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID s
 	return strings.Join(sections, "\n"), nil
 }
 
+func ReadServedRuntimeLogDebugSummaryForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return "", err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return "", err
+	}
+	backend := "sqlite"
+	if _, postgres := selected.(*PostgresStore); postgres {
+		backend = "postgres"
+	}
+	section := readServedRunDebugInspectionSection(ctx, selected, backend, "runtime_logs", runID)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return section, nil
+}
+
 // Independent section transactions preserve later diagnostics after a failed
 // PostgreSQL query, including for an unaccepted read-only process inspector.
 func readServedRunDebugInspectionSection(ctx context.Context, selected any, backend, scope, runID string) string {

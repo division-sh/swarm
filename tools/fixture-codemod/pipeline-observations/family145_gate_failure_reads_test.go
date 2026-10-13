@@ -40,6 +40,9 @@ var family145GateFailureReadCuts = map[string][]string{
 }
 
 func family145GateFailureReadProofError(key, before, after string) error {
+	if parts := strings.SplitN(key, "|", 2); len(parts) == 2 {
+		after = family145ServedDebugCallerInverse(parts[1], after)
+	}
 	want, err := family145DescriptorBusinessAssertions(before)
 	if err != nil {
 		return err

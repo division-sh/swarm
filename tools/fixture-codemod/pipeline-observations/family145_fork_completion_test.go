@@ -15,6 +15,7 @@ import (
 var family145ForkCompletionPreimages []byte
 
 func family145ForkCompletionInverse(function, after string) string {
+	after = family145ServedDebugCallerInverse(function, after)
 	if function != "waitForkReceiverSourceCompletion" {
 		return strings.ReplaceAll(after, "waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, ", "waitForkReceiverSourceCompletion(t, rt, ")
 	}

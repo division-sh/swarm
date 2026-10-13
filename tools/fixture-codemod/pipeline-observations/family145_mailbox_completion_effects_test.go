@@ -97,7 +97,15 @@ func TestFamily145MailboxEffectsWholeDependencyRetainsEveryCallerBodyAndCompleti
 }
 
 func TestFamily145PublicationDiagnosticsRetainExactElevenSectionDialectInventory(t *testing.T) {
-	original := family145ConversationForkOwnerSource(t, "../serveapp/main_runtime_test.go", "servedEventPublishDebugQuery")
+	original := ""
+	for _, row := range family145ServedDebugRows {
+		if row.Function == "servedEventPublishDebugQuery" {
+			original = row.Before
+		}
+	}
+	if original == "" {
+		t.Fatal("signed predecessor diagnostic query inventory missing")
+	}
 	physical := family145ConversationForkOwnerSource(t, "internal/runtimepersistence/test_served_delivery_observation.go", "servedRunDebugSQL")
 	delivery := family145ConversationForkOwnerSource(t, "internal/backend/delivery/read_projections.go", "runDeliveryDebugQuery")
 	lifecycle := family145ConversationForkOwnerSource(t, "internal/backend/runlifecycle/run_lifecycle_candidates.go", "readRunDebugStorageTx")
@@ -130,6 +138,7 @@ func family145MailboxNormalizeDiagnosticQueries(queries []string) []string {
 
 func family145MailboxCompletionCheckCaller(t *testing.T, function, before, after, normalized string) {
 	t.Helper()
+	normalized = family145MailboxCompletionCallerInverse(family145ServedDebugCallerInverse(function, after))
 	if function == "requireTypedReceiverInitializationCases" {
 		if err := family145ForkSourceDomainCallerProofError(function, before, after); err != nil {
 			t.Fatal(err)

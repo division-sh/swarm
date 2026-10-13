@@ -106,13 +106,13 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 			t.Fatal(err)
 		}
 		if failed != 0 {
-			t.Fatalf("configured agent journey dead-lettered\n%s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("configured agent journey dead-lettered\n%s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 		}
 		if completed >= turns {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("agent turns=%d want=%d\n%s", completed, turns, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("agent turns=%d want=%d\n%s", completed, turns, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

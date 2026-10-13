@@ -84,6 +84,9 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if rows, err := storetest.ReadLifecycleBusinessStorage(retained, observer, identity.RunID); err == nil || rows != nil {
 				t.Fatalf("retired inspection returned lifecycle rows: %+v %v", rows, err)
 			}
+			if value, err := storetest.ReadServedEventRunIDStorage(retained, observer, "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || errors.Is(err, sql.ErrNoRows) || value != "" {
+				t.Fatalf("retired inspection reached event-run SQL: %s/%v", value, err)
+			}
 			if cut, err := storetest.ReadReceiverEntityAtEventCut(retained, observer, identity.RunID, entityID.String(), "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || !reflect.DeepEqual(cut, runfork.RunForkEntityState{}) {
 				t.Fatalf("retired inspection snapshot returned historical evidence: %+v %v", cut, err)
 			}
@@ -149,6 +152,13 @@ func requireReleaseInspectionMailboxAndDiagnostics(t *testing.T, writer any, obs
 	}
 	if got, err := storetest.ReadServedRunDebugSummary(ctx, observer, runID); err != nil || got != summary || len(strings.Split(got, "\n")) != 11 {
 		t.Fatalf("independent unaccepted inspection lost diagnostic sections/fields: %s %v", got, err)
+	}
+	logs, err := storetest.ReadServedRuntimeLogDebugSummary(ctx, observer, runID)
+	if err != nil || logs != "runtime_logs: []" || !strings.HasSuffix(summary, logs) {
+		t.Fatalf("independent unaccepted log section changed physical output: %s/%v", logs, err)
+	}
+	if value, err := storetest.ReadServedEventRunIDStorage(ctx, observer, "b3c04b72-07f1-4097-a1f0-779955000005"); !errors.Is(err, sql.ErrNoRows) || value != "" {
+		t.Fatalf("unaccepted observer did not reach exact physical event absence: %s/%v", value, err)
 	}
 	requireReleaseInspectionUnaccepted(t, ctx, observer)
 	requireReleaseInspectionWriterStage(t, observer, runID)

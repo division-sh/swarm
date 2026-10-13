@@ -6453,3 +6453,107 @@ static-fork/drain/final-integration holds remain OPEN. Existing watchlist/parent
 mapping suffices. No push, PR, tier, server2 or rebase; rebase remains ONCE after
 #2617 and orchestrator handoff. Receipts:~/.cache/swarm-2542-family145/
 fork-completion-*.
+
+## Whole Served Diagnostic Dependency Wave
+
+Stacked on approved bfdcdc112, bulk gate6134544118 and carry6137624214.
+The chosen class is the complete served raw-debug interpreter and its enclosing
+original/independent-inspection reader propagation, not all SQL still present in
+these callers. All63 run-summary calls and the one standalone runtime-log call
+now use the existing selected inspection owner. Both raw summary/query helpers
+are deleted. Seventeen fixed shared-helper argument chains and nine original
+reader captures are included in85 full declaration preimages. Other raw
+mutations, counts, timers and receipt reads in the same files stay counted debt.
+This closes an interpreter dependency only; #2542/#2151 remain OPEN.
+
+Binding context is the approved issue/thread plus platform-spec selected-role,
+selected_runtime_mutation_unit_of_work and raw_sql_policy.allowed private bounded
+fixture operations. Production platform/runtime semantics are unchanged. No
+compatibility port, arbitrary table/SQL/callback, independent reconstructed
+coordinator or new execution framework is introduced. No spec amendment is
+needed for this fixture-only confinement.
+
+| Canonical owner | Systematic consumption and preserved scope |
+| --- | --- |
+| Existing original native inspection role | Every63 summary consumer uses servedInspectionRunDebugSummary with its original reader or the actual independent read-only observer. Nine roots capture p.deps.EventStore at original construction; the session cleanup carrier retains that role, and the reset candidate uses candidates[1].runtime.Bus.Store(), not an old pool or inferred backend. |
+| Existing fixed eleven-section diagnostic owner | All runs/entity/flow/event/delivery/settled-attempt/receipt/pipeline-obligation/dead-letter/agent/runtime-log sections retain physical fields, predicates, ordering, limits and NULL/byte/driver representation. Query errors remain explicit diagnostic strings; rollback of one section permits later sections. No diagnostic grants success or continuation authority. |
+| Existing eventrecord row-family owner | ReadEventRunIDStorageTx projects only exact event->run identity inside the original selected read transaction. It must NOT decode or admit the full envelope: corrupt route data still yields the physical identity. The bridge stays in test_event_support.go and crosses storetest as detached string only. Missing/error evidence is discarded. |
+| Existing fixed runtime-log diagnostic section | The one standalone consumer uses ReadServedRuntimeLogDebugSummary through the same section reader as the full eleven-section report. No caller-supplied section name, predicate, table or SQL survives. |
+| Finite transform/correspondence owner | One shared pure serveddebug rule owns all85 original/current declaration pairs,63 direct calls, two retirements, one carrier field and complete helper propagation. Owned-source traversal includes constrained Go files and excludes foreign checkouts. Unknown owner, scope, arity, argument or capture layout refuses. |
+
+The full declaration manifest is family145-served-debug-preimages.json, pinned
+to signed predecessor bfdcdc112f7053494ea597c053aaa49678804bbc. Its canonical JSON
+digest (without final newline) is
+31f62531eda187d22fa6d08b1379ab1df88a4d4f75aa6c997b00fdb06d89700e;
+complete-file SHA256 is
+5bc30573335e4c9efc8915f7db12eb345938e927b347bf368007c1b899a8bd4a.
+The generator validates ALL complete current declarations against exact
+Before/After before writes; reapplication is idempotent. Guards validate every
+complete body and reject changed source identity, original reader, assertion,
+wait/deadline/poll, lifecycle cut, release, fork, capture and event lookup.
+Historical inverse composition accepts only exact current bodies, not substrings
+or changed hash expectations. Candidate-overlay typing covers every rewritten
+package/test variant (PASS130.806s). Three adjacent historical correspondence
+controls initially rejected the new diagnostic spelling; exact whole-body
+composition repairs them. Final corpus:165 roots/1584 passes, zero failures/skips
+(1406 recipes/700 transitions); original Before and all24 historical receipts
+are retained. Current corpus digest:
+57299f75b5ac17086c95f0a7a30eff118e3589d809f24da2a2c463e6e6f622fe.
+
+| Manifestation | Status and exact execution proof |
+| --- | --- |
+| Raw eleven-section summary and enclosing helper chains | execution-proven through the same corrected path: all85 complete-body rule/inventory/idempotence controls; original dynamic held-publication SQLite/PostgreSQL roots under race, PASS21s combined; original join failure and timer-bearing fork refusal plus semantic-numeric idempotent restart under race, PASS29.618s |
+| Original served role, no incidental raw mock capture | execution-proven through the same corrected path: TestServedParityHarnessPublicMockApprovalLifecycle, both stores under race, PASS45.446s; public event/readback/settlement assertions unchanged |
+| Reader continuity through standing suspend/restart/reset | execution-proven through the same corrected path: TestServedParityHarnessStandingServiceLifecycle, both stores under race; original generation, scheduling, delivery, reset and joined-shutdown assertions retained |
+| Independent unaccepted read-only process role | execution-proven through the same corrected path: TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores under race, PASS11.159s; fixed log output and physical event absence work before acceptance; retained retired inspection refuses before event SQL |
+| Identity-only lookup after real envelope corruption | reproduced and fixed: TestServedEventRunIdentityObservationRemainsPhysicalAfterEnvelopeCorruptionBothStores under race. Existing exact selected live fault makes full event decode refuse while the physical run ID remains available; one read begin/commit, zero write commits/failures/active transactions and full application-storage immutability |
+| Missing/nil/raw/invalid/cancelled/closed identity and log roles | reproduced and fixed: TestServedEventRunIdentityAndLogDiagnosticRefuseRawInvalidCancelledAndClosedBothStores under race; error paths return no partial identity, and failed diagnostic sections never fabricate empty success |
+| Query error rollback and later-section continuation | execution-proven through the same corrected path: TestServedRunDiagnosticsRetainAllElevenSectionsAndContinueAfterQueryErrorBothStores, final restored owner run under race, PASS23.286s together with the two new roots |
+| Forbidden full-envelope decode in physical lookup | reproduced and fixed: actual temporary full ReadCanonicalEventRecordForTest mutation fails both stores specifically on corrupted-envelope lookup and transaction counters; exact restoration passes. No mutant remains |
+| Prior isolated backend-query setup omitted from writer inventory | split / escalated as separate class: TestEventFixtureWritersUseSemanticOwners fails identically on unchanged bfdcdc112 and this candidate, naming two INSERTs in eventrecord/reset_recovery_storage_test.go. Query-only test/source and guard are unchanged by this wave. Exact bounded inventory disposition requested; not waived |
+| Retained raw-helper signature accounting | split / escalated as separate class: final-source normal read-only ratchet refuses changed writer-stage body pins. Exact49 identity pairs /71 retained raw occurrences requested; no baseline refresh, generic normalization or zero-debt credit |
+
+Accounting is INTENTIONALLY HELD. Committed authoritative baseline stays
+7468 findings/5183 raw sites, SHA256
+fb6db8b87f441912b61afded6ea18eec5238520d672a5cb46a63c87da2f31bd5.
+A source-frozen read-only preview using the actual existing collectors gives
+7340/5065. Exact request artifact
+.github/audit-artifacts/issue-2542-served-debug-signature-transition-request.json
+SHA256bcf9e019cc0ecbd0eccd28c97689074e509b94372ece4d8f93c6c77f790be018
+contains49 pairs/71 occurrences. Its generator rejects other parameter/result/
+argument/receiver, location, class, family, owner or multiplicity changes and
+coexisting donors/recipients. Removing ONLY the added reader parameter/argument
+recovers every old full resolved descriptor. ALL71 stay debt with zero deletion
+credit. With those exact transfers conserved, this candidate represents128
+genuine findings/118 raw-site removals, no unrelated additions. These are
+PROVISIONAL counts, not a refreshed or green ratchet claim.
+
+Four previous seven-pair callee pins require exact composition through the new
+signed85-body rule: runServedDynamicAutoEmitProof, runServedEventPublishActiveLoadProof,
+runServedEventPublishFollowUpProof and runServedEventPublishTargetRouteProof.
+Each new Before is byte-for-byte the original reviewed After. Preserve all11
+old hashes/artifact and match ONLY exact current bodies back to those originals;
+do not silently replace their hash values or broaden prior seven/nine mappings.
+Collector/policy, old source pins and baseline remain unchanged pending ruling.
+The complete structural sweep executes81 roots:80 pass; the one inherited
+isolated-query inventory RED above remains explicit. Eight directly affected
+persistence-boundary guards pass. Affected U1000 and new-function complexity
+checks pass; signed exact-head complexity is required for this checkpoint.
+
+The initial preview extractor incorrectly filtered split go-test JSON output
+chunks and produced invalid TSV rows. Those preliminary totals are discarded.
+The retained preview concatenates EVERY output chunk for its named test and
+validates all eight columns, unique identities and positive multiplicities.
+An earlier read-only ratchet overlapping a temporary mutant is not final-source
+evidence; its final-source successor reproduces the exact source-pin hold.
+No read-only preview, failure or historical guard receipt is labeled green.
+
+Architecture disposition remains existing #2542/#2151 watchlist only: reuse
+fixed domain projections and delete shared interpretation, not a new fixture
+framework. Remaining parent class/child tail remains tracked by the live census;
+all M01/Docker/D3/M07/static-fork/drain/final-zero-tail/integration holds stay
+OPEN. The wave does not claim general flake or throughput repair. End-to-end
+timing will accompany the signed checkpoint; distinguish accounting/review wait
+from implementation and proof. No push, PR, tier, server2 or rebase. Rebase is
+ONCE after #2617 and orchestrator handoff. Receipts live under
+~/.cache/swarm-2542-family145/served-debug-*.

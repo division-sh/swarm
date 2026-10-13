@@ -120,7 +120,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("source completion candidate did not settle: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("source completion candidate did not settle: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
 				time.Sleep(10 * time.Millisecond)
 			}

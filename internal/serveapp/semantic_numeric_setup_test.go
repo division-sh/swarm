@@ -61,7 +61,7 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			if public.Fields["score"] != float64(10) {
 				t.Fatalf("republication lost numeric agreement: %#v", public)
 			}
-			requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, run, servedparity.Scenario{
+			requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, run, servedparity.Scenario{
 				ID: "numeric-setup-republication", Postconditions: []servedparity.Postcondition{servedparity.PostconditionNoNonTerminalDeliveries, servedparity.PostconditionNoPendingPipelineEvents, servedparity.PostconditionNoUnfiredDueTimers}})
 		})
 	}

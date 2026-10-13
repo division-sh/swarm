@@ -176,7 +176,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
 	var id string
 	if err := f.rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
-		t.Fatalf("ask_human did not create a card: %v\n%s", err, servedEventPublishDebugSummary(t, f.rt.DB, f.rt.Backend, f.base.RunID))
+		t.Fatalf("ask_human did not create a card: %v\n%s", err, servedInspectionRunDebugSummary(f.rt.ReceiverStateReader, f.base.RunID))
 	}
 	card, err := f.store.GetDecisionCard(f.ctx, id)
 	if err != nil {

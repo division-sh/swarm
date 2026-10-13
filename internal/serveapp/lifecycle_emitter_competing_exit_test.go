@@ -292,7 +292,7 @@ func lifecycleCompetingTerminalEntity(t *testing.T, rt servedControlProofRuntime
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("neither competing exit settled: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("neither competing exit settled: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return operatorread.OperatorEntityFull{}
 }
 

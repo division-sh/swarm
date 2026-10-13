@@ -28,6 +28,7 @@ func family145CheckLifecycleReaderWholeRule(t *testing.T, file, function, after 
 	}
 	for _, row := range rows {
 		if row.File == file && row.Function == function {
+			after = family145ServedDebugCallerInverse(function, after)
 			if fmt.Sprintf("%x", sha256.Sum256([]byte(family145LifecycleReadersInverse(after)))) != row.SHA256 {
 				t.Fatalf("lifecycle reader rule changed complete signed predecessor: %s/%s", file, function)
 			}
@@ -49,6 +50,7 @@ func TestFamily145LifecycleReadersKeepAll50CallsAndWholeBodies(t *testing.T) {
 	counts, loops := 0, 0
 	for _, row := range rows {
 		after := family145ConversationForkOwnerSource(t, "../serveapp/"+strings.TrimPrefix(row.File, "internal/serveapp/"), row.Function)
+		after = family145ServedDebugCallerInverse(row.Function, after)
 		if !family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, after) {
 			t.Fatal("missing lifecycle reader rule")
 		}

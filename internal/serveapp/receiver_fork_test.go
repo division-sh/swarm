@@ -141,7 +141,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						if time.Now().After(deadline) {
-							t.Fatalf("entityless output did not settle: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, request.RunID))
+							t.Fatalf("entityless output did not settle: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, request.RunID))
 						}
 						time.Sleep(10 * time.Millisecond)
 					}

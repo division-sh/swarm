@@ -195,6 +195,14 @@ func servedInspectionRunDebugSummary(reader receiverProofStateReader, runID stri
 	return summary
 }
 
+func servedInspectionRuntimeLogDebugSummary(reader receiverProofStateReader, runID string) string {
+	summary, err := storetest.ReadServedRuntimeLogDebugSummary(context.Background(), reader, runID)
+	if err != nil {
+		return fmt.Sprint(err)
+	}
+	return summary
+}
+
 func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID string) {
 	t.Helper()
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
@@ -218,7 +226,7 @@ func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("fan-out did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("fan-out did not finish: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 }
 
 func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, runID, mode string, want map[string][]int, textValues bool) {

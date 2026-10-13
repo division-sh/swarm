@@ -54,6 +54,10 @@ func ReadPublicationEventIdentityStorage(ctx context.Context, selected any, even
 	return private.ReadPublicationEventIdentityStorageForTest(ctx, selected, eventID)
 }
 
+func ReadServedEventRunIDStorage(ctx context.Context, selected any, eventID string) (string, error) {
+	return private.ReadServedEventRunIDStorageForTest(ctx, selected, eventID)
+}
+
 func ReadOperatorReferenceStorage(ctx context.Context, selected any, eventID string) (OperatorReferenceStorage, error) {
 	return private.ReadOperatorReferenceStorageForTest(ctx, selected, eventID)
 }

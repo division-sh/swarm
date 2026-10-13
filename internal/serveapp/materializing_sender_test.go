@@ -28,7 +28,7 @@ func TestMaterializingSenderReachesExistingRequiredReceiverBothStores(t *testing
 					t.Fatal(err)
 				}
 				if count != 1 {
-					t.Fatalf("receiver completions=%d: %s", count, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("receiver completions=%d: %s", count, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
 			})
 		}
@@ -95,7 +95,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				if deliveries != 2 || companions != 1 {
-					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
 				before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID)
 				rt, _ = restart()
@@ -131,7 +131,7 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 			// Construction precedes execution. A rejected handler must preserve
 			// its initial header/fields, not erase the successfully constructed tree.
 			if states != 1 || publications != 0 || failed != 1 {
-				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 			}
 			var entityID, stage, fields string
 			var headerRevision, fieldRevision, mutations int

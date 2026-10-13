@@ -74,7 +74,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 							break
 						}
 						if time.Now().After(deadline) {
-							t.Fatalf("receiver retry never committed: status=%s err=%v\n%s", status, err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+							t.Fatalf("receiver retry never committed: status=%s err=%v\n%s", status, err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 						}
 						time.Sleep(10 * time.Millisecond)
 					}

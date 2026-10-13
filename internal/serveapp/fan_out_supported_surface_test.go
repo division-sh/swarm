@@ -315,7 +315,7 @@ func awaitIssue2394SurfaceDiagnosis(t *testing.T, rt servedControlProofRuntime, 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("served fan-out did not settle: %+v\n%s", result, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("served fan-out did not settle: %+v\n%s", result, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return result
 }
 

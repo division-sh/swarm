@@ -82,7 +82,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				if failure, err := storetest.ReadGateDeadLetterFailure(context.Background(), diagnosticStore, published.EventID); err == nil {
 					t.Logf("receiver failure: %s", failure)
 				}
-				t.Fatalf("mixed real execution agents/nodes/turns=%d/%d/%d\n%s", agents, nodes, turns, servedEventPublishDebugSummary(t, db, backend, published.RunID))
+				t.Fatalf("mixed real execution agents/nodes/turns=%d/%d/%d\n%s", agents, nodes, turns, servedInspectionRunDebugSummary(reader, published.RunID))
 			}
 			rows, err := db.Query(`SELECT d.subscriber_type,CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='work.completed'`, published.RunID)
 			if err != nil {

@@ -65,6 +65,16 @@ func ReadRunStartEventIdentityTx(ctx context.Context, tx *sql.Tx, runID, eventNa
 
 type PublicationEventIdentityStorage struct{ RunID, EventName, ProducedBy, EntityID string }
 
+// Diagnostics need only the stored run identity, even when other event columns
+// cannot be decoded. Do not turn this physical lookup into event admission.
+func ReadEventRunIDStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var runID string
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT) FROM events WHERE event_id=$1`, eventID).Scan(&runID); err != nil {
+		return "", err
+	}
+	return runID, nil
+}
+
 type RootTemplatePublicationStorage struct {
 	EventName, EntityID, FlowInstance, TargetRoute, TargetSet string
 	Payload                                                   json.RawMessage

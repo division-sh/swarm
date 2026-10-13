@@ -128,12 +128,12 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 			if err := rt.DB.QueryRow(`SELECT CAST(run_id AS TEXT) FROM events WHERE event_name='numeric.requested'`).Scan(&run); err != nil {
 				t.Fatal(err)
 			}
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7e0")))
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
 			rt = restart()
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7.0")))
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
 			if fork {
 				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, run)
 				var frontier string

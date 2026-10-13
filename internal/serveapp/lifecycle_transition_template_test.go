@@ -83,7 +83,7 @@ func requireLifecycleTemplateEntity(t *testing.T, rt servedControlProofRuntime, 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("logical template %s did not reach %s\n%s", flow, state, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("logical template %s did not reach %s\n%s", flow, state, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return "", ""
 }
 

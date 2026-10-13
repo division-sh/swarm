@@ -161,7 +161,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			}
 			follow := requireServedEventPublishRPCResult(t, nextEndpoint, map[string]any{"event_name": "item.processed", "run_id": initial.RunID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": "2444-after-loss"})
 			requireServedEventPublishEntityState(t, reader, "postgres", initial.RunID, entityID, "done")
-			requireServedRunStatusWithDebug(t, nextEndpoint, observer, "postgres", initial.RunID, "completed")
+			requireServedRunStatusWithDebug(t, nextEndpoint, reader, "postgres", initial.RunID, "completed")
 			if follow.RunID != initial.RunID || follow.NewRunCreated {
 				t.Fatalf("successor lost durable run identity: %#v", follow)
 			}

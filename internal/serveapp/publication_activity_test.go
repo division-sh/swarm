@@ -120,7 +120,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								time.Sleep(20 * time.Millisecond)
 							}
 							if eventID == "" {
-								t.Fatalf("missing generated outcome; calls=%d\n%s", calls.Load(), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+								t.Fatalf("missing generated outcome; calls=%d\n%s", calls.Load(), servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 							}
 							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 							before := requireActivityPublicationReadback(t, rt, seed.RunID, eventID, mode, local)

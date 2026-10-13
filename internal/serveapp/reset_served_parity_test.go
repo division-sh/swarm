@@ -45,7 +45,7 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					"event_name": "item.received", "bundle_hash": proof.BundleHash,
 					"payload": map[string]any{"item_id": "before-reset"}, "idempotency_key": uuid.NewString(),
 				})
-				waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
+				waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.ReceiverStateReader, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
 				params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 				lease, err := proof.Runtime.WorkOccurrence().Begin(context.Background())
 				if err != nil {
@@ -140,8 +140,8 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 						"event_name": "item.received", "bundle_hash": proof.BundleHash,
 						"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
 					})
-					waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, later.RunID, later.EventID, proof.Probe)
-					requireServedParitySettlementPostconditions(t, proof.Endpoint, proof.DB, proof.Backend, later.RunID, scenario)
+					waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.ReceiverStateReader, proof.Backend, later.RunID, later.EventID, proof.Probe)
+					requireServedParitySettlementPostconditions(t, proof.Endpoint, proof.ReceiverStateReader, proof.Backend, later.RunID, scenario)
 					laterRun = later.RunID
 				}
 				// The domain receipt must survive transport-cache expiry even
@@ -190,7 +190,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 				"event_name": "item.received", "bundle_hash": proof.BundleHash,
 				"payload": map[string]any{"item_id": "cli-reset"}, "idempotency_key": uuid.NewString(),
 			})
-			waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
+			waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.ReceiverStateReader, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
 			stdout, stderr, code := runServedCLICommand(t, proof.Endpoint, []string{"control", "nuke", "--dry-run"})
 			if code != 0 || stderr != "" || !strings.Contains(stdout, "dry_run") {
 				t.Fatalf("dry run: exit=%d stderr=%q stdout=%q", code, stderr, stdout)

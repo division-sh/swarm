@@ -170,7 +170,7 @@ func waitLifecycleGateCard(t *testing.T, rt servedControlProofRuntime, runID str
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("gate card not visible: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("gate card not visible: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return ""
 }
 

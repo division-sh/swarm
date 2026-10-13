@@ -85,3 +85,7 @@ func ReadServedDeliveryStatusCount(ctx context.Context, selected any, eventID, s
 func ReadServedRunDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadServedRunDebugSummaryForTest(ctx, selected, runID)
 }
+
+func ReadServedRuntimeLogDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadServedRuntimeLogDebugSummaryForTest(ctx, selected, runID)
+}

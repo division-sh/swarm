@@ -22,6 +22,8 @@ import (
 )
 
 func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
@@ -70,12 +72,12 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 						replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, equivalent))
 						requireSemanticReplay(t, c.result, replay)
 					}
-					semanticNumericOutput(t, endpoint, db, c.run)
+					semanticNumericOutput(t, endpoint, db, reader, c.run)
 					conflict := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "8"))
 					if conflict.Error == nil || conflict.Error.Data["code"] != apiv1.IdempotencyConflictCode {
 						t.Fatalf("conflict = %#v", conflict)
 					}
-					semanticNumericOutput(t, endpoint, db, c.run)
+					semanticNumericOutput(t, endpoint, db, reader, c.run)
 					cases = append(cases, c)
 				}
 			}
@@ -86,7 +88,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			for _, c := range cases {
 				replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7e0"))
 				requireSemanticReplay(t, c.result, replay)
-				semanticNumericOutput(t, endpoint, db, c.run)
+				semanticNumericOutput(t, endpoint, db, reader, c.run)
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restart stop=%d", code)
@@ -161,7 +163,7 @@ func TestServedSemanticNumericEventSubscription(t *testing.T) {
 			if err := json.Unmarshal(response.Result, &started); err != nil {
 				t.Fatal(err)
 			}
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, started.RunID)
+			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, started.RunID)
 			url := "ws" + strings.TrimPrefix(strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "http") + "/v1/ws"
 			conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Authorization": []string{"Bearer " + apiv1.DefaultLoopbackAPIToken}})
 			if err != nil {
@@ -290,7 +292,7 @@ func requireSemanticReplay(t *testing.T, want json.RawMessage, got servedJSONRPC
 	}
 }
 
-func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, run string) {
+func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, run string) {
 	t.Helper()
 	var raw string
 	deadline := time.Now().Add(10 * time.Second)
@@ -323,7 +325,7 @@ func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, run string
 		}
 	}
 	// Check settlement after observing output, not before a future schedule fires.
-	requireServedParitySettlementPostconditions(t, endpoint, db, "", run, servedparity.Scenario{
+	requireServedParitySettlementPostconditions(t, endpoint, reader, "", run, servedparity.Scenario{
 		ID: "semantic-numeric-ingress",
 		Postconditions: []servedparity.Postcondition{
 			servedparity.PostconditionNoNonTerminalDeliveries,
