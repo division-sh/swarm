@@ -159,3 +159,35 @@ func TestForkOperationRecordRequiresExactResolvedPoint(t *testing.T) {
 		t.Fatal("activated operation changed its selected revision")
 	}
 }
+
+func TestForkOperationResolvedSelectorCorrespondence(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
+			point := RunForkPoint{Kind: RunForkPointEvent, EventID: uuid.NewString(), Revision: 3}
+			if explicit {
+				point.Input = point.EventID
+			}
+			request := ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request", SourceRunID: uuid.NewString(),
+				ForkEventID: point.Input, TargetBundleHash: "bundle", ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+			}
+			_, before, err := request.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.ResolvedPoint = &point
+			_, after, err := request.Canonical()
+			if err != nil || before != after {
+				t.Fatalf("matched original selector changed request hash: before=%s after=%s err=%v", before, after, err)
+			}
+			if explicit {
+				request.ForkEventID = ""
+			} else {
+				request.ForkEventID = point.EventID
+			}
+			if _, _, err := request.Canonical(); err == nil {
+				t.Fatal("resolved event equality erased the original selector mismatch")
+			}
+		})
+	}
+}

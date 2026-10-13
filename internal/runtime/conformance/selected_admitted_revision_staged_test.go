@@ -85,7 +85,8 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			if backend == "postgres" {
 				dialect = authoractivityfixture.DialectPostgres
 			}
-			storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, uuid.NewString(), sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "staged-revision-proof"), []byte(`{"account_id":"post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
+			postCutEvent := uuid.NewString()
+			storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "staged-revision-proof"), []byte(`{"account_id":"post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 			fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
 			current, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
 			if err != nil || current.ForkPoint.Revision <= point.Revision {
@@ -182,6 +183,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			if err != nil || materialized.ForkPoint != point || len(materialized.DataPins) != 1 || materialized.DataPins[0].VersionID != laterVersion.VersionID {
 				t.Fatalf("retry changed the fixed point/version: result=%+v err=%v", materialized, err)
 			}
+			assertIssue2655ChildCutContents(t, ctx, f, sourceRun, materialized.ForkRunID, point, postCutEvent, string(laterVersion.VersionID))
 			beforeReplay := snapshot(t)
 			// A nil operation point is still filled from verified preparation,
 			// not from the newer head, for the native staged consumer.
@@ -202,6 +204,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 				}
 				t.Fatal("exact staged replay changed application storage")
 			}
+			assertIssue2655ChildCutContents(t, ctx, f, sourceRun, repeated.ForkRunID, point, postCutEvent, string(laterVersion.VersionID))
 			record, found, err := f.selected.(apiv1.RunForkOperationReader).LoadForkOperationByID(ctx, request.ForkOperation.OperationID)
 			if err != nil || !found || record.Validate() != nil || record.Request.Actor != "staged-revision-proof" || record.Request.ResolvedPoint == nil || *record.Request.ResolvedPoint != point {
 				t.Fatalf("staged operation adopted caller changes or latest head: record=%+v found=%v err=%v", record, found, err)
