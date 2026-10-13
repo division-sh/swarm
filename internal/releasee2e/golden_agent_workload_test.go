@@ -788,6 +788,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
 	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID})
+	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
 	if options.repeatSequential {
 		secondRunID := goldenPublishIngressWithKey(t, process.rpc, bundleHash, options.candidateIDs, "golden-search-ingress-second")
 		if secondRunID == runID {
@@ -806,6 +807,38 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
+	}
+}
+
+func assertGoldenRunHasNoDrift(t *testing.T, binaryPath, projectRoot, contracts, configPath string, env []string, runID string) {
+	t.Helper()
+	for _, jsonOutput := range []bool{false, true} {
+		args := []string{"verify", contracts, "--config", configPath, "--run", runID}
+		if jsonOutput {
+			args = append(args, "--json")
+		}
+		result := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, args...)
+		if result.err != nil {
+			t.Fatalf("compiled verify --run failed (json=%t): %v\n%s", jsonOutput, result.err, result.output)
+		}
+		if !jsonOutput {
+			if !strings.Contains(result.output, "entities checked, no drift") {
+				t.Fatalf("compiled text verify did not prove no drift: %s", result.output)
+			}
+			continue
+		}
+		var report struct {
+			OK              bool              `json:"ok"`
+			Status          string            `json:"status"`
+			RunID           string            `json:"run_id"`
+			EntitiesChecked int               `json:"entities_checked"`
+			Rows            []json.RawMessage `json:"rows"`
+			Errors          []json.RawMessage `json:"errors"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(result.output)), &report); err != nil || !report.OK ||
+			report.Status != "passed" || report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 || len(report.Errors) != 0 {
+			t.Fatalf("compiled JSON verify did not prove exact-run no drift: err=%v output=%s", err, result.output)
+		}
 	}
 }
 
@@ -1315,6 +1348,7 @@ type goldenConversation struct {
 	ExecutionMode string `json:"execution_mode"`
 	RunID         string `json:"run_id"`
 	TurnCount     int    `json:"turn_count"`
+	MessageCount  int    `json:"message_count"`
 	Status        string `json:"status"`
 }
 
@@ -1695,7 +1729,7 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 	seenSessions := map[string]bool{}
 	seenTriggers := map[string]int{}
 	for _, conversation := range conversations {
-		if conversation.SessionID == "" || seenSessions[conversation.SessionID] || conversation.RunID != runID || conversation.TurnCount != 1 || conversation.ExecutionMode != "mock" {
+		if conversation.SessionID == "" || seenSessions[conversation.SessionID] || conversation.RunID != runID || conversation.TurnCount != 1 || conversation.MessageCount != 1 || conversation.ExecutionMode != "mock" {
 			t.Errorf("conversation = %#v, want unique session, exact run, and one mock turn", conversation)
 		}
 		seenSessions[conversation.SessionID] = true
@@ -1703,6 +1737,16 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		if len(turns) != 1 || !turns[0].ParseOK || turns[0].ExecutionMode != "mock" || turns[0].Ordinal != 1 {
 			t.Errorf("conversation %s turns = %#v, want one successful mock turn", conversation.SessionID, turns)
 			continue
+		}
+		var exact struct {
+			Session goldenConversation `json:"session"`
+			Turn    goldenTurn         `json:"turn"`
+		}
+		if err := rpc.call(ctx, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": turns[0].TurnID}, &exact); err != nil {
+			t.Fatal(err)
+		}
+		if exact.Session != conversation || exact.Turn != turns[0] {
+			t.Fatalf("conversation.get_turn differs from full-session list/page: list=%+v page=%+v exact=%+v", conversation, turns, exact)
 		}
 		expectation, ok := wantByTrigger[turns[0].TriggerEventID]
 		if !ok || conversation.AgentID != expectation.agentID || turns[0].TriggerEventType != expectation.eventName {
@@ -1767,11 +1811,15 @@ func listGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, s
 			params["cursor"] = cursor
 		}
 		var page struct {
-			Turns      []goldenTurn `json:"turns"`
-			NextCursor string       `json:"next_cursor"`
+			Conversation goldenConversation `json:"conversation"`
+			Turns        []goldenTurn       `json:"turns"`
+			NextCursor   string             `json:"next_cursor"`
 		}
 		if err := rpc.call(ctx, "conversation.list_turns", params, &page); err != nil {
 			t.Fatal(err)
+		}
+		if page.Conversation.SessionID != sessionID || page.Conversation.MessageCount != 1 {
+			t.Fatalf("conversation.list_turns did not retain the full transcript count: %+v", page.Conversation)
 		}
 		for _, turn := range page.Turns {
 			if turn.TurnID == "" || seenTurns[turn.TurnID] {
