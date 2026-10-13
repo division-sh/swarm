@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -147,6 +148,88 @@ func findProjectedFlowInstanceMetadata(snapshot *runForkRevisionSnapshot, forkRu
 		selected, found = metadata, true
 	}
 	return selected, found, nil
+}
+
+func (s *RunForkPostgresOwner) ReadReceiverConstructionHistoryTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (bool, error) {
+	return readReceiverConstructionHistoryTx(ctx, tx, run, header)
+}
+
+func (s *RunForkSQLiteOwner) ReadReceiverConstructionHistoryTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (bool, error) {
+	return readReceiverConstructionHistoryTx(ctx, tx, run, header)
+}
+
+func readReceiverConstructionHistoryTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (bool, error) {
+	_, found, err := readProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+	return found, err
+}
+
+func (s *RunForkPostgresOwner) ReadProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error) {
+	return readProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+}
+
+func (s *RunForkSQLiteOwner) ReadProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error) {
+	return readProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+}
+
+// Positive fixed-cut admission precedes physical receipt inspection. A projected
+// receipt is historical evidence, never a new creating turn or native fallback.
+func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error) {
+	cut, found, err := loadHistoricalFlowInstanceConstructionCutTx(ctx, tx, run, header)
+	if err != nil || !found {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	fixed, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(cut.plan, cut.route)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	if !found {
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("historical receiver lacks its exact constructed state")
+	}
+	if _, _, err := cut.project(run, header, fixed); err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	sourceRunID, recorded := cut.plan.SourceRunID, cut.plan.ForkPoint.Revision
+	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, sourceRunID, recorded)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	entities, err := loadRunForkEntityStates(snapshot)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	entities, _, err = attachRunForkMaterializedEntitySnapshotMetadata(snapshot, entities)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	plan := runfork.RunForkPlan{SourceRunID: sourceRunID, ForkPoint: runfork.RunForkPoint{Revision: recorded}, Entities: entities}
+	for _, reply := range snapshot.ReplyContexts {
+		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)
+	}
+	var selected *runfork.RunForkEntityState
+	for index := range plan.Entities {
+		if plan.Entities[index].EntityID == cut.plan.Entities[0].EntityID {
+			selected = &plan.Entities[index]
+		}
+	}
+	if selected == nil || selected.MaterializationMetadata == nil {
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("historical receiver lacks its exact constructed state")
+	}
+	captured := selected.MaterializationMetadata
+	expected, err := ProjectRunForkConstructionReceipt(plan, run.RunID, *selected, captured.CreatedAt)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	var present bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND instance_path=$2)`, run.RunID, header.StorageRef).Scan(&present); err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("inspect projected construction receipt: %w", err)
+	}
+	if present {
+		if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, expected); err != nil {
+			return pipeline.FlowConstructionReceipt{}, false, err
+		}
+	}
+	return expected, true, nil
 }
 
 // ReadConstructedEntityAtRevisionTx delegates fact selection, tombstones and
