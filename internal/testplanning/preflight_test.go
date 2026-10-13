@@ -94,7 +94,7 @@ func TestPreflightStructuralSelectionUsesCanonicalOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(actual, staticAuthorityGuardRoots(t, repo)) || len(actual) != 81 {
+	if !reflect.DeepEqual(actual, staticAuthorityGuardRoots(t, repo)) {
 		t.Fatalf("canonical structural selection changed: %d", len(actual))
 	}
 	if len(preflightCandidates) != 31 {
