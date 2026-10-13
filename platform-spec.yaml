@@ -2859,6 +2859,18 @@ type_system:
       `list<T>` and `type: list` with `of: T` fail on presence and teach `[T]`,
       including nested references, null/empty values, aliases and YAML merges.
       No compatibility reader or old-source/store migration is supported.
+      The schema owner keeps PostgreSQL native scalar-array column types.
+      SQLite renders only those supported canonical scalar arrays as TEXT
+      containing a JSON array, including parameterized numeric elements;
+      named lists keep their JSONB representation (TEXT on SQLite). Empty
+      arrays and ordered scalar values retain their array meaning. Unsupported,
+      malformed and nested physical array element types cannot acquire a
+      SQLite column through a generic suffix fallback. This is a fresh-schema
+      dialect projection, not an old-store migration or authored type alias.
+      Physical schema inspection equates PostgreSQL's timestamp with time zone
+      with timestamptz, and exactly timestamp with time zone[] with timestamptz[].
+      It does not equate scalar with array, different timezone/base types, or
+      unsupported/multidimensional forms through a suffix-normalizing fallback.
     opaque_json: |
       The supported json field type is an opaque JSON value: string, boolean,
       supported number, array or object. It does not establish a named-record
