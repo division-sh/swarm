@@ -52,12 +52,10 @@ func TestWorkflowSemanticsRuleEmitUsesHandlerAdvancesToFallback(t *testing.T) {
 						AdvancesTo: "awaiting_review",
 						Rules: []HandlerRuleEntry{
 							{
-								ID:        "needs-human",
 								Condition: "payload.amount > 100",
 								Emit:      EmitSpec{Event: "review.requested"},
 							},
 							{
-								ID:        "auto-approve",
 								Condition: "else",
 							},
 						},
@@ -129,7 +127,6 @@ func TestWorkflowSemanticsDerivesTopLevelCompletionTransitions(t *testing.T) {
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"component.scaffolded": {
 						OnComplete: []HandlerRuleEntry{{
-							ID:         "top-complete",
 							Condition:  "true",
 							AdvancesTo: "top_review",
 						}},
@@ -146,7 +143,7 @@ func TestWorkflowSemanticsDerivesTopLevelCompletionTransitions(t *testing.T) {
 		t.Fatalf("handler transitions = %#v", transitions)
 	}
 	carriers := HandlerTransitionAdvanceCarriers(transitions[0])
-	if len(carriers) != 1 || carriers[0].Kind != HandlerAdvanceCarrierOnComplete || carriers[0].AdvancesTo != "top_review" || carriers[0].Rule.ID != "top-complete" {
+	if len(carriers) != 1 || carriers[0].Kind != HandlerAdvanceCarrierOnComplete || carriers[0].AdvancesTo != "top_review" || carriers[0].RuleIndex != 0 || carriers[0].Rule.Condition != "true" || carriers[0].Rule.DisplayLabel("on_complete", 0) != "on_complete[0]: condition true" {
 		t.Fatalf("top-level on_complete carrier = %#v", carriers)
 	}
 }
@@ -346,12 +343,10 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 					"task.rules": {
 						Rules: []HandlerRuleEntry{
 							{
-								ID:        "priority",
 								Condition: "payload.priority == 'urgent'",
 								Emit:      EmitSpec{Event: "task.rules.then"},
 							},
 							{
-								ID:        "fallback",
 								Condition: "else",
 								Emit:      EmitSpec{Event: "task.rules.else"},
 							},

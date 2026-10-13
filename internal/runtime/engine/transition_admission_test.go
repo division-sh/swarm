@@ -149,10 +149,10 @@ func TestExecutorCompiledOrdinaryTransitionRetainsSelectedCarrier(t *testing.T) 
 		selectedIndex int
 	}{
 		{"direct", contracts.SystemNodeEventHandler{AdvancesTo: "done"}, contracts.HandlerAdvanceCarrierHandler, -1},
-		{"inherited", contracts.SystemNodeEventHandler{AdvancesTo: "done", Rules: []contracts.HandlerRuleEntry{{ID: "selected", Condition: "else", Emit: contracts.EmitSpec{Event: "work.accepted"}}}}, contracts.HandlerAdvanceCarrierHandler, 0},
-		{"first_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{ID: "first", Condition: "true", AdvancesTo: "done"}, {ID: "second", Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 0},
-		{"second_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{ID: "first", Condition: "false", AdvancesTo: "done"}, {ID: "second", Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 1},
-		{"completion", contracts.SystemNodeEventHandler{OnComplete: []contracts.HandlerRuleEntry{{ID: "complete", Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierOnComplete, 0},
+		{"inherited", contracts.SystemNodeEventHandler{AdvancesTo: "done", Rules: []contracts.HandlerRuleEntry{{Condition: "else", Emit: contracts.EmitSpec{Event: "work.accepted"}}}}, contracts.HandlerAdvanceCarrierHandler, 0},
+		{"first_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "true", AdvancesTo: "done"}, {Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 0},
+		{"second_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "false", AdvancesTo: "done"}, {Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 1},
+		{"completion", contracts.SystemNodeEventHandler{OnComplete: []contracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierOnComplete, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, err := completeSemanticFixtureHandlerRuleIdentity(node, "work.requested", tc.handler)

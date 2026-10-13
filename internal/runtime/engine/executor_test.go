@@ -389,7 +389,6 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "render_bundle",
 					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: moduleSpec},
 					Compute: &runtimecontracts.ComputeSpec{
 						Operation: runtimecontracts.ComputeOpModule,
@@ -398,7 +397,6 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 					},
 				},
 				{
-					ID:        "rendered_yaml",
 					Condition: `computed.rendered_bundle.format == "yaml"`,
 					Emit: runtimecontracts.EmitSpec{Event: "bundle.rendered", Fields: map[string]runtimecontracts.ExpressionValue{
 						"content": runtimecontracts.RefExpression("computed.rendered_bundle.content"),
@@ -450,7 +448,6 @@ func sourceWithDeclarativeEmitExternalizationFlows(t testing.TB) semanticview.So
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Path:  "operating",
 		Schema: runtimecontracts.FlowSchemaDocument{
-
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"component.scaffolded": {}},
@@ -1648,7 +1645,6 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 			}},
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			ID:        "matched",
 			Condition: "else",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1709,7 +1705,6 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			ID:        "too-high",
 			Condition: "payload.score > 100",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -2562,7 +2557,6 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "scaffold_paths",
 					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindLookup, Lookup: lookup},
 					Compute: &runtimecontracts.ComputeSpec{
 						Operation: runtimecontracts.ComputeOpLookup,
@@ -2571,7 +2565,6 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 					},
 				},
 				{
-					ID:        "service_route",
 					Condition: `computed.template_path == "templates/service/go"`,
 					Emit:      runtimecontracts.EmitSpec{Event: "repo.service_template_selected"},
 				},
@@ -2649,7 +2642,6 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "render_bundle",
 					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: moduleSpec},
 					Compute: &runtimecontracts.ComputeSpec{
 						Operation: runtimecontracts.ComputeOpModule,
@@ -2658,7 +2650,6 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 					},
 				},
 				{
-					ID:        "rendered_yaml",
 					Condition: `computed.rendered_bundle.format == "yaml"`,
 					Emit: runtimecontracts.EmitSpec{Event: "bundle.rendered", Fields: map[string]runtimecontracts.ExpressionValue{
 						"content": runtimecontracts.RefExpression("computed.rendered_bundle.content"),
@@ -3044,7 +3035,6 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "validate_manifest",
 					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindValidate, Validation: validation},
 					Compute: &runtimecontracts.ComputeSpec{
 						Operation:  runtimecontracts.ComputeOpValidate,
@@ -3053,7 +3043,6 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 					},
 				},
 				{
-					ID:        "invalid_manifest",
 					Condition: `computed.validation.deploy_manifest.valid == false`,
 					Emit:      runtimecontracts.EmitSpec{Event: "deploy.manifest_invalid"},
 				},
@@ -3158,7 +3147,6 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "validate_count",
 					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindValidate, Validation: validation},
 					Compute: &runtimecontracts.ComputeSpec{
 						Operation:  runtimecontracts.ComputeOpValidate,
@@ -3167,7 +3155,6 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 					},
 				},
 				{
-					ID:        "valid_count",
 					Condition: `computed.validation.count_match.valid == true`,
 					Emit:      runtimecontracts.EmitSpec{Event: "deploy.count_matched"},
 				},
@@ -4480,8 +4467,8 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{
-				{ID: "rule-1", Condition: "payload.score > 5", AdvancesTo: "approved"},
-				{ID: "rule-2", Condition: "else", AdvancesTo: "rejected"},
+				{Condition: "payload.score > 5", AdvancesTo: "approved"},
+				{Condition: "else", AdvancesTo: "rejected"},
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -4560,7 +4547,6 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 			}},
 		},
@@ -4596,7 +4582,6 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 			}},
 		},
@@ -4639,7 +4624,6 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
@@ -4674,7 +4658,6 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:         "rule-1",
 				Condition:  "payload.score > 5",
 				AdvancesTo: "approved",
 			}},
@@ -4768,21 +4751,18 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 					},
 					Rules: []runtimecontracts.HandlerRuleEntry{
 						{
-							ID:        "high",
 							Condition: "payload.score >= 80",
 							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 								"bucket": runtimecontracts.CELExpression(`"high"`),
 							}},
 						},
 						{
-							ID:        "medium",
 							Condition: "payload.score >= 40",
 							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 								"bucket": runtimecontracts.CELExpression(`"medium"`),
 							}},
 						},
 						{
-							ID:        "low",
 							Condition: "else",
 							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 								"bucket": runtimecontracts.CELExpression(`"low"`),
@@ -4935,7 +4915,6 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 				},
 			}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 				Emit: runtimecontracts.EmitSpec{
 					Event: "rule.emitted",
@@ -5029,7 +5008,6 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
@@ -5078,7 +5056,6 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "shared.event"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 				Emit:      runtimecontracts.EmitSpec{Event: "shared.event"},
 			}},
@@ -5110,7 +5087,6 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "else",
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "payload.items",
@@ -5152,7 +5128,6 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 			AdvancesTo: "done",
 			OnSuccess:  runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "rule-1",
 				Condition: "payload.score > 5",
 				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
@@ -5252,7 +5227,6 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 				}},
 			},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "too-early",
 				Condition: `entity.branch_target == "handler"`,
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 					Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -5307,7 +5281,6 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 				}},
 			},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "too-early",
 				Condition: `entity.branch_target == "handler"`,
 				Emit:      runtimecontracts.EmitSpec{Event: "branch.selected"},
 			}},
@@ -6045,7 +6018,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			eventType: "batch.ready",
 			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
 				return runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-					ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+					Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
 				}}}
 			},
 		},
@@ -6054,7 +6027,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			eventType: "batch.ready",
 			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
 				return runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
-					ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+					Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
 				}}}
 			},
 		},
@@ -7782,12 +7755,10 @@ func TestExecutor_RuleEmitRunsOnlyForSelectedRule(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
-					ID:        "auto",
 					Condition: "payload.amount < 100",
 					Emit:      runtimecontracts.EmitSpec{Event: "refund.auto"},
 				},
 				{
-					ID:        "needs-human",
 					Condition: "payload.amount >= 100",
 					Emit:      runtimecontracts.EmitSpec{Event: "refund.human"},
 				},

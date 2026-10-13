@@ -38,7 +38,7 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "source.evt:\n",
-					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - id: complete\n          when: |-\n                  true\n          advances_to: done\n        - id: unmatched\n          else: true\n",
+					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n        - else: true\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
@@ -60,11 +60,15 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 				if !qualified {
 					t.Fatal("authored source rule lacks canonical identity")
 				}
-				selected, err := handlerselection.Selected(handlerselection.ContextRules, ref, "complete")
+				display := handler.Rules[0].DisplayLabel("rules", 0)
+				if display != "rules[0]: when true" {
+					t.Fatalf("authored rule presentation = %q", display)
+				}
+				selected, err := handlerselection.Selected(handlerselection.ContextRules, ref, display)
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Logf("source: authored=%v rule=%s condition=%s target=%s ref=%s/%s/%s", handler.Rules[0].Authored(), handler.Rules[0].ID, handler.Rules[0].Condition, handler.Rules[0].AdvancesTo, ref.Flow(), ref.Family(), ref.SemanticPath())
+				t.Logf("source: authored=%v rule=%s condition=%s target=%s ref=%s/%s/%s", handler.Rules[0].Authored(), display, handler.Rules[0].Condition, handler.Rules[0].AdvancesTo, ref.Flow(), ref.Family(), ref.SemanticPath())
 				runID := uuid.NewString()
 				ctx = runtimecorrelation.WithRunID(ctx, runID)
 				if err := fixture.RequireRun(ctx, runID); err != nil {
