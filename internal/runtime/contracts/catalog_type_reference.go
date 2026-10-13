@@ -273,6 +273,26 @@ func (r CatalogTypeReference) ResolveReference(typeRef string) (ResolvedCatalogT
 	return resolveCatalogTypeReference(strings.TrimSpace(typeRef), r.Catalog, map[string]struct{}{})
 }
 
+// ResolveMapKey retains the validation domain carried by a string-like key.
+func (r CatalogTypeReference) ResolveMapKey() (ResolvedCatalogType, error) {
+	resolved, err := r.Resolve()
+	if err != nil {
+		return ResolvedCatalogType{}, err
+	}
+	if err := validateCatalogMapKey(resolved, r.Type, r.Catalog); err != nil {
+		return ResolvedCatalogType{}, err
+	}
+	return resolved, nil
+}
+
+func validateCatalogMapKey(key ResolvedCatalogType, ref string, catalog TypeCatalogDocument) error {
+	_, enum := catalog.Enums[key.Name]
+	if key.Kind == CatalogTypeText && (key.PlainText() || key.Format == "uuid" || enum) {
+		return nil
+	}
+	return catalogReferenceError(fmt.Sprintf("map key type %q is unsupported; map keys must be text, enum or uuid", strings.TrimSpace(ref)))
+}
+
 func catalogReferenceError(problem string) error {
 	return NewExpectedShapeDiagnostic("contract_loader.invalid_type_reference", "", problem, "Declare a supported, nonrecursive catalog type.", ErrInvalidField)
 }
@@ -359,9 +379,8 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 		if err != nil {
 			return ResolvedCatalogType{}, err
 		}
-		switch key.Kind {
-		case CatalogTypeInteger, CatalogTypeNumber, CatalogTypeBoolean:
-			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("map key type %q is unsupported", keyRef))
+		if err := validateCatalogMapKey(key, keyRef, catalog); err != nil {
+			return ResolvedCatalogType{}, err
 		}
 		value, err := resolveCatalogTypeReference(valueRef, catalog, resolving)
 		if err != nil {

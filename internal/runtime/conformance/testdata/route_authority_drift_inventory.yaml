@@ -338,6 +338,18 @@ search_dimensions:
       - internal/runtime/bus/outbox.go
     canonical_layer: route_plan_consumers
 seam_families:
+  - id: catalog_admission_audit_owner_census
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - .github/audit-artifacts/issue-2447-b-preanalysis.md
+    search_dimensions: [connect_route_plan]
+    notes: >
+      The catalog admission audit cites the existing connection compiler only
+      to distinguish scalar receiver-key compatibility from dictionary keys.
+      This exact documentation path does not produce or reinterpret routes;
+      runtime sources remain subject to the unchanged closed inventory and
+      its unclassified-route and dimension-mismatch negative controls.
   - id: read_family_audit_owner_census
     layer: conformance_guardrails
     classification: separate_semantic_concept

@@ -232,9 +232,6 @@ func normalizedEventSchemaKey(raw string) string {
 
 func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[string]struct{}) (map[string]any, string) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return map[string]any{}, ""
-	}
 	if normalized, typeDescription := normalizeEventFieldType(raw); normalized != "" && normalized != raw {
 		prop := eventSchemaForResolvedType(normalized, types, seen)
 		return prop, typeDescription
@@ -270,6 +267,9 @@ func eventSchemaForCatalogType(resolved ResolvedCatalogType, types TypeCatalogDo
 		required := make([]string, 0, len(resolved.Fields))
 		for _, field := range resolved.Fields {
 			prop := eventSchemaForCatalogType(field.Type, types)
+			if _, description := normalizeEventFieldType(field.TypeRef); description != "" {
+				prop["description"] = description
+			}
 			applySchemaRefinements(prop, field.Refinements)
 			props[field.Name] = prop
 			if !field.IsOptional {
