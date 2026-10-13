@@ -3,10 +3,12 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,12 +84,7 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			}
 			// Advance the ordinary source so the earlier fork cut cannot freeze it.
 			publishPendingReplyInput(t, ctx, rt.Bus, source, "request.note", []byte(`{"note":"source-still-owns-its-card"}`))
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: source, At: page.Events[0].EventID,
-				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}})
-			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen {
-				t.Fatalf("activate independent decision controls: %+v error=%v", result, err)
-			}
+			result := activatePendingDecisionFork(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
 			child := result.Materialization.ForkRunID
 			card := requirePendingReplyCard(t, ctx, store, child)
 			principal, err := store.EnsureOperatorPrincipal(ctx, at)
@@ -128,16 +125,16 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			}
 			evidence.StateVersion++
 			stale := startupownership.WithGenerationGrantEvidence(owned, evidence)
-			if _, err := domain.ApplyDeferralForTest(stale, decisioncard.DeferRequest{CardID: card.CardID, PrincipalID: principal.ID, Until: at.Add(time.Hour), Now: time.Now().UTC()}); err == nil {
-				t.Fatal("a descriptor differing from the current native grant deferred a card")
+			if _, err := domain.ApplyDeferralForTest(stale, decisioncard.DeferRequest{CardID: card.CardID, PrincipalID: principal.ID, Until: at.Add(time.Hour), Now: time.Now().UTC()}); err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") {
+				t.Fatalf("non-current native grant did not refuse before mutation: %v", err)
 			}
-			if _, err := domain.BeginInputForTest(owned, decisioncard.BeginInputRequest{CardID: sourceCard.CardID, Verdict: "revise", PrincipalID: principal.ID, Now: time.Now().UTC()}); err == nil {
-				t.Fatal("fork execution acquired its ordinary source's input draft")
+			if _, err := domain.BeginInputForTest(owned, decisioncard.BeginInputRequest{CardID: sourceCard.CardID, Verdict: "revise", PrincipalID: principal.ID, Now: time.Now().UTC()}); err == nil || !strings.Contains(err.Error(), "selected decision control cannot act on a run without its own selected binding") {
+				t.Fatalf("fork context did not refuse its independently active source: %v", err)
 			}
 			canceled, cancel := context.WithCancel(owned)
 			cancel()
-			if _, err := domain.CancelInputForTest(canceled, decisioncard.CancelInputRequest{CardID: card.CardID, InputDraftID: draft.ID, PrincipalID: principal.ID, Now: time.Now().UTC()}); err == nil {
-				t.Fatal("canceled input control mutated its draft")
+			if _, err := domain.CancelInputForTest(canceled, decisioncard.CancelInputRequest{CardID: card.CardID, InputDraftID: draft.ID, PrincipalID: principal.ID, Now: time.Now().UTC()}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled input control did not preserve cancellation: %v", err)
 			}
 			if err := use.Close(); err != nil {
 				t.Fatal(err)
@@ -169,12 +166,47 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			if err := owner.RetireSelectedContexts(cleanup); err != nil {
 				t.Fatal(err)
 			}
-			if use, _, err := owner.AcquireSelectedDecisionCardControl(ctx, child, runfork.ControlMailboxDefer); err == nil {
-				_ = use.Close()
-				t.Fatal("retired execution reopened a decision turn")
+			if use, _, err := owner.AcquireSelectedDecisionCardControl(ctx, child, runfork.ControlMailboxDefer); !errors.Is(err, worklifetime.ErrRetired) || use != nil {
+				t.Fatalf("retired execution did not refuse its decision turn: %v", err)
 			}
 		})
 	}
+}
+
+// This is the same supported staged/start-cut source surface as the original
+// pending-effect positive test. It does not widen event-point execution policy.
+func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, sourceRun, cut string,
+	loader admittedFixtureSelectedContractSourceLoader, loaded LoadedSelectedContractSource) SelectedContractExecutionResult {
+	t.Helper()
+	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
+	selection := runforkadmission.SelectedContractSelection(loaded.Source)
+	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true,
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, err := owner.ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	if err != nil {
+		t.Fatalf("stage the exact open-card snapshot without execution authority: %v", err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
+		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+	if err != nil || !result.Activation.Activated {
+		t.Fatalf("activate the admitted pending-effect start cut: %+v error=%v", result, err)
+	}
+	return result
 }
 
 func forkCardControlRequest(card decisioncard.Card, principal, method string) apiidempotency.Request {
