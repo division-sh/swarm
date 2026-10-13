@@ -1400,19 +1400,54 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 
 func TestEngineOutboxCommittedTargetRefusalPreservesDisposition(t *testing.T) {
 	store := &outboxClaimStore{}
-	eb, err := newScopedTestEventBus(store)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyRootOutputSingletonConnect(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
+	consumer := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "consumer", "", runtimebustest.DefaultRunID)
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{
+		Instances: runtimebus.FlowInstanceIndexFixture(
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, root, ""),
+			runtimebus.TerminatedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, consumer),
+		),
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	intent := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(
-		uuid.NewString(), "child/output.done", "", "", []byte(`{}`), 0,
+		uuid.NewString(), "root.ready", "", "", []byte(`{"entity_id":"consumer-one"}`), 0,
 		runtimebustest.DefaultRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-			EntityID: uuid.NewString(), FlowInstance: "missing-flow",
+			FlowID: consumer.TemplateID, EntityID: consumer.EntityID, FlowInstance: consumer.InstancePath,
 		}), time.Now().UTC(),
 	)}
-	ctx := context.Background()
-	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	plans, err := eb.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("prepare exact terminated receiver: plans=%d err=%v", len(plans), err)
+	}
+	defer func() {
+		if err := eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); err != nil {
+			t.Error(err)
+		}
+	}()
+	plan := plans[0].(runtimebus.EnginePublicationPlan)
+	command := plan.PublicationCommand()
+	if command.Commit.DeadLetter == nil || command.Commit.DeadLetter.Failure.Detail.Code != "target_unreachable_terminated" || len(command.Commit.DeliveryRoutes) != 0 {
+		t.Fatalf("component did not authorize its exact terminated receiver: %+v", command.Commit)
+	}
+	committed, err := store.CommitPublication(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{proof}); err != nil {
 		t.Fatal(err)
 	}
 	if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {

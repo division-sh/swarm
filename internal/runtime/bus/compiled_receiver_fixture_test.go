@@ -2,9 +2,11 @@ package bus
 
 import (
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -30,6 +32,38 @@ func (rt *RouteTable) PubsubDeclarationDefinitionsFixture(t testing.TB, flowID s
 
 func AdmittedFlowInstanceObservationFixture(t testing.TB, source semanticview.Source, runID string, instance flowidentity.Instance, key string) pipeline.FlowInstanceObservation {
 	return constructionIndexObservation(t, source, runID, instance, key)
+}
+
+// This is detached component evidence, not a native lifecycle transition.
+func TerminatedFlowInstanceObservationFixture(t testing.TB, source semanticview.Source, runID string, instance flowidentity.Instance) pipeline.FlowInstanceObservation {
+	t.Helper()
+	base := constructionIndexObservation(t, source, runID, instance, "")
+	header, err := base.WorkflowInstance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	header.Status = "terminated"
+	header.TerminatedAt = header.CreatedAt.Add(time.Second)
+	header.UpdatedAt = header.TerminatedAt
+	header.Revision++
+	receipt, found, err := base.NativeConstruction()
+	if err != nil || !found {
+		t.Fatalf("terminal component lacks original construction: found=%t err=%v", found, err)
+	}
+	readiness, found := base.Readiness()
+	if !found {
+		t.Fatal("terminal component lacks original attachment evidence")
+	}
+	readiness.InstanceStatus, readiness.InstanceTerminatedAt = header.Status, header.TerminatedAt
+	run := runlifecycle.Snapshot{
+		RunID: runID, State: base.RunState(), Origin: runlifecycle.DeploymentRunOrigin(),
+		BundleHash: base.SourceFact().BundleHash(), StartedAt: header.CreatedAt,
+	}
+	observed, err := pipeline.AdmitNativeFlowInstanceObservation(base.Selection(), header, run, base.RunRevision()+1, receipt, readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observed
 }
 
 func FlowInstanceIndexFixture(observations ...pipeline.FlowInstanceObservation) pipeline.FlowInstanceIndexReader {
