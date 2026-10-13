@@ -284,6 +284,8 @@ func normalizeSchemaType(value string) string {
 	switch v {
 	case "timestamp with time zone":
 		return "timestamptz"
+	case "timestamp with time zone[]":
+		return "timestamptz[]"
 	case "double precision":
 		return "double precision"
 	case "integer":
