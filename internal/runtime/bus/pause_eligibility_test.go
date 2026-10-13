@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -76,11 +75,6 @@ func TestPausedHandedAgentParksUntilContinueBothStores(t *testing.T) {
 				if len(page.Items) != 1 {
 					t.Fatalf("paused scan items = %d", len(page.Items))
 				}
-				intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "global/agents.yaml#agents."+f.agentID+".intent", "Audit pause eligibility.")
-				if err != nil {
-					t.Fatal(err)
-				}
-				f.source = completeEventAgentSource(f.agentID, string(f.event.Type()), intent)
 				seen := make(chan events.Event, 4)
 				generation := f.newRecordingManager(t, seen)
 				managerCtx := f.managedContext(t)
@@ -467,11 +461,6 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 			if _, err := f.store.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("audit_handed")); err != nil {
 				t.Fatal(err)
 			}
-			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "global/agents.yaml#agents."+f.agentID+".intent", "Pause claim proof.")
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.source = completeEventAgentSource(f.agentID, string(f.event.Type()), intent)
 			seen := make(chan events.Event, 4)
 			generation := f.newRecordingManager(t, seen)
 			if _, err := generation.manager.HydrateForStartup(ctx); err != nil {

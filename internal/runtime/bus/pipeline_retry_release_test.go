@@ -980,14 +980,10 @@ func TestPipelineScanRunLocalBlockDoesNotStarveLaterRunOnSQLiteAndPostgres(t *te
 }
 
 func newRetryReleaseTestEvent(fixture completeEventDispatchFixture, createdAt time.Time) events.Event {
-	sourceRoute := events.RouteIdentity{
-		FlowID:       "retry-source",
-		FlowInstance: "retry-source/one",
-		EntityID:     uuid.NewString(),
-	}
+	sourceRoute := fixture.event.RoutingSource().Route()
 	return eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		uuid.NewString(),
-		events.EventType("custom.replay.checked"),
+		fixture.event.Type(),
 		eventtest.Producer(events.EventProducerNode, "retry-release-node"),
 		"retry-release-task",
 		[]byte(`{"text":"retry release"}`),
