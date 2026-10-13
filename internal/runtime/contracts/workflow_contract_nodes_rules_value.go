@@ -47,6 +47,20 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 	if err := validatePolicySheetRows(rows, context); err != nil {
 		return nil, nodeValueError(value, err)
 	}
+	for index, row := range rows {
+		if row.Compute == nil {
+			continue
+		}
+		display := row.DisplayLabel(string(context), index)
+		switch {
+		case row.Compute.Lookup != nil:
+			row.Compute.Lookup.RowID = display
+		case row.Compute.Validation != nil:
+			row.Compute.Validation.RowID = display
+		case row.Compute.Module != nil:
+			row.Compute.Module.RowID = display
+		}
+	}
 	return rows, nil
 }
 
@@ -103,16 +117,6 @@ func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecod
 		}
 		if row.ID == "" {
 			row.ID = label
-			if row.Compute != nil {
-				switch {
-				case row.Compute.Lookup != nil:
-					row.Compute.Lookup.RowID = label
-				case row.Compute.Validation != nil:
-					row.Compute.Validation.RowID = label
-				case row.Compute.Module != nil:
-					row.Compute.Module.RowID = label
-				}
-			}
 		}
 		rows = append(rows, row)
 	}
@@ -239,7 +243,7 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 		if !out.Emit.Empty() || out.AdvancesTo != "" || !out.Activity.Empty() || out.DataAccumulation.HasWrites() || out.FanOut != nil || out.Compute != nil {
 			return fmt.Errorf("POLICY-SHEET-ROW: %s row at %s derives a value only and cannot declare branch outputs", selected, fields[selected].Location())
 		}
-		out.PolicyRow, out.Compute, err = projectNodePolicyValueRow(fields[selected], selected, out.ID)
+		out.PolicyRow, out.Compute, err = projectNodePolicyValueRow(fields[selected], selected)
 	}
 	if err != nil {
 		return nodeValueError(fields[selected], err)

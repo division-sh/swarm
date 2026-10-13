@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -12,25 +13,22 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
   event_handlers:
     task.ready:
       rules:
-        scaffold_paths:
-          lookup:
+        - lookup:
             on: [payload.scaffold_type, payload.language]
             entries:
               - {key: [service, go], value: templates/service/go}
               - {key: [library, go], value: templates/library/go}
             into: computed.template_path
             default: fail
-        validate_manifest:
-          validate:
+        - validate:
             set: deploy_manifest
             input: {source_ref: payload.source_ref}
             into: computed.validation.deploy_manifest
-        render_bundle:
-          compute_module:
+        - compute_module:
             module: structured_renderer
             input: {component: payload.component}
             into: computed.rendered_bundle
-        fallback: {else: true}
+        - else: true
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -41,15 +39,37 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 	}
 	rules := nodes["worker"].EventHandlers["task.ready"].Rules
 	if len(rules) != 4 || rules[0].Compute == nil || rules[0].Compute.Lookup == nil ||
-		rules[0].Compute.Lookup.RowID != "scaffold_paths" || len(rules[0].Compute.Lookup.Entries) != 2 ||
+		rules[0].Compute.Lookup.RowID != "rules[0]: lookup" || len(rules[0].Compute.Lookup.Entries) != 2 ||
+		rules[1].Compute.Validation.RowID != "rules[1]: validate" ||
 		rules[1].Compute.Validation.Set != "deploy_manifest" ||
+		rules[2].Compute.Module.RowID != "rules[2]: compute_module" ||
 		rules[2].Compute.Module.Module != "structured_renderer" {
 		t.Fatalf("value row projection lost metadata: %#v", rules)
+	}
+	if rules[0].PolicyRow.Lookup != rules[0].Compute.Lookup ||
+		rules[1].PolicyRow.Validation != rules[1].Compute.Validation ||
+		rules[2].PolicyRow.Module != rules[2].Compute.Module {
+		t.Fatal("value-row lowering introduced a competing compute plan")
+	}
+	handler, err := QualifySystemNodeHandlerRuleRefsForEvent(identitytest.RootNode(t, "worker"), "task.ready", nodes["worker"].EventHandlers["task.ready"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, row := range handler.Rules {
+		ref, valid := row.DeclarationIdentity()
+		if !valid || ref.SemanticPath() != []string{
+			`nodes["worker"].handlers["task.ready"].rules[0]`,
+			`nodes["worker"].handlers["task.ready"].rules[1]`,
+			`nodes["worker"].handlers["task.ready"].rules[2]`,
+			`nodes["worker"].handlers["task.ready"].rules[3]`,
+		}[index] {
+			t.Fatalf("row[%d] display displaced positional identity: %#v", index, ref)
+		}
 	}
 }
 
 func TestProjectNodePolicyLookupRejectsDuplicateKey(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - id: choose\n          lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
