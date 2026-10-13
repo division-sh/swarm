@@ -22,7 +22,10 @@ func TestOrdinaryForkPredecessorFaultScopeBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			after := forkReceiverFaultSnapshot(t, f.ctx, f.store)
-			proveOrdinaryForkFaultTableDelta(t, before, after, "workflow_instance_initial_materializations", 1)
+			proveOrdinaryForkFaultTableDelta(t, before, after, "workflow_instance_initial_materializations", 0)
+			if reflect.DeepEqual(before["workflow_instance_initial_materializations"], after["workflow_instance_initial_materializations"]) {
+				t.Fatal("correspondence fault did not replace the exact projected receipt")
+			}
 			if err := CopyReceiverConstructionReceiptForTest(f.ctx, f.store, f.sourceOwner, f.owner, f.sourceEntity, f.entityID); err == nil || !reflect.DeepEqual(after, forkReceiverFaultSnapshot(t, f.ctx, f.store)) {
 				t.Fatalf("existing destination receipt was overwritten or partially changed: %v", err)
 			}
