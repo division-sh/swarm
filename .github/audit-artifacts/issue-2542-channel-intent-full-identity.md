@@ -105,7 +105,7 @@ as production-ingress reproductions or live authority issuance.
 | Absent/pending retry versus allowed/wrong settled decision | execution-proven through the same corrected path | final-decision-controls, seven cases; final finite source controls pin the exact shared waiter/decision bridge |
 | Ordinary direct/shared object ingress and rebind retirement | execution-proven through the same corrected path | supported-core-cuts-race completed both SQLite cells; ordinary-pg-race58.985s completes both PostgreSQL cells |
 | Authority restart and all input process-death variants | execution-proven through the same corrected path | supported-core-cuts-race completed four authority cells and all12 crash cells before the unrelated aggregate alarm; invalid-answer-race40.798s also passes both stores |
-| Controlled selected-input refusal, separate card/draft/chooser no-mutation | execution-proven through the same corrected path | selected-controls-race114.487s; four modes on both stores, partial=true, duplicate attempts preserved |
+| Controlled selected-input refusal, separate card/draft/chooser no-mutation | execution-proven through the same corrected path | selected-controls-race114.487s and selected-final-controls-race95.073s; all16 cells, four modes/both partial values/both stores, duplicate attempts preserved |
 | Receptionist and all four draft-retirement variants | execution-proven through the same corrected path | receptionist-draft-race345.687s; both roots/both stores, all cancel/expire/external-decision/run-stop cells |
 | Uncertain-copy/stale pair/cancel/teaching/rebind | execution-proven through the same corrected path | uncertainty-distinct-and-rebind-race240.676s; both schedules on both stores |
 | ACK launched and settled process-death cuts | execution-proven through the same corrected path | ack-cuts-race166.935s; all four cells, identical exact occurrence at held and recovered cuts |
@@ -131,6 +131,10 @@ and currentReplacement29->32. The repair combines the historical file condition
 and extracts the unchanged retirement decisions, including their exact panic
 messages. Reconciler761/digest and completion30/17 replay remain identical;
 the six affected source controls pass1.262s. No workload or policy change.
+Final signed893cd85f2 complexity is GREEN: cognitive557 and cyclomatic259
+hotspots unchanged, both maxima unchanged. Final finite-history15 roots/1486
+test passes8.086s and final ordinary ratchet33.999s are GREEN. The initial
+signed complexity RED is retained, not claimed as a timing variance.
 
 Landing-history preparation also needs an explicit disposition: the new source
 guard git-shows signed predecessor3dc410868. The existing hosted historical-input
