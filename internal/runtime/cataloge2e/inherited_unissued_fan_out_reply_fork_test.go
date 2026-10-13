@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
-	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -94,17 +93,6 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 				len(plan.FanOutObligations[0].Outcomes) != 0 {
 				t.Fatalf("cut confused fresh child work with the original unissued carrier: %+v", plan.FanOutObligations[0])
 			}
-			paused, err := h.rt.RunControl.Pause(phase, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID,
-				Reason: "preserve-original-unissued-work", ControlledBy: "cataloge2e"})
-			if err != nil || paused.Status != runcontrol.StatusPaused {
-				t.Fatalf("pause original source before releasing its real claim: %+v error=%v", paused, err)
-			}
-			held.close()
-			waitInheritedUnissuedSourceParked(t, phase, selected, originalClaim.Key)
-			before, err := storetest.ReadSelectedForkSourceDomain(phase, selected, catalogRuntimeRunID)
-			if err != nil {
-				t.Fatal(err)
-			}
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
@@ -120,6 +108,24 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 				copied.Request.Cardinality != 1 || copied.Request.Capsule.Context.ReplyContextID() != childRows[0].ID ||
 				!reflect.DeepEqual(copied.Request.Capsule.Entity, intent.Request.Capsule.Entity) || len(childPlan.FanOutObligations[0].Outcomes) != 0 {
 				t.Fatalf("copied intent lost its frozen business data or own reply: %+v", copied)
+			}
+			// The archived cut and paused child are already proved unissued. Let
+			// the source finish; later source progress cannot redefine either.
+			held.close()
+			sourceDone, finishSource := context.WithTimeout(h.ctx, 20*time.Second)
+			defer finishSource()
+			waitCopiedActivityRequesterReturn(t, sourceDone, selected, catalogRuntimeRunID)
+			h.waitForCatalogStoreQuiescence(20 * time.Second)
+			sourceSettled, err := storetest.ReadReplyContextRecords(sourceDone, selected, catalogRuntimeRunID)
+			if err != nil || len(sourceSettled) != 1 || sourceSettled[0].State != replycontext.StateTerminal {
+				t.Fatalf("source did not finish through its original admitted turn: %+v error=%v", sourceSettled, err)
+			}
+			if err := sourceSettled[0].ValidateContinuationFrom(sourceRows[0], sourceRows[0].CreatedAt); err != nil {
+				t.Fatalf("source settlement changed its original reply binding: %v", err)
+			}
+			before, err := storetest.ReadSelectedForkSourceDomain(sourceDone, selected, catalogRuntimeRunID)
+			if err != nil {
+				t.Fatal(err)
 			}
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
@@ -166,27 +172,9 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(returned, selected, catalogRuntimeRunID)
 			afterRows, rowsErr := storetest.ReadReplyContextRecords(returned, selected, catalogRuntimeRunID)
-			if err != nil || rowsErr != nil || itemCount != 1 || finished != 1 || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(sourceRows, afterRows) {
+			if err != nil || rowsErr != nil || itemCount != 1 || finished != 1 || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(sourceSettled, afterRows) {
 				t.Fatalf("child duplicated its unissued return or changed the source: item=%d finished=%d errors=%v/%v", itemCount, finished, err, rowsErr)
 			}
 		})
-	}
-}
-
-func waitInheritedUnissuedSourceParked(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, key fanoutobligation.IntentKey) {
-	t.Helper()
-	for {
-		page, err := selected.ListFanOutIntents(ctx, fanoutobligation.ListQuery{RunID: key.RunID, Limit: 10})
-		if err != nil || len(page.Intents) != 1 || page.Intents[0].Key != key || page.Intents[0].Cursor != 0 {
-			t.Fatalf("source claim published or lost the original intent after pause: %+v error=%v", page, err)
-		}
-		if page.Intents[0].ClaimOwner == "" {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("source did not release its original paused claim: intent=%+v error=%v", page.Intents[0], ctx.Err())
-		case <-time.After(10 * time.Millisecond):
-		}
 	}
 }
