@@ -52,6 +52,7 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 		"default":        "rules:\n  - condition: else\n",
 		"singleton":      "rules:\n  condition: payload.ready\n",
 		"singleton_list": "rules:\n  condition: []\n",
+		"list_list":      "rules:\n  - condition: []\n",
 		"keyed":          "rules:\n  ready:\n    condition: payload.ready\n",
 		"mixed":          "rules:\n  - when: payload.ready\n    condition: payload.other\n  - else: true\n",
 		"duplicate":      "rules:\n  - condition: payload.ready\n    condition: payload.other\n",
@@ -61,6 +62,12 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := ruleTestRows(source)
+			if name == "singleton" || name == "singleton_list" || name == "keyed" {
+				if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+					t.Fatalf("retired collection must fail before row interpretation: %v", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) || !strings.Contains(err.Error(), "when") {
 				t.Fatalf("condition admission error = %v, want current rule vocabulary", err)
 			}
@@ -69,16 +76,21 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 }
 
 func TestHandlerRulesConditionCanBeKeyedDisplayLabel(t *testing.T) {
-	handler, err := ruleTestHandler("rules:\n  condition:\n    when: payload.ready\n  fallback:\n    else: true\n")
+	_, err := ruleTestHandler("rules:\n  condition:\n    when: payload.ready\n  fallback:\n    else: true\n")
+	if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+		t.Fatalf("field-word mapping must not become a label or singleton: %v", err)
+	}
+	handler, err := ruleTestHandler("rules:\n  - when: payload.ready\n  - else: true\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(handler.Rules) != 2 || handler.Rules[0].ID != "condition" || handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen {
-		t.Fatalf("keyed rule label changed: %#v", handler.Rules)
+	if len(handler.Rules) != 2 || handler.Rules[0].Condition != "payload.ready" || handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen ||
+		handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when payload.ready" {
+		t.Fatalf("canonical predicate meaning/presentation changed: %#v", handler.Rules)
 	}
-	_, err = ruleTestRows("rules:\n  condition: {when: payload.ready}\n  malformed: []\n")
-	if err == nil || strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") {
-		t.Fatalf("keyed display label was mistaken for predicate: %v", err)
+	_, err = ruleTestRows("rules:\n  - when: payload.ready\n  - []\n  - else: true\n")
+	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+		t.Fatalf("malformed canonical child must reach row admission: %v", err)
 	}
 }
 
@@ -108,6 +120,12 @@ func TestHandlerRulesWhenRejectsDefaultSentinel(t *testing.T) {
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := ruleTestRows(source)
+			if name == "singleton" || name == "keyed" {
+				if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+					t.Fatalf("retired collection must fail before sentinel interpretation: %v", err)
+				}
+				return
+			}
 			if err == nil {
 				t.Fatal("when default sentinel was admitted")
 			}

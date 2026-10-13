@@ -34,7 +34,7 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 		"worker/schema.yaml":   "name: worker\npins:\n  inputs:\n    - start\n",
 		"worker/entities.yaml": "work: {}\n",
 		"worker/events.yaml":   "task.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
-		"worker/nodes.yaml":    "observer:\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        accept:\n          when: payload.work_id != \"\"\n        unmatched:\n          else: true\n",
+		"worker/nodes.yaml":    "observer:\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        - when: payload.work_id != \"\"\n        - else: true\n",
 	}
 	files["worker/nodes.yaml"] += "producer:\n  execution_type: system_node\n  subscribes_to: [start, task.done]\n  produces: [task.done, task.failed]\n  event_handlers:\n    start:\n      emit:\n        event: task.done\n        fields:\n          work_id: \"work-1\"\n    task.done:\n      emit:\n        event: task.failed\n        fields:\n          work_id: " + secondValue + "\n"
 	for path, contents := range files {

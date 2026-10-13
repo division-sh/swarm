@@ -1734,10 +1734,8 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 
 func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.T) {
 	handler, err := loadNodeHandlerFixture(`rules:
-  - id: attempted-rule
-    when: evaluator.failure
-  - id: unmatched
-    else: true
+  - when: evaluator.failure
+  - else: true
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -1791,8 +1789,7 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 				fallback = "  - else: true\n"
 			}
 			raw := fmt.Sprintf(`%s:
-  - id: unsupported-condition
-    %s: unsupported.condition
+  - %s: unsupported.condition
 `, tc.field, predicate) + fallback
 			var err error
 			handler, err = loadNodeHandlerFixture(raw)
