@@ -197,6 +197,7 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 		SemanticSource: semanticview.Wrap(f.bundle), WorkflowInstances: f.workflows, LLMBackend: "anthropic",
 		DeliveryStore: f.store, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
+			LifecycleState: f.store, LifecycleOutcome: f.store,
 			AgentRoutes: f.bus, FlowActivation: agentFixtureFlowActivationCommitter{store: f.store},
 			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: publisher,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),

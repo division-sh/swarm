@@ -37,6 +37,7 @@ import (
 
 type agentFixtureFlowStore interface {
 	agentfixture.Store
+	runtimemanager.AgentLifecycleOutcomeReader
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
@@ -108,11 +109,13 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 				DeliveryStore:      selected,
 				WorkOwner:          storeTestWorkOwner(t),
 				PersistenceRoles: runtimemanager.PersistenceRoles{
-					AgentRoutes:    bus,
-					FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
-					RouteInstaller: bus,
-					RouteVerifier:  bus,
-					RouteRestorer:  bus,
+					LifecycleState:   selected,
+					LifecycleOutcome: selected,
+					AgentRoutes:      bus,
+					FlowActivation:   agentFixtureFlowActivationCommitter{store: selected},
+					RouteInstaller:   bus,
+					RouteVerifier:    bus,
+					RouteRestorer:    bus,
 				},
 				ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected))

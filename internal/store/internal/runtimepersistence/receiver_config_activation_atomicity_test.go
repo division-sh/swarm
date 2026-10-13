@@ -148,6 +148,7 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflows, LLMBackend: "anthropic",
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
+			LifecycleState: selected, LifecycleOutcome: selected,
 			AgentRoutes: bus, FlowActivation: committer,
 			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
