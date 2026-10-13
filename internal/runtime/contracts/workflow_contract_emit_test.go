@@ -59,14 +59,12 @@ func TestHandlerRuleEmitTemplateSitesMergeHandlerTemplateWithRuleFields(t *testi
 		},
 		Rules: []HandlerRuleEntry{
 			{
-				ID:        "high",
 				Condition: "payload.score >= 80",
 				Emit: EmitSpec{Fields: map[string]ExpressionValue{
 					"bucket": CELExpression(`"high"`),
 				}},
 			},
 			{
-				ID:        "low",
 				Condition: "else",
 				Emit: EmitSpec{Fields: map[string]ExpressionValue{
 					"bucket": CELExpression(`"low"`),
