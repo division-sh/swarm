@@ -54,19 +54,16 @@ func platformEventFieldJSONSchema(field EventFieldSpec) map[string]any {
 	}
 }
 
-func normalizePlatformEventFieldType(raw string) string {
+func normalizePlatformEventFieldType(raw string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "array<") && strings.Contains(raw, ">") {
 		inner := strings.TrimSpace(raw[len("array<"):strings.Index(raw, ">")])
 		if inner != "" {
 			suffix := strings.TrimSpace(raw[strings.Index(raw, ">")+1:])
-			if suffix != "" {
-				return inner + "[] " + suffix
-			}
-			return inner + "[]"
+			return "[" + inner + "]", suffix
 		}
 	}
-	return raw
+	return raw, ""
 }
 
 func sortedEventFieldNames(fields map[string]EventFieldSpec) []string {

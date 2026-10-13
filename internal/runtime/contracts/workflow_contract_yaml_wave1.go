@@ -882,10 +882,10 @@ func validateWave1TypeRef(raw, context string) error {
 			return fmt.Errorf("%s map type requires key and value types", context)
 		}
 		if strings.HasPrefix(keyType, "[") || strings.HasPrefix(strings.ToLower(keyType), "map[") {
-			return fmt.Errorf("%s map key type %q must be scalar or enum", context, keyType)
+			return fmt.Errorf("%s map key type %q is unsupported; map keys must be text, enum or uuid", context, keyType)
 		}
 		if strings.EqualFold(keyType, "object") || strings.EqualFold(keyType, "jsonb") {
-			return fmt.Errorf("%s map key type %q is unsupported", context, keyType)
+			return fmt.Errorf("%s map key type %q is unsupported; map keys must be text, enum or uuid", context, keyType)
 		}
 		if strings.EqualFold(valueType, "object") || strings.EqualFold(valueType, "jsonb") {
 			return fmt.Errorf("%s map value type %q is unsupported", context, valueType)

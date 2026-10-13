@@ -72,24 +72,29 @@ func NormalizeContainedOperationValue(contract Contract, target ContainedOperati
 }
 
 func NormalizeContainedOperationKey(contract Contract, keyType string, value any) (string, error) {
-	keyType = strings.TrimSpace(typeName(contract, keyType))
-	switch {
-	case isTextType(keyType), isUUIDType(contract, keyType), isEnumType(contract, keyType):
-		normalized, err := normalizeValueForType(contract, "", keyType, value)
-		if err != nil {
-			return "", err
-		}
-		key := fmt.Sprint(normalized)
-		if !isTextType(keyType) {
-			key = strings.TrimSpace(key)
-		}
-		if key == "" {
-			return "", fmt.Errorf("map key cannot be empty")
-		}
-		return key, nil
-	default:
-		return "", fmt.Errorf("map key type %s is unsupported; use text, uuid, or enum", keyType)
+	ref := runtimecontracts.CatalogTypeReference{Type: keyType, Catalog: contract.Types}
+	resolved, err := ref.ResolveMapKey()
+	if err != nil {
+		return "", err
 	}
+	keyType = resolved.Name
+	if resolved.PlainText() {
+		keyType = "text"
+	} else if resolved.Format == "uuid" {
+		keyType = "uuid"
+	}
+	normalized, err := normalizeValueForType(contract, "", keyType, value)
+	if err != nil {
+		return "", err
+	}
+	key := fmt.Sprint(normalized)
+	if !resolved.PlainText() {
+		key = strings.TrimSpace(key)
+	}
+	if key == "" {
+		return "", fmt.Errorf("map key cannot be empty")
+	}
+	return key, nil
 }
 
 func NormalizeContainedOperationIndex(value any) (int, error) {

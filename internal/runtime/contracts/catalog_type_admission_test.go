@@ -176,6 +176,10 @@ func TestCatalogAdmissionCompiledEventRefusals(t *testing.T) {
 		if err := ValidateCatalogFieldSupply("test", map[string]any{}, EntityFieldDecl{Type: ref}, admissionTestCatalog()); err == nil {
 			t.Errorf("invalid result target %q gained field-supply authority", ref)
 		}
+		projected, _ := eventSchemaForTypeRef(ref, admissionTestCatalog(), map[string]struct{}{})
+		if _, err := AdmitToolInputSchemaMap(projected); err == nil {
+			t.Errorf("invalid registry reference %q gained schema authority: %#v", ref, projected)
+		}
 	}
 }
 
@@ -230,5 +234,67 @@ func TestCatalogAdmissionNativePlatformArrays(t *testing.T) {
 				t.Fatal("UUID item format lost")
 			}
 		})
+	}
+}
+
+func TestCatalogAdmissionDurableTextPolicy(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-domains\n")
+	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: {type: Label, pattern: '^valid', length: {min: 5}}\n  identity: ID\n  stamp: Time?\n  status: Status\n  labels: '[Label]'\n")
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := BuildDurableDataImportShapeCatalog(bundle)
+	if err != nil || len(catalog.Shapes) != 1 {
+		t.Fatalf("compiled import shape: %+v %v", catalog, err)
+	}
+	seen := make(map[string]bool)
+	for _, field := range catalog.Shapes[0].Fields {
+		seen[field.Name] = field.Text
+	}
+	if !reflect.DeepEqual(seen, map[string]bool{"label": true, "identity": false, "stamp": false, "status": false, "labels": false}) {
+		t.Fatalf("compiled file-text eligibility erased declared domains: %v", seen)
+	}
+}
+
+func TestCatalogAdmissionRefinementPolicy(t *testing.T) {
+	types := admissionTestCatalog()
+	types.Enums["OtherStatus"] = EnumTypeDecl{Values: []string{"open", "closed"}, Default: "open"}
+	for _, tc := range []struct {
+		name, left, right string
+		accepted          bool
+	}{
+		{"text_alias", "Label", "text", true},
+		{"uuid_alias", "ID", "uuid", true},
+		{"time_alias", "Time", "timestamp", true},
+		{"same_enum", "Status", "Status", true},
+		{"different_enum", "Status", "OtherStatus", false},
+		{"enum_text", "Status", "text", false},
+		{"uuid_text", "ID", "text", false},
+		{"integer_numeric", "integer", "numeric", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateSchemaRefinementFields("declared fields", types, map[string]schemaRefinementField{
+				"left":  {Name: "left", TypeRef: tc.left, Refinements: SchemaRefinements{EqualTo: "right"}},
+				"right": {Name: "right", TypeRef: tc.right},
+			})
+			if (len(errs) == 0) != tc.accepted {
+				t.Fatalf("same-declared equality %s vs %s: %v", tc.left, tc.right, errs)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		ref      string
+		accepted bool
+	}{
+		{"Label", true}, {"[Label]", false}, {"integer", false}, {"Time", false},
+	} {
+		errs := validateSchemaRefinementFields("pattern", types, map[string]schemaRefinementField{"value": {Name: "value", TypeRef: tc.ref, Refinements: SchemaRefinements{Pattern: "^valid"}}})
+		if (len(errs) == 0) != tc.accepted {
+			t.Fatalf("pattern eligibility %s: %v", tc.ref, errs)
+		}
 	}
 }

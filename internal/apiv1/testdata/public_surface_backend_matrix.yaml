@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go, internal/serveapp/serve_runtime_execution.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, channel-delivery-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates, process-generation-missing, process-generation-publication, process-publication-outcome, process-effect-generation, process-generation-monitor-phases, process-generation-monitor-queue, process-generation-monitor-join, event-catalog-refined-publication, event-catalog-retained-artifact, catalog-type-detached-public-restart, catalog-type-detached-retained-artifact]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, channel-delivery-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates, process-generation-missing, process-generation-publication, process-publication-outcome, process-effect-generation, process-generation-monitor-phases, process-generation-monitor-queue, process-generation-monitor-join, event-catalog-refined-publication, event-catalog-retained-artifact, catalog-type-admission-public-restart, catalog-type-admission-template-route, catalog-type-detached-public-restart, catalog-type-detached-retained-artifact]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -109,6 +109,24 @@ store_parity:
     - {id: product_destructive_reset, parent: productPorts.destructiveReset, role_source_path: internal/store/selected/selected.go, role_type: DestructiveReset}
     - {id: product_startup_recovery, parent: productPorts.startupRecovery, role_source_path: internal/store/selected/selected.go, role_type: StartupRecovery}
   proof_catalog:
+    - id: catalog-type-admission-public-restart
+      kind: go_test
+      name: TestCatalogTypeAdmissionPublicRestartBothStores
+      path: internal/releasee2e/catalog_type_admission_test.go
+      profile: lifecycle
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [runtime]
+      capabilities: [{claim_id: event_delivery}, {claim_id: source_artifact}]
+    - id: catalog-type-admission-template-route
+      kind: go_test
+      name: TestCatalogTypeAdmissionTemplateRoutingBothStores
+      path: internal/releasee2e/catalog_type_admission_test.go
+      profile: lifecycle
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [runtime]
+      capabilities: [{claim_id: event_delivery}, {claim_id: source_artifact}]
     - id: catalog-type-detached-public-restart
       kind: go_test
       name: TestCatalogTypeDetachmentPublicRestartBothStores

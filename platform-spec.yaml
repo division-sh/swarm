@@ -2978,12 +2978,18 @@ type_system:
       Retirement of the separate list<T> and long type:list/of:T forms belongs
       to the independently governed duplicate-form census, not a compatibility
       path or new support in this admission repair.
-    rejected_map_key_kinds: |
-      Integer, numeric and boolean map key declarations fail typed admission
-      before describe, compilation or execution. Text scalar aliases resolve
-      through the same catalog owner. The existing enum/UUID key and contained
-      normalization contract remains unchanged by this policy-independent
-      admission repair; no text-only key rule is inferred here.
+    map_key_domains: |
+      Map keys are text-family: text, a declared closed enum, or uuid. Integer,
+      numeric, boolean, timestamp, opaque and compound key declarations fail
+      typed admission before describe, compilation or execution. The teaching
+      error states that map keys must be text, enum or uuid. Scalar aliases
+      resolve through the same catalog owner. Kind:text is string
+      representation, not erasure of enum identity or UUID format/validation.
+      Plain text preserves exact nonempty spelling; enum membership and UUID
+      canonicalization follow contained_operation.map_key_normalization.
+      Numeric-looking text keys use lexical order ("10" before "2"). Scalar
+      routing integer-to-numeric compatibility is a separate law. map[K]V
+      retains its informative key slot and is not retired.
     retired:
     - jsonb as an author-declared contract type
     - Inline type: object without declared inner shape
