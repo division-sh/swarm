@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func admissionTestCatalog() TypeCatalogDocument {
@@ -174,5 +176,59 @@ func TestCatalogAdmissionCompiledEventRefusals(t *testing.T) {
 		if err := ValidateCatalogFieldSupply("test", map[string]any{}, EntityFieldDecl{Type: ref}, admissionTestCatalog()); err == nil {
 			t.Errorf("invalid result target %q gained field-supply authority", ref)
 		}
+	}
+}
+
+func TestCatalogAdmissionTextFamilyMapKeys(t *testing.T) {
+	types := admissionTestCatalog()
+	for _, key := range []string{"text", "Label", "Status", "uuid", "ID"} {
+		resolved, err := (CatalogTypeReference{Type: "map[" + key + "]Item", Catalog: types}).Resolve()
+		if err != nil || resolved.Key == nil || resolved.Key.Kind != CatalogTypeText {
+			t.Fatalf("text-family key %s lost: %+v %v", key, resolved, err)
+		}
+		if key == "Status" && resolved.Key.Name != "Status" {
+			t.Fatal("enum identity erased")
+		}
+		if (key == "uuid" || key == "ID") && resolved.Key.Format != "uuid" {
+			t.Fatal("UUID validation format erased")
+		}
+	}
+	for _, key := range []string{"integer", "numeric", "boolean", "timestamp", "Time", "json", "array", "Item"} {
+		resolved, err := (CatalogTypeReference{Type: "map[" + key + "]Item", Catalog: types}).Resolve()
+		if err == nil || resolved.Kind != "" || !strings.Contains(err.Error(), "map keys must be text, enum or uuid") {
+			t.Errorf("invalid map key %s gained authority or lost teaching error: %+v %v", key, resolved, err)
+		}
+	}
+}
+
+func TestCatalogAdmissionNativePlatformArrays(t *testing.T) {
+	for _, tc := range []struct {
+		source, item, description string
+		optional                  bool
+	}{
+		{"array<string>", "string", "", false},
+		{"array<uuid>?", "string", "", true},
+		{"'array<string> (exact labels)'", "string", "(exact labels)", false},
+		{"{type: 'array<integer>', description: counts}", "integer", "counts", false},
+		{"{type: 'array<string> (exact labels)', description: payload labels}", "string", "(exact labels). payload labels", false},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			snapshot, err := yamlsource.Load([]byte(tc.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			field, optional, err := admitPlatformEventFieldValue(snapshot.Document("native.yaml").Root())
+			if err != nil || optional != tc.optional || field.Description != tc.description || !strings.HasPrefix(field.Type, "[") || strings.Contains(field.Type, "[]") {
+				t.Fatalf("native list lowering: field=%+v optional=%v err=%v", field, optional, err)
+			}
+			schema := platformEventFieldJSONSchema(field)
+			items, _ := schema["items"].(map[string]any)
+			if schema["type"] != "array" || items["type"] != tc.item {
+				t.Fatalf("native array item meaning lost: %#v", schema)
+			}
+			if tc.optional && items["format"] != "uuid" {
+				t.Fatal("UUID item format lost")
+			}
+		})
 	}
 }
