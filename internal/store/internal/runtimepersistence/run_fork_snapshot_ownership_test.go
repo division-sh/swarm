@@ -33,6 +33,7 @@ type snapshotOwnershipFixture struct {
 	ctx                      context.Context
 	runID, entityID, eventID string
 	state                    runtimepipeline.WorkflowEngineStateRecord
+	initialMaterialization   json.RawMessage
 }
 
 func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBackend, eventContext, reverse bool) snapshotOwnershipFixture {
@@ -72,6 +73,7 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 		t.Fatal(err)
 	}
 	f.entityID = persisted.State.EntityID
+	f.initialMaterialization = append(json.RawMessage(nil), persisted.InitialMaterialization...)
 	f.state = persisted.State
 	f.state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	f.state.ExpectedState, f.state.ExpectedRevision = "active", 1
@@ -146,27 +148,23 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						}
 					}
 					wantMetadata := runfork.RunForkMaterializedEntitySnapshotMetadata{
-						Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+						InitialMaterialization: canonicalSnapshotOwnershipJSON(t, f.initialMaterialization),
+						FlowConfig:             canonicalSnapshotOwnershipJSON(t, f.state.Config),
+						Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
 						ParentInstance: f.runID, InstanceKey: "one",
 						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
 					}
 					if entity.MaterializationMetadata != nil {
-						var gotConfig, wantConfig any
-						if err := canonicaljson.DecodePreservingNumberLexemes(entity.MaterializationMetadata.FlowConfig, &gotConfig); err != nil {
-							t.Fatal(err)
+						gotMetadata := *entity.MaterializationMetadata
+						gotMetadata.FlowConfig = canonicalSnapshotOwnershipJSON(t, gotMetadata.FlowConfig)
+						gotMetadata.InitialMaterialization = canonicalSnapshotOwnershipJSON(t, gotMetadata.InitialMaterialization)
+						if !reflect.DeepEqual(gotMetadata, wantMetadata) {
+							t.Fatalf("metadata = %#v, want %#v", gotMetadata, wantMetadata)
 						}
-						if err := canonicaljson.DecodePreservingNumberLexemes(f.state.Config, &wantConfig); err != nil {
-							t.Fatal(err)
-						}
-						if !reflect.DeepEqual(gotConfig, wantConfig) {
-							t.Fatalf("historical config = %#v, want %#v", gotConfig, wantConfig)
-						}
-						wantMetadata.FlowConfig = entity.MaterializationMetadata.FlowConfig
-					}
-					if entity.MaterializationMetadata == nil || !reflect.DeepEqual(*entity.MaterializationMetadata, wantMetadata) {
-						t.Fatalf("metadata = %#v, want %#v", entity.MaterializationMetadata, wantMetadata)
+					} else {
+						t.Fatal("fixed-cut entity is missing ownership metadata")
 					}
 					if entity.Fields["entity_type"] != "authored-not-owner" {
 						t.Fatalf("authored type field lost: %#v", entity.Fields)
@@ -212,6 +210,19 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func canonicalSnapshotOwnershipJSON(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	var value any
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func assertSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, forkRunID string, want runfork.RunForkEntityState, wantRevision int64) {
