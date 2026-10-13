@@ -19,7 +19,7 @@ func loadDetachedCatalogFixture(t *testing.T) *WorkflowContractBundle {
 	types := "enums:\n  Choice: {values: [alpha, beta], default: alpha}\ntypes:\n  Probe:\n" + bytesToIndented(detachedCatalogFields) + "  Outer:\n    child: Probe\n"
 	for name, body := range map[string]string{
 		"schema.yaml": "name: detached-catalog\nstages: {done: {final: true}}\n",
-		"types.yaml":  types, "entities.yaml": "person:\n" + detachedCatalogFields,
+		"types.yaml":  types, "entities.yaml": "person:\n" + detachedCatalogFields + "  members: map[text]Probe\n",
 		"events.yaml":       "audit.record:\n" + detachedCatalogFields + "batch.ready:\n  rows: '[Probe]'\n  label: text\n  result: Probe\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
 		"child/types.yaml":  types, "child/entities.yaml": "person:\n" + detachedCatalogFields,
@@ -245,7 +245,7 @@ func addDetachedPlanObservations(t *testing.T, out map[string]catalogDetachedObs
 			return detachedTypeField(t, get().CollectionProjection.Type, name).Refinements
 		}}
 	}
-	join := WorkflowJoinPlan{Node: identitytest.RootNode(t, "collector"), ResultType: CatalogTypeReference{Type: "Probe", Catalog: ref.Catalog}, MembersCollectionProjection: projection}
+	join := WorkflowJoinPlan{Node: identitytest.RootNode(t, "collector"), ResultType: CatalogTypeReference{Type: "Probe", Catalog: ref.Catalog}, MembersCollectionProjection: mapProjection}
 	out["D09/join/catalog"] = catalogDetachedObservation{func() any { return join }, func() SchemaRefinements {
 		return join.Clone().ResultType.Catalog.Types["Probe"].Fields[name].Refinements
 	}}
@@ -400,7 +400,7 @@ func TestCatalogTypeDetachmentCompiledConnection(t *testing.T) {
 
 func TestCatalogTypeDetachmentCompiledPlans(t *testing.T) {
 	for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
-		t.Run(bound, func(t *testing.T) {
+		t.Run(bound+"/fanout", func(t *testing.T) {
 			b := loadDetachedCatalogFixture(t)
 			node := identitytest.RootNode(t, "collector")
 			handler := SystemNodeEventHandler{FanOut: &FanOutSpec{
@@ -423,16 +423,20 @@ func TestCatalogTypeDetachmentCompiledPlans(t *testing.T) {
 			if !ok || !bytes.Equal(before, detachedSnapshot(t, fresh.SemanticEvidence())) || plan.Ref != fresh.Ref {
 				t.Fatal("compiled fan-out registry evidence or identity changed")
 			}
-			count := 1
+		})
+		t.Run(bound+"/join", func(t *testing.T) {
+			b := loadDetachedCatalogFixture(t)
+			node := identitytest.RootNode(t, "collector")
 			join, err := b.CompileWorkflowJoinPlan(node, "batch.ready", SystemNodeEventHandler{Join: &JoinSpec{
-				Stage: "done", Members: JoinMembersSpec{Count: &count, By: "payload.label"},
+				Stage: "done", Members: JoinMembersSpec{From: "state.members", By: "payload.label"},
 				Output: "payload.result", Until: "audit.record", OnCompleteFound: true, OnComplete: HandlerRuleEntry{AdvancesTo: "done"},
 			}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			before = detachedSnapshot(t, join)
+			before := detachedSnapshot(t, join)
 			mutateDetachedBound(join.Clone().ResultType.Catalog.Types["Probe"].Fields[detachedBoundField(bound)].Refinements, bound)
+			mutateDetachedBound(detachedTypeField(t, join.Clone().MembersCollectionProjection.Type, detachedBoundField(bound)).Refinements, bound)
 			if !bytes.Equal(before, detachedSnapshot(t, join)) {
 				t.Fatal("compiled arrival join evidence changed")
 			}
