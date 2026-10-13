@@ -75,6 +75,9 @@ func NodeStateFieldTypeToDDL(schemaType string) (string, error) {
 	if _, ok := runtimecontracts.NodeStateNamedTypeName(normalized); ok {
 		return "JSONB", nil
 	}
+	if strings.HasPrefix(normalized, "[") && strings.HasSuffix(normalized, "]") {
+		normalized = normalized[1:len(normalized)-1] + "[]"
+	}
 	return SchemaFieldTypeToDDL(normalized)
 }
 

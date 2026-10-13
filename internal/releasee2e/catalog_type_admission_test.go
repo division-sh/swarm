@@ -276,20 +276,23 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatalf("public template ingress: %+v %v", published, err)
 			}
 			var routed goldenEvent
+			var observed []goldenEvent
 			if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 				events, err := listGoldenEvents(ctx, process.rpc, published.RunID)
 				if err != nil {
 					return false, err
 				}
+				observed = events
 				for _, event := range events {
-					if event.EventName == "account.ready" && len(event.Deliveries) == 1 && event.Deliveries[0].Status == "delivered" {
+					if event.EventName == "producer/account.ready" && len(event.Deliveries) == 1 && event.Deliveries[0].Status == "delivered" {
 						routed = event
 						return true, nil
 					}
 				}
 				return false, nil
 			}); err != nil {
-				t.Fatalf("alias template delivery: %v\n%s", err, process.output.String())
+				state, _ := json.Marshal(observed)
+				t.Fatalf("alias template delivery: %v\nlast event state: %s\n%s", err, state, process.output.String())
 			}
 			target := routed.Deliveries[0].Target
 			if target.FlowID != "account" || target.Kind != "materializing_entity" || !reflect.DeepEqual(routed.Payload, map[string]any{"account_id": "alias-key"}) {

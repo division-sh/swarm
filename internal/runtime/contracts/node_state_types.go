@@ -23,10 +23,14 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 		if base == "" {
 			return "", fmt.Errorf("state_schema list type requires an element type")
 		}
-		if !nodeStateNamedTypePattern.MatchString(base) {
-			return "", fmt.Errorf("unsupported state_schema named list type %q; use [NamedType] for declared types.yaml references", raw)
+		if strings.ContainsAny(base, "[]<>") {
+			return "", fmt.Errorf("unsupported state_schema list element %q; use a scalar or declared named type", base)
 		}
-		return "[" + base + "]", nil
+		normalizedBase, err := NormalizeNodeStateFieldType(base)
+		if err != nil {
+			return "", err
+		}
+		return "[" + normalizedBase + "]", nil
 	}
 	if strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") {
 		base := strings.TrimSpace(raw[len("list<") : len(raw)-1])
