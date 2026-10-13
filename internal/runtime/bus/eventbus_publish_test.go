@@ -186,6 +186,16 @@ func busPublicationClaimsSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
+func busRuntimeControlSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyBusRuntimeControl(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) context.Context {
 	return eventBusTestRunContextForSource(t, selected, nil)
 }
@@ -2869,12 +2879,11 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	runID := uuid.NewString()
-	artifact := admitEventBusPersistedSourceArtifact(t, context.Background(), pg)
-	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	source := busRuntimeControlSource(t)
+	sourceFact := testSourceArtifactFact(source)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
@@ -2886,12 +2895,14 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	evt := eventtest.RunCreatingRootIngress(
 		eventID, eventType, "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.EventOrigin(t, eventID, string(eventType)), RunID: runID,
 		BundleHash: wantHash,
 	})
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 	agentIdentity := runtimebustest.IdentityForRun(t, runID, "agent-a", "bundle-source-test")
-	if err := storetest.UpsertStaticAgentFixtureForSource(t, context.Background(), pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID: "agent-a", Identity: agentIdentity, FlowID: "bundle-source-test", FlowPath: "bundle-source-test",
 			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
@@ -2907,10 +2918,10 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 		t.Fatalf("admit direct recipient: %v", err)
 	}
 	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
-	if err := eb.PublishDirect(context.Background(), evt, []string{"agent-a"}); err != nil {
+	if err := eb.PublishDirect(ctx, evt, []string{"agent-a"}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
-	bundleHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), pg, runID)
+	bundleHash, err := storetest.ReadSelectedForkRunBundleHash(ctx, pg, runID)
 	if err != nil {
 		t.Fatalf("load run source artifact: %v", err)
 	}
@@ -3094,8 +3105,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
-	eb, err := newScopedTestEventBus(pg)
+	source := busRuntimeControlSource(t)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -3152,9 +3164,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 				Origin:     storetest.EventOrigin(t, tc.eventID, string(tc.eventType)),
 				RunID:      tc.runID,
-				BundleHash: authorActivityTestBundleHash,
+				BundleHash: testSourceArtifactFact(source).BundleHash(),
 			})
-			agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, tc.runID, agentID)
+			agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
 			subscriptions := []string{string(tc.eventType)}
 			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 				AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
@@ -3242,18 +3254,21 @@ func platformSignalFixturePayload(t *testing.T, eventType events.EventType) []by
 
 func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
-	eb, err := newScopedTestEventBus(pg)
+	source := busRuntimeControlSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 	controller := runtimeingress.NewController(pg, eb, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	eb.SetRuntimeIngressDispatchGate(controller)
 
 	agentID := "agent-paused-queue"
 	eventType := events.EventType("custom.paused")
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, eventBusTestRunID, agentID, testSourceArtifactFact(source))
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, eventType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
