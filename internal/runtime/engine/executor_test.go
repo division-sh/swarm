@@ -3528,6 +3528,48 @@ func TestExecutor_ActivityIntentPersistsBeforeFollowUpTransfer(t *testing.T) {
 	}
 }
 
+func TestExecutor_RuleActivityIntentKeepsExplicitNamesAndSelectedRef(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	writer := &orderedActivityWriter{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:    sourceWithFixtureStages(sourceWithActivityTool(), "research", "pending", "pending"),
+		StateRepo: repo, MutationOwner: composedMutationOwner{state: repo, activities: writer, order: &order},
+		Locker: orderedLocker{order: &order},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("entity-1"), Node: testFlowExecutableNode(t, "research", "scanner"),
+		HandlerEventKey: "source.requested",
+		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: "else", Activity: runtimecontracts.ActivitySpec{
+				ID: "pinned_request", Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
+			},
+		}}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(order, []string{"lock", "tx", "save", "activity_intents"}) || len(writer.intents) != 1 || len(result.ActivityIntents) != 1 {
+		t.Fatalf("rule intent lost original commit ordering/cardinality: order=%v written=%#v returned=%#v", order, writer.intents, result.ActivityIntents)
+	}
+	intent := writer.intents[0]
+	if intent.ActivityID != "pinned_request" || intent.SuccessEvent != "research/pinned_request.succeeded" || intent.FailureEvent != "research/pinned_request.failed" || intent.RevisionEvent != "research/pinned_request.revision_requested" || intent.RejectedEvent != "research/pinned_request.rejected" {
+		t.Fatalf("rule intent renamed a generated outcome: %#v", intent)
+	}
+	if value, ok := intent.Input.Lookup("url"); !ok || value.Interface() != "https://example.com" {
+		t.Fatalf("rule activity input = %#v, present=%t", value.Interface(), ok)
+	}
+	selection := requireResolvedSelection(t, result.HandlerRuleSelection)
+	if selection.Context() != handlerselection.ContextRules || selection.Disposition() != handlerselection.DispositionSelected || selection.Ref().SemanticPath() != `nodes["scanner"].handlers["source.requested"].rules[0]` || selection.Ref().Flow().String() != "research" {
+		t.Fatalf("rule intent lost exact selected identity: %#v", selection)
+	}
+}
+
 func TestExecutor_UnnamedRuleActivityRefusesBeforeEffects(t *testing.T) {
 	for _, id := range []string{"", "  "} {
 		order := []string{}
