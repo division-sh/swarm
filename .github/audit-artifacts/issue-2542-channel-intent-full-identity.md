@@ -126,6 +126,20 @@ RED receipts. The SQLite fork failure is neither waived nor disguised as a
 pressure or clean-master inheritance claim. No timeout increase, skip, weakened
 business assertion or local tier. Final signed complexity is separate evidence.
 
+The first signed complexity receipt was RED: historical completion main28->30
+and currentReplacement29->32. The repair combines the historical file condition
+and extracts the unchanged retirement decisions, including their exact panic
+messages. Reconciler761/digest and completion30/17 replay remain identical;
+the six affected source controls pass1.262s. No workload or policy change.
+
+Landing-history preparation also needs an explicit disposition: the new source
+guard git-shows signed predecessor3dc410868. The existing hosted historical-input
+map names store and rewrite-stages packages, not this codemod package. Full local
+history is available, but no depth-one hosted-history qualification is claimed.
+The existing history owner should provision the finite exact codemod inputs at
+integration; this is recorded for reviewer-b, not silently changed into a full
+unshallow or source-guard fallback in this observation wave.
+
 Fresh census7155/4898 ->7074/4824:81 findings/74 raw operations removed,
 zero additions, all67 excluded occurrences and71 conserved debug occurrences
 retained. Collector84f9fb91... unchanged, baseline SHA

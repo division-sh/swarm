@@ -649,17 +649,24 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	},
 }
 
-func currentReplacement(path, key string, after map[string]string) (string, bool) {
+func retiredFixtureReplacement(path, key string, after map[string]string) bool {
 	if channelIntentRetirements[path][key] {
 		if after[key] != "" {
 			panic("retired channel-intent interpreter survived: " + path + "/" + key)
 		}
-		return "", true
+		return true
 	}
 	if retiredEventFixtureHelpers[path][key] {
 		if after[key] != "" {
 			panic("retired raw event fixture helper survived: " + path + "/" + key)
 		}
+		return true
+	}
+	return false
+}
+
+func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if retiredFixtureReplacement(path, key, after) {
 		return "", true
 	}
 	if replacement := after[key]; replacement != "" {
