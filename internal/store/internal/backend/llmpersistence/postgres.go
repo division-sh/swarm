@@ -74,8 +74,8 @@ func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *mu
 			INSERT INTO agent_conversation_audits (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance, memory_enabled, entity_id,
-				conversation, turn_count, runtime_state, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,NULLIF($10,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
+				turn_count, runtime_state, status, created_at, updated_at
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,NULLIF($10,'')::uuid,1,'{}'::jsonb,'active',now(),now())
 		`+conflict+` RETURNING session_id::text, run_id::text`, sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 			strings.TrimSpace(rec.EntityID)).Scan(&storedSessionID, &storedRunID)

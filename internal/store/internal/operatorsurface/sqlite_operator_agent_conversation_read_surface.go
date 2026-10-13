@@ -500,14 +500,13 @@ func sqliteOperatorConversationQuerySources() []string {
 				memory_enabled,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				turn_count,
-				json_array_length(COALESCE(conversation, '[]')) AS message_count,
+				` + conversationTranscriptMessageCountSQL(true) + ` AS message_count,
 				runtime_state,
-				conversation,
 				created_at AS started_at,
 				CASE WHEN status = 'terminated' THEN terminated_at ELSE NULL END AS ended_at,
 				updated_at,
 				created_at
-			FROM agent_sessions
+			FROM agent_sessions conversation_owner
 			WHERE status IN ('active', 'terminated') AND memory_enabled = 1
 		`, `
 			SELECT
@@ -524,14 +523,13 @@ func sqliteOperatorConversationQuerySources() []string {
 				memory_enabled,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				COALESCE(turn_count, 0) AS turn_count,
-				json_array_length(COALESCE(conversation, '[]')) AS message_count,
+				` + conversationTranscriptMessageCountSQL(true) + ` AS message_count,
 				COALESCE(runtime_state, '{}') AS runtime_state,
-				COALESCE(conversation, '[]') AS conversation,
 				created_at AS started_at,
 				NULL AS ended_at,
 				updated_at,
 				created_at
-			FROM agent_conversation_audits
+			FROM agent_conversation_audits conversation_owner
 			WHERE status = 'active'
 		`}
 }

@@ -22,6 +22,7 @@ import (
 
 type operatorConversationProjectionTestBackend struct {
 	store interface {
+		ListOperatorConversations(context.Context, operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error)
 		ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
 		LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 	}
@@ -32,6 +33,7 @@ type operatorConversationProjectionTestBackend struct {
 	claims     map[string]runtimedelivery.Claim
 	db         *sql.DB
 	sqlite     bool
+	memory     bool
 }
 
 type operatorConversationProjectionFixture struct {
@@ -75,18 +77,26 @@ type operatorConversationProjectionTurnSeed struct {
 }
 
 func TestOperatorConversationProjectionBackendParity(t *testing.T) {
-	var sqliteResult operatorConversationProjectionParityResult
+	sqliteResults := make(map[bool]operatorConversationProjectionParityResult)
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
-			backend := newOperatorConversationProjectionTestBackend(t, backendName)
-			fixture := seedOperatorConversationProjectionFixture(t, backend)
-			result := proveOperatorConversationProjectionBackend(t, backend, fixture)
-			if backendName == "sqlite" {
-				sqliteResult = result
-				return
-			}
-			if !reflect.DeepEqual(result, sqliteResult) {
-				t.Fatalf("PostgreSQL projection differs from SQLite:\npostgres=%#v\nsqlite=%#v", result, sqliteResult)
+			for _, mode := range []struct {
+				name   string
+				memory bool
+			}{{"memory", true}, {"stateless", false}} {
+				t.Run(mode.name, func(t *testing.T) {
+					backend := newOperatorConversationProjectionTestBackend(t, backendName)
+					backend.memory = mode.memory
+					fixture := seedOperatorConversationProjectionFixture(t, backend)
+					result := proveOperatorConversationProjectionBackend(t, backend, fixture)
+					if backendName == "sqlite" {
+						sqliteResults[mode.memory] = result
+						return
+					}
+					if !reflect.DeepEqual(result, sqliteResults[mode.memory]) {
+						t.Fatalf("PostgreSQL projection differs from SQLite:\npostgres=%#v\nsqlite=%#v", result, sqliteResults[mode.memory])
+					}
+				})
 			}
 		})
 	}
@@ -214,6 +224,10 @@ func seedOperatorConversationProjectionSession(
 	createdAt, updatedAt time.Time,
 ) {
 	t.Helper()
+	if !backend.memory {
+		// The real completion transaction creates stateless audit metadata.
+		return
+	}
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("seed operator conversation session identity: %v", err)
@@ -294,7 +308,7 @@ func seedOperatorConversationProjectionTurn(
 			AgentID:       seed.identity.AgentID(),
 			AgentIdentity: seed.identity,
 			SessionID:     seed.sessionID,
-			Memory:        agentmemory.Plan{Enabled: true},
+			Memory:        agentmemory.Plan{Enabled: backend.memory},
 			FlowInstance:  seed.identity.FlowInstance(),
 			EntityID:      seed.entityID,
 		}
@@ -317,7 +331,7 @@ func seedOperatorConversationProjectionTurn(
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, backend.settlement, runtimellm.AgentTurnRecord{
 		AgentID: seed.identity.AgentID(), Identity: seed.identity,
-		Memory: agentmemory.Plan{Enabled: true}, SessionID: seed.sessionID, RunID: seed.runID,
+		Memory: agentmemory.Plan{Enabled: backend.memory}, SessionID: seed.sessionID, RunID: seed.runID,
 		FlowInstance: seed.identity.FlowInstance(), EntityID: seed.entityID,
 		TriggerEventID: seed.triggerEventID, TriggerEventType: seed.triggerType, TaskID: seed.taskID,
 		TurnBlocks: blocks, ParseOK: seed.parseOK, Latency: time.Duration(seed.latencyMS) * time.Millisecond,
@@ -337,6 +351,9 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	if len(first.Turns) != 2 || first.NextCursor == "" || first.Turns[0].TurnID != fixture.turnIDs[3] || first.Turns[0].Ordinal != 4 || first.Turns[1].TurnID != fixture.turnIDs[2] || first.Turns[1].Ordinal != 3 {
 		t.Fatalf("first turn page = %#v", first)
 	}
+	if first.Conversation.MessageCount != 4 {
+		t.Fatalf("full transcript count = %d, want 4 despite empty hydration head and two-turn page", first.Conversation.MessageCount)
+	}
 	if first.Turns[0].ActivityCounts != (operatorread.OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1}) {
 		t.Fatalf("mixed compact activity counts = %#v", first.Turns[0].ActivityCounts)
 	}
@@ -346,6 +363,9 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	}
 	if len(second.Turns) != 2 || second.NextCursor != "" || second.Turns[0].TurnID != fixture.turnIDs[1] || second.Turns[0].Ordinal != 2 || second.Turns[1].TurnID != fixture.turnIDs[0] || second.Turns[1].Ordinal != 1 {
 		t.Fatalf("second turn page = %#v", second)
+	}
+	if second.Conversation.MessageCount != first.Conversation.MessageCount {
+		t.Fatalf("cursor changed full transcript count: first=%d second=%d", first.Conversation.MessageCount, second.Conversation.MessageCount)
 	}
 	if second.Turns[0].Tokens == nil || second.Turns[0].Tokens.Exactness != "exact" || second.Turns[0].Tokens.Input != 12 || second.Turns[0].Tokens.Output != 4 {
 		t.Fatalf("exact token fact = %#v", second.Turns[0].Tokens)
@@ -381,6 +401,13 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	}
 	if detail.Turn.TurnID != fixture.turnIDs[1] || detail.Turn.Ordinal != 2 || detail.Turn.AssistantVisibleOutput != "author-visible-two" || detail.Turn.Outcome != "author-visible-two" || len(detail.Turn.Activity) != 3 {
 		t.Fatalf("exact turn detail = %#v", detail.Turn)
+	}
+	if detail.Session.MessageCount != 4 {
+		t.Fatalf("exact turn read lost full transcript count: %+v", detail.Session)
+	}
+	conversations, err := backend.store.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{AgentID: detail.Session.AgentID, RunID: detail.Session.RunID, Limit: 1})
+	if err != nil || len(conversations.Conversations) != 1 || conversations.Conversations[0].SessionID != fixture.sessionID || conversations.Conversations[0].MessageCount != 4 {
+		t.Fatalf("conversation list full-session transcript count: %+v, err=%v", conversations, err)
 	}
 	mixed, err := backend.store.LoadOperatorPublicConversationTurn(ctx, fixture.sessionID, fixture.turnIDs[3])
 	if err != nil {

@@ -28,6 +28,15 @@ const (
 	maxOperatorConversationTurnPageSize     = 500
 )
 
+// Count the whole transcript, not its current page or the provider hydration head.
+func conversationTranscriptMessageCountSQL(sqlite bool) string {
+	sessionID := "conversation_owner.session_id"
+	if !sqlite {
+		sessionID += "::uuid"
+	}
+	return `(SELECT COUNT(*) FROM agent_turns transcript WHERE transcript.session_id = ` + sessionID + `)`
+}
+
 type conversationTurnCursor struct {
 	Kind        string `json:"kind"`
 	CompletedAt string `json:"completed_at"`
