@@ -123,13 +123,6 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 }
 
 func projectNodeStateFieldMappingValue(name string, value yamlsource.Value) (NodeStateField, error) {
-	entries, err := value.Mapping()
-	if err != nil {
-		return NodeStateField{}, err
-	}
-	if err := rejectLongListField(entries, "state field"); err != nil {
-		return NodeStateField{}, err
-	}
 	fields, err := nodeValueFields(value, "state field", map[string]struct{}{
 		"name": {}, "type": {}, "default": {},
 	})
