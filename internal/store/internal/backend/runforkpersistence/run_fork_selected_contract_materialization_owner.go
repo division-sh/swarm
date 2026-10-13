@@ -106,10 +106,12 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			return fmt.Errorf("selected-contract fork source state %s is unsupported", state)
 		}
-		planRequest := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: strings.TrimSpace(req.At)}
-		if req.ForkOperation != nil {
-			planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
+		point := req.Preparation.ForkPoint
+		forkOperation, err := bindResolvedForkOperation(req.ForkOperation, point)
+		if err != nil {
+			return err
 		}
+		planRequest := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: strings.TrimSpace(req.At), ResolvedPoint: &point}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
@@ -135,7 +137,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return fmt.Errorf("selected preparation differs from transaction's effective source")
 		}
 		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
-		forkRunID, err := selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, req.ForkOperation)
+		forkRunID, err := selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, forkOperation)
 		if err != nil {
 			return err
 		}
@@ -164,11 +166,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 		}
-		req.ForkOperation, err = bindResolvedForkOperation(req.ForkOperation, plan.ForkPoint)
-		if err != nil {
-			return err
-		}
-		if err := requireForkOperationMaterializationRequest(req.ForkOperation, plan.SourceRunID, plan.ForkPoint, identity.SourceArtifactFact.BundleHash(), selection, req.DataPinOverrides); err != nil {
+		if err := requireForkOperationMaterializationRequest(forkOperation, plan.SourceRunID, plan.ForkPoint, identity.SourceArtifactFact.BundleHash(), selection, req.DataPinOverrides); err != nil {
 			return err
 		}
 		if err := requireOriginalFanOutCarriage(txctx, source, plan, req.OriginalLoopCarriage); err != nil {
@@ -209,12 +207,12 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		if found {
-			if req.ForkOperation != nil {
+			if forkOperation != nil {
 				binding, err := loadRunForkSelectedContractBinding(txctx, tx, forkRunID)
 				if err != nil {
 					return err
 				}
-				if _, _, err := bindForkOperationTx(txctx, tx, *req.ForkOperation, forkRunID, binding.BindingID, port.postgres); err != nil {
+				if _, _, err := bindForkOperationTx(txctx, tx, *forkOperation, forkRunID, binding.BindingID, port.postgres); err != nil {
 					return err
 				}
 			}
@@ -326,8 +324,8 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		if req.ForkOperation != nil {
-			if _, replay, err := bindForkOperationTx(txctx, tx, *req.ForkOperation, forkRunID, binding.BindingID, port.postgres); err != nil {
+		if forkOperation != nil {
+			if _, replay, err := bindForkOperationTx(txctx, tx, *forkOperation, forkRunID, binding.BindingID, port.postgres); err != nil {
 				return err
 			} else if replay {
 				return fmt.Errorf("new fork materialization encountered an already-bound operation")
