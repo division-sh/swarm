@@ -5,10 +5,8 @@ test-node:
   event_handlers:
     item.reviewed:
       rules:
-        approve:
-          when: payload.decision == 'approve'
+        - when: payload.decision == 'approve'
           advances_to: approved
           emit:
             event: item.approved
-        unmatched:
-          else: true
+        - else: true

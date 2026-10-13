@@ -5,13 +5,11 @@ test-node:
   event_handlers:
     item.received:
       rules:
-        type_a:
-          when: payload.kind == 'a'
+        - when: payload.kind == 'a'
           data_accumulation:
             writes:
               - value
-        unmatched:
-          else: true
+        - else: true
   state_schema:
     fields:
       value: integer
