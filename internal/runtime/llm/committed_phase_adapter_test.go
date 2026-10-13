@@ -151,6 +151,9 @@ func TestHTTPCompletionAcknowledgedHeartbeatPreservesProviderResponseAndSettleme
 	ownedTarget.EntityID = "77777777-7777-4777-8777-777777777777"
 	ctx = llmTestWorkContext(t, runtimeeffects.WithUsageTarget(ctx, ownedTarget))
 	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
+	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	var calls atomic.Int32
 	runtime := &OpenAICompatibleRuntime{
 		httpClient: &http.Client{Transport: committedPhaseResponseTransport{calls: &calls, body: `{"model":"test","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`}},
@@ -163,8 +166,6 @@ func TestHTTPCompletionAcknowledgedHeartbeatPreservesProviderResponseAndSettleme
 	if store.heartbeats.Load() < 2 || !errors.Is(dispatch.mutationErr, fault) {
 		t.Fatalf("heartbeat commits=%d diagnostics=%v", store.heartbeats.Load(), dispatch.mutationErr)
 	}
-	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
-	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	dispatch.providerModel = model
 	dispatch.request = []byte(`{"model":"test"}`)
 	target := dispatch.handle.Attempt().Authority.Target
@@ -288,9 +289,12 @@ func TestMockCompletionCommittedPhasesPreserveExecutionAndResponse(t *testing.T)
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, base, t.Name()))
 	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, base, base))
 	actor := runtimeactors.AgentConfig{ID: "mock-phase-test", ExecutionMode: runtimeeffects.ExecutionModeMock}
+	profile := mustAdmissionProfile(t, llmselection.BackendMock)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	var calls atomic.Int32
 	response, raw, _, dispatch, err := executeMockCompletionWithExecutor(
-		ctx, actor, nil, []byte(`{"round":1}`), llmselection.ResolvedModel{ConcreteModel: "test-model"}, false, managedProviderCallForEffectTest(t, ctx),
+		ctx, actor, nil, []byte(`{"round":1}`), model, false, managedProviderCallForEffectTest(t, ctx),
 		func(context.Context, pythonmodule.Request) (pythonmodule.Result, error) {
 			calls.Add(1)
 			return pythonmodule.Result{Output: []byte(`{"text":"done"}`), FuelConsumed: 7}, nil

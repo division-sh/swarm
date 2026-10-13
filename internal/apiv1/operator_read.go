@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -839,7 +840,8 @@ func validateAgentUsageResult(item operatorread.OperatorAgentUsage) error {
 			return fmt.Errorf("agent.usage owner returned malformed result: %s.transport is required", prefix)
 		}
 		if row.CompletionEvidence != nil {
-			if err := row.CompletionEvidence.Validate(); err != nil || row.ResolvedModel != row.CompletionEvidence.ResolvedModel() {
+			request := runtimeeffects.CompletionRequest{RequestedModel: row.Model, ModelAlias: row.ModelAlias, BackendProfile: row.BackendProfile, Provider: row.Provider, Transport: row.Transport}
+			if err := row.CompletionEvidence.ValidateRequest(request, row.ResolvedModel); err != nil || row.CostProvenance != row.CompletionEvidence.CostProvenance {
 				return fmt.Errorf("agent.usage owner returned malformed completion evidence: %s: %v", prefix, err)
 			}
 		}
@@ -860,8 +862,10 @@ func validateAgentUsageTotals(path string, totals operatorread.OperatorAgentUsag
 	if totals.OutputTokens < 0 {
 		return fmt.Errorf("agent.usage owner returned malformed result: %s.output_tokens must be non-negative", path)
 	}
-	if totals.EstimatedCostUSD < 0 {
-		return fmt.Errorf("agent.usage owner returned malformed result: %s.estimated_cost_usd must be non-negative", path)
+	for _, cost := range []float64{totals.CostUSD, totals.EstimatedCostUSD, totals.ProviderReportedCostUSD, totals.ReservationExhaustionUSD, totals.UnattributedCostUSD} {
+		if cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s costs must be finite and non-negative", path)
+		}
 	}
 	return nil
 }

@@ -862,18 +862,6 @@ func unavailableCompletionUsage() runtimeeffects.CompletionUsage {
 	return runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable}
 }
 
-func completionObservedUsage(input, output int, observedModel string) runtimeeffects.CompletionUsage {
-	usage := completionUsage(input, output, runtimeeffects.CompletionUsageExact)
-	observeAPIModel(&usage, observedModel)
-	return usage
-}
-
-func unavailableObservedCompletionUsage(model string) runtimeeffects.CompletionUsage {
-	usage := unavailableCompletionUsage()
-	observeAPIModel(&usage, model)
-	return usage
-}
-
 func observeAPIModel(usage *runtimeeffects.CompletionUsage, model string) {
 	if model == "" {
 		return

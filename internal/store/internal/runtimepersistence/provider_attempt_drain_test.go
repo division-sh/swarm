@@ -653,6 +653,7 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 				requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
 				assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
+				requireCompletion2270UncertainRecoveryEvidence(t, fixture, handle.Attempt())
 				requireOriginDeliveryOutcome(t, fixture, "dead_letter", candidate.wantCode)
 				if candidate.capture {
 					wantDrain := "settled"

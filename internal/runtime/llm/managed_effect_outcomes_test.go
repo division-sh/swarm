@@ -260,6 +260,7 @@ func TestManagedClaudeProcessStopsOnSessionCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(base)
 	defer cancel()
 	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +308,9 @@ func TestManagedMockPrimitiveStopsOnSessionCancellation(t *testing.T) {
 	base := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "cancel-mock"))
 	ctx, cancel := context.WithCancel(base)
 	defer cancel()
-	model := llmselection.ResolvedModel{ConcreteModel: "test-model"}
+	profile := mustAdmissionProfile(t, llmselection.BackendMock)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	managed := managedProviderCallForEffectTest(t, ctx)
 	started := make(chan struct{})
 	var calls atomic.Int32
@@ -496,6 +499,8 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-start"))
+	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
@@ -548,6 +553,8 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-monitor-prelaunch"))
+	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
@@ -579,6 +586,8 @@ func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 func TestManagedClaudeCLIStartedProcessIsTurnEligible(t *testing.T) {
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-started"))
+	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize Claude attempt: %v", err)

@@ -78,8 +78,11 @@ func TestMockWorkerFailureDistinguishesNoDispatchObservedFailureAndLostResponse(
 			harness := effecttest.New()
 			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, t.Name()))
 			ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeMock)
+			profile := mustAdmissionProfile(t, selection.BackendMock)
+			model := mustAdmissionModel(t, profile, selection.ModelAliasRegular)
+			ctx = withEffectTestRequest(t, ctx, profile, model)
 			actor := models.AgentConfig{ID: "effect-test-agent", ExecutionMode: effects.ExecutionModeMock}
-			_, _, _, dispatch, err := executeMockCompletionWithExecutor(ctx, actor, nil, []byte(`{"round":1}`), selection.ResolvedModel{ConcreteModel: "test-model"}, false, managedProviderCallForEffectTest(t, ctx), func(context.Context, pythonmodule.Request) (pythonmodule.Result, error) {
+			_, _, _, dispatch, err := executeMockCompletionWithExecutor(ctx, actor, nil, []byte(`{"round":1}`), model, false, managedProviderCallForEffectTest(t, ctx), func(context.Context, pythonmodule.Request) (pythonmodule.Result, error) {
 				return pythonmodule.Result{}, test.failure
 			})
 			if !errors.Is(err, want) || dispatch == nil || dispatch.state != test.state || dispatch.invocation != test.invocation {

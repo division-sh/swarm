@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -91,29 +92,10 @@ func decodeClaudeCompletionResult(raw []byte) (claudeCompletionResult, error) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return result, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
-		return result, fmt.Errorf("claude result must be an object")
-	}
-	seen := map[string]bool{}
-	result.duplicates = map[string]bool{}
-	for decoder.More() {
-		key, err := decoder.Token()
-		if err != nil {
-			return result, err
-		}
-		name, ok := key.(string)
-		if !ok {
-			return result, fmt.Errorf("claude result field must be a string")
-		}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return result, err
-		}
-		if seen[name] {
-			result.duplicates[name] = true
-		}
-		seen[name] = true
+	var err error
+	result.duplicates, err = completionDuplicateFields(raw)
+	if err != nil {
+		return result, err
 	}
 	if result.duplicates["type"] {
 		return result, fmt.Errorf("duplicate claude result type")
@@ -130,6 +112,84 @@ func completionObservationDecode(raw []byte, target any) error {
 		return err
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// Response parsing may fail on one field while other dimensions remain valid.
+// This projection preserves those facts without changing the execution verdict.
+func apiCompletionUsageFromRaw(raw []byte, inputField, outputField string) runtimeeffects.CompletionUsage {
+	usage := unavailableCompletionUsage()
+	if len(raw) == 0 {
+		return usage
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return usage
+	}
+	duplicates, err := completionDuplicateFields(raw)
+	if err != nil {
+		return usage
+	}
+	var model string
+	if duplicates["model"] || completionObservationDecode(fields["model"], &model) != nil || strings.TrimSpace(model) == "" {
+		code := "invalid"
+		if len(fields["model"]) == 0 || bytes.Equal(bytes.TrimSpace(fields["model"]), []byte("null")) {
+			code = "absent"
+		}
+		completionObservationProblem(&usage.Evidence, runtimeeffects.CompletionModelResponse, "model", code)
+	} else {
+		observeAPIModel(&usage, model)
+	}
+	usage.ResolvedModel = usage.Evidence.ResolvedModel()
+	var tokens map[string]json.RawMessage
+	if duplicates["usage"] || completionObservationDecode(fields["usage"], &tokens) != nil {
+		completionObservationProblem(&usage.Evidence, "response.usage", "tokens", "invalid")
+		return usage
+	}
+	var input, output *int64
+	if completionObservationDecode(tokens[inputField], &input) != nil || completionObservationDecode(tokens[outputField], &output) != nil || input == nil || output == nil || *input < 0 || *output < 0 {
+		completionObservationProblem(&usage.Evidence, "response.usage", "tokens", "invalid")
+		return usage
+	}
+	usage.Exactness, usage.InputTokens, usage.OutputTokens = runtimeeffects.CompletionUsageExact, input, output
+	usage.ResolvedModel = usage.Evidence.ResolvedModel()
+	return usage.Clone()
+}
+
+func completionDuplicateFields(raw []byte) (map[string]bool, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, fmt.Errorf("completion response must be an object")
+	}
+	seen, duplicates := map[string]bool{}, map[string]bool{}
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := key.(string)
+		if !ok {
+			return nil, fmt.Errorf("completion response field must be a string")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		duplicates[name] = duplicates[name] || seen[name]
+		seen[name] = true
+	}
+	return duplicates, nil
+}
+
+func completionObservationFields(raw []byte) (map[string]json.RawMessage, map[string]bool, error) {
+	if !utf8.Valid(raw) {
+		return nil, nil, fmt.Errorf("invalid UTF-8 completion fields")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, nil, err
+	}
+	duplicates, err := completionDuplicateFields(raw)
+	return fields, duplicates, err
 }
 
 func observeClaudeTerminalModel(evidence *runtimeeffects.CompletionEvidence, raw json.RawMessage) error {
@@ -156,16 +216,16 @@ func observeClaudeContributors(evidence *runtimeeffects.CompletionEvidence, raw 
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
-	var contributors map[string]json.RawMessage
-	if err := completionObservationDecode(raw, &contributors); err != nil {
+	contributors, duplicates, err := completionObservationFields(raw)
+	if err != nil {
 		completionObservationProblem(evidence, runtimeeffects.CompletionModelCLIUsage, "model", "invalid")
 		return fmt.Errorf("claude modelUsage: %w", err)
 	}
 	var errs []error
 	for model, raw := range contributors {
-		if strings.TrimSpace(model) == "" {
+		if strings.TrimSpace(model) == "" || duplicates[model] {
 			completionObservationProblem(evidence, runtimeeffects.CompletionModelCLIUsage, "model", "invalid")
-			errs = append(errs, fmt.Errorf("claude modelUsage has a blank label"))
+			errs = append(errs, fmt.Errorf("claude modelUsage has a blank or contradictory label"))
 			continue
 		}
 		observation, err := observeClaudeContributor(model, raw, evidence)
@@ -177,8 +237,8 @@ func observeClaudeContributors(evidence *runtimeeffects.CompletionEvidence, raw 
 
 func observeClaudeContributor(model string, raw json.RawMessage, evidence *runtimeeffects.CompletionEvidence) (runtimeeffects.CompletionModelObservation, error) {
 	observation := runtimeeffects.CompletionModelObservation{Model: model, Source: runtimeeffects.CompletionModelCLIUsage}
-	var fields map[string]json.RawMessage
-	if err := completionObservationDecode(raw, &fields); err != nil {
+	fields, duplicates, err := completionObservationFields(raw)
+	if err != nil {
 		completionObservationProblem(evidence, observation.Source, "tokens", "invalid")
 		completionObservationProblem(evidence, observation.Source, "cost", "invalid")
 		return observation, err
@@ -197,6 +257,9 @@ func observeClaudeContributor(model string, raw json.RawMessage, evidence *runti
 		}
 		var count *int64
 		err := completionObservationDecode(value, &count)
+		if duplicates[field.name] {
+			err = fmt.Errorf("duplicate contributor %s", field.name)
+		}
 		if err == nil && count != nil && *count < 0 {
 			err = fmt.Errorf("negative %s", field.name)
 		}
@@ -208,6 +271,9 @@ func observeClaudeContributor(model string, raw json.RawMessage, evidence *runti
 		*field.target = count
 	}
 	cost, err := completionObservedCost(fields["costUSD"])
+	if duplicates["costUSD"] {
+		cost, err = nil, fmt.Errorf("duplicate contributor costUSD")
+	}
 	if err != nil {
 		completionObservationProblem(evidence, observation.Source, "cost", "invalid")
 	}

@@ -15459,6 +15459,7 @@
           "source": {
             "enum": [
               "response.model",
+              "response.usage",
               "claude.result.model",
               "claude.result.modelUsage",
               "claude.result.usage",

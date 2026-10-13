@@ -213,6 +213,7 @@ func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {
 				}
 				if committed || phase == "commit_ack_lost" {
 					requireCompletionSettlementRows(t, fixture, attempt.AttemptID, attempt.Authority.Target.ID, runtimeeffects.StateSettled, 1, 0)
+					proveCompletion2270Readback(t, context.WithoutCancel(ctx), fixture.store.(completion2270ReadStore), fixture, settlement)
 				} else {
 					requireCompletionSettlementRows(t, fixture, attempt.AttemptID, attempt.Authority.Target.ID, runtimeeffects.StateResponseObserved, 0, 1)
 				}

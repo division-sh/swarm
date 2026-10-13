@@ -198,8 +198,8 @@ func (s CompletionSpend) Validate() error {
 		strings.TrimSpace(s.InvocationType) == "" {
 		return fmt.Errorf("completion spend requires complete provider and invocation identity")
 	}
-	if s.CostUSD < 0 {
-		return fmt.Errorf("completion spend cost cannot be negative")
+	if err := validateCompletionCost(&s.CostUSD); err != nil {
+		return err
 	}
 	if !s.AgentIdentity.IsZero() {
 		identity := s.AgentIdentity.Normalize()
@@ -346,15 +346,8 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	if err := s.Usage.ValidateEvidence(); err != nil {
 		return err
 	}
-	if s.Usage.Evidence.Request != attempt.Authority.CompletionRequest ||
-		s.Usage.ResolvedModel != s.Usage.Evidence.ResolvedModel() ||
-		s.Spend.ResolvedModel != s.Usage.ResolvedModel ||
-		s.Spend.Model != attempt.Authority.CompletionRequest.RequestedModel ||
-		s.Spend.ModelAlias != attempt.Authority.CompletionRequest.ModelAlias ||
-		s.Spend.BackendProfile != attempt.Authority.CompletionRequest.BackendProfile ||
-		s.Spend.Provider != attempt.Authority.CompletionRequest.Provider ||
-		s.Spend.Transport != attempt.Authority.CompletionRequest.Transport {
-		return fmt.Errorf("completion evidence contradicts admitted provider request")
+	if err := s.validateProviderEvidence(attempt); err != nil {
+		return err
 	}
 	if err := s.Spend.Validate(); err != nil {
 		return err
@@ -417,6 +410,19 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	}
 	if s.Settlement.State != StateSettled && s.Settlement.Failure == nil {
 		return fmt.Errorf("failed completion settlement requires failure evidence")
+	}
+	return nil
+}
+
+func (s CompletionSettlement) validateProviderEvidence(attempt Attempt) error {
+	request := attempt.Authority.CompletionRequest
+	if s.Usage.Evidence.Request != request || s.Spend.ResolvedModel != s.Usage.ResolvedModel ||
+		s.Spend.Model != request.RequestedModel || s.Spend.ModelAlias != request.ModelAlias ||
+		s.Spend.BackendProfile != request.BackendProfile || s.Spend.Provider != request.Provider || s.Spend.Transport != request.Transport {
+		return fmt.Errorf("completion evidence contradicts admitted provider request")
+	}
+	if s.Usage.ProviderReportedCostUSD != nil && s.Spend.CostUSD != *s.Usage.ProviderReportedCostUSD {
+		return fmt.Errorf("completion charge contradicts provider-reported total")
 	}
 	return nil
 }

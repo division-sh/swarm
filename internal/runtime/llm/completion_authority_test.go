@@ -82,11 +82,12 @@ func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T
 	ctx, cancel := context.WithCancel(ctx)
 	probe.cancel = cancel
 	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(harness, projectionProbe, harness, harness))
+	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	handle, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("exact-request"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, model := testClaudeProviderSelection(t)
 	dispatch := newCompletionDispatch(handle, "")
 	dispatch.providerModel = model
 	dispatch.request = []byte("exact-request")
@@ -163,6 +164,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	if !ok {
 		t.Fatal("completion authority missing")
 	}
+	authority.CompletionRequest = runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "request-at-admission", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"}
 	claim, ok := runtimedelivery.ClaimFromContext(ctx)
 	if !ok {
 		t.Fatal("completion delivery claim missing")
@@ -177,6 +179,10 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	}
 	identity := authority.Target.AgentIdentity.Normalize()
 	messages := []Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "done"}}
+	inputTokens, outputTokens := int64(12), int64(3)
+	usage := runtimeeffects.CompletionUsage{ResolvedModel: "reported-at-completion", Exactness: runtimeeffects.CompletionUsageExact,
+		InputTokens: &inputTokens, OutputTokens: &outputTokens,
+		Evidence: runtimeeffects.CompletionEvidence{Request: authority.CompletionRequest, Models: []runtimeeffects.CompletionModelObservation{{Model: "reported-at-completion", Source: runtimeeffects.CompletionModelResponse}}, CostProvenance: runtimeeffects.CompletionCostEstimated}}
 	payload, err := json.Marshal(completionContinuationEnvelope{
 		Version: completionContinuationVersion,
 		Adapter: "anthropic_api",
@@ -184,7 +190,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 			Message: messages[1], Raw: json.RawMessage(`{"content":"done"}`),
 			ToolOutputAuthority: &ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()},
 		},
-		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage: usage,
 		Projection: completionProjection{
 			SessionID: authority.Target.SessionID, ExpectedTurnCount: 0, TurnCount: 1,
 			Messages: messages, Identity: identity, Memory: authority.Target.Memory, FrameID: "frame-original",
@@ -209,6 +215,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireImmutableCompletion2270Continuation(t, attempt, usage)
 	probe := &settledContinuationProbe{Harness: harness, attempt: attempt}
 	controller := runtimeeffects.NewCompletionController(probe, probe, probe, probe)
 	session := &Session{

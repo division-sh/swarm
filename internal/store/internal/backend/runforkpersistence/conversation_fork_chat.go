@@ -427,14 +427,18 @@ func completeConversationForkTurn(
 		runtimerunfork.ConversationForkChatSnapshotOwner, now, now, prepared.ForkTurnID).Scan(&createdAt); err != nil {
 		return operatorread.OperatorConversationTurn{}, fmt.Errorf("terminalize conversation fork turn: %w", err)
 	}
-	return operatorread.OperatorConversationTurn{
+	turns := []operatorread.OperatorConversationTurn{{
 		TurnID: prepared.ForkTurnID, TurnIndex: prepared.TurnIndex,
 		ExecutionMode:  string(prepared.Snapshot.SourceAgent.ExecutionMode),
 		RequestPayload: cloneRawMessage(requestPayload), ResponsePayload: cloneRawMessage(responsePayload),
 		ToolCalls: cloneConversationToolCalls(execution.ToolCalls), ToolResults: cloneConversationToolResults(execution.ToolResults),
 		TurnBlocks: conversationForkSandboxTurnBlocks(execution), ParseOK: true, CreatedAt: createdAt.Time,
 		AssistantVisibleOutput: execution.AssistantMessage,
-	}, nil
+	}}
+	if err := loadConversationForkCompletions(ctx, owner, tx, prepared.Fork.ForkID, turns); err != nil {
+		return operatorread.OperatorConversationTurn{}, err
+	}
+	return turns[0], nil
 }
 
 func loadActiveConversationForkForChat(ctx context.Context, owner conversationForkStore, tx *sql.Tx, forkID string, now time.Time) (runtimerunfork.OperatorConversationForkSession, error) {
@@ -933,7 +937,10 @@ func loadConversationForkCompletions(ctx context.Context, owner conversationFork
 			return err
 		}
 		index, exists := indices[turnID]
-		if !exists || completion.Ordinal != len(turns[index].Completions)+1 || completion.ExecutionMode != turns[index].ExecutionMode || u.ResolvedModel != u.Evidence.ResolvedModel() {
+		if !exists {
+			continue
+		}
+		if completion.Ordinal != len(turns[index].Completions)+1 || completion.ExecutionMode != turns[index].ExecutionMode || u.ResolvedModel != u.Evidence.ResolvedModel() {
 			return fmt.Errorf("invalid ordered fork completion evidence")
 		}
 		turns[index].Completions = append(turns[index].Completions, completion)
