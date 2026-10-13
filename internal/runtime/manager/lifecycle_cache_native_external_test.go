@@ -2,12 +2,17 @@ package manager_test
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -19,10 +24,13 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected storetest.AgentFixtureStore
+			var peer manager.AgentLifecycleStateReader
 			if backend == "postgres" {
-				selected = storetest.StartPostgresRuntimeStore(t)
+				owner, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				selected, peer = owner, reopen()
 			} else {
-				selected = storetest.StartSQLiteRuntimeStore(t)
+				owner, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				selected, peer = owner, reopen()
 			}
 			ctx := manager.TerminalPanicFixtureContext()
 			record := manager.ReconfigureMemoryNativeFixture(t, false)
@@ -32,6 +40,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				t.Fatalf("native row: found=%v err=%v", found, err)
 			}
 			record.Topology = view.Topology
+			proveNativeAgentRowCAS(t, selected, peer, record)
 			outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
 			if !ok {
 				t.Fatal("selected store lacks the native immutable-outcome owner")
@@ -48,6 +57,148 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				proveNativeAgentRestartAPICompletionLoss(t, selected, record.Config, controller)
 			})
 		})
+	}
+}
+
+func proveNativeAgentRowCAS(t *testing.T, selected storetest.AgentFixtureStore, peer manager.AgentLifecycleStateReader, record manager.PersistedAgent) {
+	t.Helper()
+	ctx := manager.TerminalPanicFixtureContext()
+	before, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || before.Phase != manager.AgentLifecycleRunning {
+		t.Fatalf("native CAS predecessor: found=%v row=%+v err=%v", found, before, err)
+	}
+	other, found, err := peer.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || !reflect.DeepEqual(before, other) {
+		t.Fatalf("second native handle disagrees: found=%v row=%+v err=%v", found, other, err)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := process.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("native CAS source set: found=%v err=%v", found, err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: before.ProcessBinding.BundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialRelease := manager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), RequestHash: uuid.NewString(), OperationKind: "self_release", Trigger: "self_release",
+		Identity: before.Identity, AgentID: before.AgentID,
+		ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
+		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation, TargetPhase: manager.AgentLifecycleRegistered,
+		ConfigRevision: before.ConfigRevision, RunMode: manager.AgentRunModeStopped, Topology: before.Topology,
+		DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
+	}
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, initialRelease); err != nil {
+		t.Fatal(err)
+	}
+	before, found, err = selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || before.Phase != manager.AgentLifecycleRegistered {
+		t.Fatalf("native CAS released predecessor: found=%v row=%+v err=%v", found, before, err)
+	}
+	other, found, err = peer.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || !reflect.DeepEqual(before, other) {
+		t.Fatalf("second native handle lost the released predecessor: found=%v row=%+v err=%v", found, other, err)
+	}
+	request := manager.AgentLifecycleTransition{
+		Identity: before.Identity, AgentID: before.AgentID, OperationKind: "start", Trigger: "start",
+		ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
+		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
+		ConfigRevision: before.ConfigRevision, RunMode: manager.AgentRunModeStandard, Topology: before.Topology,
+		DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
+	}
+	type outcome struct {
+		request manager.AgentLifecycleTransition
+		result  manager.AgentLifecycleTransitionResult
+		err     error
+	}
+	start, results := make(chan struct{}), make(chan outcome, 2)
+	for i := 0; i < 2; i++ {
+		candidate := request
+		candidate.OperationID, candidate.RequestHash = uuid.NewString(), uuid.NewString()
+		go func() {
+			<-start
+			result, err := grant.CommitAgentLifecycleTransition(ctx, candidate)
+			results <- outcome{request: candidate, result: result, err: err}
+		}()
+	}
+	close(start)
+	var winner outcome
+	accepted := 0
+	for i := 0; i < 2; i++ {
+		result := <-results
+		if result.err == nil {
+			accepted++
+			winner = result
+			continue
+		}
+		var conflict *failures.Error
+		if !errors.As(result.err, &conflict) || conflict.Failure.Class != failures.ClassLifecycleConflict {
+			t.Fatalf("native contested CAS returned a non-conflict: %v", result.err)
+		}
+	}
+	if accepted != 1 || winner.result.Generation != before.Generation+1 {
+		t.Fatalf("native CAS accepted %d writers: %+v", accepted, winner.result)
+	}
+	snapshot := func() any {
+		t.Helper()
+		value, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	after := snapshot()
+	replay, err := grant.CommitAgentLifecycleTransition(ctx, winner.request)
+	expectedBytes, expectedErr := canonicaljson.Bytes(winner.result)
+	replayBytes, replayErr := canonicaljson.Bytes(replay)
+	if err != nil || expectedErr != nil || replayErr != nil || !replay.Replayed || winner.result.Replayed || string(expectedBytes) != string(replayBytes) || !reflect.DeepEqual(after, snapshot()) {
+		t.Fatalf("native CAS replay changed its exact result or application evidence: %v", err)
+	}
+	for _, name := range []string{"epoch", "generation", "phase", "configuration", "topology", "duplicate_spawn"} {
+		stale := request
+		stale.OperationID, stale.RequestHash = uuid.NewString(), uuid.NewString()
+		stale.ExpectedGeneration, stale.ExpectedPhase = winner.result.Generation, winner.result.Phase
+		stale.TargetGeneration, stale.OperationKind, stale.Trigger = winner.result.Generation+1, "restart", "restart"
+		switch name {
+		case "epoch":
+			stale.ExpectedEpoch++
+		case "generation":
+			stale.ExpectedGeneration--
+		case "phase":
+			stale.ExpectedPhase = manager.AgentLifecycleRegistered
+		case "configuration":
+			stale.ConfigRevision = "foreign-config"
+		case "topology":
+			stale.Topology = agenttopology.Admission{}
+		case "duplicate_spawn":
+			stale.OperationKind, stale.Trigger = "spawn", "spawn"
+			stale.ExpectedEpoch, stale.ExpectedGeneration, stale.ExpectedPhase = 0, 0, ""
+			stale.TargetGeneration, stale.TargetPhase, stale.RunMode = 1, manager.AgentLifecycleRegistered, manager.AgentRunModeStopped
+			stale.Agent = &record
+		}
+		if _, err := grant.CommitAgentLifecycleTransition(ctx, stale); err == nil || !reflect.DeepEqual(after, snapshot()) {
+			t.Fatalf("native %s refusal changed application evidence: %v", name, err)
+		}
+	}
+	release := request
+	release.OperationID, release.RequestHash = uuid.NewString(), uuid.NewString()
+	release.OperationKind, release.Trigger = "self_release", "self_release"
+	release.ExpectedGeneration, release.ExpectedPhase = winner.result.Generation, winner.result.Phase
+	release.TargetGeneration, release.TargetPhase, release.RunMode = winner.result.Generation, manager.AgentLifecycleRegistered, manager.AgentRunModeStopped
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, release); err != nil {
+		t.Fatal(err)
+	}
+	after = snapshot()
+	request.OperationID, request.RequestHash = uuid.NewString(), uuid.NewString()
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, request); err == nil || !reflect.DeepEqual(after, snapshot()) {
+		t.Fatalf("same phase after ABA admitted the old generation: %v", err)
+	}
+	current, found, err := peer.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || current.Phase != before.Phase || current.Generation != winner.result.Generation {
+		t.Fatalf("second-handle ABA readback: found=%v row=%+v err=%v", found, current, err)
 	}
 }
 

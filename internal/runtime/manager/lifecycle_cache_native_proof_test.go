@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -58,7 +59,8 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 		t.Fatal("native lifecycle fixture lacks run execution admission")
 	}
 	fault := &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: runOwner}
-	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), nil, AgentManagerOptions{LLMBackend: record.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: reader, LifecycleOutcome: outcomes}})
+	bus := newProjectionTestBus()
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LLMBackend: record.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: reader, LifecycleOutcome: outcomes}})
 	if am.lifecycle.persistence() != fault || am.lifecycle.stateReader != reader || am.lifecycle.outcomeReader != outcomes {
 		t.Fatal("fixture constructor replaced an explicitly supplied native row/outcome owner")
 	}
@@ -168,6 +170,7 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 		t.Fatal("historical replay changed durable evidence")
 	}
 	publicRestart(am)
+	proveAgentRowNativePublicationPanic(t, ctx, am, bus, reader, record)
 	historicalSnapshot = snapshot()
 	view, _, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
 	if err != nil {
@@ -198,6 +201,67 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	}
 	projection.cancelGeneration()
 	reconstructed.mu.Unlock()
+}
+
+func proveAgentRowNativePublicationPanic(t *testing.T, ctx context.Context, am *AgentManager, bus *projectionTestBus, reader AgentLifecycleStateReader, record PersistedAgent) {
+	t.Helper()
+	before, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || before.Phase != AgentLifecycleRunning {
+		t.Fatalf("native publication-panic predecessor: found=%v row=%+v err=%v", found, before, err)
+	}
+	var done, settled <-chan struct{}
+	bus.beforePublish = func() {
+		committed, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+		if err != nil || !found || committed.Generation != before.Generation+1 || committed.Phase != AgentLifecycleRunning {
+			t.Fatalf("publication cut did not follow native running CAS: found=%v row=%+v err=%v", found, committed, err)
+		}
+		am.lifecycle.mu.Lock()
+		execution := am.lifecycle.cells[record.Config.Identity].execution
+		done, settled = execution.loopDone, execution.loopSettled
+		am.lifecycle.mu.Unlock()
+		panic("native post-CAS route publication")
+	}
+	_, err = am.replaceExecutionTargetConfigWithTopology(ctx, record.Config.Identity, "restart", uuid.NewString(), nil, am.semanticSource, &record.Topology, nil)
+	bus.beforePublish = nil
+	if err == nil || !strings.Contains(err.Error(), "native post-CAS route publication") {
+		t.Fatalf("publication panic was not returned: %v", err)
+	}
+	after, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || after.Generation != before.Generation+1 || after.Phase != AgentLifecycleRegistered || after.RunMode != AgentRunModeStopped || after.RuntimeEpoch != before.RuntimeEpoch || after.ConfigRevision != before.ConfigRevision {
+		t.Fatalf("native publication compensation: before=%+v after=%+v found=%v err=%v", before, after, found, err)
+	}
+	for name, completion := range map[string]<-chan struct{}{"loop": done, "settlement": settled} {
+		if completion == nil {
+			t.Fatalf("publication cut omitted its %s completion", name)
+		}
+		select {
+		case <-completion:
+		default:
+			t.Fatalf("unlaunched %s completion retained after compensation", name)
+		}
+	}
+	if _, installed := bus.current(record.Config.ID); installed {
+		t.Fatal("publication compensation retained an installed route")
+	}
+	am.lifecycle.mu.Lock()
+	cell := am.lifecycle.cells[record.Config.Identity]
+	execution := cell.execution
+	clean := sameAgentRowObservation(after, cell.view) && execution.fenced && execution.generationCtx.Err() != nil &&
+		execution.route == nil && execution.loopDone == nil && execution.loopSettled == nil && len(execution.leases) == 0 && cell.retirement == nil
+	am.lifecycle.mu.Unlock()
+	if !clean {
+		t.Fatal("publication compensation retained executable resources or contradicted the native row")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatalf("publication compensation left a Manager lease or join: %v", err)
+	}
+	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+		t.Fatalf("restart after exact publication cleanup: %v", err)
+	}
+	current, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found || current.Generation != after.Generation+1 || current.Phase != AgentLifecycleRunning {
+		t.Fatalf("publication cleanup recovery: found=%v row=%+v err=%v", found, current, err)
+	}
 }
 
 func ProveAgentRowIndividualSourceSetReplacement(t *testing.T, previous AgentLifecyclePersistence, reader AgentLifecycleStateReader, record PersistedAgent, advance func() (AgentLifecyclePersistence, agenttopology.Admission)) {
