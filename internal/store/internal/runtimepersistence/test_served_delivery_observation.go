@@ -824,14 +824,14 @@ func CountRunDeadLetterDeliveriesForTest(ctx context.Context, selected any, runI
 }
 
 func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
+	_, postgres := selected.(*PostgresStore)
 	var count int
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = delivery.ReadServedDeliveryStatusCount(ctx, tx, string(dialect) == "postgres", eventID, subscriberType, subscriberID, statuses...)
+		count, err = delivery.ReadServedDeliveryStatusCount(ctx, tx, postgres, eventID, subscriberType, subscriberID, statuses...)
 		return err
 	})
 	if err != nil {

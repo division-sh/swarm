@@ -44,8 +44,8 @@ func TestPersistenceAuthorityDebtWorkflowStateComposesExactlyOneHistoricalBody(t
 		t.Fatal("original served-debug evidence did not compose:", err)
 	}
 	collector, err := debtCollectorDigest(root)
-	if err != nil || collector != debtWorkflowStateCollectorTo {
-		t.Fatalf("workflow-state collector=%s expected=%s error=%v", collector, debtWorkflowStateCollectorTo, err)
+	if err != nil || collector != debtActiveCollectorTo {
+		t.Fatalf("workflow-state collector=%s expected=%s error=%v", collector, debtActiveCollectorTo, err)
 	}
 	raw, err := debtGit(root, "show", debtWorkflowStatePredecessor+":"+debtWorkflowStateFile)
 	if err != nil {

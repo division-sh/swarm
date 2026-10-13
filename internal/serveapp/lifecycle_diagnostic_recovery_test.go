@@ -86,7 +86,7 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			}
 			t.Cleanup(func() { _ = inspection.Close() })
 			reader := requireReceiverProofStateReader(t, inspection)
-			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
+			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash, ReceiverStateReader: reader}
 			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
@@ -143,11 +143,13 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				}
 				requireServedDiagnosticEventCount(t, db, id, initial.RunID, 0)
 			}
-			var oldRuns, laterRuns int
-			if err := db.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&oldRuns); err != nil || oldRuns != 0 {
+
+			oldRuns, err := readServedRunPhysicalIdentity(reader, initial.RunID)
+			if err != nil || oldRuns != 0 {
 				t.Fatalf("diagnostic replay resurrected predecessor: count=%d err=%v", oldRuns, err)
 			}
-			if err := db.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", later.RunID).Scan(&laterRuns); err != nil || laterRuns != 1 {
+			laterRuns, err := readServedRunPhysicalIdentity(reader, later.RunID)
+			if err != nil || laterRuns != 1 {
 				t.Fatalf("historical replay changed later work: count=%d err=%v", laterRuns, err)
 			}
 			if err := second.stop(); err != nil {

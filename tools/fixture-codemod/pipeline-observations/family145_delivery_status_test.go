@@ -188,6 +188,9 @@ func TestFamily145DeliveryStatusPollingStatementsAndExistingQueryOwnerAreUnchang
 	for _, path := range []string{"internal/store/internal/backend/delivery/read_projections.go", "internal/store/internal/runtimepersistence/test_served_delivery_observation.go", "internal/store/storetest/served_delivery_observation.go", "internal/store/internal/runtimepersistence/served_delivery_status_count_test.go"} {
 		original, err := exec.Command("git", "show", deliverystatus.Predecessor+":"+path).Output()
 		current, currentErr := os.ReadFile(filepath.Join("../../..", path))
+		if err == nil && currentErr == nil {
+			current = deliveryStatusEarlierOwnerSource(t, path, current, original)
+		}
 		if err != nil || currentErr != nil || string(original) != string(current) {
 			t.Fatal("existing delivery status canonical owner/hostile proof changed:", path, err, currentErr)
 		}

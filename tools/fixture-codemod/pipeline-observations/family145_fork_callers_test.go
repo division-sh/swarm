@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 817 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "990cbc7a864ca9c6b49839a6d0c59ee1a9959a914e0f49e0974587181b5aa71f" {
+	if err != nil || len(rows) != 818 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "efa537a32db6c9244ca4d97a74fe4a19d8612501a4c9bd4ba0850df83bab4792" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -39,6 +39,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			if remaining, err := checkpointRecipes([]byte("package proof\n"), []recipe{finite}); err != nil || len(remaining) != 0 {
 				t.Fatalf("exact helper retirement failed: %s/%v", row.Function, err)
 			}
+			continue
+		}
+		if family145CheckRunIdentityWholeRule(t, row.File, row.Function, row.After) {
 			continue
 		}
 		if family145CheckRunPhysicalWholeRule(t, row.File, row.Function, row.After) {

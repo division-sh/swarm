@@ -1270,7 +1270,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtWorkflowStateSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		previous, err := debtRunIdentitySourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err = debtWorkflowStateSourcePrevious(root, body.File, body.Function, previous)
 		if err != nil {
 			return err
 		}
@@ -2062,7 +2066,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {
+	if debtRunIdentityCollectorTransition(base, current, trusted, head, retirement...) || debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

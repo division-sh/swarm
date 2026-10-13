@@ -92,8 +92,9 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 							t.Fatalf("reset skipped accepted preparation settlement: %+v", response)
 						default:
 						}
-						var count int
-						if err := rt.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id=$1", seed.RunID).Scan(&count); err != nil || count != 1 {
+
+						count, err := readServedRunPhysicalIdentity(rt.ReceiverStateReader, seed.RunID)
+						if err != nil || count != 1 {
 							t.Fatalf("cleanup preceded selected join: count=%d err=%v", count, err)
 						}
 						release.Do(func() { close(probe.release) })

@@ -110,7 +110,7 @@ func TestFamily145StandingDiagnosticAmendmentPreservesEveryPriorRecipeAndTransit
 	if err := json.Unmarshal(previous, &before); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(recipeBytes, &after); err != nil {
+	if err := json.Unmarshal(runIdentityEarlierHistory(t, recipeBytes, true), &after); err != nil {
 		t.Fatal(err)
 	}
 	var retained []recipe
@@ -130,7 +130,7 @@ func TestFamily145StandingDiagnosticAmendmentPreservesEveryPriorRecipeAndTransit
 	if err := json.Unmarshal(previous, &before); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(family145TransitionBytes, &after); err != nil {
+	if err := json.Unmarshal(runIdentityEarlierHistory(t, family145TransitionBytes, false), &after); err != nil {
 		t.Fatal(err)
 	}
 	current := map[string]recipe{}

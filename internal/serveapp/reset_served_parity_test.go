@@ -79,8 +79,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					t.Fatalf("reset passed active predecessor work: %+v", response)
 				default:
 				}
-				var beforeJoin int
-				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&beforeJoin); err != nil || beforeJoin != 1 {
+
+				beforeJoin, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, initial.RunID)
+				if err != nil || beforeJoin != 1 {
 					t.Fatalf("cleanup preceded predecessor join: %d, %v", beforeJoin, err)
 				}
 				if err := lease.Done(); err != nil {
@@ -100,8 +101,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 				if err := json.Unmarshal(first.Result, &outcome); err != nil {
 					t.Fatal(err)
 				}
-				var oldRuns, artifacts int
-				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&oldRuns); err != nil || oldRuns != 0 {
+				var artifacts int
+				oldRuns, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, initial.RunID)
+				if err != nil || oldRuns != 0 {
 					t.Fatalf("predecessor run remains: %d, %v", oldRuns, err)
 				}
 				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&artifacts); err != nil {
@@ -157,8 +159,8 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 						t.Fatalf("outcome changed: %v\n%s\n%s", err, first.Result, replay.Result)
 					}
 					if laterRun != "" {
-						var count int
-						if err := proof.DB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM runs WHERE run_id = $1", laterRun).Scan(&count); err != nil || count != 1 {
+						count, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, laterRun)
+						if err != nil || count != 1 {
 							t.Fatalf("replay changed later run: %d, %v", count, err)
 						}
 					}

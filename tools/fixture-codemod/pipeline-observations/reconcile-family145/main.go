@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
@@ -36,7 +38,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "990cbc7a864ca9c6b49839a6d0c59ee1a9959a914e0f49e0974587181b5aa71f"
+const targetDigest = "efa537a32db6c9244ca4d97a74fe4a19d8612501a4c9bd4ba0850df83bab4792"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -282,6 +284,7 @@ var files = []string{
 }
 
 func main() {
+	includeRunIdentityTargets()
 	includeRunPhysicalTargets()
 	includeStandingDiagnosticTargets()
 	includeServedDebugTargets()
@@ -331,6 +334,8 @@ func main() {
 			rows = extend(rows, change)
 		}
 	}
+	rows = preserveRunIdentityRecipes(rows)
+	changes = preserveRunIdentityTransitions(changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -346,6 +351,136 @@ func main() {
 		writeJSON(transitionLedger, changes)
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
+	}
+}
+
+func preserveRunIdentityRecipes(generated []recipe) []recipe {
+	var previous []recipe
+	raw, err := exec.Command("git", "show", runidentity.Predecessor+":"+ledger).Output()
+	must(err)
+	must(json.Unmarshal(raw, &previous))
+	index := map[string]recipe{}
+	for _, row := range generated {
+		key := row.File + "/" + row.Function + "/" + row.Before
+		if _, duplicate := index[key]; duplicate {
+			panic("ambiguous complete run identity history key: " + row.File + "/" + row.Function)
+		}
+		index[key] = row
+	}
+	for i, prior := range previous {
+		key := prior.File + "/" + prior.Function + "/" + prior.Before
+		candidate, found := index[key]
+		if !found {
+			panic("run identity lost prior immutable recipe: " + prior.File + "/" + prior.Function)
+		}
+		previous[i] = composeRunIdentityRecipe(prior, candidate)
+		delete(index, key)
+	}
+	if len(index) != 1 {
+		panic("run identity introduced an unmanifested recipe")
+	}
+	for _, row := range index {
+		if row.Function != "TestServedResetPendingStartupUsesAdmittedSourcesBothStores" || row.Family != "native-postgres-admission-family145" {
+			panic("run identity new recipe is not its pending-startup consumer")
+		}
+		previous = append(previous, row)
+	}
+	return previous
+}
+
+func composeRunIdentityRecipe(prior, candidate recipe) recipe {
+	if reflect.DeepEqual(prior, candidate) {
+		return prior
+	}
+	for _, rule := range runidentity.Rules {
+		if rule.File != prior.File || rule.Function != prior.Function || prior.Successor != "" {
+			continue
+		}
+		after, err := runphysical.Transform(rule, prior.After)
+		must(err)
+		if candidate.After != after {
+			panic("run identity Successor is not its finite propagation")
+		}
+		candidate.After = prior.After
+		if !reflect.DeepEqual(prior, candidate) {
+			panic("run identity changed immutable recipe metadata")
+		}
+		prior.Successor = after
+		return prior
+	}
+	panic("unreviewed recipe change outside run identity: " + prior.File + "/" + prior.Function)
+}
+
+func preserveRunIdentityTransitions(generated []transition) []transition {
+	var previous []transition
+	raw, err := exec.Command("git", "show", runidentity.Predecessor+":"+transitionLedger).Output()
+	must(err)
+	must(json.Unmarshal(raw, &previous))
+	index := map[string]transition{}
+	for _, row := range generated {
+		key := row.File + "/" + row.Function + "/" + row.Before
+		if _, duplicate := index[key]; duplicate {
+			panic("ambiguous complete run identity transition key")
+		}
+		index[key] = row
+	}
+	for i, prior := range previous {
+		key := prior.File + "/" + prior.Function + "/" + prior.Before
+		candidate, found := index[key]
+		if !found {
+			panic("run identity lost a prior source transition")
+		}
+		previous[i] = composeRunIdentityTransition(prior, candidate)
+		delete(index, key)
+	}
+	if len(index) != 1 {
+		panic("run identity introduced an unmanifested source transition")
+	}
+	for _, row := range index {
+		if row.Function != "TestServedResetPendingStartupUsesAdmittedSourcesBothStores" {
+			panic("run identity new transition is not pending-startup")
+		}
+		previous = append(previous, row)
+	}
+	return previous
+}
+
+func composeRunIdentityTransition(prior, candidate transition) transition {
+	if reflect.DeepEqual(prior, candidate) {
+		return prior
+	}
+	for _, rule := range runidentity.Rules {
+		if rule.File != prior.File || rule.Function != prior.Function || prior.Removed {
+			continue
+		}
+		after, err := runphysical.Transform(rule, prior.After)
+		must(err)
+		if candidate.After != after {
+			panic("run identity transition is not its finite propagation")
+		}
+		candidate.After = prior.After
+		if !reflect.DeepEqual(prior, candidate) {
+			panic("run identity changed original transition metadata")
+		}
+		prior.After = after
+		return prior
+	}
+	panic("unreviewed source transition outside run identity")
+}
+
+func includeRunIdentityTargets() {
+	raw, err := os.ReadFile(runidentity.Path)
+	must(err)
+	pins, err := runidentity.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
 	}
 }
 

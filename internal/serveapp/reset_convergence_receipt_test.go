@@ -73,8 +73,9 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 		if grantErr != nil || current != successor || currentGrant.GrantID != grant.GrantID {
 			t.Fatalf("retry reconstructed live successor: %v", grantErr)
 		}
-		var count int
-		if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", later.RunID).Scan(&count); err != nil || count != 1 {
+
+		count, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, later.RunID)
+		if err != nil || count != 1 {
 			t.Fatalf("retry changed later work: count=%d err=%v", count, err)
 		}
 	}

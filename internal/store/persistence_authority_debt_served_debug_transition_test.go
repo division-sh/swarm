@@ -139,6 +139,7 @@ func debtServedDebugSourceCopy(t *testing.T) string {
 	for file, source := range files {
 		debtWriteModuleSource(t, copy, file, "package serveapp\n"+source)
 	}
+	debtRunIdentityCopySourceEvidence(t, root, copy)
 	return copy
 }
 
@@ -157,22 +158,19 @@ func TestPersistenceAuthorityDebtServedDebugSourcePinsRejectProvenanceAndNearMat
 			continue
 		}
 		t.Run(body.Function, func(t *testing.T) {
-			raw, err := os.ReadFile(filepath.Join(copy, body.File))
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed := strings.Replace(body.After, "{\n", "{\nforeignReaderProvenance();\n", 1)
-			debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), body.After, changed, 1))
+			raw, current := debtServedDebugCurrentSource(t, copy, body)
+			changed := strings.Replace(current, "{\n", "{\nforeignReaderProvenance();\n", 1)
+			debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), current, changed, 1))
 			if err := debtServedDebugSourcePins(copy); err == nil {
 				t.Fatal("changed complete reader provenance/argument/body admitted")
 			}
 			debtWriteModuleSource(t, copy, body.File, string(raw))
 			for _, role := range []string{"rt.ReceiverStateReader", "p.deps.EventStore", "reader"} {
-				if !strings.Contains(body.After, role) {
+				if !strings.Contains(current, role) {
 					continue
 				}
-				changed := strings.Replace(body.After, role, "foreignSameTypedReader", 1)
-				debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), body.After, changed, 1))
+				changed := strings.Replace(current, role, "foreignSameTypedReader", 1)
+				debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), current, changed, 1))
 				if err := debtServedDebugSourcePins(copy); err == nil {
 					t.Fatal("changed same-typed inspection provenance admitted")
 				}
@@ -191,6 +189,23 @@ func TestPersistenceAuthorityDebtServedDebugSourcePinsRejectProvenanceAndNearMat
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+}
+
+func debtServedDebugCurrentSource(t *testing.T, root string, body debtServedDebugBody) ([]byte, string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, body.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decls, err := debtServedDebugDeclarations(filepath.Join(root, body.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := decls[body.Function]
+	if strings.Count(string(raw), current) != 1 {
+		t.Fatal("hostile source requires one exact current declaration")
+	}
+	return raw, current
 }
 
 func TestPersistenceAuthorityDebtServedDebugFourWriterStageCompositionsRemainExact(t *testing.T) {
