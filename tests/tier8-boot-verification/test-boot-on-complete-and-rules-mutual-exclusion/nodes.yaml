@@ -8,8 +8,6 @@ test-node:
         - condition: payload.score >= 70
           advances_to: done
       rules:
-        route_a:
-          when: payload.type == "a"
+        - when: payload.type == "a"
           advances_to: routed
-        unmatched:
-          else: true
+        - else: true
