@@ -94,14 +94,18 @@ func TestRuleFanOutPresentationKeepsCompiledSiteAndOperands(t *testing.T) {
 				predicate = "condition"
 			}
 			var handler SystemNodeEventHandler
-			if err := decodeNodeTestYAML([]byte(fmt.Sprintf(`%s:
+			source := fmt.Sprintf(`%s:
   - %s: true
     fan_out:
       items_from: payload.items
       as: row_item
       identity: row_item.id
       emit: {event: item.requested, fields: {id: row_item.id}}
-`, tc.context, predicate)), &handler); err != nil {
+`, tc.context, predicate)
+			if tc.context == "rules" {
+				source += "  - else: true\n"
+			}
+			if err := decodeNodeTestYAML([]byte(source), &handler); err != nil {
 				t.Fatal(err)
 			}
 			var row HandlerRuleEntry
