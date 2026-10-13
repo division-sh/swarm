@@ -119,6 +119,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/runforkexecution/control_lifetime.go:Done:http_do:1":                                                                ownerRuntimeDependency,
 	"internal/runtime/sessions/heartbeat.go:StartLeaseHeartbeatWithErrorHandler:http_do:1":                                                ownerRuntimeDependency,
 	"internal/runtime/shutdown_admission.go:BeginContext:http_do:1":                                                                       ownerRuntimeDependency,
+	"internal/runtime/testfixtures/startuphandoff/proof.go:Release:http_do:1":                                                             ownerBuildTest, // sync.Once barrier release, not HTTP.
+	"internal/runtime/testfixtures/startuphandoff/proof.go:wait:http_do:1":                                                                ownerBuildTest, // sync.Once barrier entry witness, not HTTP.
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:AddOverlayFile:filesystem_write:1":                                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:AddOverlayFile:filesystem_write:2":                                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:CopyTelegramChatWithoutIngress:filesystem_write:1":                         ownerBuildTest,
