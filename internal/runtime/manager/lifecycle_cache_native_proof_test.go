@@ -5,10 +5,12 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -16,11 +18,12 @@ import (
 
 type agentRowResponseLoss struct {
 	AgentLifecyclePersistence
-	binding  processExecutionBindingProvider
-	runOwner RunExecutionOwner
-	loseNext bool
-	failNext bool
-	commits  int
+	binding     processExecutionBindingProvider
+	runOwner    RunExecutionOwner
+	loseNext    bool
+	failNext    bool
+	commits     int
+	lastRequest AgentLifecycleTransition
 }
 
 func (s *agentRowResponseLoss) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
@@ -41,6 +44,7 @@ func (s *agentRowResponseLoss) CommitAgentLifecycleTransition(ctx context.Contex
 		return result, err
 	}
 	s.commits++
+	s.lastRequest = request
 	if s.loseNext {
 		s.loseNext = false
 		return AgentLifecycleTransitionResult{}, errors.New("injected response loss after native acknowledgment")
@@ -171,6 +175,7 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	}
 	publicRestart(am)
 	proveAgentRowNativePublicationPanic(t, ctx, am, bus, reader, record)
+	record = proveAgentRowNativeCompleteReplacements(t, ctx, am, bus, fault, reader, outcomes, record, snapshot, admit)
 	historicalSnapshot = snapshot()
 	view, _, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
 	if err != nil {
@@ -201,6 +206,170 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	}
 	projection.cancelGeneration()
 	reconstructed.mu.Unlock()
+}
+
+func proveAgentRowNativeCompleteReplacements(t *testing.T, ctx context.Context, am *AgentManager, bus *projectionTestBus, fault *agentRowResponseLoss, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission) PersistedAgent {
+	t.Helper()
+	before, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if err != nil || !found {
+		t.Fatalf("complete replacement predecessor: found=%v err=%v", found, err)
+	}
+	install := func(config runtimeactors.AgentConfig) agenttopology.Admission {
+		t.Helper()
+		owner, topology := admit(config)
+		fault.AgentLifecyclePersistence = owner
+		var ok bool
+		fault.binding, ok = owner.(processExecutionBindingProvider)
+		if !ok {
+			t.Fatal("complete replacement lacks native process binding")
+		}
+		fault.runOwner, ok = owner.(RunExecutionOwner)
+		if !ok {
+			t.Fatal("complete replacement lacks native run authority")
+		}
+		return topology
+	}
+	loader, ok := reader.(interface {
+		LoadAgents(context.Context) ([]PersistedAgent, error)
+	})
+	if !ok {
+		t.Fatal("native replacement proof lacks the descriptor reader")
+	}
+	stored, err := loader.LoadAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base runtimeactors.AgentConfig
+	for _, agent := range stored {
+		if agent.Config.Identity == record.Config.Identity {
+			base = agent.Config
+		}
+	}
+	if base.ID == "" {
+		t.Fatal("native replacement has no complete predecessor descriptor")
+	}
+	visible, err := am.ResolveAgentConfig(record.Config.Identity.RunID, record.Config.ID, record.Config.CanonicalFlowPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.Prompt = visible.Prompt
+	first, second := base, base
+	first.MaxTurnsPerTask += 11
+	first.BudgetEnvelope += 1
+	second.MaxTurnsPerTask += 22
+	second.BudgetEnvelope += 2
+	firstTopology := install(first)
+	prove := func(expected runtimeactors.AgentConfig, generation uint64) AgentLifecycleState {
+		t.Helper()
+		row, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
+		if err != nil || !found || row.Generation != generation || row.Phase != AgentLifecycleRunning {
+			t.Fatalf("complete replacement row: found=%v row=%+v err=%v", found, row, err)
+		}
+		visible, err := am.ResolveAgentConfig(record.Config.Identity.RunID, record.Config.ID, record.Config.CanonicalFlowPath())
+		if err != nil || !reflect.DeepEqual(visible, expected) {
+			t.Fatalf("complete replacement mixed process configuration: got=%+v want=%+v err=%v", visible, expected, err)
+		}
+		agents, err := loader.LoadAgents(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		matched := false
+		for _, agent := range agents {
+			if agent.Config.Identity == record.Config.Identity {
+				actualBytes, actualErr := canonicaljson.Bytes(agent.Config)
+				expectedBytes, expectedErr := canonicaljson.Bytes(expected)
+				if actualErr != nil || expectedErr != nil || string(actualBytes) != string(expectedBytes) {
+					t.Fatalf("complete replacement mixed durable configuration: actual=%s expected=%s errors=%v/%v", actualBytes, expectedBytes, actualErr, expectedErr)
+				}
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatal("complete replacement lost its native descriptor")
+		}
+		result, found, err := outcomes.ReadAgentLifecycleOutcome(ctx, fault.lastRequest)
+		if err != nil || !found || result.TransitionID != row.LastTransitionID || result.Generation != generation || !result.Replayed {
+			t.Fatalf("complete replacement lacks its exact immutable generation receipt: found=%v result=%+v err=%v", found, result, err)
+		}
+		return row
+	}
+	building, releaseBuild := make(chan struct{}), make(chan struct{})
+	var buildOnce sync.Once
+	am.factory = func(config runtimeactors.AgentConfig) (Agent, error) {
+		if config.MaxTurnsPerTask == first.MaxTurnsPerTask {
+			buildOnce.Do(func() { close(building) })
+			<-releaseBuild
+		}
+		return reconfigureTestAgent{id: config.ID}, nil
+	}
+	defer func() {
+		select {
+		case <-releaseBuild:
+		default:
+			close(releaseBuild)
+		}
+	}()
+	oldResult := make(chan error, 1)
+	go func() {
+		oldResult <- am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, first, &firstTopology)
+	}()
+	select {
+	case <-building:
+	case err := <-oldResult:
+		t.Fatalf("old complete candidate never reached held preparation: %v", err)
+	}
+	secondTopology := install(second)
+	newStarted, newResult := make(chan struct{}), make(chan error, 1)
+	go func() {
+		close(newStarted)
+		newResult <- am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, second, &secondTopology)
+	}()
+	<-newStarted
+	commits := fault.commits
+	close(releaseBuild)
+	oldErr, newErr := <-oldResult, <-newResult
+	if oldErr == nil || newErr != nil || fault.commits != commits+1 {
+		t.Fatalf("concurrent complete candidates: old=%v new=%v native commits=%d want=%d", oldErr, newErr, fault.commits, commits+1)
+	}
+	current := prove(second, before.Generation+1)
+	unchanged := snapshot()
+	previousRoutes := bus.routeHistory(record.Config.ID)
+	am.lifecycle.mu.Lock()
+	previousExecution := am.lifecycle.cells[record.Config.Identity].execution
+	am.lifecycle.mu.Unlock()
+	if err := am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, first, &firstTopology); err == nil {
+		t.Fatal("old complete source/config/topology candidate replaced a newer authority")
+	}
+	am.lifecycle.mu.Lock()
+	cell := am.lifecycle.cells[record.Config.Identity]
+	conserved := cell.execution == previousExecution && sameAgentRowObservation(current, cell.view) && !cell.execution.fenced && am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
+	am.lifecycle.mu.Unlock()
+	if !conserved || !reflect.DeepEqual(unchanged, snapshot()) || !reflect.DeepEqual(previousRoutes, bus.routeHistory(record.Config.ID)) {
+		t.Fatal("stale complete candidate changed lifecycle/session/route/cache evidence")
+	}
+	third := second
+	third.MaxTurnsPerTask++
+	third.BudgetEnvelope++
+	thirdTopology := install(third)
+	if err := am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, third, &thirdTopology); err != nil {
+		t.Fatalf("next legal complete source-owned replacement: %v", err)
+	}
+	prove(third, before.Generation+2)
+	unchanged, previousRoutes = snapshot(), bus.routeHistory(record.Config.ID)
+	am.factory = func(runtimeactors.AgentConfig) (Agent, error) {
+		t.Fatal("same-current complete candidate invoked the factory")
+		return nil, nil
+	}
+	commits = fault.commits
+	if err := am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, third, &thirdTopology); err != nil {
+		t.Fatal(err)
+	}
+	if fault.commits != commits || !reflect.DeepEqual(unchanged, snapshot()) || !reflect.DeepEqual(previousRoutes, bus.routeHistory(record.Config.ID)) {
+		t.Fatal("same-current complete candidate repeated native or route publication")
+	}
+	am.factory = func(config runtimeactors.AgentConfig) (Agent, error) { return reconfigureTestAgent{id: config.ID}, nil }
+	record.Config, record.Topology = third, thirdTopology
+	return record
 }
 
 func proveAgentRowNativePublicationPanic(t *testing.T, ctx context.Context, am *AgentManager, bus *projectionTestBus, reader AgentLifecycleStateReader, record PersistedAgent) {

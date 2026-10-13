@@ -1418,7 +1418,7 @@ func (am *AgentManager) replaceExecutionIdentityConfigWithTopology(
 	identity runtimeagentidentity.Identity,
 	trigger string,
 	operationID string,
-	patch *runtimeactors.AgentConfig,
+	replacement *runtimeactors.AgentConfig,
 	source semanticview.Source,
 	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
@@ -1427,7 +1427,7 @@ func (am *AgentManager) replaceExecutionIdentityConfigWithTopology(
 	if err := identity.Validate(); err != nil {
 		return replaceExecutionResult{}, err
 	}
-	return am.replaceExecutionTargetConfigWithTopology(parent, identity, trigger, operationID, patch, source, topology, expected)
+	return am.replaceExecutionTargetConfigWithTopology(parent, identity, trigger, operationID, replacement, source, topology, expected)
 }
 
 func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
@@ -1435,7 +1435,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	identity runtimeagentidentity.Identity,
 	trigger string,
 	operationID string,
-	patch *runtimeactors.AgentConfig,
+	replacement *runtimeactors.AgentConfig,
 	source semanticview.Source,
 	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
@@ -1505,8 +1505,8 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	candidateAdmission := current.Admission
 	var rec *PersistedAgent
 	subordinate := sessions.LifecycleMutationPlan{}
-	if patch != nil {
-		updated := *patch
+	if replacement != nil {
+		updated := *replacement
 		if updated.ID == "" {
 			updated.ID = strings.TrimSpace(agentID)
 		}
@@ -1524,7 +1524,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 				updatedIdentity.Description(),
 			)
 		}
-		if patch != nil && (patch.Model != "" || patch.LLMBackend != "" || patch.Mock.Configured()) {
+		if replacement.Model != "" || replacement.LLMBackend != "" || replacement.Mock.Configured() {
 			profile, err := llmselection.ResolveLiveBackend(am.llmBackend)
 			if err != nil {
 				return replaceExecutionResult{}, err
@@ -1588,7 +1588,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			subordinate = reconfigureSessionMutationPlan(current.Config, updated)
 		}
 	}
-	if patch == nil {
+	if replacement == nil {
 		if err := am.executionPosture.Admit(candidate.Config.ExecutionMode, "agent lifecycle replacement"); err != nil {
 			return replaceExecutionResult{}, err
 		}
