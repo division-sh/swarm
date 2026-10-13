@@ -26,11 +26,11 @@ func checkPolicySheetValidationValueRows(c *checkerContext) []Finding {
 					continue
 				}
 				ref := policySheetValidationRef{
-					Node:      node,
-					EventType: eventType,
-					RuleIndex: idx,
-					RuleID:    strings.TrimSpace(rule.ID),
-					RuleRef:   policyRuleElementRef(rule),
+					Node:        node,
+					EventType:   eventType,
+					RuleIndex:   idx,
+					RuleDisplay: rule.DisplayLabel("rules", idx),
+					RuleRef:     policyRuleElementRef(rule),
 				}
 				findings = append(findings, validatePolicySheetValidationValueRow(c.source, ref, handler, rule)...)
 			}
@@ -40,27 +40,20 @@ func checkPolicySheetValidationValueRows(c *checkerContext) []Finding {
 }
 
 type policySheetValidationRef struct {
-	Node      runtimeidentity.ExecutableNode
-	EventType string
-	RuleIndex int
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
+	Node        runtimeidentity.ExecutableNode
+	EventType   string
+	RuleIndex   int
+	RuleDisplay string
+	RuleRef     runtimeidentity.DeclarationIdentity
 }
 
 func policySheetValidationFinding(ref policySheetValidationRef, detail string) Finding {
 	return Finding{
 		CheckID:  policySheetValidationCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s validate row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Message:  fmt.Sprintf("flow %s node %s handler %s validate row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RuleDisplay, detail),
 		Location: ref.Node.Key(),
 	}
-}
-
-func (r policySheetValidationRef) RowLabel() string {
-	if id := strings.TrimSpace(r.RuleID); id != "" {
-		return id
-	}
-	return fmt.Sprintf("#%d", r.RuleIndex)
 }
 
 func policySheetRuleIsValidationValueRow(rule runtimecontracts.HandlerRuleEntry) bool {
@@ -127,7 +120,7 @@ func validatePolicySheetValidationDispositionConsumer(ref policySheetValidationR
 		}
 		eventType := strings.TrimSpace(rule.Emit.EventType())
 		if _, ok := dispositions[eventType]; !ok {
-			findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("invalid-result consumer row %q emits %q, which is not declared as a rules.yaml class disposition", strings.TrimSpace(rule.ID), eventType)))
+			findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("invalid-result consumer row %q emits %q, which is not declared as a rules.yaml class disposition", rule.DisplayLabel("rules", index), eventType)))
 			continue
 		}
 		matched = true
