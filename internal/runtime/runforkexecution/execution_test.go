@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1387,7 +1388,7 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	at := time.Unix(1700002201, 0).UTC()
 	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	agent := &selectedContractForkTestAgent{}
+	agent := &selectedContractForkTestAgent{source: loaded.Source}
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
@@ -1455,7 +1456,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	agent := &selectedContractForkTestAgent{}
+	agent := &selectedContractForkTestAgent{source: loaded.Source}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
@@ -5163,6 +5164,7 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 type selectedContractForkTestAgent struct {
 	mu       sync.Mutex
 	cfg      runtimeactors.AgentConfig
+	source   semanticview.Source
 	runIDs   []string
 	eventIDs []string
 }
@@ -5206,11 +5208,16 @@ func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.
 	a.mu.Lock()
 	a.runIDs = append(a.runIDs, strings.TrimSpace(evt.RunID()))
 	a.eventIDs = append(a.eventIDs, strings.TrimSpace(evt.ID()))
-	agentID := strings.TrimSpace(a.cfg.ID)
+	cfg, source := a.cfg, a.source
 	a.mu.Unlock()
 
+	routingSource, err := pinrouting.AdmitAgentExecutionRoutingSource(source, cfg, cfg.EffectiveEntityID(), nil)
+	if err != nil {
+		return nil, err
+	}
+	envelope := events.EnvelopeForSourceRoute(evt.NormalizedEnvelope(), routingSource.Route())
 	return []events.Event{
-		eventtest.Child("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt, evt.NormalizedEnvelope(), time.Now().UTC()),
+		eventtest.ChildWithLineageAndRoutingSource("", events.EventType("task.completed"), cfg.ID, "", json.RawMessage(`{}`), 0, events.LineageFromEvent(evt), envelope, routingSource, time.Now().UTC()),
 	}, nil
 }
 
