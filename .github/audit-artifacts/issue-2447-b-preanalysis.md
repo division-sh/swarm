@@ -1,6 +1,15 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
-## S08 Renderer Gate And Complete-Domain Counterexample
+## S08 Renderer And Exact PostgreSQL Alias Gates
+
+Reviewer-g6139929337 approves S08d inside B. The exact edit adds only the
+one-dimensional timestamp with time zone[] -> timestamptz[] case alongside
+the existing scalar alias in normalizeSchemaType. No general suffix stripping,
+dimension handling, business-value normalization or comparator change is
+authorized. The negative matrix retains scalar/array, without-timezone,
+unrelated base, malformed and multidimensional distinctions through the
+unchanged compareSchemaShapes owner. The native complete-domain aggregate
+must now be rerun green on both stores; old red receipts remain red.
 
 Reviewer-g6139336433 approves the narrow SQLite renderer correction inside B,
 not a split. The existing schema type owner or exact finite canonical equivalent
@@ -28,7 +37,7 @@ with time zone[], want timestamptz[]. No compatible-table assertion is removed.
 | Added row | Owner/consumers | Bounded repair and proof |
 |---|---|---|
 | S08c SQLite physical primitive arrays | schemastore.sqliteRenderType -> SQLiteStatementsForPlan -> expectedSchemaShape, BootstrapSchema and InspectSchema | Approved6139336433: only schema-owner-supported canonical scalar array elements become existing SQLite TEXT; complete-domain renderer positives/refusals and real native value round-trips on both stores. |
-| S08d PostgreSQL array type evidence | schemastore.normalizeSchemaType, used by expected column parsing and native loadPostgresSchemaShape; inspectStatePlans governs both InspectSchema and boot's existing-table check | Request compact amendment: recognize only the existing timestamp-with-time-zone alias with one array dimension as timestamptz[], preserving scalar/array/dimension distinctions and every other drift refusal. Direct alias/distinctness controls plus complete-domain real bootstrap/inspection/readback and mismatched-column controls. compatibility.go is untouched pending that ruling. |
+| S08d PostgreSQL array type evidence | schemastore.normalizeSchemaType, used by expected column parsing and native loadPostgresSchemaShape; inspectStatePlans governs both InspectSchema and boot's existing-table check | Approved6139929337: only timestamp with time zone[] -> timestamptz[], retaining all other drift refusals. TestNodeStateTimestampArrayInspectionUsesExactAlias checks the two exact scalar/array aliases and negative distinctions through compareSchemaShapes; the full both-store bootstrap/readback aggregate remains mandatory. |
 
 The earlier template timeout is classified by retained actual event evidence:
 the delivery was already terminal producer/account.ready, while G's test waited
@@ -36,7 +45,7 @@ for the unqualified account.ready. The corrected exact scoped predicate passes
 both public roots on both stores race x3 at545de5b0c (633 checks, zero fail/skip,
 18 public root/backend checks). No runtime routing change or replay occurred.
 This corrects the stale template-hold sentence in6139336433, not the renderer gate.
-S08d blocks complete-domain closure until independently disposed; C stays frozen.
+That independent S08d stop is now lifted only by6139929337; C stays frozen.
 
 The approved renderer implementation validates its candidate scalar element
 through SchemaFieldTypeToDDL and requires exact canonical physical spelling,
