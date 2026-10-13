@@ -101,6 +101,11 @@ func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
 	}
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
+	coordinator.outcomeReader = nil
+	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err == nil || len(probe.views) != 0 || len(coordinator.cells) != 0 {
+		t.Fatal("missing immutable outcome owner admitted a creator")
+	}
+	coordinator.outcomeReader = probe
 	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, false); err == nil {
 		t.Fatal("descriptor without its durable row hydrated")
 	}

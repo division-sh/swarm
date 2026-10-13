@@ -261,6 +261,8 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		BaseContext:      testAuthorActivityContext(context.Background()),
 		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState:      pg,
+			LifecycleOutcome:    pg,
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -275,7 +277,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
-	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
+	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -333,6 +335,8 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 		BaseContext:      testAuthorActivityContextForSource(context.Background(), bootFact),
 		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState:      pg,
+			LifecycleOutcome:    pg,
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -347,7 +351,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: bootFact.BundleHash(),
 	})
-	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
+	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{

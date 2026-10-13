@@ -538,7 +538,7 @@ store_parity:
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       required_ports: [agentUsage, agentDeliveryLifecycle, agents]
       runtime_deps: [ManagerStore, ManagerLifecycleDiagnostics, ManagerPersistenceRoles]
-      nested_roles: {runtime_manager: [LifecycleCensus, LifecycleState, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes, StandingRestarts]}
+      nested_roles: {runtime_manager: [LifecycleCensus, LifecycleState, LifecycleOutcome, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes, StandingRestarts]}
       platform_tables: [agents, agent_directive_operations, agent_lifecycle_operations, agent_lifecycle_transition_facts, agent_lifecycle_diagnostic_outbox]
       public_methods: [agent.delivery_diagnostics, agent.delivery_lifecycle, agent.diagnose, agent.get, agent.list, agent.usage, agent.send_directive, agent.restart]
     - id: external_effects
