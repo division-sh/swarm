@@ -86,20 +86,24 @@ func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(predecessor))) != "9fe6d8918d3fc2716ec8db18d7415b6445afa8da23014a4b20965f6a85155867" {
 		return fmt.Errorf("reviewed R7 predecessor changed")
 	}
-	expected, restored := predecessor, candidate
+	restored, err := restoreRetainedJoinRefusalBranch(candidate)
+	if err != nil {
+		return err
+	}
+	expected, current := predecessor, restored
 	const superseded = "\n\t\t\twaitForServeStory(t, func() bool {\n\t\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t\treturn len(sourceJoins) == 2 && sourceJoins[0].OutcomeFired && sourceJoins[1].OutcomeFired\n\t\t\t})\n\t\t\twaitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)\n"
 	if strings.Count(expected, superseded) != 1 {
 		return fmt.Errorf("reviewed R7 wait changed")
 	}
 	expected = strings.Replace(expected, superseded, "", 1)
 	for _, edit := range retainedJoinSuccessorEdits {
-		if strings.Count(expected, edit.before) != 1 || strings.Count(candidate, edit.before+edit.block) != 1 {
+		if strings.Count(expected, edit.before) != 1 || strings.Count(current, edit.before+edit.block) != 1 {
 			return fmt.Errorf("exact join checkpoint/wait block missing, duplicated or moved")
 		}
 		expected = strings.Replace(expected, edit.before, edit.before+edit.block, 1)
 		restored = strings.Replace(restored, edit.before+edit.block, edit.before, 1)
 	}
-	actual, actualErr := canonicalFunction(candidate)
+	actual, actualErr := canonicalFunction(current)
 	want, wantErr := canonicalFunction(expected)
 	checkpoint := "\t\t\tif current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {"
 	restored = strings.Replace(restored, checkpoint, superseded+checkpoint, 1)
@@ -109,6 +113,23 @@ func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 		return fmt.Errorf("join successor changed work beyond exact outcome composition")
 	}
 	return nil
+}
+
+// Remove only the added positive branch before checking the original refusal
+// and exact outcome waits. Historical Before/After pins remain unchanged.
+func restoreRetainedJoinRefusalBranch(source string) (string, error) {
+	const signature = "func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint, success bool)"
+	const original = "func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint bool)"
+	const request = "\t\t\trequest := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}\n"
+	const branch = request + "\t\t\tif success {\n\t\t\t\trequireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)\n\t\t\t\treturn\n\t\t\t}\n"
+	const start = "\t\t\t// Delivery settlement does not join the lifecycle candidate executor. Stop"
+	const finish = "\t\t\tconst refusal = \"fork materialization requires execution-ready plan; blockers: timer_history_unproven\""
+	if strings.Count(source, signature) != 1 || strings.Count(source, branch+start) != 1 || strings.Count(source, finish) != 1 {
+		return "", fmt.Errorf("retained join success branch changed the original refusal boundary")
+	}
+	source = strings.Replace(source, signature, original, 1)
+	source = strings.Replace(source, branch+start, start, 1)
+	return strings.Replace(source, finish, request+finish, 1), nil
 }
 
 func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
@@ -156,6 +177,8 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 				t.Fatal("archived future-capability oracle changed")
 			}
 			for _, mutation := range []struct{ name, before, after string }{
+				{"missing_success_return", "requireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)", "omitSuccessAssertions()"},
+				{"wrong_success_selection", "if success {", "if !success {"},
 				{"missing_first", retainedJoinSuccessorEdits[0].block, ""},
 				{"duplicate_first", retainedJoinSuccessorEdits[0].block, strings.Repeat(retainedJoinSuccessorEdits[0].block, 2)},
 				{"missing_second", retainedJoinSuccessorEdits[1].block, ""},
