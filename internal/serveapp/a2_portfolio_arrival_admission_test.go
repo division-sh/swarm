@@ -72,7 +72,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				if len(matches) != 1 {
 					t.Fatalf("ordinary forwarded arrival count=%d want=1", len(matches))
 				}
-				arrival := a2ReadJoinPublicEvent(t, rt, matches[0].EventID)
+				arrival := a2ReadJoinPublicEvent(t, rt.Endpoint, matches[0].EventID)
 				if !reflect.DeepEqual(matches[0], arrival) || arrival.RunID != setup.RunID || !reflect.DeepEqual(arrival.Payload, wirePayload) ||
 					arrival.NoDelivery != nil || len(arrival.Deliveries) != 1 {
 					t.Fatalf("public forwarded event lost payload or list/get agreement: %+v", arrival)
@@ -157,7 +157,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				replay := requireServedEventPublishRPCResult(t, rt.Endpoint, refused.params)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 				if replay.EventID != refused.trigger.EventID || replay.RunID != setup.RunID ||
-					!reflect.DeepEqual(refused.arrival, a2ReadJoinPublicEvent(t, rt, refused.arrival.EventID)) ||
+					!reflect.DeepEqual(refused.arrival, a2ReadJoinPublicEvent(t, rt.Endpoint, refused.arrival.EventID)) ||
 					!reflect.DeepEqual(beforeRequests, requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "ingress/operating.report.requested")) ||
 					!reflect.DeepEqual(beforeReports, requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) {
 					t.Fatal("committed refusal replay changed identity, settled outcomes or actual worker publications")
@@ -175,7 +175,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				t.Fatal("valid final member did not complete the original arm exactly once")
 			}
 			completion := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, "platform.join_complete")[0]
-			requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt, completion.EventID), "portfolio/period", "portfolio-collector", period, "existing_entity")
+			requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt.Endpoint, completion.EventID), "portfolio/period", "portfolio-collector", period, "existing_entity")
 			requireSettled(completion.Deliveries[0].DeliveryID)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("admission successor exit=%d", code)

@@ -27,6 +27,7 @@ func family145PublicA2EndpointCallerInverse(function, current string) string {
 
 func family145CheckPublicA2EndpointWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145PublicJoinCallerInverse(function, current)
 	for _, pin := range publicendpoint.Pins() {
 		if pin.File == file && pin.Function == function {
 			if pin.After != current {
@@ -68,7 +69,7 @@ func TestFamily145PublicA2EndpointWholeRulePreservesAll67CallersAnd16Bodies(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145PublicA2CurrentDeclaration(t, raw, pin.Function) != pin.After {
+		if family145PublicJoinCallerInverse(pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("current endpoint consumer escaped exact full-body rule:", key)
 		}
 		family145PublicA2EndpointHostiles(t, pin)

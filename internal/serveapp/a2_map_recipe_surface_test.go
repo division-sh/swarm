@@ -116,7 +116,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					if !ok || !ref.Equal(arm.JoinRef()) || handle.Kind() != timeridentity.TimerHandleJoinComplete {
 						t.Fatalf("public continuation lost exact map entry/arm: %+v", completions[0])
 					}
-					requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt, completions[0].EventID), ".", "collector", entity, "existing_entity")
+					requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt.Endpoint, completions[0].EventID), ".", "collector", entity, "existing_entity")
 					events := requireA2MapRecipeHealthyEvents(t, rt, opened.RunID)
 					batches = append(batches, retainedBatch{opened, params, tc.items, tc.members, tc.results, entity, arm, workers, events})
 					t.Logf("root HTTP batch -> post-write map entry -> %d actual keyed workers -> ordinary root reports -> one fired continuation; members=%v ordered_results=%v", len(workers), arm.Members, tc.results)

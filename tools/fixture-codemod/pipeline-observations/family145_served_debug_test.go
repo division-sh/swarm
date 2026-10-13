@@ -38,6 +38,7 @@ var family145ServedDebugRows = func() []servedDebugPreimage {
 // Only the exact reviewed current body composes back to the signed predecessor.
 // Mutated arguments, assertions, captures or control flow never enter this path.
 func family145ServedDebugCallerInverse(function, after string) string {
+	after = family145PublicJoinCallerInverse(function, after)
 	after = family145ReceiverReadbackCallerInverse(function, after)
 	after = family145PublicA2EndpointCallerInverse(function, after)
 	for _, row := range family145ServedDebugRows {

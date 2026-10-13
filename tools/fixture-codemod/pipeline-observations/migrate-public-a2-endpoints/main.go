@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 )
 
 const predecessor = "9c964b502e52681d01d02c678b67ba996e5aed8a"
@@ -112,6 +113,10 @@ func normalized(source string) string {
 func currentOutput(r result) []byte {
 	raw, err := os.ReadFile(r.path)
 	must(err)
+	joinBytes, err := os.ReadFile(publicjoin.Path)
+	must(err)
+	joinPins, err := publicjoin.Decode(joinBytes)
+	must(err)
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, r.path, raw, parser.AllErrors)
 	must(err)
@@ -130,11 +135,14 @@ func currentOutput(r result) []byte {
 			continue
 		}
 		actual := nodeString(function)
-		if actual != pin.Before && actual != pin.After {
+		preceding := publicjoin.Previous(joinPins, r.path, pin.Function, actual)
+		if preceding != pin.Before && preceding != pin.After {
 			panic("caller changed outside exact endpoint transform: " + r.path + "/" + pin.Function)
 		}
 		delete(rules, function.Name.Name)
-		edits = append(edits, edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, r.exact[pin.Function]})
+		if actual == preceding {
+			edits = append(edits, edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, r.exact[pin.Function]})
+		}
 	}
 	if len(rules) != 0 {
 		panic("owned caller disappeared")
