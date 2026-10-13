@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
@@ -24,7 +27,22 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, explicit := range []bool{false, true} {
 			t.Run(backend+"/"+map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
-				f := selectedDeploymentResourceFixture(t, backend, "root")
+				root := canonicalrouting.CopySelectedDeploymentResource(t, "root", true)
+				schemaPath := filepath.Join(root, "schema.yaml")
+				schema, err := os.ReadFile(schemaPath)
+				if err != nil || strings.Count(string(schema), "inputs: [fixture.close.requested]") != 1 {
+					t.Fatalf("event-origin control requires the exact root fixture: %v", err)
+				}
+				schema = []byte(strings.Replace(string(schema), "inputs: [fixture.close.requested]", "inputs: [root.ready, fixture.close.requested]", 1))
+				if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				repo := conformanceRepoRoot(t)
+				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+				if err != nil {
+					t.Fatal(err)
+				}
+				f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
 				f.runtime.fanOutServing.Close()
 				server := f.operatorServer(t)
 				sourceRun := uuid.NewString()
@@ -51,7 +69,6 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				if explicit {
 					at = eventID
 				}
-				repo := conformanceRepoRoot(t)
 				prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: sourceRun, At: at, ExpectedBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
