@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -39,7 +40,9 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 				}
 				return startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
 			}
-			sourceRun := start("source", []byte("{\"account_id\":\"source\",\"document\":{}}\n"))
+			sourceRows := []byte("{\"account_id\":\"source\",\"document\":{}}\n")
+			sourceVersion := selectedDeploymentVersion(t, f, sourceRows)
+			sourceRun := start("source", sourceRows)
 			laterRows := []byte("{\"account_id\":\"later\",\"document\":{\"value\":2}}\n")
 			laterVersion := selectedDeploymentVersion(t, f, laterRows)
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
@@ -88,7 +91,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			if err != nil || current.ForkPoint.Revision <= point.Revision {
 				t.Fatalf("canonical source did not advance: point=%+v current=%+v err=%v", point, current.ForkPoint, err)
 			}
-			snapshot := func() map[string]storetest.SelectedForkStorageTableSnapshot {
+			snapshot := func(t *testing.T) map[string]storetest.SelectedForkStorageTableSnapshot {
 				t.Helper()
 				state, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, f.selected)
 				if err != nil {
@@ -117,6 +120,13 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 				{"fingerprint", func(r *runforkreadiness.MaterializeRequest) {
 					r.Preparation.Coordinates.AdmittedPlanFingerprint = strings.Repeat("f", 64)
 				}},
+				{"process_generation", func(r *runforkreadiness.MaterializeRequest) { r.Preparation.ProcessGeneration++ }},
+				{"process_owner", func(r *runforkreadiness.MaterializeRequest) {
+					r.Preparation.Coordinates.ProcessOwnerID = uuid.NewString()
+				}},
+				{"source_fact", func(r *runforkreadiness.MaterializeRequest) {
+					r.SourceArtifactFact, _ = correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("f", 64))
+				}},
 				{"missing_operation", func(r *runforkreadiness.MaterializeRequest) { r.ForkOperation = nil }},
 			} {
 				t.Run(test.name, func(t *testing.T) {
@@ -125,44 +135,54 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					test.change(&bad)
-					before := snapshot()
+					before := snapshot(t)
 					if _, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, bad); err == nil {
 						t.Fatal("invalid staged evidence materialized a child")
 					}
-					if after := snapshot(); !reflect.DeepEqual(before, after) {
+					if after := snapshot(t); !reflect.DeepEqual(before, after) {
 						t.Fatal("refused staged evidence changed application storage")
 					}
 				})
 			}
-			before := snapshot()
+			before := snapshot(t)
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
 			if _, err := fork.MaterializeRunForkForSelectedContractExecution(canceled, request); !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancellation changed refusal: %v", err)
 			}
-			if after := snapshot(); !reflect.DeepEqual(before, after) {
+			if after := snapshot(t); !reflect.DeepEqual(before, after) {
 				t.Fatal("canceled materialization changed application storage")
 			}
 			collector := storetest.CollectTransactions(t, f.selected, storetest.TransactionProbeOptions{})
 			_, err = fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
-			if err == nil || !strings.Contains(err.Error(), string(laterVersion.VersionID)) {
+			var missing *durabledata.DomainError
+			if !errors.As(err, &missing) || missing.Code != durabledata.CodeVersionMissing || !strings.Contains(err.Error(), string(laterVersion.VersionID)) {
 				t.Fatalf("unimported override did not refuse at the durable-data owner: %v", err)
 			}
 			counts := collector.Snapshot().Total
 			if counts.Failed == 0 || counts.RollbackAttempts == 0 || counts.Ordering.RolledBackHolders == 0 || counts.Mutation.DomainCalls == 0 {
 				t.Fatalf("late materialization refusal did not roll back its native mutation: %+v", counts)
 			}
-			if after := snapshot(); !reflect.DeepEqual(before, after) {
+			if after := snapshot(t); !reflect.DeepEqual(before, after) {
 				t.Fatal("late materialization refusal leaked child, operation or history")
 			}
 			// Retain the required version through ordinary import, then retry the
 			// exact prepared request: neither source advancement nor retry moves N.
-			_ = start("later", laterRows)
+			imported, err := f.selected.(interface {
+				ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
+			}).ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "staged-revision-proof",
+				BundleHash: request.SourceArtifactFact.BundleHash(), Declaration: laterVersion.Manifest.Declaration,
+				ExpectedHead: durabledata.VersionHead(sourceVersion.VersionID), InputFormat: "jsonl", Input: laterRows,
+			})
+			if err != nil || imported.Candidate.VersionID != laterVersion.VersionID {
+				t.Fatalf("retain retry's exact version: result=%+v err=%v", imported, err)
+			}
 			materialized, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			if err != nil || materialized.ForkPoint != point || len(materialized.DataPins) != 1 || materialized.DataPins[0].VersionID != laterVersion.VersionID {
 				t.Fatalf("retry changed the fixed point/version: result=%+v err=%v", materialized, err)
 			}
-			beforeReplay := snapshot()
+			beforeReplay := snapshot(t)
 			// A nil operation point is still filled from verified preparation,
 			// not from the newer head, for the native staged consumer.
 			replay, err := prepared.MaterializationRequest()
@@ -174,7 +194,12 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			if err != nil || repeated.ForkRunID != materialized.ForkRunID || repeated.ForkPoint != point {
 				t.Fatalf("repeat rematerialized or moved the child: result=%+v err=%v", repeated, err)
 			}
-			if after := snapshot(); !reflect.DeepEqual(beforeReplay, after) {
+			if after := snapshot(t); !reflect.DeepEqual(beforeReplay, after) {
+				for table, prior := range beforeReplay {
+					if current := after[table]; !reflect.DeepEqual(prior, current) {
+						t.Logf("replay changed %s: before=%+v after=%+v", table, prior, current)
+					}
+				}
 				t.Fatal("exact staged replay changed application storage")
 			}
 			record, found, err := f.selected.(apiv1.RunForkOperationReader).LoadForkOperationByID(ctx, request.ForkOperation.OperationID)
