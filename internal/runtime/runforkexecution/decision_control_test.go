@@ -50,6 +50,38 @@ func TestSelectedDecisionCallerPreservesOwnedContextAndCancellation(t *testing.T
 	}
 }
 
+func TestSelectedDecisionControlClassificationDoesNotMintExecution(t *testing.T) {
+	runID := uuid.NewString()
+	store := &selectedControlBindingFixture{}
+	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{fork: store}}
+	ctx := context.Background()
+	if use, selected, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlMailboxDecide); err != nil || selected || use != nil {
+		t.Fatalf("ordinary classification changed or acquired a selected turn: selected=%t use=%v error=%v", selected, use, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, uuid.NewString(), 1,
+		uuid.NewString(), "classification-census", runForkTestBundleHash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if use, _, err := owner.AcquireSelectedDecisionCardControl(managedexecution.WithAdmission(ctx, admission), runID, runfork.ControlMailboxDecide); err == nil || use != nil {
+		t.Fatal("child execution fell through to its ordinary source's control path")
+	}
+	store.binding, store.exists = testSelectedContractBinding(runID), true
+	store.binding.BindingID = uuid.NewString()
+	if use, selected, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlMailboxDecide); err == nil || !selected || use != nil {
+		t.Fatal("a historical binding without its existing execution owner acquired control")
+	}
+	before := store.calls
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, _, err := owner.AcquireSelectedDecisionCardControl(canceled, runID, runfork.ControlMailboxDecide); !errors.Is(err, context.Canceled) || store.calls != before {
+		t.Fatal("canceled control read classification or lost its cause")
+	}
+	if _, _, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlRunContinue); err == nil || store.calls != before {
+		t.Fatal("card-turn owner admitted an unrelated run control")
+	}
+}
+
 func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 	runID := uuid.NewString()
 	binding := testSelectedContractBinding(runID)
