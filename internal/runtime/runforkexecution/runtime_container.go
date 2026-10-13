@@ -423,14 +423,21 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 		return errors.Join(err, lease.Done())
 	}
 	runCtx = managedexecution.WithAdmission(runCtx, admission)
-	if agentRuntime == nil || agentRuntime.manager == nil {
+	if agentRuntime == nil || agentRuntime.manager == nil || agentRuntime.generationGrant == nil {
 		cancelRuntime(errors.New("selected lifecycle manager missing"))
 		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())
 	}
+	grantEvidence, err := agentRuntime.generationGrant.Evidence()
+	if err != nil {
+		cancelRuntime(err)
+		return errors.Join(err, lease.Done(), agentRuntime.Shutdown())
+	}
+	runCtx = startupownership.WithGenerationGrantEvidence(runCtx, grantEvidence)
 	lifecycleManager = agentRuntime.manager
 	agentRuntime.executionLease, agentRuntime.cancelExecution = lease, cancelRuntime
 	agentRuntime.scheduler, agentRuntime.timerLifecycle = scheduler, pipeline
 	agentRuntime.genericSchedules = schedules
+	agentRuntime.controlContext = runCtx
 	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
 		return errors.Join(err, agentRuntime.Shutdown())
 	}

@@ -36,6 +36,7 @@ type testOperatorCapabilities struct {
 	RunForkOperations         RunForkOperationReader
 	RunFork                   RunForkExecutor
 	SelectedForkControls      SelectedForkControlAdmission
+	SelectedForkDecisions     SelectedForkDecisionControlOwner
 	AgentControl              AgentControlController
 	Mailbox                   MailboxAPIStore
 	DecisionCards             decisioncard.Store
@@ -135,8 +136,9 @@ func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 		Now: c.Now, Cards: c.DecisionCards, ProposedEffects: proposedEffects,
 		Mailbox: c.Mailbox, NoticeAcknowledgment: noticeAcknowledgment,
 		Authority: c.DecisionAuthority, SourceArtifact: bundleSource,
-		RuntimeContexts:      c.RuntimeContexts,
-		SelectedForkControls: c.SelectedForkControls,
+		RuntimeContexts:       c.RuntimeContexts,
+		SelectedForkControls:  c.SelectedForkControls,
+		SelectedForkDecisions: c.SelectedForkDecisions,
 	}
 }
 

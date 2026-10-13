@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -149,10 +150,12 @@ func TestSelectedActivationGatewayInitializesLaterProbingWorkspace(t *testing.T)
 				if err != nil || projection == nil {
 					t.Fatalf("bind selected workspace: %v", err)
 				}
-				authority, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-					OwnerID: "selected-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-				}, "selected_activation_test")
-				if err != nil {
+				authority := startupownership.AuthorityFromLease(processbinding.LeaseStamp{
+					LeaseIdentity: processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "selected-activation-test",
+						BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend},
+					Generation: 1,
+				})
+				if err := authority.Validate(); err != nil {
 					t.Fatal(err)
 				}
 				options.ProcessCapability = activationWorkspaceProcess{authority: authority}

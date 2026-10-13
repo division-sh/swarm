@@ -1,0 +1,131 @@
+package runforkexecution
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+)
+
+type selectedDecisionControlUse struct {
+	ctx      context.Context
+	pipeline *pipeline.PipelineCoordinator
+	lease    *worklifetime.Lease
+	cancel   func()
+	once     sync.Once
+	err      error
+}
+
+func (u *selectedDecisionControlUse) close() error {
+	u.once.Do(func() {
+		u.cancel()
+		u.err = u.lease.Done()
+	})
+	return u.err
+}
+
+// A control turn consumes the child's retained execution; source selection or
+// a historical binding cannot create another executor or an approval.
+func (o SelectedContractExecutionOwner) CommitSelectedDecisionCardMutation(ctx context.Context, runID string, request apiidempotency.Request, mutation pipeline.DecisionCardMutation) (response json.RawMessage, replayed, selected bool, finalErr error) {
+	if ctx == nil {
+		return nil, false, false, fmt.Errorf("decision control requires its caller")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, false, err
+	}
+	ports, err := o.require()
+	if err != nil {
+		return nil, false, false, err
+	}
+	binding, exists, err := ports.fork.LoadRunForkSelectedContractBinding(ctx, runID)
+	if err != nil || !exists {
+		return nil, false, exists, err
+	}
+	if err := mutation.ValidateRequest(request); err != nil {
+		return nil, false, true, err
+	}
+	use, err := o.acquireDecisionControl(ctx, binding, runfork.SelectedControl(request.Method))
+	if err != nil {
+		return nil, false, true, err
+	}
+	released := false
+	defer func() {
+		if !released {
+			finalErr = errors.Join(finalErr, use.close())
+		}
+	}()
+	response, replayed, err = use.pipeline.CommitDecisionCardMutation(use.ctx, request, mutation)
+	cleanupErr := use.close()
+	released = true
+	return response, replayed, true, errors.Join(err, cleanupErr)
+}
+
+func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Context, binding runfork.RunForkSelectedContractBinding, operation runfork.SelectedControl) (*selectedDecisionControlUse, error) {
+	contexts := o.ports.contexts
+	contexts.mu.Lock()
+	defer contexts.mu.Unlock()
+	if contexts.retired || !contexts.recovered {
+		return nil, worklifetime.ErrRetired
+	}
+	var runtime *selectedContractAgentRuntime
+	found := false
+	for _, entry := range contexts.entries {
+		if entry.binding.ForkRunID != binding.ForkRunID {
+			continue
+		}
+		if found || entry.retiring || entry.closed || entry.binding.BindingID != binding.BindingID || entry.retained == nil {
+			return nil, fmt.Errorf("selected decision control requires one current retained fork")
+		}
+		found = true
+		runtime = entry.retained.retainedRuntime
+	}
+	if runtime == nil {
+		return nil, fmt.Errorf("selected decision control lacks its retained executor")
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	owned, coordinator := runtime.controlContext, runtime.timerLifecycle
+	if owned == nil || coordinator == nil {
+		return nil, fmt.Errorf("selected decision control is not ready")
+	}
+	admission, _ := managedexecution.FromContext(owned)
+	if err := runfork.RequireDecisionControlForBinding(binding.ForkRunID, operation, binding, true, admission); err != nil {
+		return nil, err
+	}
+	occurrence, present := worklifetime.OccurrenceFromContext(owned)
+	if !present {
+		return nil, fmt.Errorf("selected decision control lacks its existing work occurrence")
+	}
+	ctx, releaseCaller := bindSelectedDecisionCaller(caller, owned)
+	lease, err := occurrence.Begin(ctx)
+	if err != nil {
+		releaseCaller()
+		return nil, err
+	}
+	return &selectedDecisionControlUse{ctx: lease.Context(), pipeline: coordinator, lease: lease, cancel: releaseCaller}, nil
+}
+
+func bindSelectedDecisionCaller(caller, owned context.Context) (context.Context, func()) {
+	ctx := owned
+	releaseDeadline := func() {}
+	if deadline, bounded := caller.Deadline(); bounded {
+		ctx, releaseDeadline = context.WithDeadline(ctx, deadline)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(caller, func() { cancel(context.Cause(caller)) })
+	if err := caller.Err(); err != nil {
+		cancel(context.Cause(caller))
+	}
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
+		releaseDeadline()
+	}
+}
