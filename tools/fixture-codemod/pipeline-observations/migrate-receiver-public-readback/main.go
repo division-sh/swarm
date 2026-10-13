@@ -42,8 +42,10 @@ func main() {
 	}
 	nativeBody := nativeSource()
 	var changes []transition
+	snapshot, err := exec.Command("git", "ls-tree", "-r", "--name-only", predecessor, "--", "internal/serveapp").Output()
+	must(err)
 	must(checkoutsource.WalkDir(".", "internal/serveapp", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || !strings.Contains("\n"+string(snapshot), "\n"+path+"\n") {
 			return err
 		}
 		raw, err := exec.Command("git", "show", predecessor+":"+path).Output()

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
@@ -38,8 +39,10 @@ func main() {
 		panic("usage: migrate-public-a2-endpoints [-write]")
 	}
 	var results []result
+	snapshot, err := exec.Command("git", "ls-tree", "-r", "--name-only", predecessor, "--", "internal/serveapp").Output()
+	must(err)
 	must(checkoutsource.WalkDir(".", "internal/serveapp", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !hasGoSuffix(path) {
+		if err != nil || entry.IsDir() || !hasGoSuffix(path) || !strings.Contains("\n"+string(snapshot), "\n"+path+"\n") {
 			return err
 		}
 		raw, err := exec.Command("git", "show", predecessor+":"+path).Output()

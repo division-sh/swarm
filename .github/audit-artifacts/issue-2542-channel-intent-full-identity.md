@@ -115,7 +115,7 @@ as production-ingress reproductions or live authority issuance.
 | Public PostgreSQL selected-fork unsupported/replay/conservation | execution-proven through the same corrected path | source-refusal-replay-race/explicit_postgres/fork passes26.57s with its original five-second observation gate |
 | Public SQLite selected-fork entry gate | split / escalated as separate class | source-refusal-replay-race/default_sqlite/fork RED21.68s at main_runtime_test.go:5605, run.fork HTTP deadline before creating the new observer; existing final SQLite fork-deadline hold remains open, cause/inheritance not claimed |
 | Whole source rule, historical expectations and hostile controls | execution-proven through the same corrected path | finite-controls:176 unchanged green roots with one malformed-mutation control RED; repaired bridge control GREEN; final-finite-history and exact generator receipts certify the final diagnostic/corpus |
-| Required execution ownership and structural boundaries | execution-proven through the same corrected path | final-plan-binding:10 roots/86 passes24.201s; complete-structural-guards:81 roots/458 test passes across four packages |
+| Required execution ownership and structural boundaries | execution-proven through the same corrected path | final-plan-binding:10 roots/85 test passes24.201s; complete-structural-guards:81 roots/458 test passes across four packages |
 | Actual final candidate and ordinary no-growth accounting | execution-proven through the same corrected path | final-overlay-controls71.450s before diagnostic-only formatting; final-downward-census65.624s; final-readonly-policy:22 roots/1325 test passes28.316s; final-ratchet checks the final formatter |
 
 The grouped supported run hit Go's unchanged600s package limit after completed
@@ -156,6 +156,37 @@ Existing watchlist/tracker amendment suffices; no new issue/framework. Remaining
 provenance/global/physical owner obligations stay in #2542. Reusing exact domain
 ports is the long-run direction and prevents another per-fixture interpreter;
 broader fixture-construction work is still the high-ROI parent obligation.
+
+## Reviewer F1: complete historical enumeration repair
+
+Ruling6144179014 identified five remaining current-versus-predecessor source
+enumeration consumers. All five independently reproduced RED (git exit128)
+on a8f719da6. Each now intersects canonical checkout membership with the exact
+signed predecessor file inventory, as debug/completion already do. Inventory
+loading and every historical read still fail on errors; no catch-and-continue,
+changed-file exclusion, manifest repin or census exception.
+
+The entire seven-generator read-only set executed once: all seven commands
+returned success and retained their exact manifests, call/body counts and
+current-body checks. One new test's receiver body count was initially stale
+(4 instead of the actual15); the corrected receiver control passes. The first
+changed-source hostile control targeted a file without companion definitions
+and correctly did not fail; it now removes the actual pinned companion source
+file, and the companion inventory refuses it. Missing commit and missing
+historical source controls also refuse. Those RED controls are retained, not
+claimed as green. Final three-root controls have seven test passes20.521s;
+the other six generator successes carry from the complete read-only receipt.
+Every immutable manifest is independently hash-pinned. No new Git-history pin
+was added for the control itself. Pinned U1000 passes; ratchet and signed
+complexity are separate final receipts. No native/served or tier rerun requested
+or performed for this tool-only delta. Baseline7074/4824 remains unchanged.
+
+Review rule: every new owned source file requires replaying all historical
+generators that enumerate that source tree, not only the most recent generator.
+The qualified-integration history provisioning authorized by6144179014 remains
+required before landing, coordinated with the infrastructure owner; all earlier
+SQLite/parent holds remain open. The audit count above is corrected to85 test
+pass records, excluding the package pass record.
 
 No push, PR or rebase. Rebase once after #2617 and orchestrator handoff. Before
 any eventual authorized push, run real preflight on the clean rebased tree;
