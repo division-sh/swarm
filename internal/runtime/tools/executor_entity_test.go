@@ -1512,6 +1512,14 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	source := semanticview.Wrap(bundle)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, sourceRunID), sourceFact)
+	constructEntityToolFixture(t, ctx, pg, newEntityToolPipeline(t, pg, source), source, "review", "review/inst-1", entityID, "queued",
+		map[string]any{"fixture_key": "inst-1", "status": "open"}, at)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1526,44 +1534,6 @@ accounts:
 			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4)
 	`, sourceRunID, entityID, stateEventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'accounts', 'queued',
-			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
-		)
-	`, sourceRunID, entityID, at, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
-	parent, err := flowidentity.StandingForGeneration(source, ".", sourceRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance, err := flowidentity.KeyedChild(source, parent, "review", "inst-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance.EntityID = entityID
-	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, bundle.Semantics.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	headerConfig, err := json.Marshal(configPayload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
-		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
-		 current_state, config, status, gates, bookkeeping, accumulator, revision,
-		 entered_state_at, created_at, updated_at)
-		VALUES ($1::uuid, 'review/inst-1', $2::uuid, 'accounts', 'review', 'template', TRUE,
-		 'queued', $4::jsonb, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3)`, sourceRunID, entityID, at, string(headerConfig)); err != nil {
-		t.Fatalf("seed exact native fork source header: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
