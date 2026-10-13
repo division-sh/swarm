@@ -44,7 +44,7 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -52,7 +52,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 		t.Fatalf("new cold authority: %v", err)
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
-	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
+	rt, err := NewRuntime(ctx, completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
 		Config:       cfg,
 		ManagerStore: selected,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
@@ -77,7 +77,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("InstallStartupGrant: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {

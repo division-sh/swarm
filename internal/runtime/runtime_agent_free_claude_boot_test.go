@@ -26,14 +26,16 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	module := loadAgentFreeRuntimeWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	if got := len(semanticview.AgentDeclarations(module.SemanticSource())); got != 0 {
 		t.Fatalf("agent-free fixture has %d semantic agents", got)
 	}
 
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     claudeNoopLLMRuntime{},
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg, Options: RuntimeOptions{
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		LLMRuntime:         claudeNoopLLMRuntime{},
+		SourceArtifactFact: fact,
 	}})
 
 	if err != nil {
@@ -41,7 +43,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	}
 	t.Cleanup(func() { _ = rt.Shutdown() })
 
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 }

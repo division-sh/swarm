@@ -70,23 +70,25 @@ func (s *bootSelfCheckDescriptorStore) appendedEvents() []events.Event {
 
 func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	store := &bootSelfCheckDescriptorStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{{
 			Identity: runtimebustest.Identity(t, "agent-a", ""),
 		}},
 	}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
 		Options: RuntimeOptions{
-			SelfCheck:      true,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SelfCheck:          true,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+			SourceArtifactFact: fact,
 		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
@@ -106,15 +108,16 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 
 func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
 		Options: RuntimeOptions{
 			SelfCheck:          true,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
+			SourceArtifactFact: fact,
 			BootStartedAt:      time.Now().UTC().Add(-1500 * time.Millisecond),
 			SystemContainers:   []string{"swarm-system", "swarm-scaffold"},
 			BootProgress: func(evt BootProgressEvent) {
@@ -125,7 +128,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
@@ -163,7 +166,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 			t.Fatalf("platform.boot payload missing %q: %#v", key, payload)
 		}
 	}
-	if got := payload["bundle_hash"]; got != runtimeContextTestHashA {
+	if got := payload["bundle_hash"]; got != fact.BundleHash() {
 		t.Fatalf("bundle_hash = %#v", got)
 	}
 	recovery, ok := payload["recovery_decision"].(map[string]any)
