@@ -2315,9 +2315,16 @@ func newNotifyAllChildrenRuntime(
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
-	authority, err := eventBus.DeliveryAuthority()
+	binding, err := grant.ProcessExecutionBinding()
 	if err != nil {
-		t.Fatalf("load notify-all-children delivery authority: %v", err)
+		t.Fatalf("load notify-all-children admitted process binding: %v", err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceArtifactFact, binding.GenerationGrantID, binding.RuntimeGeneration)
+	if err != nil {
+		t.Fatalf("project notify-all-children delivery authority: %v", err)
+	}
+	if err := eventBus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatalf("bind notify-all-children delivery authority: %v", err)
 	}
 	continuationCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
 	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {

@@ -454,22 +454,24 @@ func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *tes
 
 func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	stores := []*recoveryGuardEventStore{{}, {}}
 	runtimes := make([]*Runtime, 0, len(stores))
 	for _, eventStore := range stores {
-		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+		rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 			EventStore:              eventStore,
 			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 			Options: RuntimeOptions{
-				SelfCheck:      false,
-				WorkflowModule: module,
-				LLMRuntime:     noopLLMRuntime{},
+				SourceArtifactFact: fact,
+				SelfCheck:          false,
+				WorkflowModule:     module,
+				LLMRuntime:         noopLLMRuntime{},
 			}})
 
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
-		if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+		if err := rt.Start(ctx); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		runtimes = append(runtimes, rt)

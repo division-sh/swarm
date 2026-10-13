@@ -210,10 +210,11 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			ctx := seedRuntimeTestRun(t, pg)
+			ctx := seedRuntimeTestRunForSource(t, pg, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				ContractBundle:     source,
+				SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if pc == nil {
 						return nil
@@ -227,6 +228,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
+				SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),

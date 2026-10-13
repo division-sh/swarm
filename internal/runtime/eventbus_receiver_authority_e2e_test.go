@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -60,15 +61,17 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				selected = sqlite
 			}
 
-			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-				Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-				BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-			})
-
 			bundle := loadRuntimeTempBundle(t, closedReceiverAuthorityFixtureFiles())
 			source := semanticview.Wrap(bundle)
+			fact := runtimeTestSourceArtifactFact(t, source)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runID)
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+				BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact,
+			})
+
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if backend == "sqlite" {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
@@ -103,7 +106,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				PipelineObligations:      selected.PipelineObligations(),
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: newRuntimeTestWorkflowModule(t, source), LLMRuntime: modelRuntime,
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: authorActivityTestSourceArtifactFact,
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: fact,
 					ProcessWorkOwner: processOwner,
 				},
 			}))
