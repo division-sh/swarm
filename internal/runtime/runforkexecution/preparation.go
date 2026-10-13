@@ -36,6 +36,7 @@ import (
 // PreparedSelectedFork has no executable method, actor, grant or occurrence.
 // Only the selected orchestration owner can consume it with real materialization.
 type PreparedSelectedFork struct {
+	diagnosticComponents    map[string]string
 	owner                   SelectedContractExecutionOwner
 	bindMu                  sync.Mutex
 	closed                  bool
@@ -446,13 +447,18 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	if err != nil {
 		return nil, err
 	}
+	diagnosticComponents, err := runfork.DiagnosticSelectedPreparationPlanComponents(plan, frontier, planning, agentPlan.Declarations.Revision)
+	if err != nil {
+		return nil, err
+	}
 	configurationFingerprint, err := selectedPreparationFingerprint(options.Config)
 	if err != nil {
 		return nil, err
 	}
 	p := &PreparedSelectedFork{
-		declarationRevision: agentPlan.Declarations.Revision,
-		operation:           operation, preparationID: uuid.NewString(), processGeneration: process.AuthorityGeneration, sourceRunID: plan.SourceRunID, forkPoint: plan.ForkPoint,
+		diagnosticComponents: diagnosticComponents,
+		declarationRevision:  agentPlan.Declarations.Revision,
+		operation:            operation, preparationID: uuid.NewString(), processGeneration: process.AuthorityGeneration, sourceRunID: plan.SourceRunID, forkPoint: plan.ForkPoint,
 		coordinates: managedcapabilities.SelectedForkPreparationCoordinates{
 			ProcessAuthorityID: process.AuthorityID, ProcessOwnerID: process.OwnerID, ProcessBootID: process.BootID,
 			BundleHash: loaded.SourceArtifactFact.BundleHash(), SourceFingerprint: sourceFingerprint,
@@ -701,6 +707,7 @@ func (p *PreparedSelectedFork) bind(ctx context.Context, forkRunID string, loade
 
 func (p *PreparedSelectedFork) evidence() runfork.SelectedForkPreparation {
 	return runfork.SelectedForkPreparation{PreparationID: p.preparationID, ProcessGeneration: p.processGeneration, Coordinates: p.coordinates,
+		DiagnosticPlanComponents:   p.diagnosticComponents,
 		DeclarationPlanFingerprint: p.declarationRevision,
 		SourceRunID:                p.sourceRunID, ForkPoint: p.forkPoint, ForkEventID: p.forkPoint.EventID,
 		Actors: append(make([]runfork.SelectedForkPreparedActor, 0, len(p.actors)), p.actors...)}
