@@ -11,6 +11,9 @@ func catalogReferenceError(problem string) error {
 
 func retiredCatalogListSpelling(typeRef string) error {
 	typeRef = strings.TrimSpace(typeRef)
+	if err := rejectAlternateListReference(typeRef, "catalog type"); err != nil {
+		return err
+	}
 	var item string
 	switch {
 	case strings.HasSuffix(typeRef, "[]"):
