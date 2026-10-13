@@ -1,5 +1,39 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S21 Generated Node-Fixture Consumer Correction
+
+Blocking review6144536938/checklist6144546820 supersedes the conditional
+code-positive verdict: hosted38389039892 broad-09 and full engine fail before
+reset/projection assertions on bare quoted node-state list fields. The admission
+refusal is correct. Pre-edit record6144626476 and original-source RED controls
+record this branch-caused producer gap, not an inherited flake. Change only the
+four positive declarations below to unquoted singleton lists; preserve every
+original assertion and all deliberate quoted-style negatives. No parser change.
+
+| Row | Producer, canonical owner and consumer | Required proof |
+|---|---|---|
+| S21a whole-node reset fixture | entity_reset_presence_test.go first_items/second_items/peer_items -> D singleton/style decoder -> G normalized type -> resetNodeEntityProjections/validateEntityMutationList | All normal/immutable/nonempty-refinement cells RED before admission; canonical source must reach and preserve complete reset, present-empty, peer isolation, immutable and refinement assertions. Complete engine and node-admission positive/negative controls. |
+| S21b scoped accumulator projection fixture | loadEngineProjectionFlowBundle dimensions_received -> same authored admission and normalized named-list owner -> actual qualified projection/runtime binding | Both MaterializesForQualifiedRuntimeEvent and FailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime RED before load; preserve their exact output and fail-closed runtime assertions after source migration. Complete engine plus broad-09. |
+
+Finite read-only census:254 physical nodes.yaml files;24 state_schema carrier
+lines (physical and Go raw/escaped strings),56 Go state_schema mentions including
+literal keys/reader definitions;85 quoted-list lexical lines,88 with optional
+suffixes. Only the four live bare node-state positives above need migration.
+Other matches are entity/event/type declarations, explicit scalar metadata,
+typed Go values or deliberate style negatives, not four more spellings to
+rewrite. Existing accprojection/review node sources are already canonical;
+list<DimensionScore> in the unchanged CLI accumulator source remains D/#2648's
+separate retirement. Dynamic metadata/singleton numeric producers remain as
+their approved explicit forms. No blanket corpus rewrite or D policy absorption.
+
+Before the single push run engine, bootverify, contracts, tools, cliapp and
+workflowexpr EACH IN FULL; include broad-09's exact unit proof and original
+node-positive/negative race controls, plus clean no-argument preflight and
+touched-package census/guards. No partial aggregate or unchanged-head retry.
+Refine existing B watchlist and PR audit with separate S21a/S21b rows; no new
+issue, owner/framework, compatibility, baseline/selector/deadline change. Parents
+remain open, C frozen, and D decoder/global retirement allocation unchanged.
+
 ## Singleton Refusal-Phase Oracle Correction (S20)
 
 Reviewer-g6143845068 approves d8d8's code; hosted38384935732 instead exposes
