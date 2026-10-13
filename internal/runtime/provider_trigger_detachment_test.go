@@ -13,14 +13,20 @@ func TestProviderTriggerCatalogRefinementCopyDetached(t *testing.T) {
 			low, high := 1, 10
 			start, end := 1.5, 9.5
 			entry := c.EventCatalogEntry{Payload: c.EventPayloadSpec{Type: "object", Required: []string{"value"}, Properties: map[string]c.EventFieldSpec{
-				"value": {Type: "text", IsOptional: true, Description: "provider copy", Refinements: c.SchemaRefinements{Pattern: "pattern", EqualTo: "peer", Length: c.SchemaLengthRefinement{Min: &low, Max: &high}, Range: c.SchemaRangeRefinement{Min: &start, Max: &end}}},
+				"value": {Type: "text", Description: "provider copy", Refinements: c.SchemaRefinements{Pattern: "pattern", EqualTo: "peer", Length: c.SchemaLengthRefinement{Min: &low, Max: &high}}},
+				"peer":  {Type: "text"},
+				"score": {Type: "numeric", Refinements: c.SchemaRefinements{Range: c.SchemaRangeRefinement{Min: &start, Max: &end}}},
 			}}}
 			before, err := json.Marshal(entry)
 			if err != nil {
 				t.Fatal(err)
 			}
 			copied := cloneProviderTriggerEventCatalogEntry(entry)
-			r := copied.Payload.Properties["value"].Refinements
+			name := "value"
+			if bound == "range_min" || bound == "range_max" {
+				name = "score"
+			}
+			r := copied.Payload.Properties[name].Refinements
 			switch bound {
 			case "length_min":
 				*r.Length.Min = 2
@@ -35,7 +41,8 @@ func TestProviderTriggerCatalogRefinementCopyDetached(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(before) != string(after) || r.Pattern != "pattern" || r.EqualTo != "peer" {
+			text := copied.Payload.Properties["value"].Refinements
+			if string(before) != string(after) || text.Pattern != "pattern" || text.EqualTo != "peer" {
 				t.Fatalf("provider local copy changed retained bounds/metadata: before=%s after=%s", before, after)
 			}
 		})
