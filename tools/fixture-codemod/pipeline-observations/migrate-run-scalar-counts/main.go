@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 )
@@ -125,10 +126,16 @@ func currentEdit(fset *token.FileSet, file *ast.File, path string, pin pin) edit
 			continue
 		}
 		current := requestkey.Node(fn)
-		if current != pin.Before && current != pin.After {
+		previous, err := deliverystatus.ReadPrevious(path, pin.Function, current)
+		must(err)
+		if previous != pin.Before && previous != pin.After {
 			panic("scalar source escaped exact predecessor/successor: " + path + "/" + pin.Function)
 		}
-		return edit{fset.Position(fn.Pos()).Offset, fset.Position(fn.End()).Offset, pin.After}
+		after := pin.After
+		if current != previous {
+			after = current
+		}
+		return edit{fset.Position(fn.Pos()).Offset, fset.Position(fn.End()).Offset, after}
 	}
 	if pin.After == "" {
 		return edit{}

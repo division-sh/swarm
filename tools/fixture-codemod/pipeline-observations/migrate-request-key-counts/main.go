@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 )
@@ -124,7 +125,7 @@ func prepare(pins []pin) map[string][]byte {
 				continue
 			}
 			current := requestkey.Node(fn)
-			previous := runscalar.Previous(scalarPins, path, row.Function, current)
+			previous := requestKeyPrevious(scalarPins, path, row.Function, current)
 			if previous != row.Before && previous != row.After {
 				panic("request-key source escaped exact predecessor/successor: " + path + "/" + row.Function)
 			}
@@ -157,10 +158,16 @@ func verifyOutput(path string, raw []byte, rows []pin, scalarPins []runscalar.Pi
 		}
 	}
 	for _, row := range rows {
-		if runscalar.Previous(scalarPins, path, row.Function, declarations[row.Function]) != row.After {
+		if requestKeyPrevious(scalarPins, path, row.Function, declarations[row.Function]) != row.After {
 			panic("request-key candidate output escaped its typed rule: " + path + "/" + row.Function)
 		}
 	}
+}
+
+func requestKeyPrevious(scalarPins []runscalar.Pin, path, function, current string) string {
+	previous, err := deliverystatus.ReadPrevious(path, function, current)
+	must(err)
+	return runscalar.Previous(scalarPins, path, function, previous)
 }
 
 func must(err error) {

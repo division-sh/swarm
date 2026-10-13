@@ -277,6 +277,11 @@ func debtRunScalarBodies(root string) ([]debtRequestKeyBody, error) {
 }
 
 func debtRunScalarSourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtDeliveryStatusSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if !strings.Contains(current, "servedEventPublishScalarCount(t, reader,") {
 		return current, nil // Immutable earlier bodies do not require future manifests.
 	}
@@ -299,11 +304,84 @@ func debtRunScalarSourcePins(root string) error {
 	}
 	for _, body := range bodies {
 		declarations, err := debtServedDebugDeclarations(filepath.Join(root, body.File))
-		if err != nil || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+		if err != nil {
+			return err
+		}
+		previous, err := debtDeliveryStatusSourcePrevious(root, body.File, body.Function, declarations[body.Function])
+		if err != nil || previous != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("run scalar source owner/assertion/cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
 	}
 	return nil
+}
+
+func debtDeliveryStatusBodies(root string) ([]debtRequestKeyBody, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"))
+	if err != nil || debtBaselineChecksum(raw) != "b4284bb05b933c6ac8bb151de9355e3f5bd28a6ff363b2f926d9da5a8b0042d4" {
+		return nil, fmt.Errorf("exact delivery status source evidence changed: %v", err)
+	}
+	var bodies []debtRequestKeyBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 14 {
+		return nil, fmt.Errorf("invalid delivery status complete source inventory: %v", err)
+	}
+	return bodies, nil
+}
+
+func debtDeliveryStatusSourcePrevious(root, file, function, current string) (string, error) {
+	if !debtDeliveryStatusSuccessorCandidate(current) {
+		return current, nil
+	}
+	bodies, err := debtDeliveryStatusBodies(root)
+	if err != nil {
+		return "", err
+	}
+	for _, body := range bodies {
+		if body.File == file && body.Function == function && current == body.After && debtBaselineChecksum([]byte(body.Before)) == body.SHA256 {
+			return body.Before, nil
+		}
+	}
+	return current, nil
+}
+
+func debtDeliveryStatusSuccessorCandidate(current string) bool {
+	for _, marker := range []string{
+		"servedEventPublishDeliveryStatusCount(t, reader,", "servedEventPublishDeliveryStatusCount(t, rt.ReceiverStateReader,",
+		"waitServedEventPublishDeliveryStatusCount(t, reader,", "waitServedEventPublishDeliveryStatusCountForRun(t, reader,",
+		"waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader,", "requireNoServedDeliveryStatusDuring(t, rt.ReceiverStateReader,",
+	} {
+		if strings.Contains(current, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func debtDeliveryStatusSourcePins(root string) error {
+	bodies, err := debtDeliveryStatusBodies(root)
+	if err != nil {
+		return err
+	}
+	for _, body := range bodies {
+		declarations, err := debtServedDebugDeclarations(filepath.Join(root, body.File))
+		if err != nil || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+			return fmt.Errorf("delivery status owner/assertion/polling cut changed: %s/%s: %v", body.File, body.Function, err)
+		}
+	}
+	return nil
+}
+
+func debtDeliveryStatusCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtDeliveryStatusCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtRunScalarCollectorTo {
+		intermediate := head
+		intermediate.Collector = debtRunScalarCollectorTo
+		if !debtRunScalarCollectorTransition(base, debtRunScalarCollectorTo, trusted, intermediate) {
+			return false
+		}
+	}
+	return trusted.BootstrapSource == head.BootstrapSource && len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
 }
 
 func debtRunScalarCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
@@ -1733,7 +1811,8 @@ func debtReviewedCollectorTransition(base, current string, trusted, head authori
 		debtPublicA2EndpointCollectorTransition(base, current, trusted, head) ||
 		debtReceiverReadbackCollectorTransition(base, current, trusted, head) ||
 		debtRequestKeyCollectorTransition(base, current, trusted, head) ||
-		debtRunScalarCollectorTransition(base, current, trusted, head)
+		debtRunScalarCollectorTransition(base, current, trusted, head) ||
+		debtDeliveryStatusCollectorTransition(base, current, trusted, head)
 }
 
 func debtRunFixtureCollectorPredecessor(base string, trusted, head authorityDebtBaseline) bool {

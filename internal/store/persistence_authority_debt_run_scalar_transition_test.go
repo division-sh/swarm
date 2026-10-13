@@ -83,7 +83,7 @@ func TestPersistenceAuthorityDebtRunScalarSourcePinsAndCompositionFailClosed(t *
 		}
 	}
 	copy := t.TempDir()
-	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "internal/serveapp/postgres_three_contracts_test.go", "internal/serveapp/postgres_commit_loss_contract_test.go", "tools/fixture-codemod/pipeline-observations/family145-run-scalar-preimages.json"} {
+	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "internal/serveapp/postgres_three_contracts_test.go", "internal/serveapp/postgres_commit_loss_contract_test.go", "tools/fixture-codemod/pipeline-observations/family145-run-scalar-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)

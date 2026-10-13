@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
@@ -220,7 +221,9 @@ func currentOutput(r result) []byte {
 		must(err)
 		scalarPins, err := runscalar.Decode(scalarManifest)
 		must(err)
-		previous := runscalar.Previous(scalarPins, r.path, key, actual)
+		previous, err := deliverystatus.ReadPrevious(r.path, key, actual)
+		must(err)
+		previous = runscalar.Previous(scalarPins, r.path, key, previous)
 		previous = requestkey.Previous(requestKeyPins, r.path, key, previous)
 		previous = channelintent.Previous(intentPins, r.path, key, previous)
 		previous = forknotice.Previous(noticePins, r.path, key, previous)
