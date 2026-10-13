@@ -19,12 +19,13 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "b9c50450ed8e2bbcc46cb5cb8c22c948c9eaabeb9411432675383f90f6ab790c"
+const targetDigest = "54b43fd056fb7f6531b559eb7a7985f08472697c4f26564578f1faea9954eafe"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -277,6 +278,7 @@ func main() {
 	includeForkCompanionTargets()
 	includeForkNoticeTargets()
 	includeChannelIntentTargets()
+	includeRequestKeyTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -322,6 +324,26 @@ func main() {
 		writeJSON(transitionLedger, changes)
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
+	}
+}
+
+func includeRequestKeyTargets() {
+	raw, err := os.ReadFile(requestkey.Path)
+	must(err)
+	pins, err := requestkey.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		found := false
+		for _, path := range files {
+			found = found || path == pin.File
+		}
+		if !found {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
 	}
 }
 

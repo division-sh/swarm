@@ -31,7 +31,8 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 				seedIssue2394StopIntents(t, rt, runID, eventID)
 				assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.DB, runID), false)
 				cause := "fan-out capsule requires exact node"
-				removeFault := func() {}
+				removeFault := func() {
+				}
 				if fault == "invalid_capsule" {
 					var raw []byte
 					if err := rt.DB.QueryRow(`SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND semantic_path='stop-fixture-19'`, runID).Scan(&raw); err != nil {
@@ -59,10 +60,8 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 				if response.Error == nil {
 					t.Fatal("faulted cancellation returned success")
 				}
-				// Check rollback before envelope assertions, so an untyped failure
-				// cannot conceal a partial stop or falsely completed idempotency.
 				assertIssue2394StopUnchanged(t, before, rt.DB, runID)
-				requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", key, 0)
+				requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", key, 0)
 				_, ownerErr := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt), runcontrol.TransitionRequest{RunID: runID})
 				if ownerErr == nil || !issue2394ErrorChainContains(ownerErr, cause) {
 					t.Errorf("selected stop owner lost %s cause: %v", fault, ownerErr)

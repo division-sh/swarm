@@ -67,6 +67,16 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
+		if collector == debtRequestKeyCollectorTo {
+			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+				return baseline, err
+			}
+			if err := debtRequestKeyUnrefreshedMetadata(root, metadataBytes, data, baseline); err != nil {
+				return baseline, err
+			}
+			baseline.Collector = collector
+			return baseline, nil
+		}
 		if collector == debtReceiverReadbackCollectorTo {
 			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
 				return baseline, err
@@ -123,6 +133,21 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 	}
 	baseline.Collector = collector
 	return baseline, nil
+}
+
+func debtRequestKeyUnrefreshedMetadata(root string, metadata, data []byte, baseline authorityDebtBaseline) error {
+	if baseline.Collector != debtCacheCollectorFrom {
+		return fmt.Errorf("historical TSV collector header changed")
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtReceiverReadbackCollectorTo); err != nil {
+		return err
+	}
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		if baseline.Sites[pair[0].identity()] != pair[0] || baseline.Sites[pair[1].identity()].Multiplicity != 0 {
+			return fmt.Errorf("unrefreshed request-key baseline lacks exact retained call")
+		}
+	}
+	return debtRequestKeySourcePins(root)
 }
 
 func debtServedDebugUnrefreshedMetadata(root string, metadata, data []byte, baseline authorityDebtBaseline) error {

@@ -366,27 +366,19 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
+			var reader receiverProofStateReader
+			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+				reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
+			})
 			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
-			claim := testsql.EventCorruptionClaim{
-				Invariant: "public_input.selected_store_atomicity",
-				Reason:    "prove root-connected private template lifecycle and publication facts roll back on late delivery failure",
-			}
+			claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove root-connected private template lifecycle and publication facts roll back on late delivery failure"}
 			if backend == servedparity.BackendExplicitPostgres {
 				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
 			} else {
 				testsql.InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
 			}
-
 			idempotencyKey := "public-input-rollback-" + string(backend)
-			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-				"bundle_hash": bundleHash,
-				"event_name":  "inbound.telegram.text_message",
-				"payload": map[string]any{
-					"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42",
-					"provider_message_reference": 1, "text": "rollback proof",
-				},
-				"idempotency_key": idempotencyKey,
-			})
+			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message", "payload": map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "rollback proof"}, "idempotency_key": idempotencyKey})
 			if response.Error == nil {
 				var result struct {
 					EventID string `json:"event_id"`
@@ -402,7 +394,10 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
 			eventID, runID := publicInputFailureIdentity(t, rpcErr)
-			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
+			requirePublicInputRollbackNoResidue(t, db, backend, eventID, runID)
+			if got := servedEventPublishAPIIdempotencyCount(t, reader, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
+				t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
+			}
 		})
 	}
 }
@@ -411,40 +406,40 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 	stages := []struct {
 		name    string
 		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
-	}{
-		{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-			} else {
-				testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-			}
-		}},
-		{name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-			} else {
-				testsql.InstallSQLiteAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-			}
-		}},
-	}
+	}{{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+		if backend == servedparity.BackendExplicitPostgres {
+			testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
+		} else {
+			testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
+		}
+	}}, {name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+		if backend == servedparity.BackendExplicitPostgres {
+			testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
+		} else {
+			testsql.InstallSQLiteAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
+		}
+	}}}
 	for _, backend := range servedparity.RequiredBackends {
 		for _, stage := range stages {
 			backend, stage := backend, stage
 			t.Run(string(backend)+"/"+stage.name, func(t *testing.T) {
+				var reader receiverProofStateReader
+				captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+					reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
+				})
 				endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
 				claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove rollback at " + stage.name + " after prior publication facts exist"}
 				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
-				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
-					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"},
-					"idempotency_key": idempotencyKey,
-				})
+				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message", "payload": map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"}, "idempotency_key": idempotencyKey})
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
 				}
 				eventID, runID := publicInputFailureIdentity(t, rpcErr)
-				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
+				requirePublicInputRollbackNoResidue(t, db, backend, eventID, runID)
+				if got := servedEventPublishAPIIdempotencyCount(t, reader, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
+					t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
+				}
 			})
 		}
 	}
@@ -509,21 +504,13 @@ func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (strin
 	return eventID, runID
 }
 
-func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string) {
+func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, eventID, runID string) {
 	t.Helper()
 	queries := []struct {
 		label string
 		sql   string
 		args  []any
-	}{
-		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}},
-		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
-		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
-		{label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`},
-		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}},
-		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}},
-		{label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}},
-	}
+	}{{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}}, {label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`}, {label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}}, {label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`}, {label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}}, {label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}}, {label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}}}
 	for _, query := range queries {
 		var count int
 		statement := query.sql
@@ -536,9 +523,6 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		if count != 0 {
 			t.Fatalf("%s %s rows after public-input rollback = %d, want 0", backend, query.label, count)
 		}
-	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
-		t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
 	}
 }
 

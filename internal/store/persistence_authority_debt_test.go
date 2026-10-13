@@ -154,6 +154,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(failures) != 0 {
 		return failures
 	}
+	head, base, baseActual, failures = debtRequestKeySignatureComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	old, current := debtQuiescenceUncertaintyTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -186,6 +190,144 @@ func debtStageCompletionTransition() (authorityDebtSite, authorityDebtSite) {
 	current := old
 	current.Declaration = "TestExactStageCompletionRealWriterAndRehydratedSourceBothStores"
 	return old, current
+}
+
+// Ruling6144577451 retains both live raw calls, each 1 -> 1; no removal credit.
+func debtRequestKeySignatureTransitions() [2][2]authorityDebtSite {
+	const before = "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend, idempotencyKey string, eventID string, runID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=string|arg=string|results=()"
+	const after = "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend, eventID string, runID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=string|results=()"
+	var pairs [2][2]authorityDebtSite
+	for i, declaration := range [2]string{"TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores", "TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores"} {
+		old := authorityDebtSite{Kind: "raw-operation", File: "internal/serveapp/test_command_runtime_test.go", Declaration: declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp.requirePublicInputRollbackNoResidue", Resolved: before,
+			Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1}
+		current := old
+		current.Resolved = after
+		pairs[i] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
+}
+
+func debtRequestKeySignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		old, current := pair[0], pair[1]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"both reviewed request-key raw-call identities survive: " + old.Declaration}
+			}
+		}
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+			head = debtForwardQuiescenceUncertainty(head, old, current)
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	return head, base, source, nil
+}
+
+type debtRequestKeyBody struct {
+	File, Function, Before, After, SHA256 string
+}
+
+func debtRequestKeyBodies(root string) ([]debtRequestKeyBody, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/family145-request-key-preimages.json"))
+	if err != nil || debtBaselineChecksum(raw) != "cb7b37f1c09039dff3e2c4b92e9288e25ab6001ee1bbe65225396e91773a5e1c" {
+		return nil, fmt.Errorf("exact request-key complete source evidence changed: %v", err)
+	}
+	var bodies []debtRequestKeyBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 28 {
+		return nil, fmt.Errorf("invalid request-key complete source inventory: %v", err)
+	}
+	return bodies, nil
+}
+
+func debtRequestKeySourcePrevious(root, file, function, current string) (string, error) {
+	if !debtRequestKeySuccessorCandidate(current) {
+		return current, nil // Earlier immutable fixtures do not require future evidence.
+	}
+	bodies, err := debtRequestKeyBodies(root)
+	if err != nil {
+		return "", err
+	}
+	for _, body := range bodies {
+		if body.File == file && body.Function == function && current == body.After && debtBaselineChecksum([]byte(body.Before)) == body.SHA256 {
+			return body.Before, nil
+		}
+	}
+	return current, nil
+}
+
+func debtRequestKeySuccessorCandidate(current string) bool {
+	for _, marker := range []string{
+		"servedEventPublishAPIIdempotencyCount(t, reader,", "servedEventPublishAPIIdempotencyCount(t, rt.ReceiverStateReader,",
+		"servedEventPublishEventCountByIdempotencyKey(t, reader,", "requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader,",
+		"requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, reader,", "servedEventPublishSourcedEventCount(t, reader,",
+		"storetest.ReadAPIIdempotencyCardinality(", "storetest.ReadEventIdempotencyCardinality(", "storetest.CountSourceEventPublications(",
+	} {
+		if strings.Contains(current, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func debtRequestKeySourcePins(root string) error {
+	bodies, err := debtRequestKeyBodies(root)
+	if err != nil {
+		return err
+	}
+	declarations, err := debtServedDebugDeclarations(filepath.Join(root, "internal/serveapp/test_command_runtime_test.go"))
+	if err != nil {
+		return err
+	}
+	wanted := map[string]bool{"requirePublicInputRollbackNoResidue": true}
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		wanted[pair[0].Declaration] = true
+	}
+	for _, body := range bodies {
+		if body.File != "internal/serveapp/test_command_runtime_test.go" || !wanted[body.Function] {
+			continue
+		}
+		if declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+			return fmt.Errorf("reviewed request-key raw-call capture/cut/body changed: %s", body.Function)
+		}
+		delete(wanted, body.Function)
+	}
+	if len(wanted) != 0 {
+		return fmt.Errorf("request-key source proof lacks exact helper/callers: %v", wanted)
+	}
+	return nil
+}
+
+func debtRequestKeySourceTransition(root string, actual, source map[string]authorityDebtSite) error {
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		if actual[pair[1].identity()] == pair[1] && source[pair[0].identity()] == pair[0] {
+			return debtRequestKeySourcePins(root)
+		}
+	}
+	return nil // Landed no-op or genuine later deletion needs no signature transfer.
+}
+
+func debtRequestKeyCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtRequestKeyCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtReceiverReadbackCollectorTo {
+		intermediate := trusted
+		intermediate.Collector = debtReceiverReadbackCollectorTo
+		if debtValidateCollectorIdentity(base, intermediate.Collector, trusted, intermediate, "") != nil {
+			return false
+		}
+	}
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		if trusted.Sites[pair[0].identity()] != pair[0] || trusted.Sites[pair[1].identity()].Multiplicity != 0 ||
+			(head.Sites[pair[0].identity()] != pair[0] && head.Sites[pair[1].identity()] != pair[1]) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
 }
 
 func debtStageCompletionComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
@@ -589,6 +731,10 @@ func debtWriterStageSourcePins(root string, forward bool) error {
 		}
 		source := body.String()
 		if forward {
+			source, err = debtRequestKeySourcePrevious(root, "internal/serveapp/main_runtime_test.go", fn.Name.Name, source)
+			if err != nil {
+				return err
+			}
 			source, err = debtServedDebugWriterStagePrevious(root, fn.Name.Name, source)
 			if err != nil {
 				return err
@@ -770,7 +916,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtReceiverReadbackSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		previous, err := debtRequestKeySourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err = debtReceiverReadbackSourcePrevious(root, body.File, body.Function, previous)
 		if err != nil {
 			return err
 		}
@@ -1400,6 +1550,9 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := debtRequestKeySourceTransition(root, actual, baseActual); err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -1411,6 +1564,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		normalized, _, _, _ = debtWriterStageSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		normalized, _, _, _ = debtServedDebugSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		normalized, _, _, _ = debtPublicA2EndpointComparisons(actual, normalized, normalizedBase, normalizedSource)
+		normalized, _, _, _ = debtRequestKeySignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -1467,19 +1621,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtStageCompletionCollectorTransition(base, current, trusted, head) {
-		return nil
-	}
-	if debtWriterStageCollectorTransition(base, current, trusted, head) {
-		return nil
-	}
-	if debtServedDebugCollectorTransition(base, current, trusted, head) {
-		return nil
-	}
-	if debtPublicA2EndpointCollectorTransition(base, current, trusted, head) {
-		return nil
-	}
-	if debtReceiverReadbackCollectorTransition(base, current, trusted, head) {
+	if debtReviewedCollectorTransition(base, current, trusted, head) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
@@ -1521,6 +1663,15 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return nil
 	}
 	return fmt.Errorf("authority census/role policy changed outside the exact reviewed transition; silent scan narrowing is forbidden")
+}
+
+func debtReviewedCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	return debtStageCompletionCollectorTransition(base, current, trusted, head) ||
+		debtWriterStageCollectorTransition(base, current, trusted, head) ||
+		debtServedDebugCollectorTransition(base, current, trusted, head) ||
+		debtPublicA2EndpointCollectorTransition(base, current, trusted, head) ||
+		debtReceiverReadbackCollectorTransition(base, current, trusted, head) ||
+		debtRequestKeyCollectorTransition(base, current, trusted, head)
 }
 
 func debtRunFixtureCollectorPredecessor(base string, trusted, head authorityDebtBaseline) bool {

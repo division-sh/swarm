@@ -51,19 +51,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 	for _, tc := range []struct {
 		name, values string
 		config       map[string]any
-	}{
-		{"zero_false", `{"count":0,"ratio":2.5,"active":false,"label":"kept","attributes":{"nested":[1,2.5]}}`, map[string]any{
-			"count": int64(0), "ratio": 2.5, "active": false, "label": "kept", "attributes": map[string]any{"nested": []any{int64(1), 2.5}},
-		}},
-		{"optional_fields_omitted", `{"active":true,"label":"kept","attributes":[]}`, map[string]any{
-			"active": true, "label": "kept", "attributes": []any{},
-		}},
-		// Public event-schema admission normalizes optional null to absence
-		// before same-name constructor projection; no default is reapplied.
-		{"optional_null_normalized", `{"count":null,"active":true,"label":"kept","attributes":{}}`, map[string]any{
-			"active": true, "label": "kept", "attributes": map[string]any{},
-		}},
-	} {
+	}{{"zero_false", `{"count":0,"ratio":2.5,"active":false,"label":"kept","attributes":{"nested":[1,2.5]}}`, map[string]any{"count": int64(0), "ratio": 2.5, "active": false, "label": "kept", "attributes": map[string]any{"nested": []any{int64(1), 2.5}}}}, {"optional_fields_omitted", `{"active":true,"label":"kept","attributes":[]}`, map[string]any{"active": true, "label": "kept", "attributes": []any{}}}, {"optional_null_normalized", `{"count":null,"active":true,"label":"kept","attributes":{}}`, map[string]any{"active": true, "label": "kept", "attributes": map[string]any{}}}} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := "account-" + tc.name
 			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
@@ -88,8 +76,6 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, requireReceiverSourceDomainSnapshot(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) {
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
-			// Initialization is creation-only: missing and conflicting values
-			// must neither reject reuse nor overwrite the persisted config.
 			for index, values := range []string{`{}`, `{"count":99,"ratio":7.5,"active":true,"label":"replacement","attributes":{}}`} {
 				reuseParams := receiverInitializationPublishParams(rt, fmt.Sprintf("%s-reuse-%d", tc.name, index), account, values)
 				reuseParams["run_id"] = seed.RunID
@@ -112,7 +98,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		if count := requireReceiverEventIdempotencyCardinality(t, rt.ReceiverStateReader, key); count != 0 {
 			t.Fatalf("invalid ingress persisted %d events", count)
 		}
-		if count := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "event.publish", key); count != 0 {
+		if count := servedEventPublishAPIIdempotencyCount(t, rt.ReceiverStateReader, rt.Backend, "event.publish", key); count != 0 {
 			t.Fatalf("invalid ingress persisted %d command receipts", count)
 		}
 	})

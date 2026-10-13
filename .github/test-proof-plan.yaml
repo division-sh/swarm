@@ -1043,6 +1043,8 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*|F($|[^o].*|o($|[^r].*|r($|[^k].*))))))|Example.*|Fuzz.*)$'
     required_children:
+      TestAPIIdempotencyCardinalityPreservesExactMethodKeyAndAllActorsBothStores: [sqlite, postgres]
+      TestAPIIdempotencyCardinalityRefusesInvalidCancelledAndClosedOwnersBothStores: [sqlite, postgres]
       TestAuthoredTurnTerminationCommitsWithExactStageBothStores: [committed/sqlite, committed/postgres, late_rollback/sqlite, late_rollback/postgres, stale_cas/sqlite, stale_cas/postgres, other_instance/sqlite, other_instance/postgres, prelaunch/sqlite, prelaunch/postgres, prelaunch_restart/sqlite, prelaunch_restart/postgres]
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]

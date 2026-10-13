@@ -45,7 +45,6 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 			seedIssue2394StopIntents(t, rt, runID, eventID)
 			before := readIssue2394StopSnapshot(t, rt.DB, runID)
 			assertIssue2394StopMatrix(t, before, false)
-
 			key := uuid.NewString()
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"stop-twenty","method":"run.stop","params":{"run_id":%q,"idempotency_key":%q}}`, runID, key)
 			request, err := http.NewRequest(http.MethodPost, rt.Endpoint, strings.NewReader(body))
@@ -67,9 +66,6 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 				t.Fatalf("WebSocket stop must be refused: %+v", wrongTransport)
 			}
 			assertIssue2394StopUnchanged(t, before, rt.DB, runID)
-
-			// Lose the successful server reply at a proxy, after the actual HTTP
-			// command completed, rather than issuing a second command on timeout.
 			target, err := url.Parse(rt.Endpoint)
 			if err != nil {
 				t.Fatal(err)
@@ -80,7 +76,9 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 				_, readErr := io.Copy(io.Discard, response.Body)
 				return errors.Join(readErr, response.Body.Close(), errors.New("test drops stop response"))
 			}
-			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) { w.WriteHeader(http.StatusBadGateway) }
+			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
+				w.WriteHeader(http.StatusBadGateway)
+			}
 			lostReply := httptest.NewServer(proxy)
 			t.Cleanup(lostReply.Close)
 			request, err = http.NewRequest(http.MethodPost, lostReply.URL+"/v1/rpc", strings.NewReader(body))
@@ -135,7 +133,7 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 				t.Fatalf("fresh stop is not committed replay: %+v", fresh)
 			}
 			assertIssue2394StopUnchanged(t, after, rt.DB, runID)
-			requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", key, 1)
+			requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", key, 1)
 			rig.stop(t)
 		})
 	}
@@ -191,16 +189,16 @@ func newIssue2394StopRig(t *testing.T, backend servedparity.Backend) *issue2394S
 
 func (r *issue2394StopRig) start(t *testing.T) servedControlProofRuntime {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
+	})
 	r.process = startServeRuntimeTestProcess(t, r.opts)
 	r.process.waitForReadyLine()
 	r.process.mu.Lock()
 	rt := r.process.runtime
 	r.process.mu.Unlock()
-	return servedControlProofRuntime{
-		Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, r.process.outputString()) + "/v1/rpc",
-		DB:       r.db, Backend: r.backend, BundleHash: r.bundleHash, Runtime: rt,
-		Probe: r.opts.TestLifecycleProbe.(*lifecycletest.Probe),
-	}
+	return servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, r.process.outputString()) + "/v1/rpc", DB: r.db, Backend: r.backend, BundleHash: r.bundleHash, Runtime: rt, ReceiverStateReader: reader, Probe: r.opts.TestLifecycleProbe.(*lifecycletest.Probe)}
 }
 
 func (r *issue2394StopRig) stop(t *testing.T) {

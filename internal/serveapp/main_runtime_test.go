@@ -1558,7 +1558,11 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1579,29 +1583,20 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 			servedDB = storetest.DatabaseForTest(servedSQLite)
 			return wrapServedDirectiveFaultPersistence(t, persistence, faults)
 		}
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          llm,
-		})
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: llm})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for live-agent served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		if faults != nil {
 			oldProjection := projectRuntimePersistenceForServe
-			t.Cleanup(func() { projectRuntimePersistenceForServe = oldProjection })
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = oldProjection
+			})
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				return wrapServedDirectiveFaultPersistence(t, oldProjection(owner), faults)
 			}
@@ -1609,21 +1604,8 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		sourceRoot := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeServeRuntimeTestConfig(t),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			StoreMode:               "postgres",
-			StoreModeSet:            true,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          llm,
-		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: llm})
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
 	default:
 		t.Fatalf("unknown live-agent served parity backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1657,15 +1639,19 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
+	var receiverReader receiverProofStateReader
 	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
 			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
 		}
 	})
 	var contexts *runtimepkg.RuntimeContextManager
-	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) {
+		contexts = manager
+	}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1679,22 +1665,11 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                   writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			TestRuntimeContextsReadyHook: captureContexts,
-			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
-			APIListenAddr:                "127.0.0.1:0",
-			MCPListenAddr:                "127.0.0.1:0",
-			SelfCheck:                    true,
-			Verbose:                      true,
-			TestLifecycleProbe:           probe,
-			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
-		})
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath), TestRuntimeContextsReadyHook: captureContexts, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1702,21 +1677,8 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		sourceRoot := fixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                   writeServeRuntimeTestConfig(t),
-			TestRuntimeContextsReadyHook: captureContexts,
-			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
-			StoreMode:                    "postgres",
-			StoreModeSet:                 true,
-			APIListenAddr:                "127.0.0.1:0",
-			MCPListenAddr:                "127.0.0.1:0",
-			SelfCheck:                    true,
-			Verbose:                      true,
-			TestLifecycleProbe:           probe,
-			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
-		})
-		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), TestRuntimeContextsReadyHook: captureContexts, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()})
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -2611,8 +2573,6 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	} else {
 		owner = rt.Postgres.PipelineObligations()
 	}
-	// Node settlement can precede its initial gate's supersession handoff. The
-	// handed-only proof must start after that real publication work has settled.
 	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
 	defer cancelInitial()
 	for {
@@ -2633,28 +2593,14 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		}
 	}
 	cancelInitial()
-
 	pauseKey := keyPrefix + "-run-pause"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": pauseKey,
-	})
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
 	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
 	requireServedRunStatus(t, rt.Endpoint, runID, "paused")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": pauseKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
-
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": initialEventID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": keyPrefix + "-run-queued",
-	})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.pause", pauseKey, 1)
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": initialEventID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": keyPrefix + "-run-queued"})
 	if queued.RunID != runID || queued.OperatorReferenceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
@@ -2662,8 +2608,6 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
 	defer cancelWait()
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
-	// Use the canonical owner to establish handed-only debt explicitly; the
-	// public publication above remains unhanded while the run is paused.
 	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
 	if err != nil {
 		t.Fatal(err)
@@ -2687,39 +2631,25 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		t.Fatal(err)
 	}
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
-
 	continueKey := keyPrefix + "-run-continue"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": continueKey,
-	})
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
 	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": continueKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.ReceiverStateReader, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
-
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
-		"run_id":          stopRunID,
-		"idempotency_key": stopKey,
-	})
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
 	requireServedRunControlState(t, rt.DB, rt.Backend, stopRunID, "stopped", "cancelled")
 	requireServedStoppedPendingDelivery(t, rt.DB, rt.ReceiverStateReader, rt.Backend, pendingEventID, "agent-pending")
 	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
-		"run_id":          stopRunID,
-		"idempotency_key": stopKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", stopKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", stopKey, 1)
 	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
 	requireServedRunStatus(t, rt.Endpoint, stopRunID, "cancelled")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
@@ -2729,48 +2659,32 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	t.Helper()
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
 	pauseKey := keyPrefix + "-runtime-pause"
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
-		"idempotency_key": pauseKey,
-	})
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
 	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "paused", "platform.paused")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
-		"idempotency_key": pauseKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
 	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.paused", 1)
 	duplicatePause := requireServedJSONRPCError(t, rt.Endpoint, "runtime.pause", map[string]any{})
 	if duplicatePause.Data["code"] != apiv1.RuntimeAlreadyPausedCode {
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
 	}
-
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": keyPrefix + "-runtime-queued",
-	})
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "external.observed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": keyPrefix + "-runtime-queued"})
 	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
 		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
 	}
 	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
-
 	resumeKey := keyPrefix + "-runtime-resume"
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
-		"idempotency_key": resumeKey,
-	})
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
 	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "running", "platform.resumed")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
-		"idempotency_key": resumeKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
 	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.resumed", 1)
 	duplicateResume := requireServedJSONRPCError(t, rt.Endpoint, "runtime.resume", map[string]any{})
 	if duplicateResume.Data["code"] != apiv1.RuntimeNotPausedCode {
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
 	}
-
 	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
 	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
@@ -2790,51 +2704,36 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	if !ok || len(items) < 2 {
 		t.Fatalf("%s mailbox.list items = %#v, want notice and decision card", rt.Backend, listed["items"])
 	}
-
 	var detail map[string]any
 	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &detail)
 	if detail["kind"] != decisioncard.KindDecisionCard {
 		t.Fatalf("%s mailbox.get kind = %#v", rt.Backend, detail)
 	}
-
 	var draft map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{
-		"card_id": fixture.CardID, "verdict": "reject", "observed_content_hash": fixture.ContentHash,
-		"idempotency_key": "begin-" + fixture.CardID,
-	}, &draft)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": fixture.CardID, "verdict": "reject", "observed_content_hash": fixture.ContentHash, "idempotency_key": "begin-" + fixture.CardID}, &draft)
 	draftID := strings.TrimSpace(fmt.Sprint(draft["input_draft_id"]))
 	if draftID == "" || draft["status"] != decisioncard.DraftStatusActive {
 		t.Fatalf("%s begin_input = %#v", rt.Backend, draft)
 	}
 	var cancelled map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{
-		"card_id": fixture.CardID, "input_draft_id": draftID, "idempotency_key": "cancel-" + fixture.CardID,
-	}, &cancelled)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{"card_id": fixture.CardID, "input_draft_id": draftID, "idempotency_key": "cancel-" + fixture.CardID}, &cancelled)
 	if cancelled["status"] != decisioncard.DraftStatusCancelled {
 		t.Fatalf("%s cancel_input = %#v", rt.Backend, cancelled)
 	}
-
 	deferUntil := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	var deferred map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
-		"card_id": fixture.CardID, "until": deferUntil.Format(time.RFC3339Nano), "idempotency_key": "defer-" + fixture.CardID,
-	}, &deferred)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{"card_id": fixture.CardID, "until": deferUntil.Format(time.RFC3339Nano), "idempotency_key": "defer-" + fixture.CardID}, &deferred)
 	if deferred["status"] != decisioncard.StatusPending {
 		t.Fatalf("%s mailbox.defer = %#v", rt.Backend, deferred)
 	}
-
 	var decided map[string]any
-	decideParams := map[string]any{
-		"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash,
-		"fields":          map[string]any{"score": int64(9007199254740991)},
-		"idempotency_key": "decide-" + fixture.CardID,
-	}
+	decideParams := map[string]any{"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash, "fields": map[string]any{"score": int64(9007199254740991)}, "idempotency_key": "decide-" + fixture.CardID}
 	unsafeRaw := fmt.Sprintf(`{"jsonrpc":"2.0","id":"unsafe-decision-number","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","observed_content_hash":%q,"fields":{"score":9007199254740992},"idempotency_key":%q}}`, fixture.CardID, fixture.ContentHash, "unsafe-decide-"+fixture.CardID)
 	unsafe := requestServedRawJSONRPC(t, rt.Endpoint, unsafeRaw)
 	if unsafe.Error == nil || unsafe.Error.Code != -32600 {
 		t.Fatalf("%s unsafe mailbox.decide = %#v, want invalid request", rt.Backend, unsafe)
 	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.decide", "unsafe-decide-"+fixture.CardID, 0)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "mailbox.decide", "unsafe-decide-"+fixture.CardID, 0)
 	var stillPending map[string]any
 	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &stillPending)
 	if card := servedAnyMap(t, stillPending["decision_card"]); card["status"] != decisioncard.StatusPending {
@@ -2865,13 +2764,9 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 		t.Fatalf("%s persisted decision fields = %#v", rt.Backend, fields)
 	}
 	requireServedDecisionEventSafeInteger(t, rt.DB, rt.Backend, strings.TrimSpace(fmt.Sprint(decided["decision_event_id"])))
-
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RunScopedFlowInstance{
-			RunID: fixture.RunID,
-			Route: runtimeflowidentity.RouteForInstancePath(fixture.RunID),
-		})
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.RunID, Route: runtimeflowidentity.RouteForInstancePath(fixture.RunID)})
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -2880,22 +2775,13 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-
 	requireServedMailboxSubscription(t, rt.Endpoint, fixture.CardID)
 	var acknowledged map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", map[string]any{
-		"mailbox_id": fixture.NoticeID, "idempotency_key": "ack-" + fixture.NoticeID,
-	}, &acknowledged)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", map[string]any{"mailbox_id": fixture.NoticeID, "idempotency_key": "ack-" + fixture.NoticeID}, &acknowledged)
 	if acknowledged["kind"] != decisioncard.KindNotice || acknowledged["ok"] != true {
 		t.Fatalf("%s mailbox.acknowledge = %#v", rt.Backend, acknowledged)
 	}
-	for _, scenarioID := range []string{
-		servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle,
-		servedparity.ScenarioMailboxBeginInputLifecycle,
-		servedparity.ScenarioMailboxCancelInputLifecycle,
-		servedparity.ScenarioMailboxDecisionCardLifecycle,
-		servedparity.ScenarioMailboxDeferDecisionLifecycle,
-	} {
+	for _, scenarioID := range []string{servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle, servedparity.ScenarioMailboxBeginInputLifecycle, servedparity.ScenarioMailboxCancelInputLifecycle, servedparity.ScenarioMailboxDecisionCardLifecycle, servedparity.ScenarioMailboxDeferDecisionLifecycle} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
 	}
 }
@@ -2978,20 +2864,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	runID := uuid.NewString()
 	entityID := runID
 	key := keyPrefix + "-entities"
-	params := map[string]any{
-		"bundle_hash":     rt.BundleHash,
-		"run_id":          runID,
-		"idempotency_key": key,
-		"entities": []any{
-			map[string]any{
-				"alias":         "subject",
-				"entity_id":     entityID,
-				"entity_type":   "widget",
-				"current_state": "waiting",
-				"fields":        map[string]any{"score": 5},
-			},
-		},
-	}
+	params := map[string]any{"bundle_hash": rt.BundleHash, "run_id": runID, "idempotency_key": key, "entities": []any{map[string]any{"alias": "subject", "entity_id": entityID, "entity_type": "widget", "current_state": "waiting", "fields": map[string]any{"score": 5}}}}
 	var result struct {
 		RunID    string `json:"run_id"`
 		Entities []struct {
@@ -3012,8 +2885,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	}
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
 	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
-
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "test.setup_entities", key, 1)
 	var replay struct {
 		RunID    string `json:"run_id"`
 		Entities []struct {
@@ -3024,16 +2896,9 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	if replay.RunID != runID || len(replay.Entities) != 1 || replay.Entities[0].EntityID != entityID {
 		t.Fatalf("%s test.setup_entities replay = %#v, want original run/entity", rt.Backend, replay)
 	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "test.setup_entities", key, 1)
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
-
-	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "widget.scored",
-		"bundle_hash":     rt.BundleHash,
-		"run_id":          runID,
-		"payload":         map[string]any{"delta": 1},
-		"idempotency_key": keyPrefix + "-later-event",
-	})
+	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "widget.scored", "bundle_hash": rt.BundleHash, "run_id": runID, "payload": map[string]any{"delta": 1}, "idempotency_key": keyPrefix + "-later-event"})
 	if published.RunID != runID || published.NewRunCreated || published.EventID == "" {
 		t.Fatalf("%s scenario event.publish result = %#v, want existing run", rt.Backend, published)
 	}
@@ -3635,29 +3500,14 @@ const servedTypedCreationInstancePath = "operating/ti-637499c0f9a5eda60519f6d3"
 
 func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
-	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "opco.bootstrap_requested",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"owner": "operator"},
-		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
-	})
+	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "opco.bootstrap_requested", "bundle_hash": bundleHash, "payload": map[string]any{"owner": "operator"}, "idempotency_key": "issue-1384-" + backend + "-bootstrap"})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
 		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
 	parentEntityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
-
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "opco.spinup_requested",
-		"run_id":          runID,
-		"source_event_id": bootstrap.EventID,
-		"payload": map[string]any{
-			"instance_id": instanceID,
-			"product_id":  "product-1",
-		},
-		"idempotency_key": "issue-1384-" + backend + "-spinup",
-	})
+	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "opco.spinup_requested", "run_id": runID, "source_event_id": bootstrap.EventID, "payload": map[string]any{"instance_id": instanceID, "product_id": "product-1"}, "idempotency_key": "issue-1384-" + backend + "-spinup"})
 	if spinupEnvelope.Error != nil {
 		t.Fatalf("spinup event.publish error = %#v", spinupEnvelope.Error)
 	}
@@ -3678,17 +3528,15 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	// The original publication's asynchronous log is accepted work, not an
-	// effect of the rejected replay. Settle that exact fact before snapshotting.
 	waitServedEventPublishedLog(t, endpoint, runID, spinup.EventID)
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
-
-	releaseOnce.Do(func() { close(release) })
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, reader, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
+	releaseOnce.Do(func() {
+		close(release)
+	})
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 	waitServedDeliveryOutcomeCount(t, db, reader, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
-
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, autoEventName)
 	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
@@ -3704,7 +3552,6 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	if got := servedEventPublishReceiptCountBySubscribers(t, db, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
 		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	componentEventName := servedTypedCreationInstancePath + "/component_scaffold.spawn_requested"
 	componentEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, componentEventName)
 	assertServedDynamicAutoEmitPayload(t, db, backend, componentEventID, map[string]any{"product_id": "product-1"})
@@ -3715,7 +3562,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, reader, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 	requireServedParitySettlementPostconditions(t, endpoint, reader, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
 
@@ -3819,7 +3666,6 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 	beforeGeneration := servedAgentLifecycleGeneration(t, rt, runID, agentID)
 	key := "issue-1927-" + rt.Backend + "-restart-" + uuid.NewString()
 	params := map[string]any{"run_id": runID, "agent_id": agentID, "idempotency_key": key}
-
 	var first servedAgentRestartProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &first)
 	if !first.OK {
@@ -3830,8 +3676,7 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("%s restart generation = %d, want adjacent %d", rt.Backend, afterGeneration, beforeGeneration+1)
 	}
 	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
-
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.restart", key, 1)
 	var replay servedAgentRestartProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &replay)
 	if replay != first {
@@ -3841,8 +3686,7 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("%s replay generation = %d, want unchanged %d", rt.Backend, got, afterGeneration)
 	}
 	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
-
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.restart", key, 1)
 	postRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-restart")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.ReceiverStateReader, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
@@ -3889,19 +3733,15 @@ func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntim
 func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-event-replay-"+uuid.NewString())
-
 	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "event-replay")
 	eventReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-event-replay"
 	beforeHoldEvents := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
 	beforeAuditEvents := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
 	var eventReplay servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{
-		"event_id":        eventReplayOriginal.EventID,
-		"idempotency_key": eventReplayKey,
-	}, &eventReplay)
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplay)
 	requireServedLiveAgentEventReplayResult(t, rt, eventReplayOriginal.EventID, eventReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.ReceiverStateReader, rt.Backend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "event.replay", eventReplayKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "event.replay", eventReplayKey, 1)
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
@@ -3909,10 +3749,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
 	}
 	var eventReplayAgain servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{
-		"event_id":        eventReplayOriginal.EventID,
-		"idempotency_key": eventReplayKey,
-	}, &eventReplayAgain)
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplayAgain)
 	if eventReplayAgain.ReplayEventID != eventReplay.ReplayEventID || eventReplayAgain.AuditEventID != eventReplay.AuditEventID {
 		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
 	}
@@ -3920,21 +3757,15 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
-
 	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
 	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
 	beforeHoldEvents = servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
 	beforeAuditEvents = servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
 	var agentReplay servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
-		"event_id":        agentReplayOriginal.EventID,
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"idempotency_key": agentReplayKey,
-	}, &agentReplay)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplay)
 	requireServedLiveAgentAgentReplayResult(t, rt, agentReplayOriginal.EventID, agentReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.ReceiverStateReader, rt.Backend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay", agentReplayKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.replay", agentReplayKey, 1)
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
@@ -3942,12 +3773,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
 	}
 	var agentReplayAgain servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
-		"event_id":        agentReplayOriginal.EventID,
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"idempotency_key": agentReplayKey,
-	}, &agentReplayAgain)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplayAgain)
 	if agentReplayAgain.ReplayEventID != agentReplay.ReplayEventID || agentReplayAgain.AuditEventID != agentReplay.AuditEventID {
 		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
 	}
@@ -3973,18 +3799,12 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-directive-readiness")
 	effects.Store(0)
 	key := "issue-1932-" + rt.Backend + "-directive"
-	params := map[string]any{
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"directive":       "perform one durable directive step",
-		"idempotency_key": key,
-	}
+	params := map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "perform one durable directive step", "idempotency_key": key}
 	var first servedAgentDirectiveProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &first)
 	requireServedAgentDirectiveResult(t, rt.Backend, first)
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
 	var replay servedAgentDirectiveProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &replay)
 	if replay != first {
@@ -3992,30 +3812,15 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	}
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
-	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"directive":       "a conflicting directive body",
-		"idempotency_key": key,
-	})
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "a conflicting directive body", "idempotency_key": key})
 	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
 		t.Fatalf("%s directive conflict = %#v, want %s", rt.Backend, conflict.Data, apiv1.IdempotencyConflictCode)
 	}
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
 	var keylessA, keylessB servedAgentDirectiveProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":    runID,
-		"agent_id":  "load-agent",
-		"directive": "keyless operation A",
-	}, &keylessA)
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":    runID,
-		"agent_id":  "load-agent",
-		"directive": "keyless operation B",
-	}, &keylessB)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "keyless operation A"}, &keylessA)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "keyless operation B"}, &keylessB)
 	requireServedAgentDirectiveResult(t, rt.Backend, keylessA)
 	requireServedAgentDirectiveResult(t, rt.Backend, keylessB)
 	if keylessA.OperationID == keylessB.OperationID || keylessA.DirectiveEventID == keylessB.DirectiveEventID {
@@ -4023,28 +3828,19 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	}
 	requireServedAgentDirectiveOperationCount(t, rt.DB, rt.Backend, 3)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 3)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", key, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.send_directive", key, 1)
 	for _, runID := range []string{first.RunID, keylessA.RunID, keylessB.RunID} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle))
 	}
-
 	for _, failureCase := range []struct {
 		name      string
 		directive string
 		class     runtimefailures.Class
 		detail    string
-	}{
-		{name: "untyped", directive: "return untyped directive failure", class: runtimefailures.ClassInternalFailure, detail: runtimeagentcontrol.DirectiveBoardStepFailedDetail},
-		{name: "typed", directive: "return typed directive failure", class: runtimefailures.ClassAuthenticationNeeded, detail: "provider_unauthorized"},
-	} {
+	}{{name: "untyped", directive: "return untyped directive failure", class: runtimefailures.ClassInternalFailure, detail: runtimeagentcontrol.DirectiveBoardStepFailedDetail}, {name: "typed", directive: "return typed directive failure", class: runtimefailures.ClassAuthenticationNeeded, detail: "provider_unauthorized"}} {
 		t.Run(failureCase.name+"_failure", func(t *testing.T) {
 			failureKey := "issue-1869-" + rt.Backend + "-" + failureCase.name
-			failureParams := map[string]any{
-				"run_id":          runID,
-				"agent_id":        "load-agent",
-				"directive":       failureCase.directive,
-				"idempotency_key": failureKey,
-			}
+			failureParams := map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": failureCase.directive, "idempotency_key": failureKey}
 			before := effects.Load()
 			firstFailure := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", failureParams)
 			failure := requireServedDirectiveFailureEnvelope(t, rt, firstFailure, failureKey, failureCase.class, failureCase.detail)
@@ -4436,9 +4232,9 @@ func requireServedOKJSONRPC(t *testing.T, endpoint, method string, params map[st
 	}
 }
 
-func requireServedControlAPIIdempotencyRows(t *testing.T, db *sql.DB, backend, method, key string, want int) {
+func requireServedControlAPIIdempotencyRows(t *testing.T, reader receiverProofStateReader, backend, method, key string, want int) {
 	t.Helper()
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, method, key); got != want {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, method, key); got != want {
 		t.Fatalf("%s api_idempotency rows for %s/%s = %d, want %d", backend, method, key, got, want)
 	}
 }
@@ -5214,11 +5010,7 @@ type servedEventPublishFollowUpProof struct {
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
 	t.Helper()
-	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "item.received",
-		"--payload-json", `{"item_id":"item-1"}`,
-		"--idempotency-key", "issue-1255-" + backend + "-initial",
-	})
+	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "item.received", "--payload-json", `{"item_id":"item-1"}`, "--idempotency-key", "issue-1255-" + backend + "-initial"})
 	if code != 0 {
 		t.Fatalf("initial event publish code=%d stderr=%s stdout=%s", code, initialStderr, initialStdout)
 	}
@@ -5238,13 +5030,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", identitytest.RootNode(t, "item-handler").Key())
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
-
-	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "item.processed",
-		"--run-id", runID,
-		"--payload-json", `{"item_id":"review"}`,
-		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
-	})
+	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "item.processed", "--run-id", runID, "--payload-json", `{"item_id":"review"}`, "--idempotency-key", "issue-1255-" + backend + "-follow-up"})
 	if code != 0 {
 		t.Fatalf("follow-up event publish code=%d stderr=%s stdout=%s", code, followUpStderr, followUpStdout)
 	}
@@ -5269,13 +5055,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
-
-	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
-		"run", "trace", runID,
-		"--event-name", "item.processed",
-		"--entity-id", entityID,
-		"--limit", "10",
-	})
+	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{"run", "trace", runID, "--event-name", "item.processed", "--entity-id", entityID, "--limit", "10"})
 	if traceCode != 0 {
 		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
 	}
@@ -5303,14 +5083,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}
 	}
-
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
-	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": unhandledIdempotencyKey,
-	})
+	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": unhandledIdempotencyKey})
 	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
 		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
 	}
@@ -5318,26 +5092,18 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if !ok || details["current_status"] != "completed" {
 		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
 	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s event rows for rejected follow-up idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
 	}
-	return servedEventPublishFollowUpProof{
-		RunID:           runID,
-		InitialEventID:  initialEventID,
-		FollowUpEventID: followUpEventID,
-	}
+	return servedEventPublishFollowUpProof{RunID: runID, InitialEventID: initialEventID, FollowUpEventID: followUpEventID}
 }
 
 func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "opco.bootstrap_requested",
-		"--payload-json", `{"owner":"operator"}`,
-		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
-	})
+	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "opco.bootstrap_requested", "--payload-json", `{"owner":"operator"}`, "--idempotency-key", "issue-1438-" + backend + "-bootstrap"})
 	if code != 0 {
 		t.Fatalf("bootstrap target-route event publish code=%d stderr=%s stdout=%s", code, bootstrapStderr, bootstrapStdout)
 	}
@@ -5348,15 +5114,8 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
 	}
 	requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
-
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "opco.spinup_requested",
-		"--run-id", runID,
-		"--source-event-id", bootstrapEventID,
-		"--payload-json", fmt.Sprintf(`{"instance_id":%q,"product_id":"product-1"}`, instanceID),
-		"--idempotency-key", "issue-1438-" + backend + "-spinup",
-	})
+	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "opco.spinup_requested", "--run-id", runID, "--source-event-id", bootstrapEventID, "--payload-json", fmt.Sprintf(`{"instance_id":%q,"product_id":"product-1"}`, instanceID), "--idempotency-key", "issue-1438-" + backend + "-spinup"})
 	if code != 0 {
 		t.Fatalf("spinup target-route event publish code=%d stderr=%s stdout=%s", code, spinupStderr, spinupStdout)
 	}
@@ -5366,7 +5125,6 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 		t.Fatalf("spinup target-route event publish fields = %#v, want selected existing run with delivery", spinup)
 	}
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
-
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, autoEventName)
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
@@ -5379,50 +5137,23 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if targetFlowInstance != servedTypedCreationInstancePath {
 		t.Fatalf("typed receiver path = %q, want %q", targetFlowInstance, servedTypedCreationInstancePath)
 	}
-
-	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "operating/opco.product_review_requested",
-		"--run-id", runID,
-		"--source-event-id", autoEventID,
-		"--target-flow-instance", targetFlowInstance,
-		"--target-entity-id", entityID,
-		"--payload-json", `{"note":"approved-target"}`,
-		"--idempotency-key", "issue-1438-" + backend + "-target",
-	})
+	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "operating/opco.product_review_requested", "--run-id", runID, "--source-event-id", autoEventID, "--target-flow-instance", targetFlowInstance, "--target-entity-id", entityID, "--payload-json", `{"note":"approved-target"}`, "--idempotency-key", "issue-1438-" + backend + "-target"})
 	if code == 0 || !strings.Contains(targetStderr+targetStdout, apiv1.EventNotDeclaredCode) {
 		t.Fatalf("private target must be refused: code=%d stderr=%s stdout=%s", code, targetStderr, targetStdout)
 	}
-	// The selected receiver exists and has executed its creation event, but its
-	// address must never grant public write access to a private input.
 	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "waiting")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, "issue-1438-"+backend+"-target"); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, "issue-1438-"+backend+"-target"); got != 0 {
 		t.Fatalf("%s rejected private target wrote %d events", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 0 {
 		t.Fatalf("%s rejected private target wrote %d receipts", backend, got)
 	}
 }
 
-func runServedEventPublishActiveLoadProof(
-	t *testing.T,
-	endpoint string,
-	db *sql.DB,
-	reader receiverProofStateReader,
-	backend string,
-	bundleHash string,
-	probe *lifecycletest.Probe,
-	agentStarted <-chan struct{},
-	release chan struct{},
-	releaseOnce *sync.Once,
-) {
+func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend string, bundleHash string, probe *lifecycletest.Probe, agentStarted <-chan struct{}, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "item.received",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"item_id": "item-1"},
-		"idempotency_key": "issue-1434-" + backend + "-initial",
-	})
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": bundleHash, "payload": map[string]any{"item_id": "item-1"}, "idempotency_key": "issue-1434-" + backend + "-initial"})
 	runID := initial.RunID
 	initialEventID := initial.EventID
 	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
@@ -5430,15 +5161,8 @@ func runServedEventPublishActiveLoadProof(
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
-
 	holdStart := time.Now()
-	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": initialEventID,
-		"payload":         map[string]any{"item_id": "hold"},
-		"idempotency_key": "issue-1434-" + backend + "-agent-hold",
-	})
+	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": initialEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1434-" + backend + "-agent-hold"})
 	holdElapsed := time.Since(holdStart)
 	if holdEnvelope.Error != nil {
 		t.Fatalf("%s agent-hold event.publish error = %#v", backend, holdEnvelope.Error)
@@ -5466,16 +5190,9 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress count = %d, want active agent load before follow-up\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	unhandledKey := "issue-1434-" + backend + "-unhandled-active"
 	unhandledStart := time.Now()
-	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.unhandled",
-		"run_id":          runID,
-		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"note": "unhandled under active load"},
-		"idempotency_key": unhandledKey,
-	})
+	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "thing.unhandled", "run_id": runID, "source_event_id": hold.EventID, "payload": map[string]any{"note": "unhandled under active load"}, "idempotency_key": unhandledKey})
 	unhandledElapsed := time.Since(unhandledStart)
 	if unhandledEnvelope.Error == nil {
 		t.Fatalf("%s unhandled event.publish error = nil, result=%s", backend, string(unhandledEnvelope.Result))
@@ -5486,24 +5203,17 @@ func runServedEventPublishActiveLoadProof(
 	if unhandledEnvelope.Error.Data["code"] != apiv1.EventNotDeclaredCode {
 		t.Fatalf("%s unhandled event.publish error data = %#v, want %s", backend, unhandledEnvelope.Error.Data, apiv1.EventNotDeclaredCode)
 	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledKey); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, unhandledKey); got != 0 {
 		t.Fatalf("%s event rows for unhandled active-load idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", unhandledKey); got != 0 {
 		t.Fatalf("%s idempotency rows for unhandled active-load publish = %d, want 0", backend, got)
 	}
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after fail-closed publish = %d, want still active\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	followStart := time.Now()
-	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": "issue-1434-" + backend + "-follow-up",
-	})
+	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": hold.EventID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": "issue-1434-" + backend + "-follow-up"})
 	followElapsed := time.Since(followStart)
 	if followEnvelope.Error != nil {
 		t.Fatalf("%s follow-up event.publish error = %#v", backend, followEnvelope.Error)
@@ -5529,8 +5239,9 @@ func runServedEventPublishActiveLoadProof(
 	}
 	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), runID, entityID)
 	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", itemObserver)
-
-	releaseOnce.Do(func() { close(release) })
+	releaseOnce.Do(func() {
+		close(release)
+	})
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
@@ -5982,47 +5693,39 @@ func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, run
 	return count
 }
 
-func servedEventPublishEventCountByIdempotencyKey(t *testing.T, db *sql.DB, backend, idempotencyKey string) int {
+func servedEventPublishEventCountByIdempotencyKey(t *testing.T, reader receiverProofStateReader, backend, idempotencyKey string) int {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = $1`
-		args = []any{idempotencyKey}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = ?`
-		args = []any{idempotencyKey}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.ReadEventIdempotencyCardinality(ctx, reader, idempotencyKey)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count events by idempotency key %q: %v", backend, idempotencyKey, err)
 	}
 	return count
 }
 
-func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, method, idempotencyKey string) int {
+func servedEventPublishAPIIdempotencyCount(t *testing.T, reader receiverProofStateReader, backend, method, idempotencyKey string) int {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = $1 AND idempotency_key = $2`
-		args = []any{method, idempotencyKey}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`
-		args = []any{method, idempotencyKey}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.ReadAPIIdempotencyCardinality(ctx, reader, method, idempotencyKey)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count api idempotency method=%q key=%q: %v", backend, method, idempotencyKey, err)
 	}
 	return count
@@ -6378,17 +6081,14 @@ func waitServedEventPublishedLog(t *testing.T, endpoint, runID, eventID string) 
 	t.Fatalf("original publication log did not settle for event %s", eventID)
 }
 
-func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, backend, eventID, idempotencyKey string) {
+func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, reader receiverProofStateReader, backend, eventID, idempotencyKey string) {
 	t.Helper()
-	beforeSourcedEvents := servedEventPublishSourcedEventCount(t, db, backend, eventID)
-	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{
-		"event_id":        eventID,
-		"idempotency_key": idempotencyKey,
-	})
+	beforeSourcedEvents := servedEventPublishSourcedEventCount(t, reader, backend, eventID)
+	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{"event_id": eventID, "idempotency_key": idempotencyKey})
 	if errResp.Data["code"] != apiv1.EventReplayNoDeliveryHistoryCode {
 		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
 	}
-	if got := servedEventPublishSourcedEventCount(t, db, backend, eventID); got != beforeSourcedEvents {
+	if got := servedEventPublishSourcedEventCount(t, reader, backend, eventID); got != beforeSourcedEvents {
 		var cause operatorread.OperatorEventFull
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &cause)
 		var page operatorread.OperatorEventListResult
@@ -6400,28 +6100,26 @@ func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint strin
 		}
 		t.Fatalf("%s events sourced from rejected node-only replay target = %d, want %d", backend, got, beforeSourcedEvents)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.replay", idempotencyKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.replay", idempotencyKey); got != 0 {
 		t.Fatalf("%s api_idempotency rows for rejected node-only replay = %d, want 0", backend, got)
 	}
 }
 
-func servedEventPublishSourcedEventCount(t *testing.T, db *sql.DB, backend, sourceEventID string) int {
+func servedEventPublishSourcedEventCount(t *testing.T, reader receiverProofStateReader, backend, sourceEventID string) int {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`
-		args = []any{sourceEventID}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE source_event_id = ?`
-		args = []any{sourceEventID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s sourced event count query failed: %v\n%s", backend, err, query)
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountSourceEventPublications(ctx, reader, sourceEventID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s sourced event count query failed: %v", backend, err)
 	}
 	return count
 }

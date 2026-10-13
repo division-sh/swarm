@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 761 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b9c50450ed8e2bbcc46cb5cb8c22c948c9eaabeb9411432675383f90f6ab790c" {
+	if err != nil || len(rows) != 774 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "54b43fd056fb7f6531b559eb7a7985f08472697c4f26564578f1faea9954eafe" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -53,7 +53,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), finite); err == nil {
 			t.Fatalf("changed binding/workload accepted: %s", row.Function)
 		}
-		if family145CheckChannelIntentWholeRule(t, row.File, row.Function, row.After) || family145CheckServedDebugWholeRule(t, row.File, row.Function, row.After) || family145CheckForkCompletionWholeRule(t, row.File, row.Function, row.After) || family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, row.After) || family145CheckWriterStageWholeRule(t, row.File, row.Function, row.After) || row.Function == "requireServedEventPublishEntityState" || row.Function == "requireLifecycleEventCount" || row.Function == "readLifecycleLoop" {
+		if family145CheckRequestKeyWholeRule(t, row.File, row.Function, row.After) || family145CheckChannelIntentWholeRule(t, row.File, row.Function, row.After) || family145CheckServedDebugWholeRule(t, row.File, row.Function, row.After) || family145CheckForkCompletionWholeRule(t, row.File, row.Function, row.After) || family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, row.After) || family145CheckWriterStageWholeRule(t, row.File, row.Function, row.After) || row.Function == "requireServedEventPublishEntityState" || row.Function == "requireLifecycleEventCount" || row.Function == "readLifecycleLoop" {
 			continue
 		}
 		if family145CheckPublicA2EndpointWholeRule(t, row.File, row.Function, row.After) {

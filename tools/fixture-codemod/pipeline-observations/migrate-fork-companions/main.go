@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
 const predecessor = "f0ce6f7bea8f8f89d44f98a317ed0432e2ba90ce"
@@ -168,12 +169,20 @@ func currentEdit(fset *token.FileSet, file *ast.File, pin pin) edit {
 			continue
 		}
 		current := nodeString(function)
+		comparison := current
+		if raw, err := os.ReadFile(requestkey.Path); err == nil {
+			pins, err := requestkey.Decode(raw)
+			must(err)
+			comparison = requestkey.Previous(pins, pin.File, pin.Function, comparison)
+		} else if !os.IsNotExist(err) {
+			must(err)
+		}
 		if current != pin.Before && current != pin.After {
 			raw, err := os.ReadFile(forknotice.Path)
 			must(err)
 			pins, err := forknotice.Decode(raw)
 			must(err)
-			if forknotice.Previous(pins, pin.File, pin.Function, current) != pin.After {
+			if forknotice.Previous(pins, pin.File, pin.Function, comparison) != pin.After {
 				panic("companion consumer escaped complete source: " + pin.File + "/" + pin.Function)
 			}
 			return edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, current}

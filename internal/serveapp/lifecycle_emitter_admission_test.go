@@ -96,18 +96,11 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 				name, event, site, state string
 				variant                  canonicalrouting.LifecycleEmitterVariant
 				payload                  map[string]any
-			}{
-				{"gate", "work.completed", "stages.review.gate.outcomes.approve.emit", "review", canonicalrouting.LifecycleGateLocal, map[string]any{"result": "approved"}},
-				{"loop", "loop.escaped", "loops.revision.escape.emit", "waiting", canonicalrouting.LifecycleLoopConnected, map[string]any{"revision_id": "not-a-runtime-revision"}},
-			} {
+			}{{"gate", "work.completed", "stages.review.gate.outcomes.approve.emit", "review", canonicalrouting.LifecycleGateLocal, map[string]any{"result": "approved"}}, {"loop", "loop.escaped", "loops.revision.escape.emit", "waiting", canonicalrouting.LifecycleLoopConnected, map[string]any{"revision_id": "not-a-runtime-revision"}}} {
 				t.Run(tc.name, func(t *testing.T) {
 					rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, tc.variant))
 					before := lifecycleAdmissionDomainCounts(t, rt.DB)
-					// run.start, unlike low-level event.publish, requires an exact
-					// declared root input. A producer fact must not widen it.
-					err := requireServedJSONRPCError(t, rt.Endpoint, "run.start", map[string]any{
-						"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": "lifecycle-not-ingress",
-					})
+					err := requireServedJSONRPCError(t, rt.Endpoint, "run.start", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": "lifecycle-not-ingress"})
 					details, ok := err.Data["details"].(map[string]any)
 					if err.Data["code"] != apiv1.EventNotDeclaredCode || !ok || details["reason"] != "not_declared_root_input" || details["event_name"] != tc.event {
 						t.Fatalf("wrong non-ingress rejection: %#v", err)
@@ -115,10 +108,7 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 					if got := lifecycleAdmissionDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
 						t.Fatalf("rejected run.start mutated domain: before=%v after=%v", before, got)
 					}
-					// Internal lifecycle site coordinates are not public event names.
-					err = requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
-						"bundle_hash": rt.BundleHash, "event_name": tc.site, "payload": tc.payload, "idempotency_key": "lifecycle-site-not-event",
-					})
+					err = requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.site, "payload": tc.payload, "idempotency_key": "lifecycle-site-not-event"})
 					if err.Data["code"] != apiv1.EventNotDeclaredCode {
 						t.Fatalf("wrong lifecycle-site rejection: %#v", err)
 					}
@@ -126,13 +116,11 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 						t.Fatalf("rejected event.publish mutated domain: before=%v after=%v", before, got)
 					}
 					for _, key := range []struct{ method, key string }{{"run.start", "lifecycle-not-ingress"}, {"event.publish", "lifecycle-site-not-event"}} {
-						if n := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, key.method, key.key); n != 0 {
+						if n := servedEventPublishAPIIdempotencyCount(t, rt.ReceiverStateReader, rt.Backend, key.method, key.key); n != 0 {
 							t.Fatalf("rejected %s stored %d idempotency completions", key.method, n)
 						}
 					}
-					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress",
-					})
+					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress"})
 					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, "", tc.state)
 				})
 			}
