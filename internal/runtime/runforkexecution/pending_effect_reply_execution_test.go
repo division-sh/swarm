@@ -44,6 +44,7 @@ type pendingReplyExecutionStore interface {
 	pipeline.ActivityAttemptJournal
 	replycontext.Store
 	bus.PreparedPublishEventReader
+	bus.RunLifecycleReadPersistence
 	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 	EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 }
@@ -161,6 +162,10 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("activate pending effect child: %+v error=%v", result, err)
 			}
+			if !result.Activation.SourceFrozen {
+				t.Fatal("current staged frontier did not retain its mandatory source freeze")
+			}
+			stagedCard = requirePendingReplySourceFreeze(t, ctx, store, stagedCard)
 			child := result.Materialization.ForkRunID
 			projected := requirePendingReplyCard(t, ctx, store, child)
 			pending, err := store.LoadProposedEffectContinuation(ctx, projected.CardID)
@@ -208,6 +213,21 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			}
 		})
 	}
+}
+
+func requirePendingReplySourceFreeze(t *testing.T, ctx context.Context, store pendingReplyExecutionStore, original decisioncard.Card) decisioncard.Card {
+	t.Helper()
+	run, err := store.LoadRunLifecycleSnapshot(ctx, original.RunID)
+	if err != nil || run.Status != runfork.RunForkSourceFrozenStatus || run.EndedAt == nil {
+		t.Fatalf("source freeze lacks its exact lifecycle settlement: %+v error=%v", run, err)
+	}
+	expected := original
+	expected.Status, expected.SupersededReason, expected.UpdatedAt = decisioncard.StatusSuperseded, "run_forked", *run.EndedAt
+	actual, err := store.GetDecisionCard(ctx, original.CardID)
+	if err != nil || !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("source freeze changed more than its exact card settlement: expected=%+v actual=%+v error=%v", expected, actual, err)
+	}
+	return actual
 }
 
 func publishPendingReplyInput(t *testing.T, ctx context.Context, eventBus *bus.EventBus, runID, name string, payload []byte) {
