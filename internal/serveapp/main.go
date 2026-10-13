@@ -1886,12 +1886,17 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			}
 		}
 	}
+	var channelSelectedDecisions selectedChannelDecisionOwner
+	if supervisor.selected != nil {
+		channelSelectedDecisions = supervisor.selected
+	}
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
-		ingress: ready,
-		effects: stores.Effects(), credentials: providerCredentialOwner,
+		selectedDecisions: channelSelectedDecisions,
+		ingress:           ready,
+		effects:           stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
 	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)

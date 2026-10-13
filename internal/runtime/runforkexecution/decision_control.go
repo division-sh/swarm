@@ -14,7 +14,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-type selectedDecisionControlUse struct {
+// SelectedDecisionCardControl joins one control turn to the child's existing
+// execution occurrence. Native consumers still reprove the grant in their TX.
+type SelectedDecisionCardControl struct {
 	ctx      context.Context
 	pipeline *pipeline.PipelineCoordinator
 	lease    *worklifetime.Lease
@@ -23,7 +25,9 @@ type selectedDecisionControlUse struct {
 	err      error
 }
 
-func (u *selectedDecisionControlUse) close() error {
+func (u *SelectedDecisionCardControl) WorkContext() context.Context { return u.ctx }
+
+func (u *SelectedDecisionCardControl) Close() error {
 	u.once.Do(func() {
 		u.cancel()
 		u.err = u.lease.Done()
@@ -31,43 +35,54 @@ func (u *selectedDecisionControlUse) close() error {
 	return u.err
 }
 
-// A control turn consumes the child's retained execution; source selection or
-// a historical binding cannot create another executor or an approval.
-func (o SelectedContractExecutionOwner) CommitSelectedDecisionCardMutation(ctx context.Context, runID string, request apiidempotency.Request, mutation pipeline.DecisionCardMutation) (response json.RawMessage, replayed, selected bool, finalErr error) {
+func (o SelectedContractExecutionOwner) AcquireSelectedDecisionCardControl(ctx context.Context, runID string, operation runfork.SelectedControl) (*SelectedDecisionCardControl, bool, error) {
 	if ctx == nil {
-		return nil, false, false, fmt.Errorf("decision control requires its caller")
+		return nil, false, fmt.Errorf("decision control requires its caller")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, false, false, err
+		return nil, false, err
+	}
+	if !operation.IsDecisionCardControl() {
+		return nil, false, fmt.Errorf("decision control requires a mailbox mutation")
 	}
 	ports, err := o.require()
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
 	binding, exists, err := ports.fork.LoadRunForkSelectedContractBinding(ctx, runID)
-	if err != nil || !exists {
-		return nil, false, exists, err
+	if err != nil {
+		return nil, exists, err
 	}
+	if !exists {
+		return nil, false, runfork.RequireNormalControlForBinding(runID, operation, binding, false)
+	}
+	use, err := o.acquireDecisionControl(ctx, binding, operation)
+	return use, true, err
+}
+
+// A control turn consumes the child's retained execution; source selection or
+// a historical binding cannot create another executor or an approval.
+func (o SelectedContractExecutionOwner) CommitSelectedDecisionCardMutation(ctx context.Context, runID string, request apiidempotency.Request, mutation pipeline.DecisionCardMutation) (response json.RawMessage, replayed, selected bool, finalErr error) {
 	if err := mutation.ValidateRequest(request); err != nil {
 		return nil, false, true, err
 	}
-	use, err := o.acquireDecisionControl(ctx, binding, runfork.SelectedControl(request.Method))
-	if err != nil {
-		return nil, false, true, err
+	use, selected, err := o.AcquireSelectedDecisionCardControl(ctx, runID, runfork.SelectedControl(request.Method))
+	if err != nil || !selected {
+		return nil, false, selected, err
 	}
 	released := false
 	defer func() {
 		if !released {
-			finalErr = errors.Join(finalErr, use.close())
+			finalErr = errors.Join(finalErr, use.Close())
 		}
 	}()
 	response, replayed, err = use.pipeline.CommitDecisionCardMutation(use.ctx, request, mutation)
-	cleanupErr := use.close()
+	cleanupErr := use.Close()
 	released = true
 	return response, replayed, true, errors.Join(err, cleanupErr)
 }
 
-func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Context, binding runfork.RunForkSelectedContractBinding, operation runfork.SelectedControl) (*selectedDecisionControlUse, error) {
+func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Context, binding runfork.RunForkSelectedContractBinding, operation runfork.SelectedControl) (*SelectedDecisionCardControl, error) {
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
@@ -112,7 +127,7 @@ func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Co
 		releaseCaller()
 		return nil, err
 	}
-	return &selectedDecisionControlUse{ctx: lease.Context(), pipeline: coordinator, lease: lease, cancel: releaseCaller}, nil
+	return &SelectedDecisionCardControl{ctx: lease.Context(), pipeline: coordinator, lease: lease, cancel: releaseCaller}, nil
 }
 
 func bindSelectedDecisionCaller(caller, owned context.Context) (context.Context, func()) {
