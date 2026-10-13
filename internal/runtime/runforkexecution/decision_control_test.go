@@ -143,7 +143,16 @@ func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 			case "no_context":
 				runtime.controlContext = nil
 			case "wrong_occurrence":
-				runtime.controlContext = worklifetime.WithOccurrence(managedexecution.WithAdmission(ctx, admission), process)
+				ordinary, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: runForkTestBundleHash})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := ordinary.RetireAndWait(context.Background()); err != nil {
+						t.Error(err)
+					}
+				})
+				runtime.controlContext = worklifetime.WithOccurrence(managedexecution.WithAdmission(ctx, admission), ordinary)
 			case "wrong_generation":
 				next := admission
 				next.Generation++
