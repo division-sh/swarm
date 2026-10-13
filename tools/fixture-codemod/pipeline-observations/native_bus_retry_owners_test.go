@@ -41,9 +41,7 @@ func TestNativeBusRetryOwnersPreserveBoundedClaimAndExactReceiptWitness(t *testi
 		if before != after {
 			t.Fatal("retry window, exact receipt, claim or assertion changed")
 		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		want, wantErr := canonicalFunction(row.After)
-		if err != nil || wantErr != nil || actual != want {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("retry owner consumer diverged from finite migration")
 		}
 	}

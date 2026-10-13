@@ -163,10 +163,9 @@ func TestNativePipelineExactLoopAndJoinRecipesStaySourcePinned(t *testing.T) {
 		if _, _, err := rewriteFunction(row.File, bytes.Replace(source, []byte("{"), []byte("{ unreviewedEscape();"), 1), row); err == nil {
 			t.Fatalf("changed native consumer admitted: %s", row.Function)
 		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row)))
-		want, afterErr := canonicalFunction(row.After)
-		if err != nil || afterErr != nil || actual != want {
-			t.Fatalf("native semantic repair drifted: %s/%v/%v", row.Function, err, afterErr)
+		actual := selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row))
+		if !residualComparatorCurrent2617(t, row, actual) {
+			t.Fatalf("native semantic repair drifted: %s", row.Function)
 		}
 	}
 	if count != 18 {

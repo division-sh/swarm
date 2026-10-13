@@ -148,8 +148,8 @@ func TestR7ReviewedFixtureSuccessorInventoryIsExact(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	// Exact source at accepted134a521a8; the original mechanical snapshots stay
-	// untouched, and no new runtime test body is admitted by this inventory.
+	// The selected-input134a521a8 endpoint is retained as history; its exact
+	// reviewed C05/C4 successor alone is current. The other three pins stay current.
 	for _, pin := range []struct{ file, function, digest string }{
 		{"internal/runtime/cataloge2e/guard_historical_fork_test.go", "TestGuardTerminationHistoricalForkPreservesCauseBothStores", "b2e7ab7337a58d13ab1837b7b4f31b3dd9d489a291e5650e8f5760eb6f0bdcc8"},
 		{"internal/runtime/cataloge2e/receiver_materialization_geometry_test.go", "TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores", "ba3016484746604e9e3999fc799b1948c71a0d65e67ee16a2e5d900193a53eea"},
@@ -162,6 +162,13 @@ func TestR7ReviewedFixtureSuccessorInventoryIsExact(t *testing.T) {
 				continue
 			}
 			matched++
+			if row.Function == "proveSelectedConstructedAgentInput" {
+				assertSelectedAgentInputHistoricalEndpoint2617(t)
+				if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
+					t.Fatal("selected-input current endpoint diverged from the finite C05/C4 pin")
+				}
+				continue
+			}
 			if row.Successor == "" || !historicalCurrentSourcePinned(row.Successor, pin.digest) {
 				t.Fatalf("missing or changed reviewed R7 successor: %s/%s", row.File, row.Function)
 			}

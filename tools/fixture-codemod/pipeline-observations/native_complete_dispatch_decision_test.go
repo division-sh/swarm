@@ -24,8 +24,11 @@ func TestNativeCompleteDispatchDecisionUsesExistingOwnersAndExactFixtureIdentity
 		}
 	}
 	actual := selectedCausalObservationBody(t, row.File, row.Function)
-	if !completeDispatchDecisionPreserved(actual) {
+	if !residualComparatorCurrent2617(t, row, actual) {
 		t.Fatal("actual shared decision fixture diverged")
+	}
+	if !canonicalComparatorEqual2617(strings.Replace(actual, "testSourceArtifactFact(f.source).BundleHash()", "authorActivityTestBundleHash", 1), row.After) {
+		t.Fatal("decision successor changed beyond its exact source-fact binding")
 	}
 	for _, pair := range [][2]string{
 		{"storetest.DecisionCardDomain(f.store)", "storetest.DecisionCardDomain(otherStore)"},
@@ -38,7 +41,9 @@ func TestNativeCompleteDispatchDecisionUsesExistingOwnersAndExactFixtureIdentity
 		{"if err != nil {", "if false {"},
 	} {
 		mutant := strings.Replace(actual, pair[0], pair[1], 1)
-		if mutant == actual || completeDispatchDecisionPreserved(mutant) {
+		historicalMutant := strings.Replace(row.After, pair[0], pair[1], 1)
+		if mutant == actual || residualComparatorCurrent2617(t, row, mutant) ||
+			historicalMutant == row.After || completeDispatchDecisionPreserved(historicalMutant) {
 			t.Fatalf("weakened decision fixture admitted: %v", pair)
 		}
 	}

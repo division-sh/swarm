@@ -1,0 +1,206 @@
+{
+  "Source": "abf99ee69a296145238c4757abe321e9711c6df4",
+  "Authorization": "https://github.com/division-sh/swarm/pull/2617#issuecomment-6150546076",
+  "MapSHA256": "34e301112fcc1800e93ff97357c3f067f5156059c30109923536caae3233950f",
+  "Rows": [
+    {
+      "Family": "native-bus-pool-saturation",
+      "File": "internal/runtime/bus/eventbus_publish_test.go",
+      "Function": "TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool",
+      "BeforeSHA256": "57ff61ea10f3695fb245d0988e13a29d8b5c675d6afc04312697df3a5e336146",
+      "AfterSHA256": "855611a2e5b930516a88c80c21aaff3c9459160e2f816630872a236f2b8a411a",
+      "SuccessorSHA256": "be39ebcc2dbef4dd881b953108b9fc599dc9ed526f10c8af35c6afcae15c6c2c",
+      "HistorySHA256": "f2dfea3200584341547a4ba49700142caf722efb7b1981ccdf7fc55b9ae6dd61",
+      "LostCuts": [
+        "ContractBundle: source",
+        "15*time.Second",
+        "workers.Wait()",
+        "if count != 1"
+      ]
+    },
+    {
+      "Family": "native-bus-source-hash",
+      "File": "internal/runtime/bus/eventbus_publish_test.go",
+      "Function": "TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow",
+      "BeforeSHA256": "049488d1adda5342651cd32d04262986636bb4bed0546902ca35ccebdd98f7cb",
+      "AfterSHA256": "f13d44383d89c02727b9c25b0201c0faf022127d9f0c0ae00527b320cc92f32a",
+      "SuccessorSHA256": "adfda7eeaefe79e4bd44ce07bec7b55d2c72535394eb1c85a7eb640b343793b5",
+      "HistorySHA256": "cfd9e265fbdad3240a30c2624b55c9244f08e5f96172f6eeb701ddb797a0d41e",
+      "LostCuts": [
+        "SourceArtifactFact: sourceFact",
+        "bundleHash != sourceFact.BundleHash()",
+        "seedCompleteEventDispatchRoot"
+      ]
+    },
+    {
+      "Family": "native-bus-refusal-duplicate-construction",
+      "File": "internal/runtime/bus/eventbus_publish_test.go",
+      "Function": "TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability",
+      "BeforeSHA256": "ca28821d8028110d40ee6f1f27d75d810f534aa7fd34679d23d9cfb59db63413",
+      "AfterSHA256": "b7bc2721b1ed79785bf0deba92cc050d338febd368bd89dd360f66e582609d1a",
+      "SuccessorSHA256": "ab34a9619ac88d7085be1981981dda6c212ec059712c322b8ae4ca796c23b2df",
+      "HistorySHA256": "c2b8f48de3700191989eadb615dc1f8de056c2c5b11d5b2554e6bbd1566b2eab",
+      "LostCuts": [
+        "!routes[0].Target.Empty()",
+        "!event.RoutingSource().Empty()",
+        "wantRefusal :=",
+        "EventAppendOutcomeUnknown"
+      ]
+    },
+    {
+      "Family": "native-bus-target-construction",
+      "File": "internal/runtime/bus/target_owner_store_parity_test.go",
+      "Function": "TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends",
+      "BeforeSHA256": "3046eaf65ece9dfd35809e1573b24a646b9abed10cabe70cb481c712d9ae3cca",
+      "AfterSHA256": "6f229ff924f7a86acb270f67e53c87049d1b0889dba7a85d8ce0bf4027fb572e",
+      "SuccessorSHA256": "ef17b7edcc3a52c41ed43ac5b20cd237344be8bd4e402d365dd0a26240aa70ea",
+      "HistorySHA256": "df85b6f7cd7235af9df66475d4b328772558af2c51b5248a4f285a5849373e1a",
+      "LostCuts": [
+        "instance.ParentFlowInstance = constructed.ParentRoute.FlowInstance",
+        "beforeDuplicate != afterDuplicate",
+        "ConnectClaim.Equal"
+      ]
+    },
+    {
+      "Family": "native-bus-retry-owners",
+      "File": "internal/runtime/bus/pipeline_retry_release_test.go",
+      "Function": "TestPostgresRetryReleaseClaimSpansBoundedSweepWindow",
+      "BeforeSHA256": "01952377eabd5d720cda6597a480883416e0eb7369f21c367fd702f098972205",
+      "AfterSHA256": "20af6e0e2bd093c025945562fd4fe2098717197fe293b3a9d9f486e06003cdd0",
+      "SuccessorSHA256": "e4f6b9b060c59b810babd18803d4a805dcb9c59be82427d0a5a1248b31ccacee",
+      "HistorySHA256": "483748c22f2e8f3ff072a1c3e5f99ad628cbf863a1c86e0a3164c1fb7725c30b",
+      "LostCuts": [
+        "ContractBundle: fixture.source",
+        "SweepPipelineObligations(fixture.ctx, 2)",
+        "firstWorker.Wait()"
+      ]
+    },
+    {
+      "Family": "native-bus-foreground-claims",
+      "File": "internal/runtime/bus/eventbus_publish_test.go",
+      "Function": "TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgres",
+      "BeforeSHA256": "a6ef5e08990e57a298738fe51d43ced7f4e5c8a66adba2f066ef68e164fc6300",
+      "AfterSHA256": "a985215529aa6c38ff2f1fe1da41a6e48bdaaa04ed100b7c0312e9e7a485753a",
+      "SuccessorSHA256": "96dc5a4c1ccf5076848ab29996af19bfc14a46393e3dba7a62c479131425eeef",
+      "HistorySHA256": "0773a427c4c55bd6f70ba0403cab54634f45fc170a28c85ca0b5171441ba2665",
+      "LostCuts": [
+        "ContractBundle: source",
+        "publisher.Wait()",
+        "result.Settled != 0"
+      ]
+    },
+    {
+      "Family": "native-bus-paused-claim-expiry",
+      "File": "internal/runtime/bus/pause_eligibility_test.go",
+      "Function": "TestPausedHandedAgentParksUntilContinueBothStores",
+      "BeforeSHA256": "283c1b0ae3c96014c28db1d0de8aff1c36fe5d2d3619751bf167430213671e13",
+      "AfterSHA256": "c6a9888bffe686fd8709919257d4c5ba4856b4c05d9a71e9889d50848163b0e6",
+      "SuccessorSHA256": "d7048d3f7c628b730c2cd7ddeba8afebec17a3f701130c0a41bfcf083d914db8",
+      "HistorySHA256": "326ec79fa248fe1085e45a681bc848be14f480a16ef61c29f92433377310d9bc",
+      "LostCuts": [
+        "owner.ClaimEvent",
+        "controller.Pause",
+        "result.Recovery.Sweep.Examined != 0",
+        "expirePausedDeliveryClaim"
+      ]
+    },
+    {
+      "Family": "native-complete-dispatch-construction",
+      "File": "internal/runtime/bus/event_identity_dispatch_surface_test.go",
+      "Function": "insertDecisionObligationFor",
+      "BeforeSHA256": "e107adf0edce9ebe5d085e6ef7bb0e4f68b6d57544ca13141a9f14a8c83f61ed",
+      "AfterSHA256": "7e44958d0524755d38adb0e9437d975052c6298ac93a3da7a0e3cfe93933d54b",
+      "SuccessorSHA256": "78417ecdf7e706eb4e3cfce033634a07f3d4be0cf8c8faf0e7f88b53ea5b63ae",
+      "HistorySHA256": "de22789980af38507795630d52254b3e9b6b44d9fa479ab65722b8b96b499c23",
+      "LostCuts": [
+        "BundleHash: testSourceArtifactFact(f.source).BundleHash()",
+        "storetest.DecisionCardDomain(f.store)",
+        "DecisionEventID: event.ID()",
+        "ObservedContentHash: card.CardContentHash"
+      ]
+    },
+    {
+      "Family": "native-pipeline-delivery-exact-join-semantic",
+      "File": "internal/runtime/pipeline/workflow_compiled_loop_evidence_test.go",
+      "Function": "newCompiledLoopEvidenceHarness",
+      "BeforeSHA256": "ebb63f89f3e4afa1889783430f3d2657b6974dcc27119c7918a3d1a68fd95bb7",
+      "AfterSHA256": "64b4e8f0f61b8e1b909a62e4726b0fd4d0a113c0e4c5d2ae3fa5cab046db129a",
+      "SuccessorSHA256": "f17a6ced0abf80a8c729e5360c701d1788f157a69fdb63d72c1b7e45f4ebfcc1",
+      "HistorySHA256": "b917e3c6b17e35ea90aefb395821d4f3240a4e4c55f65dad75a52a3e84e18687",
+      "LostCuts": [
+        "materializedWorkflowInstanceForSource(t, source, ctx",
+        "fixture.Construct(ctx, instance)",
+        "WorkflowVersion: source.WorkflowVersion()"
+      ]
+    },
+    {
+      "Family": "native-pipeline-delivery-bus-semantic",
+      "File": "internal/runtime/pipeline/workflow_timer_lifecycle_test.go",
+      "Function": "TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler",
+      "BeforeSHA256": "8362c9bdedb0621eba10ebe3fea3cfcbd63d8cf6b82b1921a03ba614041287e3",
+      "AfterSHA256": "fd879e98d9e96dd3b5741b20df7925f35861621644908bf4ee001ae73f6d2980",
+      "SuccessorSHA256": "808d2323be992bfa1d073519021013d7ebc40a9c444797058a1d442614e3eb30",
+      "HistorySHA256": "4cad53d7ddb4e95fedb13747c6436a3830ff27c858e5c38ba2bdd4ff4cbe5e5d",
+      "LostCuts": [
+        "materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx",
+        "got != \"waiting\"",
+        "got != \"done\""
+      ]
+    },
+    {
+      "Family": "native-pipeline-delivery-bus-semantic",
+      "File": "internal/runtime/pipeline/workflow_timer_lifecycle_test.go",
+      "Function": "TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions",
+      "BeforeSHA256": "eaf45b594f058cfd6ee504cc685f842e53cb358b3072900107ddf049a018d1f8",
+      "AfterSHA256": "9b7c35d480ed87ab7e985c3df8b4a4e8e2b0557cb36ed9175a6111c03fc27e41",
+      "SuccessorSHA256": "611523b400353ad4ece6e5dc5c6290bc76f0afe76fdff52f6bcd76d2ff580945",
+      "HistorySHA256": "a9ed919c48f1e6f497e14727b9996b08e2b9857964b1941312d23fd404314b9c",
+      "LostCuts": [
+        "materializedWorkflowInstanceForSource",
+        "got != \"ready\"",
+        "got != \"done\"",
+        "bus.publishedCount() != 1",
+        "ProveHandoff"
+      ]
+    },
+    {
+      "Family": "native-pipeline-delivery-bus-semantic",
+      "File": "internal/runtime/pipeline/workflow_timer_lifecycle_test.go",
+      "Function": "TestPipelineIntercept_HandlesChildFlowOutputForRootListener",
+      "BeforeSHA256": "fd9fa4bd054e5a37212cf0fc1b88ac086d71410bd968d9a71218ceca8bfd4e18",
+      "AfterSHA256": "7d717189f3f0df8a9d869f767d42ae6adc2afd35bf2f4fce9180223ca69d41d6",
+      "SuccessorSHA256": "7d128f59996bc5b58ecce2248df72adbff3bd67fca45651429cc3b5cd5ae8149",
+      "HistorySHA256": "9ab802c09163c617ade99acf3c61c3115e988553cf4d6e21a5d8825ef3f53227",
+      "LostCuts": [
+        "materializedWorkflowInstanceForSource",
+        "len(emitted) != 0",
+        "fixture.PublishNode"
+      ]
+    },
+    {
+      "Family": "native-run-setup-family144",
+      "File": "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go",
+      "Function": "proveSelectedConstructedAgentInput",
+      "BeforeSHA256": "97a200e743fcf1fbab43d8aa5b8400112133c7f76473c33c7bba85f50026adaf",
+      "AfterSHA256": "3fef3a992da465ce70be99412152ab2d8540929f0311cb5b59b27c925c40a2d6",
+      "SuccessorSHA256": "e9c56a4d3b166acc74aa19ded75a4be7c83b0ee0d311198ae248e999570a27fd",
+      "HistorySHA256": "9d23ec1ffab29d0f6cc4c3438d35c82b8f89a67ac58f08d4702a464e45e01909",
+      "LostCuts": [
+        "if proof.scan",
+        "if proof.changedVersionRecovery",
+        "result.ExecutedEventCount != 1",
+        "executions != 1",
+        "header.ParentFlowInstance != parent.FlowInstance",
+        "identity.RunID != result.Materialization.ForkRunID",
+        "header.Fields[\"value\"] != \"retained\""
+      ]
+    }
+  ],
+  "SelectedAgentInputHistorical": {
+    "Source": "134a521a818fdaedaf0b5f359696584b93aae5bb",
+    "File": "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go",
+    "Function": "proveSelectedConstructedAgentInput",
+    "SHA256": "49bf1fb2c3444f00ea8a75d3e1352aae24aa300a687c96a1f2a249220ea14d7f",
+    "Body": "func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fields bool, scan ...bool) {\n\tt.Helper()\n\tvar db *sql.DB\n\tvar selected startupownership.Store\n\tvar owner SelectedContractExecutionOwner\n\tif backend == \"sqlite\" {\n\t\ts := storetest.StartSQLiteRuntimeStore(t)\n\t\tselected, db, owner = s, storetest.Database(s), selectedContractSQLiteExecutionOwnerForTest(t, s)\n\t} else {\n\t\t_, db, _ = testutil.StartPostgres(t)\n\t\ts := storetest.AdmitPostgresRuntimeStore(t, db)\n\t\tselected, owner = s, selectedContractExecutionOwnerForTest(t, s)\n\t}\n\tctx, repo := runForkTestContext(t), runForkExecutionRepoRoot(t)\n\troot := canonicalrouting.CopySelectedConstructedAgentInput(t)\n\tif nested {\n\t\troot = canonicalrouting.CopySelectedNestedConstructedAgentInput(t, fields)\n\t}\n\tloader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}\n\tloaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: \"selected_contracts\"})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\trunID, eventID := uuid.NewString(), uuid.NewString()\n\tat := time.Unix(1700002200, 0).UTC()\n\tbundle, _ := semanticview.Bundle(loaded.Source)\n\tstoretest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,\n\t\tBundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})\n\tpayload := []byte(`{}`)\n\tanchorType := events.EventType(\"task.assigned\")\n\tif nested {\n\t\tpayload = []byte(`{\"work_id\":\"one\"}`)\n\t\tanchorType = \"construction.started\"\n\t}\n\tinput := eventtest.OperatorInjectedWithRoutingSource(eventID, anchorType, \"operator\", \"\", payload, 0, runID, nil,\n\t\tevents.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)\n\tinput, err = eventtest.AdmitPayload(input, \".\", string(anchorType))\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\trootIdentity := flowidentity.Stored(loaded.Source, \".\", runID, runID, runID, \"\")\n\tinstances := []flowidentity.Instance{rootIdentity}\n\tvar child flowidentity.Instance\n\tif !nested {\n\t\tchild, err = flowidentity.KeylessChild(loaded.Source, rootIdentity, \"child\")\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\tinstances = append(instances, child)\n\t} else {\n\t\tfor _, key := range []string{\"one\", \"two\"} {\n\t\t\tparent := flowidentity.Derive(loaded.Source, \"templ\", key)\n\t\t\tparent.ParentRoute = flowidentity.ParentRoute{FlowID: \".\", FlowInstance: runID, EntityID: runID}\n\t\t\tparent.ParentEntityID = runID\n\t\t\tinstances = append(instances, parent)\n\t\t\tfor _, branch := range []string{\"child\", \"audit\"} {\n\t\t\t\tcurrent := parent\n\t\t\t\tfor _, flow := range []string{\"templ/\" + branch, \"templ/\" + branch + \"/leaf\"} {\n\t\t\t\t\tcurrent, err = flowidentity.KeylessChild(loaded.Source, current, flow)\n\t\t\t\t\tif err != nil {\n\t\t\t\t\t\tt.Fatal(err)\n\t\t\t\t\t}\n\t\t\t\t\tinstances = append(instances, current)\n\t\t\t\t\tif key == \"one\" \u0026\u0026 flow == \"templ/child/leaf\" {\n\t\t\t\t\t\tchild = current\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\twriteCtx := effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), input.ExecutionMode())\n\tfor _, identity := range instances {\n\t\tvar constructorInput []string\n\t\tconstructorEvent := input\n\t\tif nested \u0026\u0026 identity.TemplateID == \"templ\" {\n\t\t\tconstructorInput = []string{string(anchorType)}\n\t\t\tpayload, err := json.Marshal(map[string]any{\"work_id\": identity.InstanceID})\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tconstructorEvent = eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), anchorType, \"operator\", \"\", payload, 0, runID, nil,\n\t\t\t\tevents.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)\n\t\t\tconstructorEvent, err = eventtest.AdmitPayload(constructorEvent, \".\", string(anchorType))\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t}\n\t\tcommand := selectedExecutionSourceFlowCommand(t, writeCtx, loaded, constructorEvent, identity, constructorInput...)\n\t\tresult, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(writeCtx, command)\n\t\tif err != nil || !result.Acknowledged || !result.Created {\n\t\t\tt.Fatalf(\"component source construction: result=%#v err=%v\", result, err)\n\t\t}\n\t}\n\tif nested {\n\t\t// This fixture anchor carries lineage, not admitted subscriber work.\n\t\tacknowledged := pipelineobligation.Acknowledged(\"construction_fixture_anchor\")\n\t\tstoretest.CommitSemanticEventWithInitialFacts(t, writeCtx, selected, input, nil, pipelineobligation.ScopeDirect, \u0026acknowledged)\n\t\tlineage := events.EventLineage{RunID: runID, ParentEventID: input.ID(), ExecutionMode: input.ExecutionMode()}\n\t\troutingSource := eventtest.StaticFlowRoutingSource(child.TemplateID, child.InstancePath, child.EntityID)\n\t\tpublication, err := pinrouting.AdmitPublicationIdentity(child.TemplateID, \"work.ready\", routingSource)\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\tinput = eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), publication, eventtest.Producer(events.EventProducerPlatform, \"workflow\"), \"\", payload, 1, lineage,\n\t\t\tevents.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, child.EntityID), child.InstancePath),\n\t\t\troutingSource, at.Add(time.Second))\n\t\tinput, err = eventtest.AdmitPayload(input, child.TemplateID, \"work.ready\")\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\teventID = input.ID()\n\t}\n\tmaterialized, err := manager.ConstructedFlowMaterialization(loaded.Source, runID, child)\n\tif err != nil || len(materialized.Agents) != 1 {\n\t\tt.Fatalf(\"exact constructed child declaration: plan=%#v err=%v\", materialized, err)\n\t}\n\trecord, err := materialized.Agents[0].Materialize(runID)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tstoretest.CommitSemanticEventWithRoutes(t, writeCtx, selected, input, []events.DeliveryRoute{{\n\t\tRecipient: events.MustAgentDeliveryRecipient(record.Config.ID), AgentIdentity: record.Config.Identity,\n\t\tTarget: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath}),\n\t}}, pipelineobligation.ScopeSubscribed)\n\ttx, err := db.BeginTx(ctx, nil)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer tx.Rollback()\n\tif backend == \"sqlite\" {\n\t\t_, err = runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...)\n\t} else {\n\t\t_, err = runforkrevision.Capture(ctx, tx, runID, runforkrevision.AllFamilies()...)\n\t}\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif err := tx.Commit(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif nested {\n\t\tplan, err := selected.(interface {\n\t\t\tPlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)\n\t\t}).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\tfrontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source})\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\thistory, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, FrontierAdmission: frontier})\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\ttopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: history})\n\t\tif err != nil || !topology.DynamicTopologySupported {\n\t\t\tt.Fatalf(\"exact constructed route proof: frontier=%+v history=%+v topology=%+v err=%v\", frontier, history, topology, err)\n\t\t}\n\t}\n\tbefore := selectedPreparationDatabaseSnapshot(t, db, backend)\n\tif len(scan) != 0 \u0026\u0026 scan[0] {\n\t\towner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store)}\n\t}\n\tagents := map[agentidentity.Identity]*constructedInputAgent{}\n\tresult, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{\n\t\tSourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,\n\t\tContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),\n\t\tAgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live,\n\t\t\tProcessCapability: selectedContractTestProcessCapability(t, ctx, selected),\n\t\t\tConfig:            \u0026config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},\n\t\t\tAgentFactory: func(cfg actors.AgentConfig) (manager.Agent, error) {\n\t\t\t\tidentity, err := cfg.ConcreteIdentity()\n\t\t\t\tif err != nil {\n\t\t\t\t\treturn nil, err\n\t\t\t\t}\n\t\t\t\tagent := \u0026constructedInputAgent{observe: func(ctx context.Context, event events.Event) error {\n\t\t\t\t\terr := observeSelectedConstructedInput(ctx, selected, event)\n\t\t\t\t\tif err != nil {\n\t\t\t\t\t\tt.Logf(\"selected admission observation: %v\", err)\n\t\t\t\t\t}\n\t\t\t\t\treturn err\n\t\t\t\t}}\n\t\t\t\tagent.Configure(cfg)\n\t\t\t\tagents[identity] = agent\n\t\t\t\treturn agent, nil\n\t\t\t},\n\t\t},\n\t})\n\tif len(scan) != 0 \u0026\u0026 scan[0] {\n\t\tif !errors.Is(err, errSelectedHistoricalScanCut) {\n\t\t\tt.Fatalf(\"historical scan did not reach its exact admitted component cut: %v\", err)\n\t\t}\n\t} else {\n\t\tif err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {\n\t\t\tt.Fatalf(\"actual selected constructed-input execution: result=%#v err=%v\", result, err)\n\t\t}\n\t\twantActors := 1\n\t\tif nested {\n\t\t\twantActors = 8\n\t\t}\n\t\tif result.AgentRuntimeMaterialization == nil || len(result.AgentRuntimeMaterialization.ConfiguredAgentIdentities) != wantActors || len(agents) != wantActors {\n\t\t\tt.Fatalf(\"selected runtime omitted known actors: proof=%+v agents=%d\", result.AgentRuntimeMaterialization, len(agents))\n\t\t}\n\t\tvar executions int\n\t\tfor identity, agent := range agents {\n\t\t\tif identity.RunID != result.Materialization.ForkRunID {\n\t\t\t\tt.Fatal(\"source/sibling actor adopted into selected runtime\")\n\t\t\t}\n\t\t\tif nested \u0026\u0026 (identity.Route.InstancePath == \"templ/child\" || identity.Route.InstancePath == \"templ/audit\") {\n\t\t\t\tt.Fatal(\"authored-path phantom prepared\")\n\t\t\t}\n\t\t\tif seen := agent.SeenRunIDs(); len(seen) != 0 {\n\t\t\t\tif len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {\n\t\t\t\t\tt.Fatalf(\"actor escaped exact selected owner: %v\", seen)\n\t\t\t\t}\n\t\t\t\texecutions++\n\t\t\t}\n\t\t}\n\t\tif executions != 1 {\n\t\t\tt.Fatalf(\"fixed frontier executed %d actors, want one\", executions)\n\t\t}\n\t\tworkflow := pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner))\n\t\tfor _, source := range instances[1:] {\n\t\t\tchildOwner := flowidentity.RunScopedFlowInstance{RunID: result.Materialization.ForkRunID, Route: source.Route()}\n\t\t\theader, found, err := workflow.LoadWorkflowInstance(ctx, childOwner)\n\t\t\tparent, parentErr := runfork.ProjectParentRoute(runID, childOwner.RunID, source.ParentRoute)\n\t\t\tif err != nil || parentErr != nil || !found || header.ParentFlowID != parent.FlowID || header.ParentFlowInstance != parent.FlowInstance || header.ParentEntityID != parent.EntityID {\n\t\t\t\tt.Fatalf(\"fork header lost exact constructor parent: found=%v header=%#v err=%v parentErr=%v\", found, header, err, parentErr)\n\t\t\t}\n\t\t\tif fields \u0026\u0026 source.TemplateID != \"templ\" \u0026\u0026 header.Fields[\"value\"] != \"retained\" {\n\t\t\t\tt.Fatalf(\"fork companion lost retained business field: %+v\", header.Fields)\n\t\t\t}\n\t\t}\n\t}\n\tafter := selectedPreparationDatabaseSnapshot(t, db, backend)\n\tfor table, rows := range before {\n\t\tif table == \"runs\" {\n\t\t\tcontinue\n\t\t}\n\t\tfor _, row := range rows {\n\t\t\tif strings.Contains(row, runID) \u0026\u0026 !slices.Contains(after[table], row) {\n\t\t\t\tt.Fatalf(\"fork changed source evidence in %s: %s\", table, row)\n\t\t\t}\n\t\t}\n\t}\n\n}"
+  }
+}
