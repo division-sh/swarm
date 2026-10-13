@@ -137,10 +137,13 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(intent.EffectClass)
 	matched := false
 	for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
-		if site.RuleRef.Valid() && (selection.Disposition() != handlerselection.DispositionSelected || site.RuleRef != selection.Ref()) {
+		if site.Kind == runtimecontracts.ActivitySiteRule && (!site.RuleRef.Valid() || selection.Disposition() != handlerselection.DispositionSelected || site.RuleRef != selection.Ref()) {
 			continue
 		}
-		result := runtimecontracts.ActivityResultEventsForSite(site)
+		result, err := runtimecontracts.ActivityResultEventsForSite(site)
+		if err != nil {
+			return ActivityRequestLineage{}, err
+		}
 		if site.HandlerEventKey == intent.HandlerEventKey && site.Spec.Tool == intent.Tool && site.Spec.Approval == nil &&
 			result.ActivityID == intent.ActivityID && result.SuccessEvent == intent.SuccessEvent && result.FailureEvent == intent.FailureEvent &&
 			result.RevisionRequested == intent.RevisionEvent && result.Rejected == intent.RejectedEvent &&

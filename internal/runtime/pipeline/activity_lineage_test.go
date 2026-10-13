@@ -23,7 +23,10 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 	parent := newActivityBoringSourceEvent(uuid.NewString(), uuid.NewString(), "https://input.invalid")
 	intent := activityBoringExpectedIntentForSourceEvent(parent, "https://input.invalid")
 	site := runtimecontracts.ActivitySitesForNode(mustActivityBoringNode("scanner"), source.ExecutableNodeEventHandlers(mustActivityBoringNode("scanner")))[0]
-	result := runtimecontracts.ActivityResultEventsForSite(site)
+	result, err := runtimecontracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		t.Fatal(err)
+	}
 	intent.RevisionEvent, intent.RejectedEvent = result.RevisionRequested, result.Rejected
 	delivery := runtimedelivery.Snapshot{
 		EventID: parent.ID(), RunID: parent.RunID(), Status: runtimedelivery.StatusDelivered,
@@ -111,7 +114,10 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 	parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "request", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	node := identitytest.RootNode(t, "scanner")
 	site := runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node))[0]
-	result := runtimecontracts.ActivityResultEventsForSite(site)
+	result, err := runtimecontracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
 	intent := runtimeengine.ActivityIntent{
 		RoutingSource: eventtest.StaticFlowRoutingSource(".", runID, runID), EntityID: identity.NormalizeEntityID(runID), FlowInstance: runID,
