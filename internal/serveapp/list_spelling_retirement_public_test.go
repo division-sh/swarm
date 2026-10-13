@@ -3,12 +3,15 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestListSpellingRetirementPublicBothStores(t *testing.T) {
@@ -18,7 +21,13 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 			for name, body := range listRetirementPublicSource() {
 				write2376SourceFile(t, root, name, body)
 			}
-			opts, start := lifecycleRestartHarness(t, backend, root)
+			unsetStoreSelectorEnv(t)
+			stubServeRuntimeWorkspaceLifecycle(t)
+			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "list.sqlite"))
+			if backend == "postgres" {
+				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
+			}
 			for _, args := range [][]string{
 				{"verify", ".", "--portable", "--json", "--config", opts.ConfigPath},
 				{"describe", ".", "--json"},
@@ -28,7 +37,8 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 					t.Fatalf("%s rejected the teaching replacement: code=%d\n%s\n%s", args[0], code, &out, &errOut)
 				}
 			}
-			process, _ := start()
+			process := startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
 			defer func() { process.stop() }()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			item := map[string]any{"name": "one", "tags": []any{"a", "b"}}
@@ -40,7 +50,8 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 			if code := process.stop(); code != 0 {
 				t.Fatalf("first owner stop=%d", code)
 			}
-			process, _ = start()
+			process = startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			if got := waitListRetirementFields(t, endpoint, seed.RunID, []any{item}); got != entityID {
 				t.Fatalf("restart changed native membership: %s -> %s", entityID, got)
