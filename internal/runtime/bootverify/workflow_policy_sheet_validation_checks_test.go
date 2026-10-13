@@ -18,13 +18,15 @@ func TestPolicySheetValidationValueRowsAcceptsConsumedDispositionRoute(t *testin
 	}
 }
 
-func TestPolicySheetValidationValueRowsIgnoreAbsentAndDuplicateDisplayLabels(t *testing.T) {
-	for _, labels := range [][2]string{{"", ""}, {"duplicate", "duplicate"}} {
+func TestPolicySheetValidationValueRowsIgnorePredicatePresentationSpelling(t *testing.T) {
+	for _, condition := range []string{"computed.validation.deploy_manifest.valid == false", " computed.validation.deploy_manifest.valid == false "} {
 		handler := bootverifyValidationHandler(true, "deploy.manifest_invalid")
-		handler.Rules[0].ID = labels[0]
-		handler.Rules[1].ID = labels[1]
+		handler.Rules[1].Condition = condition
+		if handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: validate" || handler.Rules[1].DisplayLabel("rules", 1) != "rules[1]: when "+strings.TrimSpace(condition) {
+			t.Fatalf("row presentation was not derived: %#v", handler.Rules)
+		}
 		if findings := bootverifyValidationFindings(handler); len(findings) != 0 {
-			t.Fatalf("labels %q produced validation findings: %#v", labels, findings)
+			t.Fatalf("predicate spelling %q produced validation findings: %#v", condition, findings)
 		}
 	}
 }
@@ -95,7 +97,6 @@ func bootverifyValidationHandler(includeConsumer bool, emitEvent string) runtime
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			ID:        "validate_manifest",
 			PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindValidate, Validation: validation},
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation:  runtimecontracts.ComputeOpValidate,
@@ -106,7 +107,6 @@ func bootverifyValidationHandler(includeConsumer bool, emitEvent string) runtime
 	}
 	if includeConsumer {
 		handler.Rules = append(handler.Rules, runtimecontracts.HandlerRuleEntry{
-			ID:        "invalid_manifest",
 			Condition: "computed.validation.deploy_manifest.valid == false",
 			Emit:      runtimecontracts.EmitSpec{Event: emitEvent},
 		})
