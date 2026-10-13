@@ -160,6 +160,7 @@ func TestOrdinalEmissionValidatorRejectsEveryOriginCoordinate(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				other.Request.Capsule.SourcePlanRef = other.Request.PlanRef
 			}
 			projection, err := PrepareOrdinalEmission(other, trigger, ordinal)
 			if err != nil {

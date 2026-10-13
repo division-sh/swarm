@@ -89,6 +89,9 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	if err := guardSourceForkDependencies(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
+	if err := guardReplyContextDependencies(ctx, tx, runIDs, sqlite); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
 	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
@@ -256,7 +259,14 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []s
 }
 
 func GuardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string) error {
-	return guardSourceForkDependencies(ctx, tx, runIDs, false)
+	if err := guardSourceForkDependencies(ctx, tx, runIDs, false); err != nil {
+		return err
+	}
+	return guardReplyContextDependencies(ctx, tx, runIDs, false)
+}
+
+func GuardReplyContextEvidenceDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	return guardReplyContextDependencies(ctx, tx, runIDs, sqlite)
 }
 
 func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
@@ -280,6 +290,29 @@ func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []strin
 		return fmt.Errorf("inspect destructive reset fork dependencies: %w", err)
 	}
 	return fmt.Errorf("%w: cannot delete source run %s while dependent fork %s remains outside the cleanup set", destructivereset.ErrInvalidRequest, sourceRunID, forkRunID)
+}
+
+func guardReplyContextDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
+	var contextID, preservedRun string
+	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT child.reply_context_id, COALESCE(CAST(child.run_id AS TEXT), '')
+		FROM reply_contexts child
+		LEFT JOIN reply_contexts enclosing ON enclosing.reply_context_id=child.enclosing_reply_context_id
+		WHERE (child.source_run_id IN %[1]s OR enclosing.run_id IN %[1]s)
+		  AND (child.run_id IS NULL OR NOT (child.run_id IN %[1]s))
+		ORDER BY child.reply_context_id LIMIT 1
+	`, runSet), runArg).Scan(&contextID, &preservedRun)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect destructive reset reply dependencies: %w", err)
+	}
+	return fmt.Errorf("%w: cannot delete reply evidence while context %s in preserved run %q remains outside the cleanup set", destructivereset.ErrInvalidRequest, contextID, preservedRun)
 }
 
 func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time, sqlite bool) error {

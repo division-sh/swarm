@@ -9,6 +9,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -31,26 +32,120 @@ func ResolveWorkflowJoinOccurrenceDeliveryTarget(
 	if err != nil || !ok {
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, ok, err
 	}
-	executionFlowID := resolution.Ref.FlowPath()
-	target := events.RouteIdentity{EntityID: strings.TrimSpace(evt.EntityID())}
+	return workflowJoinOccurrenceDeliveryTarget(source, evt, resolution.Ref)
+}
+
+// The sealed publication has already proved the original occurrence. Selection
+// maps that declaration to compiled counterfactual code; it does not rewrite the
+// original event or relax the live event's exact-artifact validation.
+func ResolvePublishedJoinOccurrenceDeliveryTarget(source semanticview.Source, publication runfork.PublishedJoinOccurrence) (events.DeliveryRecipient, events.RouteIdentity, DeliveryTargetHandler, bool, error) {
+	if source == nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("published join requires selected semantic source")
+	}
+	command := publication.Command()
+	if err := command.Validate(); err != nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
+	}
+	payload, object := command.Payload.Interface().(map[string]any)
+	_, original, valid := timeridentity.ParseJoinHandle(payload)
+	if !object || !valid {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("published join lacks its exact retained declaration")
+	}
+	if original.Mode() != timeridentity.JoinRefModeFanOutDelivery {
+		return ResolveWorkflowJoinOccurrenceDeliveryTarget(source, publication.Event())
+	}
+	ref, err := selectedRetainedBarrierDeclaration(source, original)
+	if err != nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
+	}
+	return workflowJoinOccurrenceDeliveryTarget(source, publication.Event(), ref)
+}
+
+func selectedRetainedBarrierDeclaration(source semanticview.Source, original timeridentity.JoinRef) (timeridentity.JoinRef, error) {
+	retained, valid := original.FanOutDelivery()
+	selected, found := semanticview.WorkflowJoinPlanForHandler(source, original.Node(), original.HandlerEvent())
+	if !valid || !found || selected.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery || selected.Spec.EffectiveID() != original.JoinID() ||
+		selected.FanOut.FanOut.ElementRef != runtimecontracts.FanOutElementRefFrom(retained.DeclarationIdentity()) {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier has no exact selected declaration counterpart")
+	}
+	carriage, err := semanticview.CompileFanOutPlanCarriage(source)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	compiled, _, err := carriage.Resolve(selected.FanOut.FanOut.ElementRef)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	if compiled != selected.FanOut.FanOut {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier selected join contradicts its compiled fan-out evidence")
+	}
+	handler, found := source.ExecutableNodeEventHandlers(original.Node())[original.HandlerEvent()]
+	if !found || handler.Join == nil {
+		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier selected declaration has no executable handler")
+	}
+	ref, err := workflowJoinDeclarationRef(source, original.Node(), original.HandlerEvent(), handler)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	return ref, nil
+}
+
+func workflowJoinOccurrenceDeliveryTarget(source semanticview.Source, evt events.Event, ref timeridentity.JoinRef) (events.DeliveryRecipient, events.RouteIdentity, DeliveryTargetHandler, bool, error) {
+	return workflowJoinOwnerDeliveryTarget(source, ref, evt.RunID(), evt.EntityID(), evt.FlowInstance())
+}
+
+// Pending obligations use the already-bound owner and declaration, never an
+// invented physical event or fresh membership/return-destination resolution.
+func ResolvePendingJoinOccurrenceDeliveryTarget(source semanticview.Source, occurrence runtimegenericschedule.TransferredJoinOccurrence) (events.DeliveryRecipient, events.RouteIdentity, DeliveryTargetHandler, bool, error) {
+	if source == nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join requires selected semantic source")
+	}
+	if err := occurrence.Validate(); err != nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
+	}
+	command := occurrence.Command
+	_, ref, valid := timeridentity.ParseJoinHandle(command.Payload.Interface().(map[string]any))
+	if !valid {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join lacks exact retained declaration")
+	}
+	if ref.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+		var err error
+		ref, err = selectedRetainedBarrierDeclaration(source, ref)
+		if err != nil {
+			return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
+		}
+	} else if _, found := semanticview.WorkflowJoinPlanForRef(source, ref); !found {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join references unknown exact selected declaration")
+	}
+	handler, found := source.ExecutableNodeEventHandlers(ref.Node())[ref.HandlerEvent()]
+	if !found || handler.Join == nil {
+		return events.DeliveryRecipient{}, events.RouteIdentity{}, DeliveryTargetHandler{}, false, fmt.Errorf("pending join has no executable selected handler")
+	}
+	return workflowJoinOwnerDeliveryTarget(source, ref, command.RunID, command.EntityID, command.FlowInstance)
+}
+
+func workflowJoinOwnerDeliveryTarget(source semanticview.Source, ref timeridentity.JoinRef, runID, entityID, instancePath string) (events.DeliveryRecipient, events.RouteIdentity, DeliveryTargetHandler, bool, error) {
+	var noRecipient events.DeliveryRecipient
+	executionFlowID := ref.FlowPath()
+	target := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
 	if executionFlowID == semanticview.RootExecutionFlowID(source) {
 		target.FlowID = executionFlowID
-		target.FlowInstance = strings.TrimSpace(evt.RunID())
+		target.FlowInstance = strings.TrimSpace(runID)
 	} else {
 		target.FlowID = executionFlowID
-		target.FlowInstance = strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+		target.FlowInstance = strings.Trim(strings.TrimSpace(instancePath), "/")
 	}
 	target = target.Normalized()
 	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, false,
 			fmt.Errorf("join lifecycle delivery target requires exact flow, instance, and entity identity")
 	}
-	handler, err := NewDeliveryTargetHandler(resolution.Ref.Node())
+	handler, err := NewDeliveryTargetHandler(ref.Node())
 	if err != nil {
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
 	}
-	handler = handler.ForEvent(events.EventType(resolution.Ref.HandlerEvent()))
-	return events.MustNodeDeliveryRecipient(resolution.Ref.Node()), target, handler, true, nil
+	handler = handler.ForEvent(events.EventType(ref.HandlerEvent()))
+	return events.MustNodeDeliveryRecipient(ref.Node()), target, handler, true, nil
 }
 
 func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event) (workflowJoinOccurrenceResolution, bool, error) {

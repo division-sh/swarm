@@ -1292,16 +1292,19 @@ func (c WorkflowInstanceRecordedHeader) ParentRoute() runtimeflowidentity.Parent
 	return runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
 }
 
-func (c WorkflowInstanceRecordedHeader) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute) ([]byte, error) {
+func (c WorkflowInstanceRecordedHeader) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute, workflowVersion string) ([]byte, error) {
 	oldParent := c.ParentRoute()
 	if !route.Valid() || oldParent.Empty() != parent.Empty() ||
 		(!parent.Empty() && (!parent.Complete() || parent.FlowID != oldParent.FlowID)) {
 		return nil, fmt.Errorf("historical config projection requires exact route and parent ownership")
 	}
+	if workflowVersion == "" || workflowVersion != strings.TrimSpace(workflowVersion) {
+		return nil, fmt.Errorf("historical config projection requires its exact workflow version")
+	}
 	projection := c.projection
 	projection.Control.StorageRef, projection.Control.FlowPath, projection.Control.InstanceID = route.InstancePath, route.InstancePath, route.InstanceID
 	projection.Control.ParentFlowID, projection.Control.ParentFlowInstance, projection.Control.ParentEntityID = parent.FlowID, parent.FlowInstance, parent.EntityID
-	return canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(c.WorkflowVersion()))
+	return canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(workflowVersion))
 }
 
 func decodeWorkflowInstanceHeaderPayload(raw []byte, control workflowInstancePersistedControl) (workflowInstancePersistedControl, error) {

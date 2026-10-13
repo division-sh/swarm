@@ -10,7 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -41,6 +43,11 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 				}
 				at := time.Unix(100, 0).UTC()
 				sourceHash, targetHash := strings.Repeat("a", 64), strings.Repeat("b", 64)
+				identity := flowidentity.Stored(nil, flow, path, flowidentity.LogicalInstanceID(path), entityID, "")
+				construction := selectedWorkflowConstructionRecordFixture(t, sourceRun, "bundle-v2:sha256:"+sourceHash, identity, pipeline.WorkflowInstance{
+					WorkflowVersion: "fixture", Mode: mode, Status: "active", EntityType: entityType,
+					CurrentState: "active", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
+				}, executionmode.Mock)
 				outcomes := map[string]contracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}}
 				topology := contracts.BuildWorkflowStageTopology(flow, "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil,
 					[]contracts.WorkflowGatePlan{{FlowID: flow, Stage: "active", Decision: "review", Outcomes: outcomes}})
@@ -65,8 +72,10 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					Fields: map[string]any{}, Bookkeeping: map[string]any{"stage_entry": entry},
 					Accumulator: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
 					MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+						Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, StageDefined: true,
+						FlowConfig: construction.Config, InitialMaterialization: construction.InitialMaterialization,
 					},
 				}
 				before, err := json.Marshal(history.Accumulator)

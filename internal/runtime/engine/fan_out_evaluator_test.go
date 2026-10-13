@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,8 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type fanOutCensusCountingSource struct {
@@ -32,6 +37,11 @@ func (s *fanOutCensusCountingSource) ExecutableNodeRecords() []rc.ScopedNodeReco
 }
 
 func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
+	t.Helper()
+	return preparedFanOutFixtureWithContext(t, events.DeliveryContext{}, r2Mixed...)
+}
+
+func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryContext, r2Mixed ...bool) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
 	t.Helper()
 	node := testRootExecutableNode(t, "worker")
 	handler, err := rc.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", rc.SystemNodeEventHandler{FanOut: &rc.FanOutSpec{
@@ -70,7 +80,23 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 		Semantics:    rc.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]rc.SystemNodeEventHandler{"worker": {"batch.ready": handler}}},
 		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"offset": {Type: "integer"}}}},
 	}
-	source := &fanOutCensusCountingSource{Source: fanOutSourceWithBundleIdentity(t, bundle)}
+	// The two compiled fixture variants must not claim the same artifact.
+	fixtureRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "schema.yaml"), []byte("name: engine-fan-out-test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodeSource, err := json.Marshal(bundle.Nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "nodes.yaml"), nodeSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle.SourceArtifact, err = sourceartifact.AdmitDirectory(fixtureRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &fanOutCensusCountingSource{Source: mustCompileEngineSource(bundle)}
 	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -84,13 +110,82 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 		t.Fatal(err)
 	}
 	trigger := eventtest.RunCreatingRootIngress(eventtest.UUID("prepared-fan-out"), "batch.ready", "", "", raw, 0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
+	ctx := context.Background()
+	if !incoming.Empty() {
+		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Context: incoming,
+			Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: trigger.RunID(), EntityID: "entity-1"})}
+		routeID, err := route.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		deliveryID, err := deliverylifecycle.DeliveryID(trigger.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim, err := deliverylifecycle.AdmitPersistedClaim(deliveryID, trigger.RunID(), events.EncodeDeliveryRouteIdentity(routeID), eventtest.UUID("prepared-fan-out-claim"), 1, deliverylifecycle.SubscriberNode, node.Key())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = events.WithDeliveryContext(deliverylifecycle.WithRoute(deliverylifecycle.WithClaim(ctx, claim), route), incoming)
+	}
+	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("capture: %v %#v", err, result.FanOutIntent)
 	}
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{Request: *result.FanOutIntent, Source: result.FanOutIntent.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 	return exec, intent, trigger, source
+}
+
+func TestDeferredFanOutRetainsCapturedReplyForEveryOrdinal(t *testing.T) {
+	declaration, err := timeridentity.NewJoinRef(testRootExecutableNode(t, "worker"), "batch.ready", "pending", "consumed-input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:original-request"},
+		Joins: []events.JoinAdmissionReceipt{{Ref: declaration, Disposition: events.JoinAdmissionEarly}}}
+	exec, intent, trigger, _ := preparedFanOutFixtureWithContext(t, incoming)
+	if intent.Request.Capsule.Context.ReplyContextID() != incoming.ReplyContextID() || len(intent.Request.Capsule.Context.Joins) != 0 {
+		t.Fatalf("capture lost the reply or copied consumed input admissions: %+v", intent.Request.Capsule.Context)
+	}
+	raw, err := fanoutobligation.MarshalCapsule(intent.Request.Capsule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded fanoutobligation.Capsule
+	if err := json.Unmarshal(raw, &decoded); err != nil || !decoded.Equal(intent.Request.Capsule) {
+		t.Fatalf("durable capsule lost exact continuation: %+v error=%v", decoded.Context, err)
+	}
+	intent.Request.Capsule = decoded
+	prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ordinal := range 2 {
+		// A later pump context cannot supply or replace the original input.
+		ctx := events.WithDeliveryContext(context.Background(), events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:unrelated-worker"}})
+		emit, err := prepared.EvaluateOrdinal(ctx, int64(ordinal), ordinal)
+		if err != nil || emit.Context.ReplyContextID() != incoming.ReplyContextID() {
+			t.Fatalf("deferred ordinal %d lost its captured reply: context=%+v error=%v", ordinal, emit.Context, err)
+		}
+		emit.Context.Reply.ID = "reply-v1:mutated-output"
+	}
+	if intent.Request.Capsule.Context.ReplyContextID() != incoming.ReplyContextID() {
+		t.Fatal("output mutation changed the frozen request")
+	}
+}
+
+func TestDeferredFanOutWithoutReplyDoesNotBorrowPumpContext(t *testing.T) {
+	exec, intent, trigger, _ := preparedFanOutFixture(t)
+	prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := events.WithDeliveryContext(context.Background(), events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:unrelated-worker"}})
+	emit, err := prepared.EvaluateOrdinal(ctx, int64(0), 0)
+	if err != nil || !emit.Context.Empty() {
+		t.Fatalf("absence borrowed a worker's return authority: %+v error=%v", emit.Context, err)
+	}
 }
 
 func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
@@ -109,6 +204,43 @@ func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
 	}
 	if payload["note"] != `row=0,meta={"missing":null}` || payload["value"] != float64(5) {
 		t.Fatalf("prepared R2 payload = %#v", payload)
+	}
+}
+
+func TestFanOutSelectedEmitUsesFrozenSourceAndExactCompiledPlan(t *testing.T) {
+	_, original, trigger, _ := preparedFanOutFixture(t)
+	selectedExecutor, selected, _, _ := preparedFanOutFixture(t, true)
+	if original.Request.PlanRef.SemanticDigest == selected.Request.PlanRef.SemanticDigest {
+		t.Fatal("fixture did not change the compiled emit semantics")
+	}
+	if original.Request.PlanRef.BundleHash == selected.Request.PlanRef.BundleHash {
+		t.Fatal("different fixture declarations claimed the same source artifact")
+	}
+	request := original.Request
+	request.PlanRef = selected.Request.PlanRef
+	original.Request = request
+	prepared, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), original, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit, err := prepared.EvaluateOrdinal(context.Background(), int64(1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emit.Event.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["value"] != float64(6) || payload["note"] != `row=1,meta={"missing":null}` || payload["index"] != float64(1) || payload["count"] != float64(33) {
+		t.Fatalf("selected emit did not use the retained source frame and ordinal: %#v", payload)
+	}
+	if original.Request.Capsule.SourcePlanRef == original.Request.PlanRef || original.Request.Capsule.SourceProjection.Emit.Fields["note"].CEL != "" {
+		t.Fatal("selected plan replaced the immutable original witness")
+	}
+	wrong := original
+	wrong.Request.PlanRef = wrong.Request.Capsule.SourcePlanRef
+	if _, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), wrong, trigger); err == nil {
+		t.Fatal("loaded selected source accepted an unselected executable reference")
 	}
 }
 

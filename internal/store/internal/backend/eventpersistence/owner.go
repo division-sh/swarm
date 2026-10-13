@@ -10,9 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -35,7 +37,8 @@ import (
 
 type selectedForkLineageOwner interface {
 	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
-	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
+	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute, []pinrouting.ReplyRequestContinuation, []pinrouting.ReplyReturnContinuation) error
+	RequireSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
 
 type operatorChannelClaimPostgresOwner interface {
@@ -324,6 +327,22 @@ func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, attempt *
 
 func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
 	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventPostgresOwner) requireReplyContextContinuationTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.RequireOpenWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventSQLiteOwner) requireReplyContextContinuationTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.RequireOpenWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventPostgresOwner) requireReplyContextReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.RequireTerminalWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventSQLiteOwner) requireReplyContextReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.RequireTerminalWithinTransaction(ctx, attempt, record)
 }
 
 func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
