@@ -61,6 +61,7 @@ var generatedSourceEdits = map[string][][2]string{
 	},
 	"internal/releasee2e/catalog_type_admission_test.go": {
 		{"  labels: '[Label]'", "  labels: [Label]"},
+		{"items: '[]text'", "items: {type: '[]text'}"},
 	},
 }
 
