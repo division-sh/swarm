@@ -265,6 +265,12 @@ func ObserveOrdinaryRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evi
 	return inspectCurrentRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite, false)
 }
 
+// Selected control preflight observes the same exact grant and process without
+// taking mutation locks. The eventual writer still calls the locked inspector.
+func ObserveRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	return inspectCurrentRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite, false)
+}
+
 func inspectCurrentRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite, lock bool) (manager.RunExecutionOwnership, error) {
 	if tx == nil {
 		return 0, errors.New("run execution ownership requires a transaction")
@@ -317,8 +323,18 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 	if evidence.SelectedFork == nil {
 		return classifyOrdinaryRunSource(hash, bindingID, evidence.BundleHash), nil
 	}
-	if err := ProveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite); err != nil {
-		return 0, err
+	if lock {
+		if err := ProveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite); err != nil {
+			return 0, err
+		}
+	} else {
+		current, err := ObserveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite)
+		if err != nil {
+			return 0, err
+		}
+		if !current {
+			return manager.RunExecutionForeign, nil
+		}
 	}
 	if runID != evidence.SelectedFork.ForkRunID || !bindingID.Valid || bindingID.String != evidence.SelectedFork.BindingID || hash != evidence.BundleHash {
 		return manager.RunExecutionForeign, nil

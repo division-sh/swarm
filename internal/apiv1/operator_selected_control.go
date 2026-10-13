@@ -2,13 +2,20 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 type SelectedForkControlAdmission interface {
 	RequireNormalControl(context.Context, string, runfork.SelectedControl) error
+}
+
+type SelectedForkDecisionControlOwner interface {
+	CommitSelectedDecisionCardMutation(context.Context, string, apiidempotency.Request, pipeline.DecisionCardMutation) (json.RawMessage, bool, bool, error)
 }
 
 func requireNormalRunControl(ctx context.Context, owner SelectedForkControlAdmission, runID string, operation runfork.SelectedControl) error {

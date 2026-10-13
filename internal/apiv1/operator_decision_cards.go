@@ -309,6 +309,24 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if err != nil && !errors.Is(err, decisioncard.ErrNotFound) {
 		return nil, decisionCardAPIError(cardID, err)
 	}
+	now := time.Now().UTC()
+	if opts.Now != nil {
+		now = opts.Now().UTC()
+	}
+	request := apiidempotency.Request{
+		Method: req.Method, Actor: apiidempotency.PrincipalActor(req.OperatorPrincipalID),
+		IdempotencyKey: strings.TrimSpace(stringParam(req.Params, "idempotency_key")), RequestHash: req.RequestHash,
+		ResourceID: cardID, TTL: 24 * time.Hour, Now: now,
+	}
+	if err == nil && opts.SelectedForkDecisions != nil {
+		response, replayed, selected, decisionErr := opts.SelectedForkDecisions.CommitSelectedDecisionCardMutation(ctx, card.RunID, request, mutation)
+		if decisionErr != nil {
+			return nil, decisionCardAPIError(cardID, decisionErr)
+		}
+		if selected {
+			return decisionCardMutationResponse(cardID, response, replayed)
+		}
+	}
 	if err == nil {
 		if err := requireNormalRunControl(ctx, opts.SelectedForkControls, card.RunID, runfork.SelectedControl(req.Method)); err != nil {
 			return nil, err
@@ -338,21 +356,15 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if err != nil {
 		return nil, err
 	}
-	idempotencyKey := strings.TrimSpace(stringParam(req.Params, "idempotency_key"))
-	result := semanticvalue.EmptyObject()
-	var replayed bool
-	now := time.Now().UTC()
-	if opts.Now != nil {
-		now = opts.Now().UTC()
-	}
-	response, replayed, err := authority.CommitDecisionCardMutation(ctx, apiidempotency.Request{
-		Method: req.Method, Actor: apiidempotency.PrincipalActor(req.OperatorPrincipalID), IdempotencyKey: idempotencyKey,
-		RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,
-	}, mutation)
+	response, replayed, err := authority.CommitDecisionCardMutation(ctx, request, mutation)
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, err)
 	}
-	result, err = canonicaljson.Decode(response)
+	return decisionCardMutationResponse(cardID, response, replayed)
+}
+
+func decisionCardMutationResponse(cardID string, response []byte, replayed bool) (any, error) {
+	result, err := canonicaljson.Decode(response)
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, err)
 	}
