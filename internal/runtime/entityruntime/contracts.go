@@ -519,7 +519,10 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 		currentRefinements = field.Refinements
 		optional = field.IsOptional
 	}
-	kind := pathKind(contract, currentType)
+	kind, err := pathKind(contract, currentType)
+	if err != nil {
+		return Field{}, err
+	}
 	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements, IsOptional: optional}, nil
 }
 
@@ -862,36 +865,37 @@ func resolveStructuralType(contract Contract, typeRef string) (runtimecontracts.
 	return (runtimecontracts.CatalogTypeReference{Type: strings.TrimSpace(typeRef), Catalog: contract.Types}).Resolve()
 }
 
-func pathKind(contract Contract, typeRef string) string {
-	switch {
-	case isJSONValueType(contract, typeRef):
-		return "json"
-	case isTextType(typeRef):
-		return "scalar"
-	case isIntegerType(contract, typeRef):
-		return "scalar"
-	case isNumericType(contract, typeRef):
-		return "scalar"
-	case isBooleanType(contract, typeRef):
-		return "scalar"
-	case isJSONObjectType(contract, typeRef):
-		return "object"
-	case isJSONArrayType(contract, typeRef):
-		return "list"
-	case isTimestampType(contract, typeRef):
-		return "scalar"
-	case isUUIDType(contract, typeRef):
-		return "scalar"
-	case isEnumType(contract, typeRef):
-		return "enum"
-	case isNamedType(contract, typeRef):
-		return "object"
-	case isMapType(typeRef):
-		return "map"
-	case isListType(typeRef):
-		return "list"
+func pathKind(contract Contract, typeRef string) (string, error) {
+	reference := runtimecontracts.CatalogTypeReference{Type: strings.TrimSpace(typeRef), Catalog: contract.Types}
+	resolved, err := reference.Resolve()
+	if err != nil {
+		return "", err
+	}
+	switch resolved.Kind {
+	case runtimecontracts.CatalogTypeText:
+		if resolved.Name != "" {
+			return "enum", nil
+		}
+		return "scalar", nil
+	case runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
+		return "scalar", nil
+	case runtimecontracts.CatalogTypeObject:
+		return "object", nil
+	case runtimecontracts.CatalogTypeList:
+		return "list", nil
+	case runtimecontracts.CatalogTypeMap:
+		return "map", nil
+	case runtimecontracts.CatalogTypeDynamic:
+		switch reference.ComparableDomain() {
+		case "object":
+			return "object", nil
+		case "array":
+			return "list", nil
+		default:
+			return "json", nil
+		}
 	default:
-		return ""
+		return "", fmt.Errorf("unsupported resolved field kind %q", resolved.Kind)
 	}
 }
 

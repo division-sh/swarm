@@ -23,6 +23,12 @@ Final repo-wide guard/census and #2645 preflight, if merged, remain required.
 A stays closed; C stays frozen. No new issue, compatibility, framework, DDL policy,
 vendoring or broad re-census is authorized.
 
+Reviewer-e6138271620 reconciles the numeric example without new metadata grammar:
+use a bare field-value block sequence (`amounts:` then `- numeric(5,2)`), preserving
+the existing scalar metadata type slot. D's compact gate is now approved. G
+acknowledges and teaches that exact lossless carrier; semantic normalization and
+physical projection are unchanged, and D remains the only decoder editor.
+
 ## Historical S03 Consumer Amendment: Coding Frozen
 
 The approved native-array/final-key delta is implemented locally from f06979d4b,

@@ -39,6 +39,34 @@ func TestCatalogAdmissionRejectsInvalidReferences(t *testing.T) {
 	}
 }
 
+func TestCatalogAdmissionNodeListTeaching(t *testing.T) {
+	for _, ref := range []string{"numeric(5,2)[]", "[]numeric(5,2)"} {
+		err := retiredCatalogListSpelling(ref)
+		if _, ok := AsLoaderDiagnostic(err); !ok {
+			t.Fatalf("retired node list lacks typed refusal: %v", err)
+		}
+		if !strings.Contains(err.Error(), "amounts:\n  - numeric(5,2)") || !strings.Contains(err.Error(), "has two items") {
+			t.Fatalf("numeric retirement teaches an invalid YAML replacement: %v", err)
+		}
+	}
+	snapshot, err := yamlsource.Load([]byte("amounts:\n  - numeric(5,2)\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err := snapshot.Document("nodes.yaml").Root().Mapping()
+	if err != nil || len(fields) != 1 {
+		t.Fatalf("teaching field shape: %v, %v", fields, err)
+	}
+	items, err := fields[0].Value.Sequence()
+	if err != nil || len(items) != 1 {
+		t.Fatalf("teaching list is not one item: %v, %v", items, err)
+	}
+	scalar, err := items[0].Scalar()
+	if err != nil || scalar.Value != "numeric(5,2)" || scalar.Style != 0 {
+		t.Fatalf("teaching element did not preserve one plain numeric token: %+v, %v", scalar, err)
+	}
+}
+
 func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 	for _, tc := range []struct{ name, file, source string }{
 		{"unused_self", "types.yaml", "types:\n  Cycle:\n    child: Cycle\n"},
