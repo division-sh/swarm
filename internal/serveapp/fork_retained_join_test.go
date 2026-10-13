@@ -68,7 +68,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if t.Failed() {
 				t.FailNow()
 			}
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			first, joins := readRetainedRootJoins(t, rt, started.RunID)
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
@@ -78,7 +78,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
@@ -125,7 +125,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 					"payload": map[string]any{"revision_id": current.RevisionID}, "idempotency_key": "retained-join-checkpoint",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			}
 			var frontier string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='join.observed' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {

@@ -18,12 +18,12 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-seed",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-request",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, sourceCard string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)

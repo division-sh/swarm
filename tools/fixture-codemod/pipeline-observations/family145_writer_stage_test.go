@@ -25,6 +25,7 @@ type writerStagePreimage struct {
 }
 
 func family145WriterStageCallerInverse(function, after string) string {
+	after = family145ForkCompletionInverse(function, after)
 	after = family145LifecycleReadersInverse(after)
 	after = strings.NewReplacer(
 		"requireServedEventPublishEntityState(t, rt.ReceiverStateReader, ", "requireServedEventPublishEntityState(t, rt.DB, ",

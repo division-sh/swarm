@@ -46,12 +46,12 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-seed",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-request",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, finished string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
@@ -71,7 +71,7 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 // elects recipients from requested targets or latest source entity rows.
 func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, root, sourceRunID, frontierEventID, laterScopeEventID string) {
 	t.Helper()
-	waitForkReceiverSourceCompletion(t, rt, sourceRunID)
+	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, sourceRunID)
 	var frontierEventIDRevision, scopeRevision int64
 	if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, sourceRunID, frontierEventID).Scan(&frontierEventIDRevision); err != nil {
 		t.Fatal(err)

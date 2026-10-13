@@ -6381,3 +6381,75 @@ ready dependency remains the raw debug chain and its enclosing typed consumer
 propagation; existing eleven-section owner is already reconciled. Receipts:
 ~/.cache/swarm-2542-family145/writer-stage-seven-pairs-* and
 writer-stage-policy-*.
+
+## Whole Fork-Completion Dependency Wave
+
+Stacked on reviewer-b's approved daf6590ef under bulk gate6134544118 and
+carry6137244932. The complete30-call waitForkReceiverSourceCompletion family
+now passes ONLY the original rt.ReceiverStateReader, not its raw-bearing
+servedControlProofRuntime. One existing initialized/independent inspection
+role, one original run identity, one fixed handoff witness. The helper uses
+ReadServedIncompletePipelineHandoffCount through reader.InspectSnapshot and
+the existing eleven-section servedInspectionRunDebugSummary on failure.
+It retains the original deadline,10ms poll, exact zero predicate, read-error
+refusal, and completion-before-snapshot/fork/claim/refusal cuts. No failed-first
+branch was borrowed from the distinct publication-site wait. Native handoff
+means active OR missing stamp OR missing exact event/platform/pipeline receipt,
+not delivery quiescence alone. It is not continuation authority.
+
+Committed migrate-fork-completion reads the signed complete predecessor at
+daf6590ef, uses the canonical owned-source walker, validates every three-argument
+t/rt call, rejects unsupported source layouts and changed complete bodies,
+then mechanically changes all30 calls and the one helper. Reapplication is
+idempotent. Source slices preserve original comments/formatting outside the
+exact edits. Seventeen complete predecessor bodies are pinned (12 files),
+ledger SHA25630bef9d6edb24f9d59b3f8c828fff01607d4fbae6788af1b73e05549a937e9b2.
+The finite guard checks all30 owned calls and complete body inverses, plus
+raw/foreign owner, arity, argument, swallowed-error, predicate, deadline,
+poll, diagnostic, source/run/assertion/fork/cleanup hostile changes. Existing
+joined-receiver/source-domain/retained-join guards compose ONLY this exact
+argument substitution. The no-fork hostile control now mutates the current
+native call spelling, not an absent historical string. No guard relaxation.
+
+Corpus:1357 recipes/640 transitions, SHA256
+4af41ac3ab17e18137385675972543cbec897491ae2cfcdf5491fdda32f25bb2.
+Original Before records and all24 immutable historical receipts stay intact.
+An initial overlay preparation RED found the fieldless-gate recipe missing
+its composed current output; its exact source is now included in reconciliation.
+No assertion/order/final expectation was rebaselined. Final candidate overlay
+typing passes for every rewritten package/test variant (36.550s). Whole finite
+correspondence/history/idempotence collection:163 roots/1533 passes, zero
+failures/skips (23.567s); eight structural boundaries PASS3.534s. Affected
+serveapp/codemod/transform/reconciler U1000 and new-function complexity pass.
+Final signed complexity is required for this checkpoint.
+
+Execution: original no-fork completion/stamp/exact-receipt proof passes BOTH
+stores under race (16.232s). Required receiver existing/missing-selected fork
+and active/retired public mailbox refusals pass BOTH stores under race
+(53.859s combined). The fieldless-gate caller passes BOTH stores under race
+(23.635s). Native
+handoff OR/error/ownership/run-isolation/full-storage-immutability roots pass
+BOTH stores under race (44.984s). Real temporary removal of the receipt OR arm
+fails BOTH missing_receipt cells specifically with count0/want1, no setup
+failure; exact owner restoration passes and leaves no production diff.
+Other unchanged native diagnostic sections and consumers carry their preceding
+qualified receipts; no exhaustive unrelated matrix/local tier rerun.
+
+Fresh downward census PASS34.414s:7502 ->7468 findings,5216 ->5183 raw sites,
+34/33 genuine removals, ZERO added. All seven previously authorized signature
+pairs remain counted; no new accounting transition, policy or collector change.
+The30 helper calls, helper raw SQL/debug operations and broad helper parameter
+are retired, not waived. Source/ancestry/excluded-source67 remain unchanged.
+Baseline SHA256fb6db8b87f441912b61afded6ea18eec5238520d672a5cb46a63c87da2f31bd5;
+normal unchanged read-only ratchet PASS21.210s. Parent/raw-debug/source-construction
+tail remains live; this is whole completion-reader dependency closure, NOT
+parent zero-debt closure. Governing spec's selected-role/fixed-private-observation
+boundary is unchanged; no production/platform semantics update is needed.
+
+Timing will be posted with the signed checkpoint using the explicit measured
+coding-to-receipt window (first transform creation03:05:54Z), separate from
+untimed intake reading and reviewer turnaround. All previous M01/Docker/D3/M07/
+static-fork/drain/final-integration holds remain OPEN. Existing watchlist/parent
+mapping suffices. No push, PR, tier, server2 or rebase; rebase remains ONCE after
+#2617 and orchestrator handoff. Receipts:~/.cache/swarm-2542-family145/
+fork-completion-*.

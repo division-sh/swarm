@@ -42,7 +42,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "loop-notice-start",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			var frontier string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='review/review.requested'`, started.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)

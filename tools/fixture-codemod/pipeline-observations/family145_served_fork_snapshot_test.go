@@ -104,6 +104,7 @@ func family145RetainedJoinReaderProofError(before, after string) error {
 }
 
 func family145RetainedJoinConsumerProofError(before, after string) error {
+	after = family145ForkCompletionInverse("testServedJoinWriterCompletedHistoryRefusal", after)
 	const diagnostic = "\n\t\t\t\tt.Logf(\"JOIN_COMPLETION_CUT status=%s close_reason=%s outputs=%d timer_cancelled=%t outcome_pending=%t outcome_fired=%t\", join.Status, join.CloseReason, len(join.Outputs), join.TimerCancelled, join.OutcomePending, join.OutcomeFired)"
 	normalized := strings.Replace(after, diagnostic, "", 1)
 	normalized = strings.ReplaceAll(normalized, "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)", "snapshotForkReceiverApplication(t, rt)")

@@ -19,7 +19,7 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 					"payload": map[string]any{}, "idempotency_key": "fieldless-gate-seed",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				var cardID string
 				if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&cardID); err != nil {
 					t.Fatal(err)

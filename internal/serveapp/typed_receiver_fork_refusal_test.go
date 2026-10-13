@@ -29,7 +29,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			}
 			t.Logf("public input wire with explicit integral decimals: %s", requestWire)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			const path = "account/ti-138096d2b56ac1568ac40ea7"
 			entityID := flowidentity.EntityID(path)
 			var creating, consumed string

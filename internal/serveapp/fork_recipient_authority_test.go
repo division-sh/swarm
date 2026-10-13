@@ -131,7 +131,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 				"payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			if selected == nil {
 				t.Fatal("served runtime did not expose its selected persistence owner")
 			}

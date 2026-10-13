@@ -135,7 +135,7 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7.0")))
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
 			if fork {
-				waitForkReceiverSourceCompletion(t, rt, run)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, run)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='numeric.completed'`, run).Scan(&frontier); err != nil {
 					t.Fatal(err)

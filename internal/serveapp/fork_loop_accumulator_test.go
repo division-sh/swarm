@@ -35,7 +35,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 				first := readForkLoopActivation(t, rt, started.RunID)
 				initial := readForkHandlerAccumulators(t, rt, started.RunID)
 				wantInitial := 1
@@ -50,7 +50,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 				current := readForkLoopActivation(t, rt, started.RunID)
 				if current.Attempt != 2 || current.ActivationID != first.ActivationID || current.RevisionID == first.RevisionID {
 					t.Fatalf("ordinary repeat: first=%+v current=%+v", first, current)

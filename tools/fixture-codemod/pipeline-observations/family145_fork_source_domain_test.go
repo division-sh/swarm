@@ -235,7 +235,7 @@ func family145ForkSourceDomainCheckCaller(t *testing.T, function, before, after 
 	}
 	cuts := []string{owner, "t.Fatal"}
 	if function == "TestServedForkSourceCompletionWithoutForkBothStores" {
-		cuts = append(cuts, "waitForkReceiverSourceCompletion(t, rt, seed.RunID)",
+		cuts = append(cuts, "waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)",
 			`columns := settled["event_deliveries"].Columns`, `handoff < 0`,
 			`len(early["event_deliveries"].Rows) != len(settled["event_deliveries"].Rows)`,
 			`beforeRow[handoff].Type != "<nil>"`, `afterRow[handoff].Type == "<nil>"`,

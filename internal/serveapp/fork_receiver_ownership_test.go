@@ -56,16 +56,18 @@ func readForkReceiverProducerEvidence(t *testing.T, owner runtimebus.EventStore,
 	return forkReceiverProducerEvidence{Source: event.RoutingSource(), Name: string(event.Type()), Mode: string(event.ExecutionMode())}
 }
 
-func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
+func waitForkReceiverSourceCompletion(t *testing.T, reader receiverProofStateReader, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var incomplete int
 		// Successful pipeline settlement owns the handoff stamp and receipt in
 		// one transaction, after recursive child publication has returned.
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
-			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
-			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&incomplete); err != nil {
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			incomplete, err = storetest.ReadServedIncompletePipelineHandoffCount(ctx, reader, runID)
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if incomplete == 0 {
@@ -73,7 +75,7 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("source pipeline completion did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("source pipeline completion did not finish: %s", servedInspectionRunDebugSummary(reader, runID))
 }
 
 // Refusal snapshots cover all application base tables, not merely the child
@@ -348,7 +350,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
 	})
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 	seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 	seedCompanions := map[string]map[string][]string{}
 	for _, receiver := range receivers {
@@ -361,7 +363,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 	if started.RunID != seed.RunID {
 		t.Fatal("second source ingress escaped the seeded run")
 	}
@@ -377,7 +379,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatal("distinct source occurrence collapsed")
 		}
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND event_id<>$3`, seed.RunID, prefix+"producer/work.ready", frontier).Scan(&frontier); err != nil {
 			t.Fatal(err)
 		}
@@ -480,11 +482,11 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		if siblingSeed.RunID == seed.RunID {
 			t.Fatal("independent sibling run collapsed")
 		}
@@ -645,7 +647,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, entityID, instancePath string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/validation.requested'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
@@ -762,7 +764,7 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			early := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			settled := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 			columns := settled["event_deliveries"].Columns
 			handoff := -1
@@ -950,7 +952,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
 					t.Fatalf("receiver seed ownership: %+v", seedRows)
@@ -960,7 +962,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatal("source request escaped seeded run")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 					t.Fatal(err)

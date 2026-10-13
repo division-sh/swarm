@@ -125,7 +125,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				wantSeedRows := map[string]forkReceiverRow{
 					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "root", State: "active", Fields: map[string]any{"marker": "root-owned"}},
@@ -140,7 +140,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 					t.Fatal("source request escaped seeded run")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 					t.Fatal(err)

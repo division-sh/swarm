@@ -37,12 +37,12 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-request",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, deliveryID string
 			if err := rt.DB.QueryRow(`SELECT e.event_id, d.delivery_id FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 AND e.event_name='producer/work.ready'`, seed.RunID).Scan(&frontier, &deliveryID); err != nil {
 				t.Fatal(err)
@@ -53,7 +53,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
 			})
-			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, sibling.RunID)
 			family, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing real selected fork owner")
@@ -201,7 +201,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			// Source settlement (including pipeline receipt/handoff) and fault
 			// restoration precede the healthy baseline. Source freeze/lineage and
 			// the successful API response are lawful writes, not business effects.
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 			siblingBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)
 			sourceCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
