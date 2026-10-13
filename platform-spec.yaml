@@ -5870,8 +5870,9 @@ engine:
           a typed EmitIntent with that recorded reference through the existing emission owner, not a bare event that
           loses the continuation. A copied journal's own child reference remains authoritative for its recorded output;
           neither a worker's ambient context nor source provenance grants reply or execution authority.
-        timer: TimerIntent.Context and timers.reply_context_id preserve the ref for one-shot schedules; recurring schedules
-          carrying an open reply context fail closed.
+        timer: The supported schedule tool captures the exact incoming DeliveryContext.Reply into genericschedule.AdmissionCommand.ReplyContext.
+          timers.reply_context_id persists that immutable one-shot reference; Lifecycle.fire restores only the recorded command reference.
+          Absolute and delay schedules preserve it; cron and every carrying a reply context fail validation before mutation.
         child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
           no instance-global metadata copy is permitted.
         mailbox: mailbox.reply_context_id is populated by supported HITL operations. Defer and terminal
