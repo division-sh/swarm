@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,23 +24,7 @@ type claudeCompletionResult struct {
 // Each dimension is admitted separately: a malformed price cannot erase valid
 // token totals, and missing tokens cannot erase an observed model or price.
 func claudeCompletionUsageFromRaw(raw []byte) (runtimeeffects.CompletionUsage, error) {
-	var terminal claudeCompletionResult
-	var terminalErr error
-	found := false
-	decode := func(raw []byte) bool {
-		result, candidate, err := decodeClaudeCompletionResult(raw)
-		if !candidate {
-			return false
-		}
-		terminal, terminalErr, found = result, err, true
-		return true
-	}
-	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte{'\n'}) {
-		decode(line)
-	}
-	if !found {
-		decode(raw)
-	}
+	terminal, found, terminalErr := selectClaudeCompletionResult(raw)
 	usage := unavailableCompletionUsage()
 	if !found {
 		return usage, fmt.Errorf("claude ResultMessage missing exact usage")
@@ -84,6 +67,34 @@ func claudeCompletionUsageFromRaw(raw []byte) (runtimeeffects.CompletionUsage, e
 	usage.Evidence = usage.Evidence.Canonical()
 	usage.ResolvedModel = usage.Evidence.ResolvedModel()
 	return usage.Clone(), errors.Join(modelErr, contributorErr, tokenErr, costErr)
+}
+
+// RawMessage framing keeps document-internal newlines and original Unicode
+// bytes intact; only then can terminal selection and dimension admission run.
+func selectClaudeCompletionResult(raw []byte) (claudeCompletionResult, bool, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var terminal claudeCompletionResult
+	var terminalErr error
+	found := false
+	for {
+		start := decoder.InputOffset()
+		var frame json.RawMessage
+		frameErr := decoder.Decode(&frame)
+		if frameErr == io.EOF {
+			return terminal, found, terminalErr
+		}
+		if frameErr != nil {
+			frame = raw[start:]
+		}
+		result, candidate, err := decodeClaudeCompletionResult(frame)
+		if candidate {
+			terminal, found, terminalErr = result, true, err
+		}
+		if frameErr != nil {
+			// An incomplete frame cannot certify an older terminal's facts.
+			return terminal, found, errors.Join(frameErr, err)
+		}
+	}
 }
 
 func removeCompletionObservationSource(models []runtimeeffects.CompletionModelObservation, source string) []runtimeeffects.CompletionModelObservation {
@@ -203,11 +214,9 @@ type completionObservationField struct {
 }
 
 // Decoder offsets retain each exact key lexeme for strict Unicode admission.
-// Values stay raw so one invalid contributor cannot erase its valid siblings.
+// Values stay raw: an invalid dimension cannot hide a later valid type field
+// or erase its independently valid siblings.
 func completionObservationFieldList(raw []byte) ([]completionObservationField, error) {
-	if !utf8.Valid(raw) {
-		return nil, fmt.Errorf("invalid UTF-8 completion fields")
-	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return nil, fmt.Errorf("completion fields require an object")
