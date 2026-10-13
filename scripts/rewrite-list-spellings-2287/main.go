@@ -56,6 +56,12 @@ var generatedSourceEdits = map[string][][2]string{
 	"internal/runtime/testfixtures/canonicalrouting/root_reply.go": {
 		{"  request_id: \"[text]\"", "  request_id: [text]"},
 	},
+	"internal/runtime/contracts/catalog_type_admission_test.go": {
+		{"  child: '[]text'", "  child: {type: '[]text'}"},
+	},
+	"internal/releasee2e/catalog_type_admission_test.go": {
+		{"  labels: '[Label]'", "  labels: [Label]"},
+	},
 }
 
 type edit struct {
