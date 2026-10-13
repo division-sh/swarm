@@ -52,7 +52,10 @@ func (r ForkOneShotRequest) Validate() error {
 			return fmt.Errorf("fork one-shot child birth precedes retained terminal history")
 		}
 	}
-	source, child := r.Source.Command.Canonical(), r.Child.Canonical()
+	return requireForkOneShotProjectedCommand(r.Source.Command.Canonical(), r.Child.Canonical())
+}
+
+func requireForkOneShotProjectedCommand(source, child runtimegenericschedule.AdmissionCommand) error {
 	if child.OwnerKind != runtimegenericschedule.OwnerAgent || child.OwnerID != source.OwnerID ||
 		child.AgentIdentity.Name != source.AgentIdentity.Name || child.AgentIdentity.Route != source.AgentIdentity.Route ||
 		child.ScheduleKey != source.ScheduleKey || child.TaskID != source.TaskID || child.EventType != source.EventType ||
@@ -227,48 +230,82 @@ func DecodeSnapshot(s runforkrevision.TimerSnapshot) (runtimegenericschedule.Act
 	if err != nil {
 		return runtimegenericschedule.Activation{}, err
 	}
-	scope, err := a.Command.ScopeKey()
-	if err != nil {
+	if err := requireSnapshotCommand(s, a); err != nil {
 		return runtimegenericschedule.Activation{}, err
 	}
+	if err := requireSnapshotActor(s, a.Command); err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	if err := requireSnapshotScope(s, a.Command); err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	if err := requireSnapshotCoordinates(s, a.Command); err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	return a, nil
+}
+
+func requireSnapshotCommand(s runforkrevision.TimerSnapshot, a runtimegenericschedule.Activation) error {
 	c := a.Command
 	if a.ID != s.TimerID || a.ImmutableHash != s.ImmutableHash || c.RunID != s.RunID || c.EntityID != s.EntityID ||
 		c.FlowInstance != s.FlowInstance || string(c.OwnerKind) != s.OwnerKind || c.OwnerID != s.OwnerAgent ||
 		c.EventType != s.FireEvent || string(c.ExecutionMode) != s.ExecutionMode || c.ReplyContext != s.ReplyContextID || c.TaskID != s.TaskID ||
 		string(a.Status) != s.Status || a.CancelCause != s.CancelCause || a.Failure.Code != s.FailureCode || a.Failure.Message != s.FailureMessage {
-		return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot requires exact canonical command and disposition storage")
+		return fmt.Errorf("generic schedule snapshot requires exact canonical command and disposition storage")
 	}
+	return nil
+}
+
+func requireSnapshotActor(s runforkrevision.TimerSnapshot, c runtimegenericschedule.AdmissionCommand) error {
 	if !c.AgentIdentity.IsZero() {
 		identity, err := c.AgentIdentity.StorageFields()
 		if err != nil {
-			return runtimegenericschedule.Activation{}, err
+			return err
 		}
 		if identity.NameOwner != s.AgentNameOwner || identity.NameSource != s.AgentNameSource || identity.RoutePresence != s.AgentRoutePresence ||
 			identity.FlowScopeKey != s.AgentFlowScopeKey || identity.FlowInstanceID != s.AgentFlowInstanceID {
-			return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot requires exact canonical actor storage")
+			return fmt.Errorf("generic schedule snapshot requires exact canonical actor storage")
 		}
 	} else if s.AgentNameOwner != "" || s.AgentNameSource != "" || s.AgentRoutePresence != "" || s.AgentFlowScopeKey != "" || s.AgentFlowInstanceID != "" {
-		return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot carries foreign actor storage")
+		return fmt.Errorf("generic schedule snapshot carries foreign actor storage")
 	}
-	if s.TimerName != a.Command.ScheduleKey || s.ScheduleKey != a.Command.ScheduleKey || s.ScheduleScope != scope ||
-		s.Recurring != a.Command.Due.Recurring() || s.RecurrenceInterval != "" || s.OwnerNode != "" || s.FlowScopeKey != "" || s.FlowInstanceID != "" ||
+	return nil
+}
+
+func requireSnapshotScope(s runforkrevision.TimerSnapshot, c runtimegenericschedule.AdmissionCommand) error {
+	scope, err := c.ScopeKey()
+	if err != nil {
+		return err
+	}
+	if s.TimerName != c.ScheduleKey || s.ScheduleKey != c.ScheduleKey || s.ScheduleScope != scope ||
+		s.Recurring != c.Due.Recurring() || s.RecurrenceInterval != "" || s.OwnerNode != "" || s.FlowScopeKey != "" || s.FlowInstanceID != "" ||
 		s.TaskType == "timer" && s.Recurring || s.TaskType == "scheduled_task" && s.RunID == "" ||
 		s.TaskType == "global_recurring" && (!s.Recurring || s.RunID != "") {
-		return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot contradicts its exact native key, scope or task family")
+		return fmt.Errorf("generic schedule snapshot contradicts its exact native key, scope or task family")
 	}
-	dueAbsolute, duration, cron := encodeDueBasis(a.Command.Due)
-	if s.DueBasisKind != string(a.Command.Due.Kind) || s.DueBasisDuration != duration || s.DueBasisCron != cron ||
+	return nil
+}
+
+func requireSnapshotCoordinates(s runforkrevision.TimerSnapshot, c runtimegenericschedule.AdmissionCommand) error {
+	dueAbsolute, duration, cron := encodeDueBasis(c.Due)
+	if s.DueBasisKind != string(c.Due.Kind) || s.DueBasisDuration != duration || s.DueBasisCron != cron ||
 		(dueAbsolute == nil) != (s.DueBasisAbsolute == nil) {
-		return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot contradicts its immutable due storage")
+		return fmt.Errorf("generic schedule snapshot contradicts its immutable due storage")
+	}
+	timeColumn := func(at *time.Time) any {
+		if at == nil {
+			return nil
+		}
+		return *at
 	}
 	for _, at := range []any{s.CreatedAt, s.FireAt, timeColumn(s.InitialFireAt), timeColumn(s.DueBasisAbsolute),
 		timeColumn(s.OccurrenceAdmittedAt), timeColumn(s.CancelledAt), timeColumn(s.FiredAt), timeColumn(s.AcceptedAt),
 		timeColumn(s.FailedAt), timeColumn(s.SourceArmedAt)} {
 		if at, ok := at.(time.Time); ok && (at.IsZero() || at != canonicalTime(at)) {
-			return runtimegenericschedule.Activation{}, fmt.Errorf("generic schedule snapshot requires exact canonical storage coordinates")
+			return fmt.Errorf("generic schedule snapshot requires exact canonical storage coordinates")
 		}
 	}
-	return a, nil
+	return nil
 }
 
 type snapshotActivationRow []any
