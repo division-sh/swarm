@@ -56,7 +56,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				first := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, fork.ForkRunID, entityID, history[0].TriggerEventID)
 				selected := first.Evidence.RuleSelection()
 				if first.From != "waiting" || first.To != "active" || first.TriggerEventID != childEvent ||
-					first.Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "alpha" ||
+					first.Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "rules[0]: when payload.choice == 'alpha'" ||
 					selected.Ref().SemanticPath() != `nodes["controller"].handlers["work.first"].rules[0]` ||
 					!reflect.DeepEqual(first.GuardsEvaluated, []string{"first_choice", "first_nonempty"}) {
 					t.Fatalf("scope %q lost exact child transition cause: %+v", scope, history)

@@ -114,15 +114,14 @@ pins:
       rules:
 `, handler, handler, handler)
 			for _, choice := range []string{"alpha", "beta"} {
-				nodes += fmt.Sprintf(`        %s:
-          when: payload.choice == '%s'
+				nodes += fmt.Sprintf(`        - when: payload.choice == '%s'
           advances_to: active
           emit:
             event: work.completed
             fields: {result: '%s%s/%s'}
-`, choice, choice, prefix, handler, choice)
+`, choice, prefix, handler, choice)
 			}
-			nodes += "        unmatched:\n          else: true\n"
+			nodes += "        - else: true\n"
 		}
 		nodes += `collector:
   execution_type: system_node

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -79,7 +80,16 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := &issue2564M25CASOwner{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), events: selected.events.(operatorread.ObservabilityReader), t: t, success: resultEvents.SuccessEvent, source: fact}
+			consumer := externalPipelineSourceNode(t, source, ".", "consumer")
+			handler, found := source.ExecutableNodeEventHandler(consumer, resultEvents.SuccessEvent)
+			if !found || len(handler.Rules) != 2 {
+				t.Fatal("M25 lacks admitted result consumer and fallback")
+			}
+			ref, admitted := handler.Rules[0].DeclarationIdentity()
+			if !admitted {
+				t.Fatal("M25 lacks the exact admitted result-consumer identity")
+			}
+			owner := &issue2564M25CASOwner{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), events: selected.events.(operatorread.ObservabilityReader), t: t, success: resultEvents.SuccessEvent, source: fact, rule: ref}
 			selected.persistence = pipeline.NewWorkflowPersistence(owner)
 			module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
 				{Node: externalPipelineSourceNode(t, source, ".", "scanner"), Subscriptions: []events.EventType{"source.requested"}, Produces: []events.EventType{events.EventType(resultEvents.SuccessEvent), events.EventType(resultEvents.FailureEvent)}, ExecutionType: contracts.SystemNodeExecutionType},
@@ -162,6 +172,7 @@ type issue2564M25CASOwner struct {
 	attempts, losses, rival, committed int
 	claim                              deliverylifecycle.Claim
 	selection                          deliverylifecycle.HandlerRuleSelectionFact
+	rule                               identity.DeclarationIdentity
 	resultID                           string
 	drafts                             []float64
 }
@@ -194,7 +205,7 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 	} else if !o.claim.Same(command.DeliverySuccess.Claim) || !selection.Equal(o.selection) || event.ID() != o.resultID {
 		o.t.Fatal("M25 CAS retry changed exact claim, selected rule or retained result")
 	}
-	if command.DeliverySuccess.RuleSelection.DisplayLabel() != "consume_result" {
+	if selection.Context() != handlerselection.ContextRules || selection.Disposition() != handlerselection.DispositionSelected || !selection.Ref().Equal(o.rule) || selection.DisplayLabel() != "rules[0]: when payload.result.title == 'M25 external'" {
 		o.t.Fatalf("M25 bypassed authored result selection: %+v", command.DeliverySuccess.RuleSelection)
 	}
 	var draft map[string]any
@@ -297,15 +308,13 @@ consumer:
   event_handlers:
     %s:
       rules:
-        - id: consume_result
-          when: payload.result.title == 'M25 external'
+        - when: payload.result.title == 'M25 external'
           data_accumulation:
             writes:
               - {target_field: title, value: payload.result.title}
               - {target_field: folded, value: entity.local + 1}
               - {target_field: received, value: entity.received + 1}
-        - id: unexpected_result
-          else: true
+        - else: true
           data_accumulation:
             writes:
               - {target_field: title, value: 'unexpected result'}

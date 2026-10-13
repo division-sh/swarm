@@ -152,7 +152,7 @@ func assertServedSelectionTrace(t *testing.T, rt servedControlProofRuntime, even
 		if !present && fact == nil {
 			return
 		}
-		if present && row.DeliveryStatus == "delivered" && fact != nil && fact.Context == handlerselection.ContextRules && fact.Disposition == handlerselection.DispositionSelected && fact.DisplayLabel == "first" && fact.FlowPath == "." && fact.SemanticPath == `nodes["select"].handlers["select"].rules[0]` {
+		if present && row.DeliveryStatus == "delivered" && fact != nil && fact.Context == handlerselection.ContextRules && fact.Disposition == handlerselection.DispositionSelected && fact.DisplayLabel == "rules[0]: when entity.marker == 'first'" && fact.FlowPath == "." && fact.SemanticPath == `nodes["select"].handlers["select"].rules[0]` {
 			return
 		}
 		t.Fatalf("incorrect public selection presence: want=%v row=%+v", present, row)

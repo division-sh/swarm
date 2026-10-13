@@ -66,7 +66,8 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 									index = 1
 								}
 								path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
-								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != choice || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
+								display := fmt.Sprintf("rules[%d]: when payload.choice == '%s'", index, choice)
+								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != display || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
 									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 								}
 								var entity operatorread.OperatorEntityFull

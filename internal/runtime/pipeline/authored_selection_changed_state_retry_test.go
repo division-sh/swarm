@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -54,9 +55,9 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
   event_handlers:
     source.evt:
       rules:
-        - {id: first, when: entity.marker == 'first', advances_to: done}
-        - {id: second, when: entity.marker == 'second', advances_to: done}
-        - {id: unmatched, else: true}
+        - {when: entity.marker == 'first', advances_to: done}
+        - {when: entity.marker == 'second', advances_to: done}
+        - {else: true}
 `
 				if first == "evaluation_failed" {
 					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
@@ -123,7 +124,13 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 					t.Fatalf("failure observations = %#v", observed.failures)
 				}
 				attempt, err := observed.failures[0].ResolvedFact()
-				if err != nil || attempt.Disposition() != wantFirst {
+				firstIndex, firstLabel := 0, "rules[0]: when entity.marker == 'first'"
+				if first == "fallback" {
+					firstIndex, firstLabel = 2, "rules[2]: else"
+				} else if first == "evaluation_failed" {
+					firstLabel = "rules[0]: when query_entities(marker == 'first').count == 1"
+				}
+				if err != nil || attempt.Disposition() != wantFirst || attempt.Context() != handlerselection.ContextRules || attempt.Ref().Flow().String() != "." || attempt.Ref().SemanticPath() != fmt.Sprintf(`nodes["router"].handlers["source.evt"].rules[%d]`, firstIndex) || attempt.DisplayLabel() != firstLabel {
 					t.Fatalf("did not reach intended attempt selection: %#v %v", attempt, err)
 				}
 				id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -155,7 +162,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 					t.Fatalf("final delivery: %#v %v", settled, err)
 				}
 				fact, err := settled.FinalSelection.Fact()
-				if err != nil || fact.DisplayLabel() != "second" || fact.Disposition() != handlerselection.DispositionSelected {
+				if err != nil || fact.DisplayLabel() != "rules[1]: when entity.marker == 'second'" || fact.Disposition() != handlerselection.DispositionSelected || fact.Context() != handlerselection.ContextRules || fact.Ref().Flow().String() != "." || fact.Ref().SemanticPath() != `nodes["router"].handlers["source.evt"].rules[1]` {
 					t.Fatalf("did not reevaluate current state: %#v %v", fact, err)
 				}
 				after, found := load()
