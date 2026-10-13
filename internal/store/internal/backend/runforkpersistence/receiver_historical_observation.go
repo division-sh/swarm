@@ -214,8 +214,11 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	if selected == nil || selected.MaterializationMetadata == nil {
 		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("historical receiver lacks its exact constructed state")
 	}
-	captured := selected.MaterializationMetadata
-	expected, err := ProjectRunForkConstructionReceipt(plan, run.RunID, *selected, captured.CreatedAt)
+	born, err := readRunForkReceiverBirthTx(ctx, tx, run.RunID, header)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
+	}
+	expected, err := ProjectRunForkConstructionReceipt(plan, run.RunID, *selected, born)
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}

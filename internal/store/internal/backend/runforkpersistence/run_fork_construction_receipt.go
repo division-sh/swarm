@@ -1,6 +1,8 @@
 package runforkpersistence
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"time"
@@ -12,6 +14,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
+
+// Materialization records the child's immutable birth in its initial revision.
+// Neither the live header nor the physical receipt being compared chooses it.
+func readRunForkReceiverBirthTx(ctx context.Context, tx *sql.Tx, forkRunID string, header pipeline.WorkflowInstance) (time.Time, error) {
+	owner, err := flowidentity.NewRunScopedFlowInstance(forkRunID,
+		flowidentity.StoredRoute(header.WorkflowName, header.InstanceID, header.StorageRef))
+	if err != nil {
+		return time.Time{}, err
+	}
+	initial, err := ReadConstructedEntityAtRevisionTx(ctx, tx, owner, header.EntityID, 1)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read original fork receiver birth: %w", err)
+	}
+	return initial.MaterializationMetadata.CreatedAt, nil
+}
 
 func runForkConstructionOccurrenceOwed(plan runfork.RunForkPlan, entity runfork.RunForkEntityState) (bool, error) {
 	meta := entity.MaterializationMetadata
