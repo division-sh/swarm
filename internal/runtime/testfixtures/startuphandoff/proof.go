@@ -115,6 +115,12 @@ func (p *Proof) checkLocked(kind, id string) {
 	}
 }
 
+func (p *Proof) ObserveExecutionAttempt(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.checkLocked("callback attempt", id)
+}
+
 type Observation struct {
 	Partial, ContinuationScans           int
 	RecoverySettled, ContinuationSettled bool
