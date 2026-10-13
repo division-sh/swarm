@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -2213,58 +2214,27 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 }
 
 func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Normalize() {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity})
-	}
-	fields, err := agentIdentityFields(req.Identity)
-	if err != nil {
-		return err
-	}
-	var epoch, generation int64
-	var phase string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
-		FROM agents
-		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
-		  AND agent_route_presence=$4 AND flow_scope_key=$5
-		  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
-		FOR UPDATE
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase); err != nil {
-		if err == sql.ErrNoRows {
-			return supersededExternalAttempt(req.Token, 0, 0, "absent")
-		}
-		return fmt.Errorf("lock provider-head lifecycle: %w", err)
-	}
-	if epoch != req.Token.RuntimeEpoch || generation != int64(req.Token.Generation) || strings.TrimSpace(phase) != "running" {
-		return supersededExternalAttempt(req.Token, epoch, generation, phase)
-	}
-	return nil
+	return requireProviderHeadLifecycle(ctx, tx, req, false)
 }
 
 func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
+	return requireProviderHeadLifecycle(ctx, tx, req, true)
+}
+
+func requireProviderHeadLifecycle(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest, sqlite bool) error {
 	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Normalize() {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity})
 	}
-	fields, err := agentIdentityFields(req.Identity)
+	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, req.Identity, req.Token, sqlite)
 	if err != nil {
-		return err
+		return fmt.Errorf("lock provider-head lifecycle: %w", err)
 	}
-	var epoch, generation int64
-	var phase string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
-		FROM agents
-		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
-		  AND agent_route_presence=? AND flow_scope_key=?
-		  AND flow_instance_id=? AND flow_instance=? AND run_id=?
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase); err != nil {
-		if err == sql.ErrNoRows {
-			return supersededExternalAttempt(req.Token, 0, 0, "absent")
-		}
-		return fmt.Errorf("lock sqlite provider-head lifecycle: %w", err)
+	if !observation.Found {
+		return supersededExternalAttempt(req.Token, 0, 0, "absent")
 	}
-	if epoch != req.Token.RuntimeEpoch || generation != int64(req.Token.Generation) || strings.TrimSpace(phase) != "running" {
-		return supersededExternalAttempt(req.Token, epoch, generation, phase)
+	if !observation.Current {
+		state := observation.State
+		return supersededExternalAttempt(req.Token, state.RuntimeEpoch, int64(state.Generation), string(state.Phase))
 	}
 	return nil
 }

@@ -25,6 +25,7 @@ import (
 type lifecycleSubordinateStore interface {
 	agentfixture.Store
 	runtimesessions.Registry
+	runtimemanager.AgentLifecycleStateReader
 }
 
 func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
@@ -82,6 +83,42 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
+	}
+	before, found, err := store.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found {
+		t.Fatalf("read current lifecycle before invalid transitions: found=%v err=%v", found, err)
+	}
+	fixtureTest := t
+	for _, invalid := range []struct {
+		name       string
+		kind       string
+		generation uint64
+	}{
+		{name: "skipped_generation", kind: "restart", generation: started.Generation + 2},
+		{name: "reused_generation", kind: "restart", generation: started.Generation},
+		{name: "self_release_advances_generation", kind: "self_release", generation: started.Generation + 1},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			_, err := agentfixture.CommitStatic(fixtureTest, ctx, store, runtimemanager.AgentLifecycleTransition{
+				OperationID: uuid.NewString(), OperationKind: invalid.kind, RequestHash: invalid.name,
+				Identity: identity, AgentID: agentID, Trigger: invalid.kind,
+				ExpectedEpoch: started.RuntimeEpoch, ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
+				TargetEpoch: started.RuntimeEpoch, TargetGeneration: invalid.generation,
+				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "revision-1",
+				RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
+			})
+			var failure *runtimefailures.Error
+			if !errors.As(err, &failure) || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
+				t.Fatalf("invalid generation transition: %v, want lifecycle conflict", err)
+			}
+			after, found, err := store.LoadAgentLifecycleState(ctx, identity)
+			if err != nil || !found || !reflect.DeepEqual(before, after) {
+				t.Fatalf("refusal changed current lifecycle: before=%#v after=%#v found=%v err=%v", before, after, found, err)
+			}
+		})
+	}
+	if t.Failed() {
+		return
 	}
 	staleToken := runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: started.Generation}
 	staleCtx := runtimeeffects.WithLifecycleToken(ctx, staleToken)

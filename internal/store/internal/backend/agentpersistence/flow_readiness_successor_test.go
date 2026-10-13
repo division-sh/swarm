@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
 )
@@ -44,13 +43,9 @@ func TestFlowReadinessSuccessorCannotAuthorizeIndividualRestamp(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw, err := canonicaljson.Bytes(old)
-			if err != nil {
-				t.Fatal(err)
-			}
 			err = validateFlowReadinessSuccessor(manager.AgentLifecycleTransition{
 				OperationKind: "source_set_rebind", Topology: next, ExpectedGeneration: 1, TargetGeneration: test.generation,
-			}, lifecycleCell{Topology: raw}, true, false)
+			}, manager.AgentLifecycleState{Topology: old}, true, false)
 			if (err == nil) != test.valid {
 				t.Fatalf("successor admission=%v want valid=%v", err, test.valid)
 			}

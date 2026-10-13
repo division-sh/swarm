@@ -14,6 +14,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -109,15 +110,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		LEFT JOIN agents g ON o.authority_kind='normal_agent'
-		  AND g.run_id=o.agent_run_id
-		  AND g.agent_id=o.agent_id
-		  AND g.agent_name_owner=o.agent_name_owner
-		  AND g.agent_name_source=o.agent_name_source
-		  AND g.agent_route_presence=o.agent_route_presence
-		  AND g.flow_scope_key=o.flow_scope_key
-		  AND g.flow_instance_id=o.flow_instance_id
-		  AND g.flow_instance=o.flow_instance
+		`+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$2) OR
@@ -125,8 +118,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
-		      g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS DISTINCT FROM o.runtime_epoch OR
-		      g.lifecycle_generation IS DISTINCT FROM o.generation OR g.lifecycle_phase <> 'running'
+		      `+storeagent.CompletionRecoveryAgentStaleSQL(false)+`
 		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
@@ -166,15 +158,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		LEFT JOIN agents g ON o.authority_kind='normal_agent'
-		  AND g.run_id=o.agent_run_id
-		  AND g.agent_id=o.agent_id
-		  AND g.agent_name_owner=o.agent_name_owner
-		  AND g.agent_name_source=o.agent_name_source
-		  AND g.agent_route_presence=o.agent_route_presence
-		  AND g.flow_scope_key=o.flow_scope_key
-		  AND g.flow_instance_id=o.flow_instance_id
-		  AND g.flow_instance=o.flow_instance
+		`+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id=?) OR
@@ -182,8 +166,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (
-		      g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS NOT o.runtime_epoch OR
-		      g.lifecycle_generation IS NOT o.generation OR g.lifecycle_phase <> 'running'
+		      `+storeagent.CompletionRecoveryAgentStaleSQL(true)+`
 		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
