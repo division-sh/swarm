@@ -65,16 +65,14 @@ repo_scaffold.repo_commit_failed:
   event_handlers:
     repo_scaffold.repo_commit_requested:
       rules:
-        ready:
-          when: |-
+        - when: |-
                   payload.mvp_yaml == "name: Demo\n"
           emit:
             event: repo_scaffold.repo_commit_succeeded
             fields:
               request_id: payload.request_id
               result_kind: "ready"
-        rejected:
-          else: true
+        - else: true
           emit:
             event: repo_scaffold.repo_commit_failed
             fields:
