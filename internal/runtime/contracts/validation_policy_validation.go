@@ -147,7 +147,7 @@ func validatePolicySheetValidationRows(bundle *WorkflowContractBundle) []error {
 				if !policySheetRuleIsValidationValueRow(rule) {
 					continue
 				}
-				context := fmt.Sprintf("node %s handler %s rules[%d] validate row %s", node.Key(), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
+				context := fmt.Sprintf("node %s handler %s %s", node.Key(), strings.TrimSpace(eventType), rule.DisplayLabel("rules", idx))
 				errs = append(errs, validatePolicySheetValidationRow(context, rule, rules)...)
 			}
 		}
