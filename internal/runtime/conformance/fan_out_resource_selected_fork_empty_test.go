@@ -60,8 +60,8 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != empty.VersionID {
 					t.Fatalf("empty fork lost exact pin or child: %+v", result)
 				}
-				if selector == "start" && (result.ForkPoint.Kind != runfork.RunForkPointRunStart || result.ForkPoint.Revision != 1 || result.ForkPoint.EventID != "") {
-					t.Fatalf("empty start fork lost its exclusive original point: %+v", result.ForkPoint)
+				if selector == "start" && (result.ForkPointKind != string(runfork.RunForkPointRunStart) || result.ForkRevision != 1 || result.ForkEventID != "") {
+					t.Fatalf("empty start fork lost its exclusive original point: %+v", result)
 				}
 				for _, runID := range []string{sourceRunID, result.ForkRunID} {
 					for _, query := range []string{
