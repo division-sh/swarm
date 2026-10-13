@@ -293,6 +293,53 @@ func TestListSpellingRetirementNestedReferences(t *testing.T) {
 	}
 }
 
+func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
+	for _, surface := range []string{"types", "entities", "events"} {
+		for _, scope := range []string{"", "child/"} {
+			for _, test := range []struct{ retired, canonical string }{
+				{"map[text][]text", "map[text][text]"},
+				{"[[]text]", "[[text]]"},
+				{"[text[]]", "[[text]]"},
+				{"[list<text>]", "[[text]]"},
+				{"map[text]list<text>", "map[text][text]"},
+				{"map[text][list<text>]", "map[text][[text]]"},
+			} {
+				t.Run(scope+surface+"/"+test.retired, func(t *testing.T) {
+					root := t.TempDir()
+					writeFixtureFile(t, root+"/schema.yaml", "name: nested-proof\nstages: {done: {final: true}}\n")
+					if scope != "" {
+						writeFixtureFile(t, root+"/child/schema.yaml", "name: child\nstages: {done: {final: true}}\n")
+					}
+					file := scope + surface + ".yaml"
+					prefix := ""
+					switch surface {
+					case "types":
+						prefix = "types:\n  Unused:\n    items: "
+					case "entities":
+						prefix = "probe:\n  items: "
+					case "events":
+						prefix = "proof.received:\n  items: "
+					}
+					repo := repoRootForContractsTest(t)
+					for _, source := range []string{test.retired, test.canonical} {
+						writeFixtureFile(t, root+"/"+file, prefix+"{type: '"+source+"'}\n")
+						bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+						if source == test.retired {
+							if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "use [") || !strings.Contains(err.Error(), file) {
+								t.Fatalf("nested alternate escaped full source admission: %s: %v", source, err)
+							}
+							continue
+						}
+						if err != nil || bundle == nil {
+							t.Fatalf("canonical nested replacement refused: %s: %v", source, err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 	for _, name := range []string{"List", "LIST"} {
 		t.Run(name, func(t *testing.T) {

@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -100,23 +101,30 @@ func TestCatalogAdmissionAuthoredNodeNamedListIdentity(t *testing.T) {
 }
 
 func TestCatalogAdmissionNodeRetirementAllocation(t *testing.T) {
-	for _, source := range []string{
-		"items: list<DimensionScore>\n",
-		"items: 'list<DimensionScore>'\n",
-		"items: {type: list<DimensionScore>, default: []}\n",
-		"items: {type: ' list<DimensionScore> ', default: []}\n",
-		"- name: items\n  type: list<DimensionScore>\n  default: []\n",
+	for _, test := range []struct{ source, canonical string }{
+		{"items: list<DimensionScore>\n", "items: [DimensionScore]\n"},
+		{"items: 'list<DimensionScore>'\n", "items: [DimensionScore]\n"},
+		{"items: {type: list<DimensionScore>, default: []}\n", "items: {type: '[DimensionScore]', default: []}\n"},
+		{"items: {type: ' list<DimensionScore> ', default: []}\n", "items: {type: ' [DimensionScore] ', default: []}\n"},
+		{"- name: items\n  type: list<DimensionScore>\n  default: []\n", "- name: items\n  type: '[DimensionScore]'\n  default: []\n"},
 	} {
-		t.Run(source, func(t *testing.T) {
-			snapshot, err := yamlsource.Load([]byte(source))
+		t.Run(test.source, func(t *testing.T) {
+			snapshot, err := yamlsource.Load([]byte(test.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root()); !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), "nodes.yaml") {
+				t.Fatalf("retired node carrier lacks source-located teaching: %v", err)
+			}
+			snapshot, err = yamlsource.Load([]byte(test.canonical))
 			if err != nil {
 				t.Fatal(err)
 			}
 			fields, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root())
-			if err != nil || len(fields) != 1 || fields[0].Name != "items" || fields[0].Type != "list<DimensionScore>" {
-				t.Fatalf("D-owned retirement changed existing node carrier: %+v, %v", fields, err)
+			if err != nil || len(fields) != 1 || fields[0].Name != "items" || fields[0].Type != "[DimensionScore]" {
+				t.Fatalf("canonical node carrier changed named identity: %+v, %v", fields, err)
 			}
-			if strings.Contains(source, "default:") && !reflect.DeepEqual(fields[0].Default, []any{}) {
+			if strings.Contains(test.source, "default:") && !reflect.DeepEqual(fields[0].Default, []any{}) {
 				t.Fatalf("existing metadata default changed: %#v", fields[0].Default)
 			}
 		})
@@ -126,8 +134,7 @@ func TestCatalogAdmissionNodeRetirementAllocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root())
-	diagnostic, typed := AsLoaderDiagnostic(err)
-	if !typed || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(err.Error(), "of") {
-		t.Fatalf("existing unknown metadata refusal changed: %v", err)
+	if !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "of") || !strings.Contains(err.Error(), "[T]") {
+		t.Fatalf("retired metadata lacks presence refusal and canonical teaching: %v", err)
 	}
 }

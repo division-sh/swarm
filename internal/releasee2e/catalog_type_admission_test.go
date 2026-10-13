@@ -83,9 +83,9 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
 			writeReleaseFile(t, filepath.Join(source, "types.yaml"), admissionPublicTypes)
 			writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "stages:\n  pending: {}\n  collecting: {}\n  done: {final: true}\npins:\n  inputs: [task.requested]\n")
-			fields := "  labels: '[Label]'\n  lookup: map[Label]Item\n  enums: map[Status]Item\n  uuids: map[ID]Item\n"
+			fields := "  labels: [Label]\n  lookup: map[Label]Item\n  enums: map[Status]Item\n  uuids: map[ID]Item\n"
 			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n"+fields+"key.observed:\n  member_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "entities.yaml"), "test_entity:\n  labels: '[Label]'\n  lookup: {type: 'map[Label]Item', initial: {}}\n  enums: map[Status]Item\n  uuids: map[ID]Item\n")
+			writeReleaseFile(t, filepath.Join(source, "entities.yaml"), "test_entity:\n  labels: [Label]\n  lookup: {type: 'map[Label]Item', initial: {}}\n  enums: map[Status]Item\n  uuids: map[ID]Item\n")
 			writeReleaseFile(t, filepath.Join(source, "nodes.yaml"), admissionPublicNodes)
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
