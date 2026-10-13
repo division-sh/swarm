@@ -3,10 +3,12 @@ package contracts
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const detachedCatalogFields = "  label: {type: text, pattern: '^[a-z]+$', length: {min: 1, max: 10}, equal_to: peer}\n  peer: {type: text, length: {min: 1, max: 10}}\n  score: {type: numeric, range: {min: 1.5, max: 9.5}, equal_to: other}\n  other: {type: numeric, range: {min: 1.5, max: 9.5}}\n  note: text?\n"
@@ -14,11 +16,11 @@ const detachedCatalogFields = "  label: {type: text, pattern: '^[a-z]+$', length
 func loadDetachedCatalogFixture(t *testing.T) *WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	types := "types:\n  Probe:\n" + bytesToIndented(detachedCatalogFields) + "  Outer:\n    child: Probe\n"
+	types := "enums:\n  Choice: {values: [alpha, beta], default: alpha}\ntypes:\n  Probe:\n" + bytesToIndented(detachedCatalogFields) + "  Outer:\n    child: Probe\n"
 	for name, body := range map[string]string{
 		"schema.yaml": "name: detached-catalog\nstages: {done: {final: true}}\n",
 		"types.yaml":  types, "entities.yaml": "person:\n" + detachedCatalogFields,
-		"events.yaml":       "audit.record:\n" + detachedCatalogFields,
+		"events.yaml":       "audit.record:\n" + detachedCatalogFields + "batch.ready:\n  rows: '[Probe]'\n  label: text\n  result: Probe\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
 		"child/types.yaml":  types, "child/entities.yaml": "person:\n" + detachedCatalogFields,
 		"child/events.yaml": "audit.record:\n" + detachedCatalogFields,
@@ -332,5 +334,98 @@ func TestCatalogTypeDetachmentPrimaryAndResolverInputCapture(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCatalogTypeDetachmentFlowOverrideEnum(t *testing.T) {
+	b := loadDetachedCatalogFixture(t)
+	before := detachedSnapshot(t, b.ResolvedTypeCatalogForFlow("child"))
+	view := b.ResolvedTypeCatalogForFlow("child")
+	view.Enums["Choice"].Values[0] = "changed"
+	if after := detachedSnapshot(t, b.ResolvedTypeCatalogForFlow("child")); !bytes.Equal(before, after) {
+		t.Fatalf("incoming flow enum aliased retained declaration: before=%s after=%s", before, after)
+	}
+}
+
+func TestCatalogTypeDetachmentCompiledConnection(t *testing.T) {
+	for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
+		for _, side := range []string{"source", "receiver"} {
+			t.Run(bound+"/"+side, func(t *testing.T) {
+				root := canonicalrouting.CopyConnectionPolicies(t, false)
+				path := filepath.Join(root, "schema.yaml")
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, path, string(body)+"stages: {done: {final: true}}\n")
+				writeFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Probe:\n"+bytesToIndented(detachedCatalogFields))
+				repo := repoRootForContractsTest(t)
+				b, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				if err != nil {
+					t.Fatal(err)
+				}
+				connects := b.CompositionConnects()
+				if len(connects) != 2 {
+					t.Fatalf("compiled connection count %d", len(connects))
+				}
+				for _, connect := range connects {
+					input, ok, err := b.ConnectionInput(connect)
+					if err != nil || !ok {
+						t.Fatalf("actual connection admission: %t %v", ok, err)
+					}
+					before := detachedSnapshot(t, input.SourceEvidence())
+					view := input.SourceEvidence().SourceType
+					if side == "receiver" {
+						view = input.SourceEvidence().ReceiverType
+					}
+					mutateDetachedBound(view.Catalog.Types["Probe"].Fields[detachedBoundField(bound)].Refinements, bound)
+					if after := detachedSnapshot(t, input.SourceEvidence()); !bytes.Equal(before, after) {
+						t.Fatalf("compiled edge %s/%s changed: before=%s after=%s", bound, side, before, after)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCatalogTypeDetachmentCompiledPlans(t *testing.T) {
+	for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
+		t.Run(bound, func(t *testing.T) {
+			b := loadDetachedCatalogFixture(t)
+			node := identitytest.RootNode(t, "collector")
+			handler := SystemNodeEventHandler{FanOut: &FanOutSpec{
+				ItemsFrom: "payload.rows", As: "row", Identity: "row.label",
+				Emit: EmitSpec{Event: "audit.record"},
+			}}
+			if err := b.CompileFanOutHandlerPlans(node, "batch.ready", handler); err != nil {
+				t.Fatal(err)
+			}
+			plans := b.FanOutPlansForHandler(node, "batch.ready")
+			if len(plans) != 1 {
+				t.Fatalf("compiled fan-out plans = %d", len(plans))
+			}
+			plan := plans[0]
+			before := detachedSnapshot(t, plan.SemanticEvidence())
+			view := plan.SemanticEvidence()
+			mutateDetachedBound(detachedTypeField(t, view.ItemType, detachedBoundField(bound)).Refinements, bound)
+			mutateDetachedBound(view.CollectionType.Catalog.Types["Probe"].Fields[detachedBoundField(bound)].Refinements, bound)
+			fresh, ok := b.FanOutPlanForSite(plan.Site)
+			if !ok || !bytes.Equal(before, detachedSnapshot(t, fresh.SemanticEvidence())) || plan.Ref != fresh.Ref {
+				t.Fatal("compiled fan-out registry evidence or identity changed")
+			}
+			count := 1
+			join, err := b.CompileWorkflowJoinPlan(node, "batch.ready", SystemNodeEventHandler{Join: &JoinSpec{
+				Stage: "done", Members: JoinMembersSpec{Count: &count, By: "payload.label"},
+				Output: "payload.result", Until: "audit.record", OnCompleteFound: true, OnComplete: HandlerRuleEntry{AdvancesTo: "done"},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before = detachedSnapshot(t, join)
+			mutateDetachedBound(join.Clone().ResultType.Catalog.Types["Probe"].Fields[detachedBoundField(bound)].Refinements, bound)
+			if !bytes.Equal(before, detachedSnapshot(t, join)) {
+				t.Fatal("compiled arrival join evidence changed")
+			}
+		})
 	}
 }

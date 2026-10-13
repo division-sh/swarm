@@ -59,6 +59,7 @@ func (t ResolvedCatalogType) Clone() ResolvedCatalogType {
 	for index, field := range t.Fields {
 		out.Fields[index] = field
 		out.Fields[index].Type = field.Type.Clone()
+		out.Fields[index].Refinements = field.Refinements.Clone()
 	}
 	return out
 }
@@ -332,7 +333,7 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 				TypeRef:     strings.TrimSpace(field.Type),
 				Type:        resolved,
 				IsOptional:  field.IsOptional,
-				Refinements: field.Refinements,
+				Refinements: field.Refinements.Clone(),
 			})
 		}
 		return ResolvedCatalogType{Kind: CatalogTypeObject, Name: typeRef, Fields: fields}, nil

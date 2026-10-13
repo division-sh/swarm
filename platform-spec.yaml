@@ -14155,6 +14155,15 @@ flow_model:
       concrete declaration.
   compiled_event_schema_projection:
     status: implemented_recursive_structural_presence
+    detached_type_evidence: >-
+      Retained catalog type evidence owns its complete recursive field shape and refinement bounds. Admission,
+      compiled input capture, declaration copies, structural and primary-entity readbacks, collection projections,
+      and connection, join and fan-out evidence detach Length.Min/Max and Range.Min/Max through the shared
+      SchemaRefinements.Clone owner. Mutating original inputs or returned views cannot change a later retained
+      read, acceptance-schema bytes or digest, field presence, pattern/equality text, or source/catalog provenance.
+      A local Field or FieldPath lookup may borrow from its caller-owned structural value; an immutable owner
+      must first supply a detached value. Readback isolation does not change type admission, role policy,
+      payload acceptance or identity, and it introduces no compatibility or old-store migration path.
     owner: internal/runtime/semanticview.Source.ResolveEffectiveCompiledFlowEventSchema
     rule: >-
       Runtime consumers use one immutable admitted CompiledEventSchema projection for the exact owning flow and
