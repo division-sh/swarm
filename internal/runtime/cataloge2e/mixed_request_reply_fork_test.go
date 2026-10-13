@@ -379,6 +379,7 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 	case <-ctx.Done():
 		t.Fatalf("ordinary mixed observer never acquired its actual claim: %v", ctx.Err())
 	}
+	loggedRequesterWait := false
 	for {
 		rows, err := storetest.ReadReplyContextRecords(ctx, selected, catalogRuntimeRunID)
 		if err != nil {
@@ -422,6 +423,10 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 					t.Fatalf("ordinary requester return count=%d error=%v", count, err)
 				}
 				if count == 0 {
+					if !loggedRequesterWait {
+						loggedRequesterWait = true
+						logMixedRequesterWait(t, ctx, selected, row)
+					}
 					select {
 					case <-ctx.Done():
 						t.Fatal("ordinary requester did not return within the original business bound")
@@ -454,5 +459,25 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 			t.Fatalf("provider did not settle while the real ordinary observer remained held: rows=%+v error=%v", rows, ctx.Err())
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+func logMixedRequesterWait(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, row replycontext.Record) {
+	t.Helper()
+	publication, found, err := selected.LoadPreparedPublishEvent(ctx, row.AcceptedReplyEventID)
+	receipt, receiptErr := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, selected, row.AcceptedReplyEventID)
+	t.Logf("held observer source phase: terminal_context=%s accepted_event=%s physical_return=%t routes=%d receipt=%+v errors=%v/%v",
+		row.ID, row.AcceptedReplyEventID, found, len(publication.DeliveryRoutes), receipt, err, receiptErr)
+	if err != nil || !found {
+		return
+	}
+	for _, route := range publication.DeliveryRoutes {
+		id, idErr := deliverylifecycle.DeliveryID(row.AcceptedReplyEventID, route)
+		if idErr != nil {
+			t.Logf("held observer return identity error: %v", idErr)
+			continue
+		}
+		delivery, deliveryErr := selected.Snapshot(ctx, id)
+		t.Logf("held observer return phase: delivery=%+v error=%v", delivery, deliveryErr)
 	}
 }
