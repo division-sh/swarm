@@ -140,14 +140,14 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
-			fields, ok := entity["fields"].(map[string]any)
+			stateFields, ok := entity["fields"].(map[string]any)
 			if !ok {
 				t.Fatalf("public entity fields are not an object: %#v", entity)
 			}
-			lookup, _ := fields["lookup"].(map[string]any)
+			lookup, _ := stateFields["lookup"].(map[string]any)
 			wantLookup := map[string]any{" 2": map[string]any{"id": "space"}, "+2": map[string]any{"id": "plus"}, "-1": map[string]any{"id": "negative"}, "02": map[string]any{"id": "zero"}, "1": map[string]any{"id": "one"}, "10": map[string]any{"id": "ten"}, "2": map[string]any{"id": "two", "note": "merged"}}
-			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(fields["enums"], payload["enums"]) || !reflect.DeepEqual(fields["uuids"], payload["uuids"]) {
-				t.Fatalf("public whole-map/contained mutation lost typed keys: %#v", fields)
+			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(stateFields["enums"], payload["enums"]) || !reflect.DeepEqual(stateFields["uuids"], payload["uuids"]) {
+				t.Fatalf("public whole-map/contained mutation lost typed keys: %#v", stateFields)
 			}
 			assertCatalogAdmissionJoin(t, entity, []string{" 2", "+2", "-1", "02", "1", "10", "2"})
 			before, _ := json.Marshal(entity)
