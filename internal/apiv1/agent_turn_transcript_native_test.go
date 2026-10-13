@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -39,11 +41,19 @@ func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 				var selected transcriptNativeStore
 				var reopen func() transcriptNativeStore
 				if backend == "sqlite" {
-					primary, reconstruct := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
-					selected, reopen = primary, func() transcriptNativeStore { return reconstruct() }
+					location := filepath.Join(t.TempDir(), "transcript.db")
+					selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, location)
+					reopen = func() transcriptNativeStore {
+						owner, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, location)
+						return owner
+					}
 				} else {
-					primary, reconstruct := storetest.StartPostgresRuntimeStoreWithReopen(t)
-					selected, reopen = primary, func() transcriptNativeStore { return reconstruct() }
+					location := testutil.StartPostgresDSN(t)
+					selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+					reopen = func() transcriptNativeStore {
+						owner, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+						return owner
+					}
 				}
 				runID := uuid.NewString()
 				const agentID = "transcript-agent"

@@ -11,6 +11,9 @@ func TestManagerUnitConstructorDoesNotCreateAnImplicitRawDeliveryStore(t *testin
 	want, err := canonicalFunction(strings.Replace(row.Before, cut, "", 1))
 	got, afterErr := canonicalFunction(row.After)
 	actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+	if row.Successor != "" && actualErr == nil {
+		actual, actualErr = reverseR52ManagerSuccessor(row, actual)
+	}
 	if err != nil || afterErr != nil || actualErr != nil || !strings.Contains(row.Before, cut) || want != got || actual != got {
 		t.Fatal("manager unit constructor changed beyond removal of implicit SQL persistence")
 	}
@@ -20,7 +23,7 @@ func TestManagerUnitConstructorDoesNotCreateAnImplicitRawDeliveryStore(t *testin
 			t.Fatalf("lost explicit owner or joined lifetime accepted: %s", preserved)
 		}
 	}
-	if strings.Contains(row.After, "newManagerDeliveryTestStore") {
+	if strings.Contains(row.After, "newManagerDeliveryTestStore") || strings.Contains(row.Successor, "newManagerDeliveryTestStore") {
 		t.Fatal("raw-backed persistence fallback survives")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -19,9 +18,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var selected storetest.AgentFixtureStore
 			if backend == "postgres" {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
@@ -55,9 +52,7 @@ func TestAgentRowIndividualSourceSetReplacementBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var selected storetest.AgentFixtureStore
 			if backend == "postgres" {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
