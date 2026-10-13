@@ -127,7 +127,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 			item := items[0]
 			raw, rawErr := selected.GetMailboxItem(wait, item.MailboxID)
 			if item.Type != tools.NotifyHumanMailboxItemType || item.SourceEventID != activityidentity.ForkLineageEventID(child, initial) ||
-				item.SourceFlow != "worker" || rawErr != nil || raw.FromAgent == "" || raw.Summary != "own selected notice" || item.Status != "pending" ||
+				item.SourceRunID != child || item.SourceFlow != "worker" || rawErr != nil || raw.FromAgent == "" || raw.Summary != "own selected notice" || item.Status != "pending" ||
 				!reflect.DeepEqual(item.Payload, map[string]any{"proof": "fresh-child-only"}) {
 				t.Fatalf("fresh notice borrowed source ownership/payload: item=%+v raw=%+v error=%v", item, raw, rawErr)
 			}
@@ -166,7 +166,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 			}
 			request := apiidempotency.Request{Method: "mailbox.acknowledge", Actor: apiidempotency.PrincipalActor(principal.ID),
 				IdempotencyKey: "fresh-selected-notice-ack", ResourceID: item.MailboxID, RequestHash: "fresh-selected-notice-ack", Now: time.Now().UTC()}
-			ackCtx := correlation.WithRunID(cleanup, child)
+			ackCtx := correlation.WithSourceArtifactFact(correlation.WithRunID(cleanup, child), loaded.SourceArtifactFact)
 			completion, replayed, err := selected.AcknowledgeMailboxNotice(ackCtx, request)
 			if err != nil || replayed {
 				t.Fatalf("fresh notice acknowledgment failed: %+v replay=%t error=%v", completion, replayed, err)
