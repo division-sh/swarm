@@ -243,6 +243,9 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ev
 		return &admitted
 	}
 	admit := func(context string, index int, rule runtimecontracts.HandlerRuleEntry) (runtimecontracts.HandlerRuleEntry, error) {
+		if rule.Authored() {
+			return rule, nil
+		}
 		admitted, err := admittedFixtureRule()
 		if err != nil {
 			return runtimecontracts.HandlerRuleEntry{}, err

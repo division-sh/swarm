@@ -18144,6 +18144,10 @@ platform_tables:
         evaluation_failed (dead_letter only), or not_applicable. A never-reached final failure or parent terminalization
         records not_applicable for that resolution and does not describe previous unsuccessful attempts.
         Authored identity is the exact path-derived declaration identity; display_label is presentation only.
+        New selected and evaluation-failed facts consume the shared admitted-predicate display projection, with
+        collection/position and full source predicate text; they never consume authored row IDs or reconstruct
+        display from lowered CEL. Ordinary completion and singular join outcomes retain their distinct context.
+        Historical facts remain immutable and retain their recorded display; no-match remains display-free.
         Final replay equality remains strict. Inspection and dry-run never write; no unsuccessful-attempt rule ledger,
         ordinal, ordered set, current-contract lookup, label authority, fallback or compatibility interpretation exists.
         Existing selected stores are unsupported.

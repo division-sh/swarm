@@ -1668,8 +1668,8 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "matched" {
-		t.Fatalf("RuleID = %q, want matched", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]: else" {
+		t.Fatalf("display = %q, want rules[0]: else", got)
 	}
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("selected rules fact = %#v", result.HandlerRuleSelection)
@@ -1764,7 +1764,7 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 		t.Fatalf("Execute error = %v, want %v", err, wantErr)
 	}
 	fact := requireResolvedSelection(t, result.HandlerRuleSelection)
-	if fact.Context() != handlerselection.ContextRules || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "attempted-rule" {
+	if fact.Context() != handlerselection.ContextRules || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "rules[0]: when evaluator.failure" {
 		t.Fatalf("failed evaluation fact = %#v", fact)
 	}
 	if got := fact.Ref().SemanticPath(); got != `nodes["scoring-node"].handlers["score.dimension_complete"].rules[0]` {
@@ -1820,7 +1820,7 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 				t.Fatalf("Execute error = %v, want %v", err, ErrNotImplemented)
 			}
 			fact := requireResolvedSelection(t, result.HandlerRuleSelection)
-			if fact.Context() != tc.wantContext || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "unsupported-condition" {
+			if fact.Context() != tc.wantContext || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != tc.field+"[0]: "+predicate+" unsupported.condition" {
 				t.Fatalf("unsupported evaluation fact = %#v", fact)
 			}
 			if got := fact.Ref().SemanticPath(); got != tc.semanticPath {
@@ -2680,8 +2680,8 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rendered_yaml" {
-		t.Fatalf("selected rule = %q, want rendered_yaml", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != `rules[1]: when computed.rendered_bundle.format == "yaml"` {
+		t.Fatalf("selected display = %q, want rendered-bundle predicate at rules[1]", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("emit intents = %d, want 1", got)
@@ -2716,8 +2716,8 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rendered_yaml" {
-		t.Fatalf("selected rule = %q, want rendered_yaml", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != `rules[1]: when computed.rendered_bundle.format == "yaml"` {
+		t.Fatalf("selected display = %q, want rendered-bundle predicate at rules[1]", got)
 	}
 	if got := len(result.ComputeModuleTraces); got != 1 {
 		t.Fatalf("module traces = %d, want 1", got)
@@ -3075,8 +3075,8 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	if len(violations) != 1 {
 		t.Fatalf("violations len = %d, want 1: %#v", len(violations), deployResult["violations"])
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "invalid_manifest" {
-		t.Fatalf("selected rule = %q, want invalid_manifest", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[1]: when computed.validation.deploy_manifest.valid == false" {
+		t.Fatalf("selected display = %q, want manifest validity predicate at rules[1]", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("emit intents = %d, want 1", got)
@@ -3189,8 +3189,8 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	if len(violations) != 0 {
 		t.Fatalf("violations len = %d, want 0: %#v", len(violations), countResult["violations"])
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "valid_count" {
-		t.Fatalf("selected rule = %q, want valid_count", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[1]: when computed.validation.count_match.valid == true" {
+		t.Fatalf("selected display = %q, want count validity predicate at rules[1]", got)
 	}
 }
 
@@ -4492,8 +4492,8 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rules[0]: when payload.score > 5" {
+		t.Fatalf("display = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.NextState != "approved" {
 		t.Fatalf("NextState = %q", result.NextState)
@@ -4536,8 +4536,8 @@ rules:
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "deep_scan" {
-		t.Fatalf("RuleID = %q, want deep_scan", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]: case {selector: payload.mode, equals: deep}" {
+		t.Fatalf("display = %q, want authored case predicate", got)
 	}
 	if got := result.NextState; got != "deep_scan" {
 		t.Fatalf("NextState = %q, want deep_scan", got)
@@ -4572,8 +4572,8 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rules[0]: when payload.score > 5" {
+		t.Fatalf("display = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.NextState != "default" {
 		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
@@ -4608,8 +4608,8 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rules[0]: when payload.score > 5" {
+		t.Fatalf("display = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.SetsGate != "approved" {
 		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
@@ -4702,32 +4702,32 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 		}),
 	})
 	cases := []struct {
-		name   string
-		score  int
-		bools  map[string]bool
-		bucket string
-		ruleID string
+		name    string
+		score   int
+		bools   map[string]bool
+		bucket  string
+		display string
 	}{
 		{
-			name:   "high_first_match",
-			score:  91,
-			bools:  map[string]bool{"payload.score >= 80": true, "payload.score >= 40": true},
-			bucket: "high",
-			ruleID: "high",
+			name:    "high_first_match",
+			score:   91,
+			bools:   map[string]bool{"payload.score >= 80": true, "payload.score >= 40": true},
+			bucket:  "high",
+			display: "rules[0]: when payload.score >= 80",
 		},
 		{
-			name:   "medium_after_high_fails",
-			score:  52,
-			bools:  map[string]bool{"payload.score >= 80": false, "payload.score >= 40": true},
-			bucket: "medium",
-			ruleID: "medium",
+			name:    "medium_after_high_fails",
+			score:   52,
+			bools:   map[string]bool{"payload.score >= 80": false, "payload.score >= 40": true},
+			bucket:  "medium",
+			display: "rules[1]: when payload.score >= 40",
 		},
 		{
-			name:   "else_low",
-			score:  12,
-			bools:  map[string]bool{"payload.score >= 80": false, "payload.score >= 40": false},
-			bucket: "low",
-			ruleID: "low",
+			name:    "else_low",
+			score:   12,
+			bools:   map[string]bool{"payload.score >= 80": false, "payload.score >= 40": false},
+			bucket:  "low",
+			display: "rules[2]: else",
 		},
 	}
 	for _, tc := range cases {
@@ -4798,8 +4798,8 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != tc.ruleID {
-				t.Fatalf("RuleID = %q, want %q", got, tc.ruleID)
+			if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != tc.display {
+				t.Fatalf("display = %q, want %q", got, tc.display)
 			}
 			if got := len(result.EmitIntents); got != 1 {
 				t.Fatalf("EmitIntents len = %d, want 1", got)
@@ -4953,8 +4953,8 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rule-1" {
-		t.Fatalf("RuleID = %q, want rule-1", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]: when payload.score > 5" {
+		t.Fatalf("display = %q, want rules[0]: when payload.score > 5", got)
 	}
 	if got := len(result.EmitIntents); got != 2 {
 		t.Fatalf("EmitIntents len = %d, want 2", got)
@@ -7801,8 +7801,8 @@ func TestExecutor_RuleEmitRunsOnlyForSelectedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "needs-human" {
-		t.Fatalf("RuleID = %q, want needs-human", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[1]: when payload.amount >= 100" {
+		t.Fatalf("display = %q, want rules[1]: when payload.amount >= 100", got)
 	}
 	if len(result.EmitIntents) != 1 || result.EmitIntents[0].Event.Type() != "flow-1/refund.human" {
 		t.Fatalf("emit intents = %#v, want only selected rule emission", result.EmitIntents)
