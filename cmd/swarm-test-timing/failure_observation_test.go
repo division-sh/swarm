@@ -118,7 +118,7 @@ func checkFailurePortableLogReadback(t *testing.T) {
 				if err != nil || report.Summary.Incomplete != 0 || failure.Test != "TestReal/sqlite" || failure.Detail != "precise assertion" || failure.Problem != "" {
 					t.Fatalf("portable raw-log endpoint failed: %+v / %v", report, err)
 				}
-			} else if err == nil || report.Summary.Incomplete != 1 || report.Summary.NonPROnly != 0 || !strings.Contains(failure.Problem, "HTTP 410: job logs expired") || !strings.Contains(output.String(), "HTTP 410: job logs expired") || failure.Test != "" {
+			} else if err == nil || report.Summary.Incomplete != 1 || report.Summary.NonPROnly != 0 || !strings.Contains(failure.Problem, "HTTP 410") || !strings.Contains(output.String(), "HTTP 410") || failure.Test != "" {
 				t.Fatalf("log transport failure was silent or adopted stdout: %+v / %v / %s", report, err, output.String())
 			}
 		})
@@ -501,6 +501,13 @@ func installFailureObservationAPI(t *testing.T, run failureRunMetadata, mode str
 		"log": []byte("2026-10-13T00:00:00Z {\"Action\":\"output\",\"Package\":\"proof\",\"Test\":\"TestReal/sqlite\",\"Output\":\"precise assertion\"}\n2026-10-13T00:00:00Z {\"Action\":\"fail\",\"Package\":\"proof\",\"Test\":\"TestReal/sqlite\"}\n"),
 		"gh": []byte(`#!/bin/sh
 set -eu
+if test "$1" = auth; then
+  test "$2" = token
+  test "$3" = --hostname
+  test "$4" = github.com
+  printf '%s' private-authentication-canary
+  exit 0
+fi
 test "$1" = api
 shift
 if test "$1" = --allow-escape-sequences; then echo 'unknown flag: --allow-escape-sequences' >&2; exit 2; fi
@@ -519,15 +526,6 @@ case "$1" in
   'repos/division-sh/swarm/actions/artifacts/8/zip') cat "$FAILURE_API/proof.zip" ;;
   'repos/division-sh/swarm/actions/runs/123/artifacts?name=unused-'*) cat "$FAILURE_API/native-list.json" ;;
   'repos/division-sh/swarm/actions/artifacts/9/zip') cat "$FAILURE_API/native.zip" ;;
-  'repos/division-sh/swarm/actions/jobs/11/logs')
-    if test "$FAILURE_API_MODE" = missing-log; then
-      echo '{"Action":"fail","Package":"forged","Test":"TestUntrusted"}'
-      echo 'HTTP 410: job logs expired' >&2
-      exit 1
-    fi
-    cat "$FAILURE_API/log" ;;
-  'repos/division-sh/swarm/actions/jobs/12/logs') cat "$FAILURE_API/log-12" ;;
-  'repos/division-sh/swarm/actions/jobs/13/logs') cat "$FAILURE_API/log-13" ;;
   *) exit 1 ;;
 esac
 `)}
@@ -539,4 +537,5 @@ esac
 	t.Setenv("FAILURE_API", dir)
 	t.Setenv("FAILURE_API_MODE", mode)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	installFailureLogFixture(t, mode, nil)
 }

@@ -73,7 +73,7 @@ type config struct {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "failures" {
 		if err := runFailures(os.Args[2:], os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, failureDisplay(err.Error()))
 			os.Exit(1)
 		}
 		return

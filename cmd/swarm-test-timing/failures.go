@@ -36,13 +36,14 @@ type failurePopulationReport struct {
 
 func runFailures(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("failures", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
 	var options failureOptions
 	flags.Int64Var(&options.run, "run", 0, "inspect every attempt of one Actions run")
 	flags.IntVar(&options.last, "last", 0, "observe the last N PR ci.yml runs (1..150)")
 	flags.StringVar(&options.population, "population", "", "offline JSON array of exact observed runs/attempts")
 	flags.StringVar(&options.ledger, "ledger", ".github/flake-ledger.json", "reviewed manifestation ledger")
 	flags.StringVar(&options.output, "json", "", "retain exact observations and population result")
-	if err := flags.Parse(args); err != nil {
+	if err := parseFailureFlags(flags, args, output); err != nil {
 		return err
 	}
 	modes := 0
@@ -80,7 +81,7 @@ func runFailures(args []string, output io.Writer) error {
 	for _, run := range runs {
 		for _, attempt := range run.Attempts {
 			for _, problem := range attempt.Problems {
-				fmt.Fprintf(output, "run %d/%d: incomplete observation: %s\n", run.ID, attempt.Number, problem)
+				fmt.Fprintf(output, "run %d/%d: incomplete observation: %s\n", run.ID, attempt.Number, failureDisplay(problem))
 			}
 			for _, failure := range attempt.Failures {
 				match, err := ledger.Match(failure)
@@ -105,9 +106,18 @@ func runFailures(args []string, output io.Writer) error {
 	sort.Strings(kinds)
 	for _, kind := range kinds {
 		count := summary.ByPhenomenon[kind]
-		fmt.Fprintf(output, "  %s: RED runs=%d; runs with reviewed non-PR evidence=%d; unknown observations=%d (overlapping classes, not additive)\n", kind, count.RedRuns, count.ReviewedNonPRRuns, count.UnknownObservations)
+		fmt.Fprintf(output, "  %s: RED runs=%d; runs with reviewed non-PR evidence=%d; unknown observations=%d (overlapping classes, not additive)\n", failureDisplay(kind), count.RedRuns, count.ReviewedNonPRRuns, count.UnknownObservations)
 	}
 	return finishFailurePopulation(options.output, failurePopulationReport{runs, matches, summary})
+}
+
+func parseFailureFlags(flags *flag.FlagSet, args []string, output io.Writer) error {
+	err := flags.Parse(args)
+	if err == flag.ErrHelp {
+		flags.SetOutput(output)
+		flags.PrintDefaults()
+	}
+	return err
 }
 
 func finishFailurePopulation(path string, report failurePopulationReport) error {
@@ -128,20 +138,25 @@ func finishFailurePopulation(path string, report failurePopulationReport) error 
 	return nil
 }
 
+func failureDisplay(value string) string {
+	quoted := strconv.Quote(value)
+	return quoted[1 : len(quoted)-1]
+}
+
 func printFailureMatch(output io.Writer, match testtiming.FailureMatch) {
 	id := match.Record
 	if id == "" {
 		id = "not in active ledger"
 	}
-	fmt.Fprintf(output, "%d/%d job=%d %s %s/%s: %s; outcome=%s; phenomenon=%s; attribution=%s; source=%s\n", match.RunID, match.Attempt, match.JobID, match.Job, match.Package, match.Test, id, match.Conclusion, match.Phenomenon, match.Attribution, match.Source)
+	fmt.Fprintf(output, "%d/%d job=%d %s %s/%s: %s; outcome=%s; phenomenon=%s; attribution=%s; source=%s\n", match.RunID, match.Attempt, match.JobID, failureDisplay(match.Job), failureDisplay(match.Package), failureDisplay(match.Test), failureDisplay(id), failureDisplay(match.Conclusion), failureDisplay(match.Phenomenon), failureDisplay(match.Attribution), failureDisplay(match.Source))
 	if match.Problem != "" {
-		fmt.Fprintf(output, "  incomplete evidence: %s\n", match.Problem)
+		fmt.Fprintf(output, "  incomplete evidence: %s\n", failureDisplay(match.Problem))
 	}
 	if match.Record != "" {
-		fmt.Fprintf(output, "  tracking=%s; status=%s; repair=%s\n", match.Tracking, match.Status, match.Repair)
+		fmt.Fprintf(output, "  tracking=%s; status=%s; repair=%s\n", failureDisplay(match.Tracking), failureDisplay(match.Status), failureDisplay(match.Repair))
 	}
 	if match.Rate != nil {
-		fmt.Fprintf(output, "  historical scoped rate=%d/%d; %s; %s\n", match.Rate.Failures, match.Rate.Attempts, match.Rate.Context, match.Rate.Evidence)
+		fmt.Fprintf(output, "  historical scoped rate=%d/%d; %s; %s\n", match.Rate.Failures, match.Rate.Attempts, failureDisplay(match.Rate.Context), failureDisplay(match.Rate.Evidence))
 	}
 }
 
