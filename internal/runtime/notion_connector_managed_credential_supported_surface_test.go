@@ -35,7 +35,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -61,7 +61,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",

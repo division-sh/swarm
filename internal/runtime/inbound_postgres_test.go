@@ -62,6 +62,11 @@ func boundedInboundTestSource(t *testing.T) semanticview.Source {
 func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
 	opts.ContractBundle = boundedInboundTestSource(t)
+	fact := runtimeTestSourceArtifactFact(t, opts.ContractBundle)
+	if opts.SourceArtifactFact.Validate() == nil && opts.SourceArtifactFact != fact {
+		t.Fatal("bounded bus fixture source contradicts its selected artifact")
+	}
+	opts.SourceArtifactFact = fact
 	return newScopedTestEventBus(t, selected, opts, differentEvents...)
 }
 
@@ -141,6 +146,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -243,6 +249,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -345,6 +352,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -446,6 +454,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -507,6 +516,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -569,6 +579,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -634,6 +645,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -692,6 +704,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -753,6 +766,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
@@ -822,6 +836,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 
 	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
@@ -1031,6 +1046,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			target := seedPostgresInboundGatewayRuntime(t, ctx, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+			ctx = boundedInboundTargetContext(t, ctx, target)
 
 			bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
@@ -1120,6 +1136,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+			ctx = boundedInboundTargetContext(t, ctx, target)
 
 			bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
@@ -1178,19 +1195,22 @@ func seedPostgresInboundGatewayRuntime(
 	sources ...semanticview.Source,
 ) runtimepkg.InboundTarget {
 	t.Helper()
-	target := seedBoundedStandingTarget(t, ctx, pg, entityID)
-	if target.RunID != runID {
-		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
-	}
 	source := boundedInboundTestSource(t)
 	if len(sources) == 1 {
 		source = sources[0]
 	} else if len(sources) != 0 {
 		t.Fatal("inbound fixture requires one exact constructor source")
 	}
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	target := seedBoundedStandingTarget(t, ctx, pg, entityID, source)
+	if target.RunID != runID {
+		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
+	}
 	seedBoundedInboundFlow(t, ctx, pg, source, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
-		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",
@@ -1208,7 +1228,7 @@ func seedPostgresInboundGatewayRuntime(
 			Status:    "active",
 			HiredBy:   "test",
 			StartedAt: time.Now().UTC(),
-		}); err != nil {
+		}, fact); err != nil {
 			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 		}
 	}
@@ -1309,19 +1329,22 @@ func seedSQLiteInboundGatewayRuntime(
 ) runtimepkg.InboundTarget {
 	t.Helper()
 	now := time.Now().UTC()
-	target := seedBoundedStandingTarget(t, ctx, sqliteStore, entityID)
-	if target.RunID != runID {
-		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
-	}
 	source := boundedInboundTestSource(t)
 	if len(sources) == 1 {
 		source = sources[0]
 	} else if len(sources) != 0 {
 		t.Fatal("inbound fixture requires one exact constructor source")
 	}
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	target := seedBoundedStandingTarget(t, ctx, sqliteStore, entityID, source)
+	if target.RunID != runID {
+		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
+	}
 	seedBoundedInboundFlow(t, ctx, sqliteStore, source, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
-		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",
@@ -1339,7 +1362,7 @@ func seedSQLiteInboundGatewayRuntime(
 			Status:    "active",
 			HiredBy:   "test",
 			StartedAt: now,
-		}); err != nil {
+		}, fact); err != nil {
 			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 		}
 	}
@@ -1386,10 +1409,18 @@ func installInboundStandingRecoveryOwner(
 ) {
 	t.Helper()
 	origin := boundedInboundStandingOrigin(t, provider)
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
+		t.Fatalf("admit standing recovery source: %v", err)
+	}
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		t.Fatal("standing recovery requires the selected bus source")
+	}
 	process := worklifetime.NewProcess()
-	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: runID,
-		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
+		BundleHash:        fact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1456,7 +1487,11 @@ func unsubscribeAndWaitForInboundBusQuiescence(t testing.TB, bus *runtimebus.Eve
 
 func waitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus) {
 	t.Helper()
-	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
+		t.Fatalf("admit selected bus quiescence source: %v", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)

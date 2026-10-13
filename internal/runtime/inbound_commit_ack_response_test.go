@@ -108,11 +108,13 @@ func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, 
 		t.Cleanup(cleanup)
 		selected := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 		return ctx, selected, db, target
 	}
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	db := storetest.DatabaseForTest(selected)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
+	ctx = boundedInboundTargetContext(t, ctx, target)
 	return ctx, selected, db, target
 }
 
@@ -160,7 +162,7 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 				t.Fatal(err)
 			}
 			process := worklifetime.NewProcess()
-			runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+			runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: target.BundleHash})
 			if err != nil {
 				t.Fatal(err)
 			}

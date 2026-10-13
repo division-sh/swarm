@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -18,6 +19,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -140,7 +142,7 @@ func TestBoundedProviderDeliveryRequiresPreResolvedStandingTarget(t *testing.T) 
 	}
 }
 
-func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, alias string) runtimepkg.InboundTarget {
+func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, alias string, selectedSource semanticview.Source) runtimepkg.InboundTarget {
 	t.Helper()
 	flowPath := boundedProviderFlowID
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
@@ -149,11 +151,12 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 		t.Fatal("bounded provider target requires an admitted source artifact fact")
 	}
 	bundleHash := source.BundleHash()
+	bundle, found := semanticview.Bundle(selectedSource)
 	writer, ok := persistence.(sourceartifactfixture.Writer)
-	if !ok || bundleHash != sourceartifactfixture.BundleHash {
+	if !ok || !found || bundle.SourceArtifact == nil || bundleHash != bundle.SourceArtifact.BundleHash() {
 		t.Fatal("bounded component binding requires its exact admitted fixture artifact writer")
 	}
-	sourceartifactfixture.Require(t, ctx, writer)
+	sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 
 	owner, ok := persistence.(runtimepipeline.StandingServicePersistence)
 	if !ok {
@@ -180,6 +183,16 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 func boundedInboundTestCoordinates() (string, string) {
 	return runtimeflowidentity.StandingGenerationRunID(runtimeflowidentity.StandingServiceID(boundedProviderFlowID), 1),
 		runtimeflowidentity.EntityID(boundedProviderFlowID)
+}
+
+func boundedInboundTargetContext(t testing.TB, ctx context.Context, target runtimepkg.InboundTarget) context.Context {
+	t.Helper()
+	fact, err := runtimecorrelation.NewSourceArtifactFact(target.BundleHash)
+	if err != nil {
+		t.Fatalf("bounded receiver context requires its admitted binding source: %v", err)
+	}
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 }
 
 const boundedProviderFlowID = "bounded_inbound"
