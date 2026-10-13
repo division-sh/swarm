@@ -3,6 +3,7 @@ package contracts
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -63,7 +64,10 @@ func TestOrderedRuleRowsRejectAuthoredNamesOnPresence(t *testing.T) {
 func assertRetiredRuleNameDiagnostic(t *testing.T, err error, context, key string) {
 	t.Helper()
 	var diagnostic *LoaderDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Code != "undefined_field" || diagnostic.Key != key {
+	if !errors.As(err, &diagnostic) || diagnostic.Code != "contract_loader.undefined_field" ||
+		!strings.Contains(diagnostic.Problem, `field "`+key+`" is not supported`) ||
+		!strings.Contains(diagnostic.Location.YAMLPath, `["`+key+`"]`) ||
+		!slices.Contains(diagnostic.ValidOptions, "emit") || slices.Contains(diagnostic.ValidOptions, "id") || slices.Contains(diagnostic.ValidOptions, "description") {
 		t.Fatalf("%s.%s must fail on presence at the vocabulary owner: %v", context, key, err)
 	}
 	for _, want := range []string{`["` + context + `"][0]`, "nodes.yaml:", "emit"} {
