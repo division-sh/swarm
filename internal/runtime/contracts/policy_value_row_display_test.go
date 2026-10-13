@@ -3,6 +3,8 @@ package contracts
 import (
 	"fmt"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestContractPolicyValueRowDiagnosticsKeepPositionAndKind(t *testing.T) {
@@ -15,6 +17,7 @@ func TestContractPolicyValueRowDiagnosticsKeepPositionAndKind(t *testing.T) {
 		{PolicySheetRowKindModule, validatePolicySheetComputeModuleRows, "compute_module row must lower to compute-owned module operation"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {
+			nodeKey := identitytest.RootNode(t, "worker").Key()
 			row := HandlerRuleEntry{PolicyRow: PolicySheetRowMetadata{Kind: tc.kind}}
 			bundle := &WorkflowContractBundle{Nodes: map[string]SystemNodeContract{
 				"worker": {EventHandlers: map[string]SystemNodeEventHandler{"request": {Rules: []HandlerRuleEntry{row, row}}}},
@@ -24,7 +27,7 @@ func TestContractPolicyValueRowDiagnosticsKeepPositionAndKind(t *testing.T) {
 				t.Fatalf("value-row refusals = %v, want both distinct positional rows", errs)
 			}
 			for i, err := range errs {
-				want := fmt.Sprintf("%s: node worker handler request rules[%d]: %s %s", ErrInvalidField, i, tc.kind, tc.detail)
+				want := fmt.Sprintf("%s: node %s handler request rules[%d]: %s %s", ErrInvalidField, nodeKey, i, tc.kind, tc.detail)
 				if err.Error() != want {
 					t.Fatalf("value-row refusal[%d] = %v, want %q", i, err, want)
 				}
