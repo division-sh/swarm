@@ -634,22 +634,16 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 		}
 	}
 	for idx, rule := range handler.Rules {
-		scope := fmt.Sprintf("handler.rules[%d]", idx)
-		if id := strings.TrimSpace(rule.ID); id != "" {
-			scope = "handler.rules[" + id + "]"
-		}
+		scope := "handler." + rule.DisplayLabel("rules", idx)
 		addRuleTargets(scope, rule)
 	}
 	for idx, rule := range handler.OnComplete {
-		scope := fmt.Sprintf("handler.on_complete[%d]", idx)
-		if id := strings.TrimSpace(rule.ID); id != "" {
-			scope = "handler.on_complete[" + id + "]"
-		}
+		scope := "handler." + rule.DisplayLabel("on_complete", idx)
 		addRuleTargets(scope, rule)
 	}
 	if handler.Join != nil {
-		addRuleTargets("handler.join.on_complete", handler.Join.OnComplete)
-		addRuleTargets("handler.join.on_deadline", handler.Join.OnDeadline)
+		addRuleTargets("handler."+handler.Join.OnComplete.DisplayLabel("join.on_complete", 0), handler.Join.OnComplete)
+		addRuleTargets("handler."+handler.Join.OnDeadline.DisplayLabel("join.on_deadline", 0), handler.Join.OnDeadline)
 	}
 	return out
 }
