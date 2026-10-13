@@ -1,5 +1,35 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S22 Typed Entity Fixture Consumer Correction
+
+Pre-edit issue record6145212320 and existing-watchlist refinement extend the
+already-approved suffix/prefix presence class to a missed typed Go producer.
+The complete entityruntime package at23b120823 rejects the old positive
+TestMaterialize_AcceptsBracketFormListRefs at `[text][]`, correctly teaching
+`[[text]]`. This is fixture drift, not a new interpreter or policy decision.
+All13 touched packages ran completely at that frozen source: the other12 pass,
+with provision-dependent/PG-only skips explicitly recorded and not credited.
+The seven-package aggregate remains RED; no passing source is substituted for it.
+
+| Row | Producer, canonical owner and consumer | Required proof |
+|---|---|---|
+| S22a typed nested-list state fixture | Contract.Entity/Types in TestMaterialize_AcceptsBracketFormListRefs -> CatalogTypeReference -> NormalizeState | Migrate `[text][]`, `[][text]`, `[Feature][]` to `[[text]]`, `[[text]]`, `[[Feature]]`; keep every original present-empty and named-record assertion. |
+| S22b nested field normalization and old-spelling refusal | Same Contract -> ResolveFieldPath/NormalizeFieldValue -> canonical reference owner | Preserve nested Feature values plus wrong-shape/unknown-field refusal; explicitly reject all three old refs through both state and field entrances with the canonical teaching replacement. |
+
+The additional finite Type-string census has seven lines: exactly three old
+typed positives, one physical text[] DDL control and three physical SQL []uint8
+diagnostic controls. The four physical controls remain unchanged; they are not
+authored references. S21's node-YAML census is not claimed to cover these typed
+producers. Historical field names remain business-field identities, not support
+for their retired Type values. No production/parser/spec-policy, D angle/long
+retirement, assertion, selector, baseline, guard, or per-test deadline change.
+
+Run the complete changed entityruntime package, all six requested packages,
+focused canonical/refusal race controls and clean no-argument preflight before
+the single push. Earlier whole-package and broad-unit receipts stay bound to
+their actual23b source; hosted lifecycle/current-head review still required.
+Parents2447/2407/2349 stay open, C frozen and D2648/2287 separate.
+
 ## S21 Generated Node-Fixture Consumer Correction
 
 Blocking review6144536938/checklist6144546820 supersedes the conditional

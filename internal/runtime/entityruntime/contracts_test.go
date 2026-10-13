@@ -228,8 +228,8 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"tags":          {Type: "[text]"},
-				"legacy_tags":   {Type: "[text][]"},
-				"prefixed_tags": {Type: "[][text]"},
+				"legacy_tags":   {Type: "[[text]]"},
+				"prefixed_tags": {Type: "[[text]]"},
 				"spec":          {Type: "Spec"},
 			},
 		},
@@ -238,7 +238,7 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 				"Spec": {
 					Fields: map[string]runtimecontracts.TypeFieldSpec{
 						"features":        {Type: "[Feature]"},
-						"legacy_features": {Type: "[Feature][]"},
+						"legacy_features": {Type: "[[Feature]]"},
 						"notes":           {Type: "[text]"},
 					},
 				},
@@ -301,6 +301,36 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	}
 	if _, err := NormalizeFieldValue(contract, "spec.features", []any{map[string]any{"unknown": "x"}}); err == nil {
 		t.Fatalf("NormalizeFieldValue(spec.features undeclared field) = nil, want named-type field error")
+	}
+}
+
+func TestMaterialize_RejectsRetiredNestedListRefs(t *testing.T) {
+	for _, tc := range []struct {
+		reference   string
+		replacement string
+	}{
+		{reference: "[text][]", replacement: "[[text]]"},
+		{reference: "[][text]", replacement: "[[text]]"},
+		{reference: "[Feature][]", replacement: "[[Feature]]"},
+	} {
+		t.Run(tc.reference, func(t *testing.T) {
+			contract := Contract{
+				Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"items": {Type: tc.reference},
+				}},
+				Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+					"Feature": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"name": {Type: "text"},
+					}},
+				}},
+			}
+			if _, err := NormalizeState(contract, map[string]any{"items": []any{}}); err == nil || !strings.Contains(err.Error(), "retired") || !strings.Contains(err.Error(), "use "+tc.replacement) {
+				t.Fatalf("NormalizeState(%s) = %v, want retired reference teaching %s", tc.reference, err, tc.replacement)
+			}
+			if _, err := NormalizeFieldValue(contract, "items", []any{}); err == nil || !strings.Contains(err.Error(), "retired") || !strings.Contains(err.Error(), "use "+tc.replacement) {
+				t.Fatalf("NormalizeFieldValue(%s) = %v, want retired reference teaching %s", tc.reference, err, tc.replacement)
+			}
+		})
 	}
 }
 
