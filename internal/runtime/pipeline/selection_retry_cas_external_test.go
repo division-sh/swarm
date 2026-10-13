@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -31,11 +32,12 @@ type selectionCASPersistence struct {
 	selection handlerselection.HandlerRuleSelectionFact
 	err       error
 	losses    int
+	rules     [2]identity.DeclarationIdentity
 }
 
 func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
 	if command.DeliverySuccess != nil && p.losses < 9 &&
-		(command.DeliverySuccess.RuleSelection.DisplayLabel() == "first" || command.DeliverySuccess.RuleSelection.DisplayLabel() == "second") {
+		(command.DeliverySuccess.RuleSelection.Ref().Equal(p.rules[0]) || command.DeliverySuccess.RuleSelection.Ref().Equal(p.rules[1])) {
 		if !p.fired {
 			p.selection = command.DeliverySuccess.RuleSelection
 		}
@@ -97,6 +99,17 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}
+			handler, found := source.ExecutableNodeEventHandler(externalPipelineSourceNode(t, source, ".", "select"), "select")
+			if !found || len(handler.Rules) != 3 {
+				t.Fatal("CAS proof requires both admitted selection rows and its fallback")
+			}
+			for index := range fault.rules {
+				ref, admitted := handler.Rules[index].DeclarationIdentity()
+				if !admitted {
+					t.Fatal("CAS proof lacks exact admitted selection identity")
+				}
+				fault.rules[index] = ref
+			}
 			selected.persistence = pipeline.NewWorkflowPersistence(fault)
 			module := proposedEffectProofModule{source: source, nodes: nodes}
 			initialCoordinator := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module})
@@ -126,7 +139,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
-			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || fault.selection.DisplayLabel() != "first" {
+			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || !fault.selection.Ref().Equal(fault.rules[0]) || fault.selection.DisplayLabel() != "rules[0]: when entity.marker == 'first'" {
 				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
 			}
 			evidence := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, event.ID())
@@ -146,8 +159,8 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if evidence.DeadLetters != 0 {
 				t.Fatalf("state contention dead letter: %d", evidence.DeadLetters)
 			}
-			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
-			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
+			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when entity.marker == 'second'")
+			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when entity.marker == 'second'")
 			reader := selected.events.(interface {
 				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 			})

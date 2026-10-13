@@ -130,7 +130,8 @@ func TestServedCompiledTransitionSeedSettlementFenceBothStores(t *testing.T) {
 					t.Fatalf("history=%+v", history)
 				}
 				record := readLifecycleTransitionAtCut(t, reader, seed.RunID, entity, history[0].TriggerEventID)
-				if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.RuleSelection().DisplayLabel() != "alpha" {
+				selection := record.Evidence.RuleSelection()
+				if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || selection.DisplayLabel() != "rules[0]: when payload.choice == 'alpha'" || selection.Ref().SemanticPath() != `nodes["controller"].handlers["work.second"].rules[0]` {
 					t.Fatalf("selected immutable evidence changed: %+v", record)
 				}
 			}
