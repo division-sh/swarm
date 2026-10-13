@@ -8,54 +8,55 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-// An absent actor can defer only to its live, durably accepted attachment.
-// This observation grants neither agent construction nor delivery execution.
-func (am *AgentManager) committedAgentAttachmentInstalling(ctx context.Context, identity agentidentity.Identity) (bool, error) {
+// An observed attachment proves its exact installing census, including whether
+// it owns this actor. Missing observation proves neither membership nor absence.
+func (am *AgentManager) observeCommittedAgentAttachment(ctx context.Context, identity agentidentity.Identity) (observed, planned bool, err error) {
 	ownerCtx, _, running := am.lifecycle.runSnapshot()
 	if !running || ownerCtx == nil || ownerCtx.Err() != nil {
-		return false, nil
+		return false, false, nil
 	}
 	key, active, executor, receipt, hash := am.installingAgentAttachment(identity)
 	if active == nil || am.workflowInstances == nil {
-		return false, nil
+		return false, false, nil
 	}
 	if err := receipt.Validate(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if receipt.RunID() != key.runID || receipt.InstancePath() != key.instancePath {
-		return false, errors.New("accepted agent attachment receipt differs from its exact owner")
+		return false, false, errors.New("accepted agent attachment receipt differs from its exact owner")
 	}
 	provider, ok := am.lifecycle.persistence().(processExecutionBindingProvider)
 	if !ok {
-		return false, errors.New("accepted agent attachment requires its generation binding")
+		return false, false, errors.New("accepted agent attachment requires its generation binding")
 	}
 	binding, err := provider.ProcessExecutionBinding()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if !receipt.ProcessBinding().Equal(binding) {
-		return false, pipeline.ErrFlowAttachmentStale
+		return false, false, pipeline.ErrFlowAttachmentStale
 	}
 	row, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, active.identity.Route)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	installing, err := installingAgentReadiness(row, found, active, receipt, hash, identity)
+	installing, err := installingAgentReadiness(row, found, active, receipt, hash)
 	if err != nil || !installing {
-		return false, err
+		return false, false, err
 	}
 	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, receipt); err != nil {
-		return false, err
+		return false, false, err
 	}
 	// Native verification never runs under the process mutex. Recheck the
 	// executor afterwards so retirement/successor handoff cannot lend its wake.
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
-	return ownerCtx.Err() == nil && am.dynamicFlowActiveAttempts[key] == active && am.dynamicFlowReadinessAttempts[key] == executor &&
-		active.receipt == receipt && active.planHash == hash && agentAttachmentInstalling(active, executor), nil
+	observed = ownerCtx.Err() == nil && am.dynamicFlowActiveAttempts[key] == active && am.dynamicFlowReadinessAttempts[key] == executor &&
+		active.receipt == receipt && active.planHash == hash && agentAttachmentInstalling(active, executor)
+	return observed, observed && readinessPlanOwnsAgent(row.Plan, identity), nil
 }
 
-func installingAgentReadiness(row pipeline.DynamicFlowRuntimeReadiness, found bool, active *dynamicFlowActiveAttempt, receipt pipeline.DynamicFlowRuntimeActivationAttempt, hash string, identity agentidentity.Identity) (bool, error) {
+func installingAgentReadiness(row pipeline.DynamicFlowRuntimeReadiness, found bool, active *dynamicFlowActiveAttempt, receipt pipeline.DynamicFlowRuntimeActivationAttempt, hash string) (bool, error) {
 	if !found || row.Plan.RunID != receipt.RunID() || row.InstancePath != receipt.InstancePath() || row.Plan.Identity.Route() != active.identity.Route ||
 		row.PlanHash != hash || row.AttemptOrdinal != receipt.Ordinal() {
 		return false, errors.New("accepted agent attachment disagrees with current readiness evidence")
@@ -63,7 +64,7 @@ func installingAgentReadiness(row pipeline.DynamicFlowRuntimeReadiness, found bo
 	if !row.Eligible() || row.AttemptState != "accepted" || !row.Phase.Valid() || row.Phase.Includes(pipeline.FlowAttachmentAgentsRegistered) {
 		return false, nil
 	}
-	return readinessPlanOwnsAgent(row.Plan, identity), nil
+	return true, nil
 }
 
 func readinessPlanOwnsAgent(plan pipeline.DynamicFlowRuntimeReadinessPlan, identity agentidentity.Identity) bool {

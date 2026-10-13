@@ -93,12 +93,19 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 }
 
 func (am *AgentManager) finalizeAbsentCommittedAgentReadiness(ctx context.Context, identity runtimeagentidentity.Identity) error {
-	installing, err := am.committedAgentAttachmentInstalling(ctx, identity)
+	observed, planned, err := am.observeCommittedAgentAttachment(ctx, identity)
 	if err != nil {
 		return fmt.Errorf("inspect committed agent %s attachment: %w", identity.Description(), err)
 	}
-	if installing {
+	if observed && !planned {
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, identity.Description())
+	}
+	if observed {
 		return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
+	}
+	switch am.lifecycle.phaseSnapshot() {
+	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
+		return errRuntimeShuttingDown
 	}
 	return nil
 }
