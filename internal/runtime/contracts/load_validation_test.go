@@ -241,7 +241,6 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"deploy.requested": {
 						Rules: []HandlerRuleEntry{{
-							ID:        "validate_manifest",
 							PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindValidate, Validation: validation},
 							Compute: &ComputeSpec{
 								Operation:  ComputeOpValidate,

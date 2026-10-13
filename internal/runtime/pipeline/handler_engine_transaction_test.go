@@ -454,7 +454,6 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 
 func VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmitForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-
 		"schema.yaml": "name: runtime-test\n",
 		"scoring/schema.yaml": `name: scoring
 stages:
@@ -823,7 +822,6 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
 stages:
@@ -915,7 +913,6 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContextForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
 instance: validation_id
@@ -997,7 +994,6 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentityForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-
 		"schema.yaml": "name: runtime-test\n",
 		"review/schema.yaml": `name: review
 stages:
@@ -1065,7 +1061,6 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
 stages:
@@ -1235,7 +1230,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
-			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
+			{Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
@@ -1273,7 +1268,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
-			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
+			{Condition: "true", AdvancesTo: "done"},
 		},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
@@ -1373,7 +1368,7 @@ func VerifyExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrderForTest(t *te
 	result, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 		Rules: []runtimecontracts.HandlerRuleEntry{
-			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
+			{Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
@@ -1407,21 +1402,18 @@ func VerifyExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEventFor
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{
-				ID:        "high",
 				Condition: "payload.score >= 80.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"high"`),
 				}},
 			},
 			{
-				ID:        "medium",
 				Condition: "payload.score >= 40.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"medium"`),
 				}},
 			},
 			{
-				ID:        "low",
 				Condition: "else",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"low"`),
@@ -1686,7 +1678,6 @@ func VerifyExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImme
 			state: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Rules: []runtimecontracts.HandlerRuleEntry{{
-					ID:        "pick",
 					Condition: "true",
 					Emit: runtimecontracts.EmitSpec{
 						Event: "custom.emitted",
@@ -1704,7 +1695,6 @@ func VerifyExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImme
 			state: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				OnComplete: []runtimecontracts.HandlerRuleEntry{{
-					ID:        "complete",
 					Condition: "true",
 					Emit: runtimecontracts.EmitSpec{
 						Event: "custom.emitted",

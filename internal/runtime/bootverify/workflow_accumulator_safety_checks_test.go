@@ -14,7 +14,7 @@ func TestRunRejectsAccumulatorHandlerOnCompleteThroughSharedAdmission(t *testing
 	bundle := templatefanin.LoadBundle(t)
 	node := bundle.Nodes[templatefanin.ReceiverNodeID]
 	handler := node.EventHandlers[templatefanin.ReceiverEvent]
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{ID: "finite-close", Condition: "accumulated.count >= 2"}}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{Condition: "accumulated.count >= 2"}}
 	writeFlowHandler(t, bundle, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

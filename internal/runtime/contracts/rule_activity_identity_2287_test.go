@@ -34,9 +34,7 @@ func TestRuleActivityPinnedNamesPreserveEveryInventoriedBinding(t *testing.T) {
 			for _, index := range []int{0, 7} {
 				rows := make([]HandlerRuleEntry, index+1)
 				rows[index].Activity = ActivitySpec{ID: tc.id, Tool: tc.tool}
-				if index == 0 {
-					rows[index].ID = tc.label
-				}
+				rows[index].Condition = tc.label
 				sites := ActivitySitesForNode(node, map[string]SystemNodeEventHandler{tc.event: {Rules: rows}})
 				if len(sites) != 1 {
 					t.Fatalf("sites = %#v", sites)
@@ -112,7 +110,7 @@ func TestUnnamedProgrammaticRuleActivityCannotCompileGeneratedCatalog(t *testing
 	for _, id := range []string{"", "  "} {
 		bundle := &WorkflowContractBundle{
 			Nodes: map[string]SystemNodeContract{"worker": {EventHandlers: map[string]SystemNodeEventHandler{
-				"request": {Rules: []HandlerRuleEntry{{ID: "not-authority", Activity: ActivitySpec{ID: id, Tool: "send"}}}},
+				"request": {Rules: []HandlerRuleEntry{{Activity: ActivitySpec{ID: id, Tool: "send"}}}},
 			}}},
 			Tools: map[string]ToolSchemaEntry{"send": MustToolSchemaEntry(
 				WithToolHandler(ToolHandlerHTTP), WithToolEffect(ActivityEffectClassReadOnly),

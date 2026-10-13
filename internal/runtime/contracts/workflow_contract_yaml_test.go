@@ -593,7 +593,6 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *testing.T) {
-
 	tests := []struct {
 		name string
 		body canonicalrouting.ParserSnippet
@@ -1132,7 +1131,7 @@ rules:
 
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := decodeNodeTestYAML([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 rules:
   case:
     when: payload.mode == "case"
@@ -1140,20 +1139,30 @@ rules:
   default:
     else: true
     emit: scan.default_requested
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+		t.Fatalf("keyed row words must not restore rule names: %v", err)
+	}
+	if err := decodeNodeTestYAML([]byte(`
+rules:
+  - when: payload.mode == "case"
+    emit: scan.case_requested
+  - else: true
+    emit: scan.default_requested
 `), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+		t.Fatal(err)
 	}
 	if got, want := len(handler.Rules), 2; got != want {
 		t.Fatalf("rules len = %d, want %d", got, want)
 	}
-	if got := handler.Rules[0].ID; got != "case" {
-		t.Fatalf("rules[0].ID = %q, want case", got)
+	if got := handler.Rules[0].DisplayLabel("rules", 0); got != `rules[0]: when payload.mode == "case"` || handler.Rules[0].Emit.EventType() != "scan.case_requested" {
+		t.Fatalf("rules[0] presentation or output changed: %#v", handler.Rules[0])
 	}
 	if got := handler.Rules[0].PolicyRow.Kind; got != PolicySheetRowKindWhen {
 		t.Fatalf("rules[0].PolicyRow.Kind = %q, want when", got)
 	}
-	if got := handler.Rules[1].ID; got != "default" {
-		t.Fatalf("rules[1].ID = %q, want default", got)
+	if got := handler.Rules[1].DisplayLabel("rules", 1); got != "rules[1]: else" || handler.Rules[1].Emit.EventType() != "scan.default_requested" {
+		t.Fatalf("rules[1] presentation or output changed: %#v", handler.Rules[1])
 	}
 	if got := handler.Rules[1].Condition; got != "else" {
 		t.Fatalf("rules[1].Condition = %q, want else", got)
@@ -1499,61 +1508,52 @@ switch:
 	}
 }
 
-func TestSystemNodeEventHandlerDecode_AllowsAbsentAndDuplicatePolicyDisplayLabels(t *testing.T) {
+func TestSystemNodeEventHandlerDecode_DerivesPolicyDisplayFromPredicateAndPosition(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`rules:
   - when: payload.ok
     advances_to: ok
-  - id: repeated-label
-    when: payload.retry
+  - when: payload.ok
     advances_to: retry
-  - id: repeated-label
-    default: true
+  - default: true
     advances_to: fallback
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
-	if len(handler.Rules) != 3 || handler.Rules[0].ID != "" || handler.Rules[1].ID != handler.Rules[2].ID {
-		t.Fatalf("decoded labels = %#v", handler.Rules)
+	if len(handler.Rules) != 3 || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when payload.ok" || handler.Rules[1].DisplayLabel("rules", 1) != "rules[1]: when payload.ok" || handler.Rules[2].DisplayLabel("rules", 2) != "rules[2]: else" ||
+		handler.Rules[0].AdvancesTo != "ok" || handler.Rules[1].AdvancesTo != "retry" || handler.Rules[2].AdvancesTo != "fallback" {
+		t.Fatalf("derived presentation lost position or row outcomes: %#v", handler.Rules)
 	}
 }
 
-func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t *testing.T) {
+func TestSystemNodeEventHandlerDecode_RejectsEverySingletonRuleFieldFamily(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		raw    string
-		assert func(testing.TB, HandlerRuleEntry)
+		name string
+		raw  string
 	}{
 		{
 			name: "activity only",
 			raw:  "rules: {activity: {id: singleton_activity_probe, tool: notify}}\n",
-			assert: func(t testing.TB, rule HandlerRuleEntry) {
-				if rule.Activity.Tool != "notify" {
-					t.Fatalf("activity = %#v", rule.Activity)
-				}
-			},
 		},
 		{
 			name: "presentation only",
 			raw:  "rules: {id: display-only, description: presentation}\n",
-			assert: func(t testing.TB, rule HandlerRuleEntry) {
-				if rule.ID != "display-only" || rule.Description != "presentation" {
-					t.Fatalf("presentation = %#v", rule)
-				}
-			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			if err := decodeNodeTestYAML([]byte(tc.raw), &handler); err != nil {
-				t.Fatal(err)
+			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+				t.Fatalf("singleton must fail at collection admission: %v", err)
 			}
-			if len(handler.Rules) != 1 {
-				t.Fatalf("rules = %#v, want one singleton", handler.Rules)
-			}
-			tc.assert(t, handler.Rules[0])
 		})
 	}
+	var handler SystemNodeEventHandler
+	if err := decodeNodeTestYAML([]byte("rules: [{activity: {id: singleton_activity_probe, tool: notify}}]\n"), &handler); err != nil || len(handler.Rules) != 1 || handler.Rules[0].Activity.ID != "singleton_activity_probe" || handler.Rules[0].Activity.Tool != "notify" {
+		t.Fatalf("ordered activity-only row lost supported behavior: %#v, %v", handler, err)
+	}
+	_, err := ruleTestHandler("rules: [{id: display-only, description: presentation}]\n")
+	assertRetiredRuleNameDiagnostic(t, err, "rules", "id")
 }
 
 func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *testing.T) {
@@ -1570,15 +1570,9 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
     advances_to: done
 `, context, label)
 				var handler SystemNodeEventHandler
-				if err := decodeNodeTestYAML([]byte(raw), &handler); err != nil {
-					t.Fatal(err)
-				}
-				rows := handler.Rules
-				if context == "on_complete" {
-					rows = handler.OnComplete
-				}
-				if len(rows) != 1 || rows[0].ID != label || rows[0].Condition != "else" || rows[0].AdvancesTo != "done" {
-					t.Fatalf("decoded keyed row = %#v", rows)
+				err := decodeNodeTestYAML([]byte(raw), &handler)
+				if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+					t.Fatalf("field-word keyed row %q must fail as an unordered collection: %v", label, err)
 				}
 			})
 		}
@@ -1591,8 +1585,8 @@ func TestSystemNodeEventHandlerDecode_RejectsAmbiguousRuleMapping(t *testing.T) 
 			var handler SystemNodeEventHandler
 			err := decodeNodeTestYAML([]byte(context+`: {activity: {id: ambiguous}}
 `), &handler)
-			if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-RULE-GRAMMAR") {
-				t.Fatalf("yaml.Unmarshal error = %v, want ambiguous grammar rejection", err)
+			if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+				t.Fatalf("yaml.Unmarshal error = %v, want ordered collection rejection", err)
 			}
 		})
 	}
@@ -1615,16 +1609,17 @@ func TestSystemNodeEventHandlerDecode_RejectsEmptyAuthoredRows(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		raw  string
+		want string
 	}{
-		{name: "rules sequence", raw: "rules:\n  - {}\n"},
-		{name: "rules keyed", raw: "rules:\n  selected: {}\n"},
-		{name: "on complete sequence", raw: "on_complete:\n  - {}\n"},
+		{name: "rules sequence", raw: "rules:\n  - {}\n", want: "EMPTY-AUTHORED-RULE"},
+		{name: "rules keyed", raw: "rules:\n  selected: {}\n", want: "DIALECT-RULES-ORDER"},
+		{name: "on complete sequence", raw: "on_complete:\n  - {}\n", want: "EMPTY-AUTHORED-RULE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
 			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
-			if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
-				t.Fatalf("yaml.Unmarshal error = %v, want empty authored row rejection", err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %s", err, tc.want)
 			}
 		})
 	}
@@ -1636,13 +1631,14 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 		raw  string
 		want string
 	}{
-		{name: "empty label", raw: "rules:\n  \"\": {else: true}\n", want: "label must not be empty"},
-		{name: "whitespace label", raw: "rules:\n  \"   \": {else: true}\n", want: "label must not be empty"},
-		{name: "scalar child", raw: "rules:\n  selected: else\n", want: `rule field "selected" is not supported`},
-		{name: "empty collection", raw: "rules: {}\n", want: "must contain at least one row"},
-		{name: "null rules", raw: "rules: null\n", want: "rules handler rule collection must not be null"},
-		{name: "null on complete", raw: "on_complete: null\n", want: "on_complete handler rule collection must not be null"},
-		{name: "duplicate keyed label", raw: "rules:\n  selected: {else: true}\n  selected: {else: true}\n", want: "duplicate normalized key"},
+		{name: "empty label", raw: "rules:\n  \"\": {else: true}\n", want: "DIALECT-RULES-ORDER"},
+		{name: "whitespace label", raw: "rules:\n  \"   \": {else: true}\n", want: "DIALECT-RULES-ORDER"},
+		{name: "scalar child", raw: "rules:\n  selected: else\n", want: "DIALECT-RULES-ORDER"},
+		{name: "empty collection", raw: "rules: {}\n", want: "DIALECT-RULES-ORDER"},
+		{name: "null rules", raw: "rules: null\n", want: "DIALECT-RULES-ORDER"},
+		{name: "null on complete", raw: "on_complete: null\n", want: "DIALECT-OC-ORDER"},
+		{name: "duplicate keyed label", raw: "rules:\n  selected: {else: true}\n  selected: {else: true}\n", want: "DIALECT-RULES-ORDER"},
+		{name: "duplicate canonical row field", raw: "rules:\n  - else: true\n    emit: first\n    emit: second\n", want: "duplicate normalized key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
@@ -1650,14 +1646,11 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
-			if tc.name == "scalar child" && !strings.Contains(err.Error(), "Valid fields: activity") {
-				t.Fatalf("unknown keyed rule omitted current vocabulary: %v", err)
-			}
 		})
 	}
 }
 
-func TestSystemNodeEventHandlerDecode_ResolvesAliasedRowsIndependentOfKeyLabel(t *testing.T) {
+func TestSystemNodeEventHandlerDecode_RejectsKeyedAliasRowsAndPreservesOrderedAliases(t *testing.T) {
 	labels := []string{
 		"selected", "id", "description", "condition", "when", "case", "range", "lookup", "validate",
 		"compute_module", "else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
@@ -1672,14 +1665,16 @@ handler:
     %q: *rule
 `, label)
 			var handler SystemNodeEventHandler
-			if err := decodeNodeTestMember([]byte(raw), "handler", &handler); err != nil {
-				t.Fatal(err)
-			}
-			rules := handler.Rules
-			if len(rules) != 1 || rules[0].ID != label || rules[0].AdvancesTo != "done" {
-				t.Fatalf("aliased keyed row = %#v", rules)
+			err := decodeNodeTestMember([]byte(raw), "handler", &handler)
+			if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") {
+				t.Fatalf("keyed alias %q must fail as an unordered collection: %v", label, err)
 			}
 		})
+	}
+	var handler SystemNodeEventHandler
+	err := decodeNodeTestMember([]byte("template: &rule {else: true, advances_to: done}\nhandler:\n  rules: [*rule]\n"), "handler", &handler)
+	if err != nil || len(handler.Rules) != 1 || handler.Rules[0].AdvancesTo != "done" || handler.Rules[0].Condition != "else" || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: else" {
+		t.Fatalf("ordered alias lost its predicate, target or derived display: %#v, %v", handler, err)
 	}
 }
 

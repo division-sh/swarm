@@ -114,7 +114,7 @@ func TestCredentialChecksRetainAllMockToolUsedByLiveWorkflowActivity(t *testing.
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"provider.requested": {Activity: runtimecontracts.ActivitySpec{ID: "provider_send", Tool: "provider.send"}},
 				"provider.rule_requested": {Rules: []runtimecontracts.HandlerRuleEntry{{
-					ID: "send", Condition: "true", Activity: runtimecontracts.ActivitySpec{ID: "provider_rule_send", Tool: "provider.send"},
+					Condition: "true", Activity: runtimecontracts.ActivitySpec{ID: "provider_rule_send", Tool: "provider.send"},
 				}}},
 			},
 		},
