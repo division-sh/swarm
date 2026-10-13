@@ -19,8 +19,8 @@ import (
 
 var angle = regexp.MustCompile(`list<([^<>]+)>`)
 
-// These finite source fragments are assembled after YAML parsing would be
-// possible; their declaration role is pinned by the corpus inventory.
+// These pinned fragments become declarations only after Go concatenation or
+// formatting; they cannot be decoded as standalone YAML.
 var generatedSourceEdits = map[string][][2]string{
 	"internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go": {
 		{"  audit_log: \"[AuditEntry]\"", "  audit_log: [AuditEntry]"},
