@@ -1,65 +1,123 @@
 package runtime
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+// The external test package supplies the native store composition without an
+// import cycle through storetest's runtime-facing helpers.
+var InboundTransportNativeIndexFixture func(testing.TB, semanticview.Source, []InboundTarget) runtimepipeline.FlowInstanceIndexReader
 
 func newInboundTestEventBus(t testing.TB, store runtimebus.EventStore, targets ...InboundTarget) (*runtimebus.EventBus, error) {
 	return newInboundTestEventBusWithOptions(t, store, runtimebus.EventBusOptions{}, targets...)
 }
 
-// Transport tests supply their selected execution owners explicitly. These
-// isolated declarations do not replace the source-loaded HTTP lifecycle proofs.
+func inboundTransportSource(t testing.TB, targets []InboundTarget, observe bool) semanticview.Source {
+	t.Helper()
+	flows := make([]string, 0, len(targets))
+	for _, target := range targets {
+		flows = append(flows, target.FlowPath)
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo,
+		canonicalrouting.CopyInboundTransport(t, flows, observe), runtimecontracts.DefaultPlatformSpecFile(repo),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingress := make(map[string][]string, len(targets))
+	for _, target := range targets {
+		schema, found := bundle.FlowSchemas[target.FlowPath]
+		if !found {
+			t.Fatal("transport fixture omitted its selected declaration")
+		}
+		for _, pin := range schema.Pins.Inputs.EventPins {
+			ingress[target.FlowPath] = append(ingress[target.FlowPath], pin.Event)
+		}
+	}
+	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), ingress)
+}
+
+// The transport publication owner stays isolated; its instance observations
+// come from genuine source-bound construction in the native selected store.
 func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions, targets ...InboundTarget) (*runtimebus.EventBus, error) {
 	t.Helper()
 	if len(targets) == 0 {
 		targets = []InboundTarget{testInboundTarget("", "")}
 	}
-	rawEvents := []string{"inbound.telegram", "inbound.github.push", "inbound.github.issue_comment", "inbound.slack.message_channels", "inbound.slack.message", "inbound.stripe", "inbound.twilio", "inbound.shopify", "inbound.typeform", "inbound.intercom", "inbound.partner", "inbound.json"}
-	root := &runtimecontracts.FlowContractView{Path: ".", Schema: runtimecontracts.FlowSchemaDocument{Name: "inbound-fixture"}, Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
-	byID := map[string]*runtimecontracts.FlowContractView{".": root}
-	schemas := make(map[string]runtimecontracts.FlowSchemaDocument)
-	ingress := make(map[string][]string)
+	source := opts.ContractBundle
+	if source == nil {
+		source = inboundTransportSource(t, targets, len(opts.Interceptors) > 0)
+	}
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle.SourceArtifact == nil {
+		return nil, fmt.Errorf("transport fixture requires its admitted source artifact")
+	}
+	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
+	if opts.SourceArtifactFact.Validate() == nil && opts.SourceArtifactFact != fact {
+		return nil, fmt.Errorf("transport fixture source fact contradicts its source")
+	}
+	opts.ContractBundle, opts.SourceArtifactFact = source, fact
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = runtimeTestOccurrence(t, fact.BundleHash())
+	}
 	for _, target := range targets {
-		flow := runtimecontracts.FlowContractView{Path: target.FlowPath, Paths: runtimecontracts.FlowContractPaths{FlowPath: target.FlowPath}}
-		for _, event := range rawEvents {
-			flow.Schema.Pins.Inputs.EventPins = append(flow.Schema.Pins.Inputs.EventPins, runtimecontracts.FlowInputEventPin{Event: event})
+		if target.BundleHash != "" && target.BundleHash != fact.BundleHash() {
+			return nil, fmt.Errorf("transport fixture target source contradicts its source")
 		}
-		if len(opts.Interceptors) > 0 {
-			flow.Events = make(map[string]runtimecontracts.EventCatalogEntry, len(rawEvents))
-			handlers := make(map[string]runtimecontracts.SystemNodeEventHandler, len(rawEvents))
-			for _, event := range rawEvents {
-				handlers[event] = runtimecontracts.SystemNodeEventHandler{}
-				flow.Events[event] = providertriggers.RawEventCatalogEntry()
-			}
-			flow.Nodes = map[string]runtimecontracts.SystemNodeContract{"observer": {SubscribesTo: rawEvents, EventHandlers: handlers}}
-		}
-		root.Children = append(root.Children, flow)
-		ingress[target.FlowPath] = append([]string(nil), rawEvents...)
 	}
-	for index := range root.Children {
-		flow := &root.Children[index]
-		flow.Parent = root
-		byID[flow.Path] = flow
-		schemas[flow.Path] = flow.Schema
+	if InboundTransportNativeIndexFixture == nil {
+		return nil, fmt.Errorf("native transport fixture composition is not installed")
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{RootSchema: &root.Schema, FlowSchemas: schemas, FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: byID}}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	opts.Durable.Instances = InboundTransportNativeIndexFixture(t, source, targets)
+	return newRuntimeTestEventBusWithOptions(t, store, opts)
+}
+
+func inboundTestBusBundleHash(t testing.TB, bus *runtimebus.EventBus) string {
+	t.Helper()
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	opts.ContractBundle = semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), ingress)
-	if opts.SourceArtifactFact.Validate() != nil {
-		opts.SourceArtifactFact = testSourceArtifactFact(t, targets[0].BundleHash)
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		t.Fatal("transport bus omitted its admitted source fact")
 	}
-	if opts.WorkOwner == nil {
-		opts.WorkOwner = runtimeTestOccurrence(t, opts.SourceArtifactFact.BundleHash())
+	return fact.BundleHash()
+}
+
+func TestInboundTransportFixtureRejectsForeignSourceBeforePublication(t *testing.T) {
+	for _, mismatch := range []string{"fact", "target"} {
+		t.Run(mismatch, func(t *testing.T) {
+			target := testInboundTarget("", "")
+			source := inboundTransportSource(t, []InboundTarget{target}, false)
+			foreign := testSourceArtifactFact(t, "bundle-v2:sha256:"+strings.Repeat("d", 64))
+			opts := runtimebus.EventBusOptions{ContractBundle: source}
+			if mismatch == "fact" {
+				opts.SourceArtifactFact = foreign
+			} else {
+				target.BundleHash = foreign.BundleHash()
+			}
+			store := &capturingInboundEventStore{}
+			bus, err := newInboundTestEventBusWithOptions(t, store, opts, target)
+			if bus != nil || err == nil || !strings.Contains(err.Error(), "contradicts its source") {
+				t.Fatalf("foreign %s: bus=%v err=%v, want exact source refusal", mismatch, bus, err)
+			}
+			if store.recorded || len(store.events) != 0 || len(store.active) != 0 {
+				t.Fatal("foreign source reached the transport publication owner")
+			}
+		})
 	}
-	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }

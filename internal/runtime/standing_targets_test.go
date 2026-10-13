@@ -449,7 +449,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 		t.Fatal(err)
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: runtimeTestBundleHash, FlowPath: "coordinator",
+		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
 		ServiceID: flowidentity.StandingServiceID("coordinator"), Generation: 1, PublicationSequence: 1,
 		RunID: "41000000-0000-0000-0000-000000000001",
 		Alias: "chat", Provider: "telegram",
@@ -481,7 +481,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
 	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.raw.issues")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 		t.Fatal(err)
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: runtimeTestBundleHash, FlowPath: "coordinator",
+		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
 		ServiceID: flowidentity.StandingServiceID("coordinator"), Generation: 1, PublicationSequence: 1,
 		RunID: "42000000-0000-0000-0000-000000000001",
 		Alias: "issues", Provider: "github",
