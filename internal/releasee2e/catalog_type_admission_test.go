@@ -11,10 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 )
 
 const admissionPublicTypes = `scalars:
@@ -140,27 +136,20 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			if !reflect.DeepEqual(keys, []string{" 2", "+2", "-1", "02", "1", "10", "2"}) {
 				t.Fatalf("public fan-out lost exact lexical key order: %v; events=%+v\n%s", keys, events, process.output.String())
 			}
-			var entity operatorread.OperatorEntityFull
+			var entity map[string]any
 			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
-			lookup, _ := entity.Fields["lookup"].(map[string]any)
+			fields, ok := entity["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("public entity fields are not an object: %#v", entity)
+			}
+			lookup, _ := fields["lookup"].(map[string]any)
 			wantLookup := map[string]any{" 2": map[string]any{"id": "space"}, "+2": map[string]any{"id": "plus"}, "-1": map[string]any{"id": "negative"}, "02": map[string]any{"id": "zero"}, "1": map[string]any{"id": "one"}, "10": map[string]any{"id": "ten"}, "2": map[string]any{"id": "two", "note": "merged"}}
-			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(entity.Fields["enums"], payload["enums"]) || !reflect.DeepEqual(entity.Fields["uuids"], payload["uuids"]) {
-				t.Fatalf("public whole-map/contained mutation lost typed keys: %#v", entity.Fields)
+			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(fields["enums"], payload["enums"]) || !reflect.DeepEqual(fields["uuids"], payload["uuids"]) {
+				t.Fatalf("public whole-map/contained mutation lost typed keys: %#v", fields)
 			}
-			carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulated)
-			if err != nil {
-				t.Fatal(err)
-			}
-			joins, err := joinruntime.List(carrier.StateBuckets)
-			if err != nil || len(joins) != 1 || joins[0].Status != joinruntime.StatusClosed || joins[0].Expected() != 7 || joins[0].Completed() != 7 || !joins[0].OutcomeFired {
-				t.Fatalf("public join did not settle exact map membership: %+v %v", joins, err)
-			}
-			results, err := joins[0].Results()
-			if err != nil || !reflect.DeepEqual(results, []any{" 2", "+2", "-1", "02", "1", "10", "2"}) {
-				t.Fatalf("public join lost ordered map-key results: %v %v", results, err)
-			}
+			assertCatalogAdmissionJoin(t, entity, []string{" 2", "+2", "-1", "02", "1", "10", "2"})
 			before, _ := json.Marshal(entity)
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
@@ -298,9 +287,13 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			if target.FlowID != "account" || target.Kind != "materializing_entity" || !reflect.DeepEqual(routed.Payload, map[string]any{"account_id": "alias-key"}) {
 				t.Fatalf("alias template route lost exact acquisition/payload: %+v", routed)
 			}
-			var entity operatorread.OperatorEntityFull
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil || entity.Entity.FlowInstance != target.FlowInstance || entity.Entity.RunID != published.RunID || !reflect.DeepEqual(entity.Fields, map[string]any{"account_id": "alias-key"}) {
+			var entity map[string]any
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatalf("alias template identity readback: %+v %v", entity, err)
+			}
+			summary, ok := entity["entity"].(map[string]any)
+			if !ok || summary["flow_instance"] != target.FlowInstance || summary["run_id"] != published.RunID || !reflect.DeepEqual(entity["fields"], map[string]any{"account_id": "alias-key"}) {
+				t.Fatalf("alias template identity readback: %+v", entity)
 			}
 			before, _ := json.Marshal(entity)
 			if err := process.stopAndWait(10 * time.Second); err != nil {
@@ -321,5 +314,58 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func assertCatalogAdmissionJoin(t *testing.T, entity map[string]any, wantMembers []string) {
+	t.Helper()
+	accumulated, ok := entity["accumulated"].(map[string]any)
+	if !ok {
+		t.Fatalf("public join state is not an object: %#v", entity["accumulated"])
+	}
+	const nodeBucket = "handler_joins:Lg.Y29tcGxldGUtdGFzaw"
+	joinBuckets := 0
+	for key := range accumulated {
+		if strings.HasPrefix(key, "handler_joins:") {
+			joinBuckets++
+		}
+	}
+	bucket, ok := accumulated[nodeBucket].(map[string]any)
+	if !ok || joinBuckets != 1 {
+		t.Fatalf("public join has missing or foreign node ownership: %#v", accumulated)
+	}
+	joins, ok := bucket["handler_joins"].(map[string]any)
+	if !ok || len(joins) != 1 {
+		t.Fatalf("public join did not retain exactly one activation: %#v", bucket)
+	}
+	for key, value := range joins {
+		var join struct {
+			Members        []string `json:"members"`
+			MemberCount    *int     `json:"member_count"`
+			Status         string   `json:"status"`
+			CloseReason    string   `json:"close_reason"`
+			OutcomeFired   bool     `json:"outcome_fired"`
+			OutcomePending bool     `json:"outcome_pending"`
+			Outputs        map[string]struct {
+				Hash  string `json:"hash"`
+				Value string `json:"value"`
+			} `json:"outputs"`
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &join); err != nil {
+			t.Fatal(err)
+		}
+		if key == "" || !reflect.DeepEqual(join.Members, wantMembers) || join.MemberCount != nil || len(join.Outputs) != len(wantMembers) || join.Status != "closed" || join.CloseReason != "complete" || !join.OutcomeFired || join.OutcomePending {
+			t.Fatalf("public join did not settle exact ordered membership: %s", raw)
+		}
+		for _, member := range wantMembers {
+			output, ok := join.Outputs[member]
+			if !ok || output.Hash == "" || output.Value != member {
+				t.Fatalf("public join lost the exact output for member %q: %s", member, raw)
+			}
+		}
 	}
 }
