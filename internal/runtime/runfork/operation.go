@@ -44,8 +44,8 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 		if err := r.ResolvedPoint.Validate(); err != nil {
 			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point: %w", err)
 		}
-		if r.ResolvedPoint.EventID != r.ForkEventID && r.ForkEventID != "" {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with event selector")
+		if r.ResolvedPoint.Input != r.ForkEventID || (r.ForkEventID != "" && r.ResolvedPoint.EventID != r.ForkEventID) {
+			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with original event selector")
 		}
 	}
 	if strings.TrimSpace(r.Actor) == "" || strings.TrimSpace(r.TransportHash) == "" || strings.TrimSpace(r.TargetBundleHash) == "" {
@@ -82,6 +82,15 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 		return ForkOperationRequest{}, "", err
 	}
 	return r, hash, nil
+}
+
+func (r ForkOperationRequest) BindResolvedPoint(point RunForkPoint) (ForkOperationRequest, error) {
+	if r.ResolvedPoint != nil && *r.ResolvedPoint != point {
+		return ForkOperationRequest{}, fmt.Errorf("fork operation resolved point differs from admitted source revision")
+	}
+	r.ResolvedPoint = &point
+	canonical, _, err := r.Canonical()
+	return canonical, err
 }
 
 type ForkOperationStatus string

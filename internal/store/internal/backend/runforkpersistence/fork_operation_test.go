@@ -24,7 +24,7 @@ func TestForkOperationDurableReplayAndConflictBothStores(t *testing.T) {
 				TransportHash: "sha256:exact-transport", SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
 				TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			}
-			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: request.ForkEventID}
+			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, Input: request.ForkEventID, EventID: request.ForkEventID}
 			childID, bindingID := uuid.NewString(), uuid.NewString()
 			withForkOperationTx(t, db, func(tx *sql.Tx) {
 				if _, found, err := lookupForkOperationTx(ctx, tx, request.Actor, request.IdempotencyKey, request.TransportHash, backend == "postgres", true); err != nil || found {
@@ -97,7 +97,7 @@ func TestForkOperationKeylessIsInvocationScopedBothStores(t *testing.T) {
 				SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(), TargetBundleHash: "sha256:bundle",
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			}
-			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: request.ForkEventID}
+			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, Input: request.ForkEventID, EventID: request.ForkEventID}
 			childID, bindingID := uuid.NewString(), uuid.NewString()
 			withForkOperationTx(t, db, func(tx *sql.Tx) {
 				if _, replay, err := bindForkOperationTx(context.Background(), tx, request, childID, bindingID, backend == "postgres"); err != nil || replay {

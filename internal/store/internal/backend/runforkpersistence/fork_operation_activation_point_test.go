@@ -17,6 +17,7 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 				{Kind: runfork.RunForkPointEvent, Revision: 7, EventID: uuid.NewString()},
 			} {
 				t.Run(string(point.Kind), func(t *testing.T) {
+					point.Input = point.EventID
 					db := forkOperationTestDatabase(t, backend)
 					if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_bindings (
 						binding_id TEXT PRIMARY KEY, fork_run_id TEXT NOT NULL, source_run_id TEXT NOT NULL,
