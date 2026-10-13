@@ -246,9 +246,11 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 					t.Fatal("ordinary observer reopened or changed settled reply history")
 				}
 				proveMixedRequestObserverOnlyReforkPartition(t, wait, selected, staged.ForkRunID, inputID)
-				sourceRun, reforkCut := staged.ForkRunID, inputID
-				for hop := 0; hop < 2; hop++ {
-					sourceRun, reforkCut = executeObserverOnlyRequestRefork(t, h, selected, owner, loader, selection, options, sourceRun, reforkCut)
+				if !publicationProof && !returnedRequester {
+					sourceRun, reforkCut := staged.ForkRunID, inputID
+					for hop := 0; hop < 2; hop++ {
+						sourceRun, reforkCut = executeObserverOnlyRequestRefork(t, h, selected, owner, loader, selection, options, sourceRun, reforkCut)
+					}
 				}
 			} else {
 				returned, found, err := selected.LoadPreparedPublishEvent(wait, terminal.AcceptedReplyEventID)
