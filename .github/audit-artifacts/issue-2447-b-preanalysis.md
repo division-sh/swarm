@@ -1,5 +1,23 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Recursion Diagnostic Vocabulary Correction
+
+Exact-head hosted38407052342 atffe8dc5ff fails broad-08's complete production
+vocabulary guard: the new S01 recursion refusal names the forbidden internal
+phase label. Classification6147125402 records this branch-caused diagnostic
+gap before editing. Remove only that label; preserve the named type,
+unsupported cause, typed diagnostic, source location and recursion refusal.
+The existing invalid-reference root must cover both self and mutual recursion
+wording, and the complete userfacing package must pass without changing its
+guard. This is an existing S01 presentation obligation, not a new admission
+policy, interpreter or extraction scope.
+
+The finalffe whole-package/race commands were interrupted while still queued,
+before execution, so they earn no proof. Replacements bind the corrected source;
+the original hosted aggregate remains RED. Run clean no-argument preflight and
+the vocabulary/recursion controls before the batched push. Part C remains frozen
+until B merges and is re-gated; D2648/2287 remains separate.
+
 ## S22 Typed Entity Fixture Consumer Correction
 
 Pre-edit issue record6145212320 and existing-watchlist refinement extend the
