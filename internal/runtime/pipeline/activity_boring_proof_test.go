@@ -521,6 +521,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	site := runtimecontracts.ActivitySite{
 		Node:            mustActivityBoringNode("scanner"),
 		HandlerEventKey: "source.requested",
+		Kind:            runtimecontracts.ActivitySiteHandler,
 		RuleIndex:       -1,
 		Spec: runtimecontracts.ActivitySpec{
 			Tool: "source_scrape",
@@ -529,7 +530,10 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 			},
 		},
 	}
-	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
+	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		panic(err)
+	}
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
 	return runtimeengine.ActivityIntent{
 		RoutingSource:    routingSource,
@@ -569,10 +573,13 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		runID = testPipelineRunID
 	}
 	entityID := uuid.NewString()
-	resultEvents := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{
-		Node: mustActivityBoringNode("scanner"), HandlerEventKey: "source.requested", RuleIndex: -1,
+	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{
+		Node: mustActivityBoringNode("scanner"), HandlerEventKey: "source.requested", Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1,
 		Spec: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
 	})
+	if err != nil {
+		panic(err)
+	}
 	return runtimeengine.ActivityIntent{
 		RoutingSource:    mustActivityBoringRoutingSource(entityID),
 		ActivityID:       "scanner_source_scrape",

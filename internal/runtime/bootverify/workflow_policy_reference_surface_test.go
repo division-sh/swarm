@@ -101,7 +101,7 @@ func TestR3PolicyReferenceSurfaceMatrix(t *testing.T) {
 		{"condition", c.SystemNodeEventHandler{Condition: "policy.missing > 0"}},
 		{"logic", c.SystemNodeEventHandler{Logic: "policy.missing"}},
 		{"rule when", c.SystemNodeEventHandler{Rules: []c.HandlerRuleEntry{{Condition: "policy.missing > 0"}}}},
-		{"rule activity", c.SystemNodeEventHandler{Rules: []c.HandlerRuleEntry{{Activity: c.ActivitySpec{Input: map[string]c.ExpressionValue{"value": ref}}}}}},
+		{"rule activity", c.SystemNodeEventHandler{Rules: []c.HandlerRuleEntry{{Activity: c.ActivitySpec{ID: "policy_reference_probe", Input: map[string]c.ExpressionValue{"value": ref}}}}}},
 		{"completion", c.SystemNodeEventHandler{OnComplete: []c.HandlerRuleEntry{{Condition: "policy.missing > 0"}}}},
 		{"accumulate from", c.SystemNodeEventHandler{Accumulate: &c.AccumulateSpec{From: "policy.missing"}}},
 		{"accumulate key", c.SystemNodeEventHandler{Accumulate: &c.AccumulateSpec{Key: "policy.missing"}}},

@@ -3528,6 +3528,44 @@ func TestExecutor_ActivityIntentPersistsBeforeFollowUpTransfer(t *testing.T) {
 	}
 }
 
+func TestExecutor_UnnamedRuleActivityRefusesBeforeEffects(t *testing.T) {
+	for _, id := range []string{"", "  "} {
+		order := []string{}
+		repo := &orderedStateRepo{order: &order}
+		writer := &orderedActivityWriter{order: &order}
+		exec, err := NewExecutor(RuntimeDependencies{
+			Source:    sourceWithFixtureStages(sourceWithActivityTool(), "research", "pending", "pending"),
+			StateRepo: repo, MutationOwner: composedMutationOwner{state: repo, activities: writer, order: &order},
+			Locker: orderedLocker{order: &order},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+			EntityID: identity.NormalizeEntityID("entity-1"), Node: testFlowExecutableNode(t, "research", "scanner"),
+			HandlerEventKey: "source.requested",
+			Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
+			Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
+				Condition: "else", Activity: runtimecontracts.ActivitySpec{
+					ID: id, Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
+				},
+			}}},
+			State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		})
+		if err == nil || !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "rules[0].activity.id is required") {
+			t.Fatalf("unnamed selected activity error = %v", err)
+		}
+		if len(writer.intents) != 0 {
+			t.Fatalf("refused rule wrote activity intents: %#v", writer.intents)
+		}
+		for _, step := range order {
+			if step == "save" || step == "activity_intents" || step == "publications" {
+				t.Fatalf("refused rule committed effects: %v", order)
+			}
+		}
+	}
+}
+
 func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testing.T) {
 	order := []string{}
 	writer := &orderedActivityWriter{order: &order, err: errors.New("intent store failed")}
