@@ -3,6 +3,7 @@ package runfork
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -27,6 +28,8 @@ type SelectedForkPreparationBinding struct {
 }
 
 type SelectedForkPreparation struct {
+	// Disposable attribution only; never part of persisted preparation evidence.
+	DiagnosticPlanComponents   map[string]string                                      `json:"-"`
 	DeclarationPlanFingerprint string                                                 `json:"declaration_plan_fingerprint"`
 	PreparationID              string                                                 `json:"preparation_id"`
 	ProcessGeneration          uint64                                                 `json:"process_generation"`
@@ -152,6 +155,43 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 	}
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// DiagnosticSelectedPreparationPlanComponents captures only nonsecret hashes
+// from the same canonical population as SelectedPreparationPlanFingerprint.
+func DiagnosticSelectedPreparationPlanComponents(plan RunForkPlan, frontier RunForkContractFrontierAdmission, planning RunForkSelectedContractRecipientPlanning, declarationRevision string) (map[string]string, error) {
+	history, ok := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
+	if !ok {
+		return nil, fmt.Errorf("diagnostic requires fixed-revision history")
+	}
+	raw, err := canonicaljson.Bytes(struct {
+		Plan         RunForkPlan
+		History      []string
+		Inputs       []InputPublicationCoordinates
+		Frontier     RunForkContractFrontierAdmission
+		Recipients   RunForkSelectedContractRecipientPlanning
+		Declarations string
+	}{plan, history, plan.HistoricalInputCoordinates(), frontier, planning, declarationRevision})
+	if err != nil {
+		return nil, err
+	}
+	var components map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &components); err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(components["Plan"], &fields); err != nil {
+		return nil, err
+	}
+	for name, value := range fields {
+		components["Plan."+name] = value
+	}
+	fingerprints := make(map[string]string, len(components))
+	for name, value := range components {
+		digest := sha256.Sum256(value)
+		fingerprints[name] = hex.EncodeToString(digest[:])
+	}
+	return fingerprints, nil
 }
 
 func SelectedPreparationSourceFingerprint(identity scenarioexecution.EffectiveSourceIdentity) (string, error) {

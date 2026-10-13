@@ -121,7 +121,24 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if req.Preparation.SourceRunID != plan.SourceRunID || req.Preparation.ForkPoint != plan.ForkPoint ||
 			req.Preparation.ForkEventID != plan.ForkPoint.EventID ||
 			req.Preparation.Coordinates.BundleHash != req.SourceArtifactFact.BundleHash() || fingerprint != req.Preparation.Coordinates.AdmittedPlanFingerprint {
-			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan")
+			current, diagnosticErr := runfork.DiagnosticSelectedPreparationPlanComponents(plan, req.FrontierAdmission, req.RecipientPlanning, req.Preparation.DeclarationPlanFingerprint)
+			changed := make(map[string][2]string)
+			for name, before := range req.Preparation.DiagnosticPlanComponents {
+				if after := current[name]; before != after {
+					changed[name] = [2]string{before, after}
+				}
+			}
+			for name, after := range current {
+				if _, found := req.Preparation.DiagnosticPlanComponents[name]; !found {
+					changed[name] = [2]string{"absent", after}
+				}
+			}
+			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan [disposable diagnostic source_run_equal=%t fork_point_equal=%t fork_point_timestamp_equal=%t fork_point_instant_equal=%t fork_event_equal=%t bundle_equal=%t plan_equal=%t prepared_plan=%s transaction_plan=%s prepared_components_present=%t diagnostic_ok=%t canonical_component_deltas=%v]",
+				req.Preparation.SourceRunID == plan.SourceRunID, req.Preparation.ForkPoint == plan.ForkPoint,
+				req.Preparation.ForkPoint.Timestamp == plan.ForkPoint.Timestamp, req.Preparation.ForkPoint.Timestamp.Equal(plan.ForkPoint.Timestamp),
+				req.Preparation.ForkEventID == plan.ForkPoint.EventID, req.Preparation.Coordinates.BundleHash == req.SourceArtifactFact.BundleHash(),
+				fingerprint == req.Preparation.Coordinates.AdmittedPlanFingerprint, req.Preparation.Coordinates.AdmittedPlanFingerprint, fingerprint,
+				req.Preparation.DiagnosticPlanComponents != nil, diagnosticErr == nil, changed)
 		}
 		sourceFingerprint, err := runfork.SelectedPreparationSourceFingerprint(req.EffectiveSourceIdentity)
 		if err != nil || sourceFingerprint != req.Preparation.Coordinates.SourceFingerprint {
