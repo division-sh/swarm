@@ -108,7 +108,7 @@ func TestRunForkHistoricalContextCanonicalWriterControlsBothStores(t *testing.T)
 				}
 			}
 			latest, err := f.planner.PlanRunFork(testAuthorActivityContext(), runfork.RunForkPlanRequest{SourceRunID: f.source.runID})
-			if err != nil || latest.ForkPoint.EventID != f.latestID || latest.EventCountAtFork != f.initial.EventCountAtFork+1 {
+			if err != nil || latest.ForkPoint.EventID != f.latestID || latest.ForkPoint.Revision != 3 || latest.EventCountAtFork != f.initial.EventCountAtFork+1 {
 				t.Fatalf("default latest cursor = %#v, err=%v", latest.ForkPoint, err)
 			}
 			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, f.db, f.postgres))
@@ -129,6 +129,7 @@ func newHistoricalContextFixtureWithSeed(t *testing.T, backend eventRecordContra
 	s := f.source
 	requireRunFixtureForTest(t, ctx, opened.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: s.runID, StartedAt: s.at})
 	requireRunFixtureForTest(t, ctx, opened.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.foreignID, StartedAt: s.at})
+	requireRunForkRevisionMatrixEmptyStart(t, ctx, opened.store, s.runID)
 	seedTestAgentRow(t, ctx, f.db, f.postgres, mustTestAgentIdentityForRun(s.runID, "revision-matrix-agent", ""), "active")
 	tx, err := f.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -137,8 +138,8 @@ func newHistoricalContextFixtureWithSeed(t *testing.T, backend eventRecordContra
 	defer tx.Rollback()
 	seedRunForkRevisionMatrixFacts(t, ctx, tx, s, true, f.postgres)
 	// Select an independent canonical event in the same atomic revision. A
-	// corruption of the subject event's key must not move the cursor to R2 and
-	// thereby discard the very R1 fact whose admission is under test.
+	// corruption of the subject event's key must not move the cursor to R3 and
+	// thereby discard the very R2 fact whose admission is under test. R1 is creation.
 	seedRunForkRevisionMatrixEvent(t, ctx, tx, s.runID, f.anchorID, s.at.Add(time.Millisecond), f.postgres)
 	if prepare != nil {
 		prepare(t, tx, f)
@@ -151,10 +152,10 @@ func newHistoricalContextFixtureWithSeed(t *testing.T, backend eventRecordContra
 	if err != nil {
 		t.Fatalf("healthy thirteen-family PlanRunFork prerequisite: %v", err)
 	}
-	if f.initial.ForkPoint.Revision != 1 || f.initial.EventCountAtFork != 2 {
+	if f.initial.ForkPoint.Revision != 2 || f.initial.EventCountAtFork != 2 {
 		t.Fatalf("initial canonical cut = %#v events=%d", f.initial.ForkPoint, f.initial.EventCountAtFork)
 	}
-	rows, err := f.db.QueryContext(ctx, `SELECT family,fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=1 ORDER BY family,fact_key`, s.runID)
+	rows, err := f.db.QueryContext(ctx, `SELECT family,fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2 ORDER BY family,fact_key`, s.runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func newHistoricalContextFixtureWithSeed(t *testing.T, backend eventRecordContra
 	// Immutable families cannot lawfully publish a changed payload. These exact
 	// later copies are diagnostic retained-ledger controls, NOT writer updates.
 	// Their bytes came from the real thirteen-family canonical finalizer above.
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) SELECT run_id,2,family,fact_key,fact,present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=1`, s.runID)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) SELECT run_id,3,family,fact_key,fact,present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2`, s.runID)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -230,19 +231,19 @@ func (f historicalContextFixture) reject(t *testing.T, original, bad historicalC
 		}
 	}
 	t.Cleanup(func() {
-		exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=1 AND family=$2 AND fact_key=$3`, f.source.runID, bad.family, bad.key)
+		exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2 AND family=$2 AND fact_key=$3`, f.source.runID, bad.family, bad.key)
 		if bad.family != original.family || bad.key != original.key {
-			exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2 AND family=$2 AND fact_key=$3`, f.source.runID, bad.family, bad.key)
+			exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=3 AND family=$2 AND fact_key=$3`, f.source.runID, bad.family, bad.key)
 		}
-		exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,1,$2,$3,$4,TRUE) ON CONFLICT (run_id,revision,family,fact_key) DO UPDATE SET fact=excluded.fact,present=TRUE`, f.source.runID, original.family, original.key, original.raw)
+		exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,2,$2,$3,$4,TRUE) ON CONFLICT (run_id,revision,family,fact_key) DO UPDATE SET fact=excluded.fact,present=TRUE`, f.source.runID, original.family, original.key, original.raw)
 	})
 	if !alias {
-		exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=1 AND family=$2 AND fact_key=$3`, f.source.runID, original.family, original.key)
+		exec(`DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2 AND family=$2 AND fact_key=$3`, f.source.runID, original.family, original.key)
 	}
-	exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,1,$2,$3,$4,TRUE)`, f.source.runID, bad.family, bad.key, bad.raw)
+	exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,2,$2,$3,$4,TRUE)`, f.source.runID, bad.family, bad.key, bad.raw)
 	if bad.family != original.family || bad.key != original.key {
 		// Suppress only the injected alias at the later cut, preserving valid latest.
-		exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,2,$2,$3,'{}',FALSE)`, f.source.runID, bad.family, bad.key)
+		exec(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,3,$2,$3,'{}',FALSE)`, f.source.runID, bad.family, bad.key)
 	}
 	f.requireLatestComplete(t)
 	before := historicalContextDatabaseRows(t, f.db, f.postgres)
