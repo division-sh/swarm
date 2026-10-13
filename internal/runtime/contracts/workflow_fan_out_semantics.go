@@ -444,12 +444,12 @@ func HandlerFanOutSites(handler SystemNodeEventHandler) []WorkflowFanOutSite {
 	for idx := range handler.Rules {
 		writes := append([]WorkflowDataWrite(nil), handler.Rules[idx].DataAccumulation.Writes...)
 		writes = append(writes, topLevelWrites...)
-		add(indexedFanOutSiteSource("handler.rules", idx, handler.Rules[idx].ID), FanOutSiteRule, idx, handler.Rules[idx].FanOut, writes)
+		add("handler."+handler.Rules[idx].DisplayLabel("rules", idx)+".fan_out", FanOutSiteRule, idx, handler.Rules[idx].FanOut, writes)
 	}
 	for idx := range handler.OnComplete {
 		writes := append([]WorkflowDataWrite(nil), handler.OnComplete[idx].DataAccumulation.Writes...)
 		writes = append(writes, topLevelWrites...)
-		add(indexedFanOutSiteSource("handler.on_complete", idx, handler.OnComplete[idx].ID), FanOutSiteOnComplete, idx, handler.OnComplete[idx].FanOut, writes)
+		add("handler."+handler.OnComplete[idx].DisplayLabel("on_complete", idx)+".fan_out", FanOutSiteOnComplete, idx, handler.OnComplete[idx].FanOut, writes)
 	}
 	return out
 }
@@ -496,14 +496,6 @@ func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []Workflo
 		}
 	}
 	return nil
-}
-
-func indexedFanOutSiteSource(scope string, index int, id string) string {
-	id = strings.TrimSpace(id)
-	if id != "" {
-		return fmt.Sprintf("%s[%s].fan_out", scope, id)
-	}
-	return fmt.Sprintf("%s[%d].fan_out", scope, index)
 }
 
 func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec FanOutSpec) (FanOutEffectiveSemantics, error) {
