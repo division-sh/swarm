@@ -81,6 +81,11 @@ func (p *nestedDeadlineWorkerHold) NotifyLifecycle(ctx context.Context, signal l
 // selected child alone can fire the original, overdue deadlines.
 func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) (*rootruntime.Runtime, func()) {
 	t.Helper()
+	return nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+}
+
+func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
+	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +94,7 @@ func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any
 	p := owner.ports
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
 		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}},
-		Options: rootruntime.RuntimeOptions{ExecutionPosture: executionposture.MockOnly, RuntimeInstanceID: runForkTestRuntimeInstanceID,
+		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
 			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,
