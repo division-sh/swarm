@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -101,10 +102,14 @@ func copyTimePtr(value *time.Time) *time.Time {
 
 func addOperatorAgentUsageTotals(a, b operatorread.OperatorAgentUsageTotals) operatorread.OperatorAgentUsageTotals {
 	return operatorread.OperatorAgentUsageTotals{
-		LedgerEntries:    a.LedgerEntries + b.LedgerEntries,
-		InputTokens:      a.InputTokens + b.InputTokens,
-		OutputTokens:     a.OutputTokens + b.OutputTokens,
-		EstimatedCostUSD: a.EstimatedCostUSD + b.EstimatedCostUSD,
+		LedgerEntries:            a.LedgerEntries + b.LedgerEntries,
+		InputTokens:              a.InputTokens + b.InputTokens,
+		OutputTokens:             a.OutputTokens + b.OutputTokens,
+		CostUSD:                  a.CostUSD + b.CostUSD,
+		EstimatedCostUSD:         a.EstimatedCostUSD + b.EstimatedCostUSD,
+		ProviderReportedCostUSD:  a.ProviderReportedCostUSD + b.ProviderReportedCostUSD,
+		ReservationExhaustionUSD: a.ReservationExhaustionUSD + b.ReservationExhaustionUSD,
+		UnattributedCostUSD:      a.UnattributedCostUSD + b.UnattributedCostUSD,
 	}
 }
 
@@ -200,7 +205,9 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 				COALESCE(NULLIF(BTRIM(backend_profile), ''), 'unknown') AS backend_profile,
 				COALESCE(NULLIF(BTRIM(provider), ''), 'unknown') AS provider,
 				COALESCE(NULLIF(BTRIM(transport), ''), 'unknown') AS transport,
-				COALESCE(NULLIF(BTRIM(resolved_model), ''), model) AS resolved_model,
+				COALESCE(resolved_model, '') AS resolved_model,
+				completion_evidence,
+				COALESCE(completion_evidence->>'cost_provenance', 'unattributed') AS cost_provenance,
 				input_tokens,
 				output_tokens,
 				cost_usd
@@ -228,9 +235,14 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 			COUNT(*)::int,
 			COALESCE(SUM(input_tokens), 0)::bigint,
 			COALESCE(SUM(output_tokens), 0)::bigint,
-			COALESCE(SUM(cost_usd), 0)::float8
+			COALESCE(SUM(cost_usd), 0)::float8,
+			COALESCE(SUM(CASE WHEN cost_provenance='locally_estimated' THEN cost_usd ELSE 0 END), 0)::float8,
+			COALESCE(SUM(CASE WHEN cost_provenance='provider_reported' THEN cost_usd ELSE 0 END), 0)::float8,
+			COALESCE(SUM(CASE WHEN cost_provenance='reservation_exhaustion' THEN cost_usd ELSE 0 END), 0)::float8,
+			COALESCE(SUM(CASE WHEN cost_provenance='unattributed' THEN cost_usd ELSE 0 END), 0)::float8,
+			COALESCE(completion_evidence::text, ''), cost_provenance
 		FROM usage_rows
-		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model, completion_evidence, cost_provenance
 		ORDER BY CASE execution_mode WHEN 'live' THEN 0 ELSE 1 END ASC, CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
 	`, windowClause.String()), args...)
 	if err != nil {
@@ -241,6 +253,7 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 	var out []operatorread.OperatorAgentUsageBreakdown
 	for rows.Next() {
 		var row operatorread.OperatorAgentUsageBreakdown
+		var evidenceRaw string
 		if err := rows.Scan(
 			&row.ExecutionMode,
 			&row.UsageAccounting,
@@ -254,7 +267,8 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 			&row.Totals.LedgerEntries,
 			&row.Totals.InputTokens,
 			&row.Totals.OutputTokens,
-			&row.Totals.EstimatedCostUSD,
+			&row.Totals.CostUSD, &row.Totals.EstimatedCostUSD, &row.Totals.ProviderReportedCostUSD,
+			&row.Totals.ReservationExhaustionUSD, &row.Totals.UnattributedCostUSD, &evidenceRaw, &row.CostProvenance,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent usage breakdown: %w", err)
 		}
@@ -266,8 +280,10 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 		row.BackendProfile = strings.TrimSpace(row.BackendProfile)
 		row.Provider = strings.TrimSpace(row.Provider)
 		row.Transport = strings.TrimSpace(row.Transport)
-		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
-		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.Totals.EstimatedCostUSD)
+		if err := projectAgentUsageCompletionEvidence(&row, evidenceRaw); err != nil {
+			return nil, err
+		}
+		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.CostProvenance, row.Totals.CostUSD)
 		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
 			return nil, err
 		}
@@ -305,7 +321,9 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 				COALESCE(NULLIF(trim(backend_profile), ''), 'unknown') AS backend_profile,
 				COALESCE(NULLIF(trim(provider), ''), 'unknown') AS provider,
 				COALESCE(NULLIF(trim(transport), ''), 'unknown') AS transport,
-				COALESCE(NULLIF(trim(resolved_model), ''), model) AS resolved_model,
+				COALESCE(resolved_model, '') AS resolved_model,
+				completion_evidence,
+				COALESCE(json_extract(completion_evidence, '$.cost_provenance'), 'unattributed') AS cost_provenance,
 				input_tokens,
 				output_tokens,
 				cost_usd
@@ -333,9 +351,14 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 			COUNT(*),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
-			COALESCE(SUM(cost_usd), 0)
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(CASE WHEN cost_provenance='locally_estimated' THEN cost_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN cost_provenance='provider_reported' THEN cost_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN cost_provenance='reservation_exhaustion' THEN cost_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN cost_provenance='unattributed' THEN cost_usd ELSE 0 END), 0),
+			COALESCE(completion_evidence, ''), cost_provenance
 		FROM usage_rows
-		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model, completion_evidence, cost_provenance
 		ORDER BY CASE execution_mode WHEN 'live' THEN 0 ELSE 1 END ASC, CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
 	`, windowClause.String()), args...)
 	if err != nil {
@@ -346,6 +369,7 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 	var out []operatorread.OperatorAgentUsageBreakdown
 	for rows.Next() {
 		var row operatorread.OperatorAgentUsageBreakdown
+		var evidenceRaw string
 		if err := rows.Scan(
 			&row.ExecutionMode,
 			&row.UsageAccounting,
@@ -359,7 +383,8 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 			&row.Totals.LedgerEntries,
 			&row.Totals.InputTokens,
 			&row.Totals.OutputTokens,
-			&row.Totals.EstimatedCostUSD,
+			&row.Totals.CostUSD, &row.Totals.EstimatedCostUSD, &row.Totals.ProviderReportedCostUSD,
+			&row.Totals.ReservationExhaustionUSD, &row.Totals.UnattributedCostUSD, &evidenceRaw, &row.CostProvenance,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent usage breakdown: %w", err)
 		}
@@ -371,8 +396,10 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 		row.BackendProfile = strings.TrimSpace(row.BackendProfile)
 		row.Provider = strings.TrimSpace(row.Provider)
 		row.Transport = strings.TrimSpace(row.Transport)
-		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
-		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.Totals.EstimatedCostUSD)
+		if err := projectAgentUsageCompletionEvidence(&row, evidenceRaw); err != nil {
+			return nil, err
+		}
+		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.CostProvenance, row.Totals.CostUSD)
 		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
 			return nil, err
 		}
@@ -411,18 +438,44 @@ func validateOperatorAgentUsageBreakdown(row operatorread.OperatorAgentUsageBrea
 	if row.Transport == "" {
 		return fmt.Errorf("agent usage read owner returned empty transport")
 	}
-	if row.ResolvedModel == "" {
-		return fmt.Errorf("agent usage read owner returned empty resolved_model")
-	}
-	if row.Totals.LedgerEntries < 0 || row.Totals.InputTokens < 0 || row.Totals.OutputTokens < 0 || row.Totals.EstimatedCostUSD < 0 {
+	if row.Totals.LedgerEntries < 0 || row.Totals.InputTokens < 0 || row.Totals.OutputTokens < 0 || row.Totals.CostUSD < 0 || row.Totals.EstimatedCostUSD < 0 {
 		return fmt.Errorf("agent usage read owner returned negative totals")
 	}
 	return nil
 }
 
-func operatorUsageCostDisplay(mode string, cost float64) string {
+func projectAgentUsageCompletionEvidence(row *operatorread.OperatorAgentUsageBreakdown, raw string) error {
+	if raw == "" {
+		if row.CostProvenance != "unattributed" {
+			return fmt.Errorf("agent usage provenance lacks completion evidence")
+		}
+		return nil
+	}
+	evidence, err := runtimeeffects.DecodeCompletionEvidence([]byte(raw))
+	if err != nil {
+		return fmt.Errorf("decode agent usage completion evidence: %w", err)
+	}
+	request := evidence.Request
+	if request.RequestedModel != row.Model || request.ModelAlias != row.ModelAlias || request.BackendProfile != row.BackendProfile ||
+		request.Provider != row.Provider || request.Transport != row.Transport || evidence.ResolvedModel() != row.ResolvedModel || evidence.CostProvenance != row.CostProvenance {
+		return fmt.Errorf("agent usage columns contradict completion evidence")
+	}
+	row.CompletionEvidence = &evidence
+	return nil
+}
+
+func operatorUsageCostDisplay(mode, provenance string, cost float64) string {
 	if strings.TrimSpace(mode) == string(executionmode.Mock) {
 		return fmt.Sprintf("~$%.6f (mock estimate)", cost)
 	}
-	return fmt.Sprintf("$%.6f", cost)
+	switch provenance {
+	case runtimeeffects.CompletionCostReported:
+		return fmt.Sprintf("$%.6f (provider reported)", cost)
+	case runtimeeffects.CompletionCostEstimated:
+		return fmt.Sprintf("~$%.6f (local estimate)", cost)
+	case runtimeeffects.CompletionCostReservation:
+		return fmt.Sprintf("$%.6f (reservation exhaustion)", cost)
+	default:
+		return fmt.Sprintf("$%.6f (%s)", cost, provenance)
+	}
 }

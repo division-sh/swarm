@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
@@ -75,17 +76,20 @@ type conversationTurnPage struct {
 }
 
 type conversationTurnListItem struct {
-	Ordinal          int                         `json:"ordinal"`
-	TurnID           string                      `json:"turn_id"`
-	CompletedAt      string                      `json:"completed_at"`
-	DurationMS       *int                        `json:"duration_ms"`
-	TriggerEventID   string                      `json:"trigger_event_id,omitempty"`
-	TriggerEventType string                      `json:"trigger_event_type,omitempty"`
-	ActivityCounts   *conversationActivityCounts `json:"activity_counts"`
-	Tokens           *conversationTokenUsage     `json:"tokens,omitempty"`
-	Outcome          string                      `json:"outcome,omitempty"`
-	ParseOK          *bool                       `json:"parse_ok"`
-	Failure          *runtimefailures.Envelope   `json:"failure,omitempty"`
+	ExecutionMode      string                            `json:"execution_mode"`
+	CompletionEvidence runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel      string                            `json:"resolved_model,omitempty"`
+	Ordinal            int                               `json:"ordinal"`
+	TurnID             string                            `json:"turn_id"`
+	CompletedAt        string                            `json:"completed_at"`
+	DurationMS         *int                              `json:"duration_ms"`
+	TriggerEventID     string                            `json:"trigger_event_id,omitempty"`
+	TriggerEventType   string                            `json:"trigger_event_type,omitempty"`
+	ActivityCounts     *conversationActivityCounts       `json:"activity_counts"`
+	Tokens             *conversationTokenUsage           `json:"tokens,omitempty"`
+	Outcome            string                            `json:"outcome,omitempty"`
+	ParseOK            *bool                             `json:"parse_ok"`
+	Failure            *runtimefailures.Envelope         `json:"failure,omitempty"`
 }
 
 type conversationActivityCounts struct {
@@ -98,21 +102,24 @@ type conversationActivityCounts struct {
 }
 
 type conversationTurn struct {
-	Ordinal                int                       `json:"ordinal"`
-	TurnID                 string                    `json:"turn_id"`
-	CompletedAt            string                    `json:"completed_at"`
-	DurationMS             *int                      `json:"duration_ms"`
-	TriggerEventID         string                    `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string                    `json:"trigger_event_type,omitempty"`
-	EntityID               string                    `json:"entity_id,omitempty"`
-	TaskID                 string                    `json:"task_id,omitempty"`
-	Activity               []conversationActivity    `json:"activity"`
-	Tokens                 *conversationTokenUsage   `json:"tokens,omitempty"`
-	Outcome                string                    `json:"outcome,omitempty"`
-	ParseOK                *bool                     `json:"parse_ok"`
-	Failure                *runtimefailures.Envelope `json:"failure,omitempty"`
-	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
-	RetryCount             int                       `json:"retry_count,omitempty"`
+	ExecutionMode          string                            `json:"execution_mode"`
+	CompletionEvidence     runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel          string                            `json:"resolved_model,omitempty"`
+	Ordinal                int                               `json:"ordinal"`
+	TurnID                 string                            `json:"turn_id"`
+	CompletedAt            string                            `json:"completed_at"`
+	DurationMS             *int                              `json:"duration_ms"`
+	TriggerEventID         string                            `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string                            `json:"trigger_event_type,omitempty"`
+	EntityID               string                            `json:"entity_id,omitempty"`
+	TaskID                 string                            `json:"task_id,omitempty"`
+	Activity               []conversationActivity            `json:"activity"`
+	Tokens                 *conversationTokenUsage           `json:"tokens,omitempty"`
+	Outcome                string                            `json:"outcome,omitempty"`
+	ParseOK                *bool                             `json:"parse_ok"`
+	Failure                *runtimefailures.Envelope         `json:"failure,omitempty"`
+	AssistantVisibleOutput string                            `json:"assistant_visible_output,omitempty"`
+	RetryCount             int                               `json:"retry_count,omitempty"`
 }
 
 type conversationTurnDetail struct {
@@ -534,6 +541,12 @@ func validateConversationSummary(prefix string, item conversationSummary) error 
 }
 
 func validateConversationTurn(prefix string, turn conversationTurn) error {
+	if turn.ExecutionMode != "live" && turn.ExecutionMode != "mock" {
+		return fmt.Errorf("malformed %s: execution_mode must be live or mock", prefix)
+	}
+	if err := validateCLICompletionEvidence(prefix, turn.CompletionEvidence, turn.ResolvedModel); err != nil {
+		return err
+	}
 	if turn.Ordinal < 1 {
 		return fmt.Errorf("malformed %s: ordinal must be at least 1", prefix)
 	}
@@ -588,6 +601,12 @@ func validateConversationTurn(prefix string, turn conversationTurn) error {
 }
 
 func validateConversationTurnListItem(prefix string, turn conversationTurnListItem) error {
+	if turn.ExecutionMode != "live" && turn.ExecutionMode != "mock" {
+		return fmt.Errorf("malformed %s: execution_mode must be live or mock", prefix)
+	}
+	if err := validateCLICompletionEvidence(prefix, turn.CompletionEvidence, turn.ResolvedModel); err != nil {
+		return err
+	}
 	if turn.Ordinal < 1 {
 		return fmt.Errorf("malformed %s: ordinal must be at least 1", prefix)
 	}
@@ -691,6 +710,7 @@ func writeConversationDetailResult(out io.Writer, result conversationTurnPage) {
 		rows = append(rows, []string{
 			turn.TurnID,
 			fmt.Sprintf("%d", turn.Ordinal),
+			cliCompletionEvidenceSummary(turn.CompletionEvidence),
 			turn.CompletedAt,
 			conversationListTriggerSummary(turn),
 			conversationActivityCountsSummary(turn.ActivityCounts),
@@ -707,6 +727,7 @@ func writeConversationDetailResult(out io.Writer, result conversationTurnPage) {
 		Columns: []cliTableColumn{
 			{Header: "TURN", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyTurn},
 			{Header: "#"},
+			{Header: "MODEL EVIDENCE", Truncatable: true},
 			{Header: "TIME"},
 			{Header: "TRIGGER", Truncatable: true},
 			{Header: "ACTIVITY", Truncatable: true},
@@ -746,6 +767,7 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 			{Label: "Entity", Value: turn.EntityID},
 			{Label: "Task", Value: turn.TaskID},
 			{Label: "Tokens", Value: conversationTokenSummary(turn.Tokens)},
+			{Label: "Model evidence", Value: cliCompletionEvidenceSummary(turn.CompletionEvidence)},
 			{Label: "Outcome", Value: conversationOutcomeSummary(turn)},
 			{Label: "Retries", Value: fmt.Sprintf("%d", turn.RetryCount)},
 			{Label: "Frame version", Value: result.Frame.Version},

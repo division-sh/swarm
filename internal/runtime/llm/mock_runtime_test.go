@@ -100,8 +100,8 @@ func TestMockManagedRequestConsumesCanonicalExecutionFrame(t *testing.T) {
 	if len(settlements) != 1 || settlements[0].AgentTurn == nil || len(input.Messages) != 1 || !strings.Contains(input.Messages[0].Content, `"kind":"initial"`) {
 		t.Fatalf("mock settlements = %#v, want one canonical frame request", settlements)
 	}
-	if settlements[0].Usage.ResolvedModel != "test-model" || settlements[0].Spend.ResolvedModel != "test-model" {
-		t.Fatalf("mock settlement = %#v, want sealed frame model", settlements[0])
+	if settlements[0].Usage.ResolvedModel != "" || settlements[0].Spend.ResolvedModel != "" || len(settlements[0].Usage.Evidence.Models) != 0 {
+		t.Fatalf("mock settlement = %#v, fabricated a provider model observation", settlements[0])
 	}
 }
 

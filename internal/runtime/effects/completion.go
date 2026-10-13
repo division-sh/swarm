@@ -22,21 +22,19 @@ const (
 )
 
 type CompletionUsage struct {
-	ResolvedModel              string
-	Exactness                  CompletionUsageExactness
-	InputTokens                *int64
-	OutputTokens               *int64
-	CacheReadInputTokens       *int64
-	CacheCreationInputTokens   *int64
-	CacheCreation5mInputTokens *int64
-	CacheCreation1hInputTokens *int64
-	ProviderReportedCostUSD    *float64
+	Evidence                   CompletionEvidence       `json:"completion_evidence"`
+	ResolvedModel              string                   `json:"resolved_model,omitempty"`
+	Exactness                  CompletionUsageExactness `json:"usage_exactness"`
+	InputTokens                *int64                   `json:"input_tokens,omitempty"`
+	OutputTokens               *int64                   `json:"output_tokens,omitempty"`
+	CacheReadInputTokens       *int64                   `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens   *int64                   `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation5mInputTokens *int64                   `json:"cache_creation_5m_input_tokens,omitempty"`
+	CacheCreation1hInputTokens *int64                   `json:"cache_creation_1h_input_tokens,omitempty"`
+	ProviderReportedCostUSD    *float64                 `json:"provider_reported_cost_usd,omitempty"`
 }
 
 func (u CompletionUsage) Validate() error {
-	if strings.TrimSpace(u.ResolvedModel) == "" {
-		return fmt.Errorf("completion usage resolved model is required")
-	}
 	switch u.Exactness {
 	case CompletionUsageExact, CompletionUsageEstimated:
 		if u.InputTokens == nil || u.OutputTokens == nil || *u.InputTokens < 0 || *u.OutputTokens < 0 {
@@ -59,8 +57,8 @@ func (u CompletionUsage) Validate() error {
 			return fmt.Errorf("completion usage %s cannot be negative", name)
 		}
 	}
-	if u.ProviderReportedCostUSD != nil && *u.ProviderReportedCostUSD < 0 {
-		return fmt.Errorf("completion provider-reported cost cannot be negative")
+	if err := validateCompletionCost(u.ProviderReportedCostUSD); err != nil {
+		return err
 	}
 	if u.CacheCreation5mInputTokens != nil || u.CacheCreation1hInputTokens != nil {
 		if u.CacheCreationInputTokens == nil {
@@ -90,6 +88,36 @@ func (u CompletionUsage) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (u CompletionUsage) ValidateEvidence() error {
+	if err := u.Validate(); err != nil {
+		return err
+	}
+	if err := u.Evidence.Validate(); err != nil {
+		return err
+	}
+	if u.ResolvedModel != u.Evidence.ResolvedModel() {
+		return fmt.Errorf("completion model contradicts observation evidence")
+	}
+	if u.Evidence.CostProvenance != u.CostProvenance() {
+		return fmt.Errorf("completion cost provenance contradicts retained observations")
+	}
+	if (u.ProviderReportedCostUSD == nil) != (u.Evidence.ProviderReportedCostUSD == nil) ||
+		(u.ProviderReportedCostUSD != nil && *u.ProviderReportedCostUSD != *u.Evidence.ProviderReportedCostUSD) {
+		return fmt.Errorf("completion evidence contradicts reported total cost")
+	}
+	return nil
+}
+
+func (u CompletionUsage) CostProvenance() string {
+	if u.ProviderReportedCostUSD != nil {
+		return CompletionCostReported
+	}
+	if u.Exactness != CompletionUsageUnavailable {
+		return CompletionCostEstimated
+	}
+	return CompletionCostUnavailable
 }
 
 type CompletionAgentTurn struct {
@@ -167,7 +195,7 @@ type CompletionSpend struct {
 func (s CompletionSpend) Validate() error {
 	if strings.TrimSpace(s.AgentID) == "" || strings.TrimSpace(s.Model) == "" ||
 		strings.TrimSpace(s.BackendProfile) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" ||
-		strings.TrimSpace(s.ResolvedModel) == "" || strings.TrimSpace(s.InvocationType) == "" {
+		strings.TrimSpace(s.InvocationType) == "" {
 		return fmt.Errorf("completion spend requires complete provider and invocation identity")
 	}
 	if s.CostUSD < 0 {
@@ -209,6 +237,7 @@ type DrainedCompletionSettlement struct {
 }
 
 func ProjectDrainedCompletionSettlement(attempt Attempt, settlement CompletionSettlement) (DrainedCompletionSettlement, error) {
+	settlement = settlement.Clone()
 	if settlement.AgentTurn == nil {
 		return DrainedCompletionSettlement{}, fmt.Errorf("drained completion requires immutable agent-turn evidence")
 	}
@@ -218,7 +247,7 @@ func ProjectDrainedCompletionSettlement(attempt Attempt, settlement CompletionSe
 	}
 	return DrainedCompletionSettlement{
 		Settlement: settlement.Settlement,
-		Usage:      settlement.Usage,
+		Usage:      settlement.Usage.Clone(),
 		AgentTurn:  *settlement.AgentTurn,
 		Spend:      settlement.Spend,
 		Now:        settlement.Now,
@@ -227,13 +256,13 @@ func ProjectDrainedCompletionSettlement(attempt Attempt, settlement CompletionSe
 
 func (s DrainedCompletionSettlement) CompletionSettlement() CompletionSettlement {
 	turn := s.AgentTurn
-	return CompletionSettlement{
+	return (CompletionSettlement{
 		Settlement: s.Settlement,
-		Usage:      s.Usage,
+		Usage:      s.Usage.Clone(),
 		AgentTurn:  &turn,
 		Spend:      s.Spend,
 		Now:        s.Now,
-	}
+	}).Clone()
 }
 
 type CompletionSettlementDisposition string
@@ -314,8 +343,18 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	if attempt.AttemptID == "" || attempt.Authority.ValidateCompletionAdapter(attempt.Adapter) != nil {
 		return fmt.Errorf("completion settlement requires a valid completion attempt")
 	}
-	if err := s.Usage.Validate(); err != nil {
+	if err := s.Usage.ValidateEvidence(); err != nil {
 		return err
+	}
+	if s.Usage.Evidence.Request != attempt.Authority.CompletionRequest ||
+		s.Usage.ResolvedModel != s.Usage.Evidence.ResolvedModel() ||
+		s.Spend.ResolvedModel != s.Usage.ResolvedModel ||
+		s.Spend.Model != attempt.Authority.CompletionRequest.RequestedModel ||
+		s.Spend.ModelAlias != attempt.Authority.CompletionRequest.ModelAlias ||
+		s.Spend.BackendProfile != attempt.Authority.CompletionRequest.BackendProfile ||
+		s.Spend.Provider != attempt.Authority.CompletionRequest.Provider ||
+		s.Spend.Transport != attempt.Authority.CompletionRequest.Transport {
+		return fmt.Errorf("completion evidence contradicts admitted provider request")
 	}
 	if err := s.Spend.Validate(); err != nil {
 		return err
@@ -380,4 +419,19 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 		return fmt.Errorf("failed completion settlement requires failure evidence")
 	}
 	return nil
+}
+
+func (s CompletionSettlement) Clone() CompletionSettlement {
+	s.Usage = s.Usage.Clone()
+	if s.AgentTurn != nil {
+		turn := *s.AgentTurn
+		turn.CapabilitySurface = append(json.RawMessage(nil), turn.CapabilitySurface...)
+		turn.ToolCalls = append(json.RawMessage(nil), turn.ToolCalls...)
+		turn.EmittedEvents = append(json.RawMessage(nil), turn.EmittedEvents...)
+		turn.RequestPayload = append(json.RawMessage(nil), turn.RequestPayload...)
+		turn.ResponsePayload = append(json.RawMessage(nil), turn.ResponsePayload...)
+		turn.TurnBlocks = append(json.RawMessage(nil), turn.TurnBlocks...)
+		s.AgentTurn = &turn
+	}
+	return s
 }

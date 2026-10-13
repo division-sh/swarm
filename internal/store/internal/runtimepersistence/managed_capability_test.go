@@ -22,6 +22,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -41,20 +42,20 @@ func managedCompletionTestSurface(t testing.TB, authority runtimeeffects.Authori
 			runID = authority.SelectedFork.ForkRunID
 		}
 	}
-	transport := "api"
+	backend := adapter
 	switch adapter {
-	case "claude_cli":
-		transport = "cli"
+	case "anthropic_api":
+		backend = llmselection.BackendAnthropic
 	case "mock_python":
-		transport = "cli"
+		backend = llmselection.BackendMock
 	}
-	runtimeMode := "task"
-	if authority.Target.Memory.Enabled {
-		runtimeMode = "session"
+	profile, err := llmselection.ResolveActiveBackend(backend)
+	if err != nil {
+		t.Fatal(err)
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: runtimeMode,
-		Provider: adapter, Transport: transport, ProviderContract: "store-test-provider-contract",
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: profile.RuntimeMode,
+		Provider: profile.Provider, Transport: profile.Transport, ProviderContract: "store-test-provider-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
 			ExecutionKind: executionKind, ExecutionAuthorityID: executionAuthorityID,
@@ -426,6 +427,27 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	if settlementFailure != nil {
 		settlement.Settlement.Failure = settlementFailure
 	}
+	request := handle.Attempt().Authority.CompletionRequest
+	settlement.Usage = settlement.Usage.Clone()
+	settlement.Usage.Evidence.Request = request
+	settlement.Usage.Evidence.CostProvenance = runtimeeffects.CompletionCostEstimated
+	if settlement.Usage.Exactness == runtimeeffects.CompletionUsageUnavailable {
+		settlement.Usage.Evidence.CostProvenance = runtimeeffects.CompletionCostUnavailable
+	}
+	if settlement.Usage.ResolvedModel != "" {
+		source := runtimeeffects.CompletionModelResponse
+		if adapter == "claude_cli" {
+			source = runtimeeffects.CompletionModelCLITerminal
+		}
+		settlement.Usage.Evidence.Models = []runtimeeffects.CompletionModelObservation{{Model: settlement.Usage.ResolvedModel, Source: source}}
+	}
+	if adapter == "mock_python" {
+		settlement.Usage.Evidence.Models = []runtimeeffects.CompletionModelObservation{}
+		settlement.Usage.ResolvedModel = ""
+	}
+	settlement.Spend.Model, settlement.Spend.ModelAlias = request.RequestedModel, request.ModelAlias
+	settlement.Spend.BackendProfile, settlement.Spend.Provider, settlement.Spend.Transport = request.BackendProfile, request.Provider, request.Transport
+	settlement.Spend.ResolvedModel = settlement.Usage.ResolvedModel
 	result, err := handle.SettleCompletion(completionCtx, settlement)
 	if err != nil {
 		return err
@@ -492,6 +514,15 @@ func applyManagedCompletionTestSurface(t testing.TB, turn *runtimeeffects.Comple
 	event := managedCompletionTestEvent(authority)
 	turn.TriggerEventID = event.ID()
 	turn.TriggerEventType = string(event.Type())
+}
+
+func bindCompletionEvidenceForTest(settlement *runtimeeffects.CompletionSettlement, request runtimeeffects.CompletionRequest, models []runtimeeffects.CompletionModelObservation) {
+	evidence := runtimeeffects.CompletionEvidence{Request: request, Models: models, CostProvenance: settlement.Usage.CostProvenance(),
+		ProviderReportedCostUSD: settlement.Usage.ProviderReportedCostUSD}
+	settlement.Usage.Evidence = evidence.Canonical()
+	settlement.Usage.ResolvedModel = evidence.ResolvedModel()
+	settlement.Spend.Model, settlement.Spend.ModelAlias, settlement.Spend.ResolvedModel = request.RequestedModel, request.ModelAlias, settlement.Usage.ResolvedModel
+	settlement.Spend.BackendProfile, settlement.Spend.Provider, settlement.Spend.Transport = request.BackendProfile, request.Provider, request.Transport
 }
 
 func applyManagedCompletionContextSurface(t testing.TB, ctx context.Context, turn *runtimeeffects.CompletionAgentTurn) {

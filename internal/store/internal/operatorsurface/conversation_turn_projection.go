@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
@@ -44,25 +45,27 @@ type conversationTurnCursor struct {
 }
 
 type conversationTurnRecord struct {
-	TurnID           string
-	Ordinal          int
-	RunID            string
-	AgentID          string
-	SessionID        string
-	EntityID         string
-	TriggerEventID   string
-	TriggerEventType string
-	TaskID           string
-	TurnBlocksRaw    []byte
-	ParseOK          bool
-	LatencyMS        int
-	RetryCount       int
-	UsageExactness   string
-	ExecutionMode    string
-	InputTokens      sql.NullInt64
-	OutputTokens     sql.NullInt64
-	Failure          *runtimefailures.Envelope
-	CreatedAt        time.Time
+	CompletionEvidenceRaw []byte
+	ResolvedModel         sql.NullString
+	TurnID                string
+	Ordinal               int
+	RunID                 string
+	AgentID               string
+	SessionID             string
+	EntityID              string
+	TriggerEventID        string
+	TriggerEventType      string
+	TaskID                string
+	TurnBlocksRaw         []byte
+	ParseOK               bool
+	LatencyMS             int
+	RetryCount            int
+	UsageExactness        string
+	ExecutionMode         string
+	InputTokens           sql.NullInt64
+	OutputTokens          sql.NullInt64
+	Failure               *runtimefailures.Envelope
+	CreatedAt             time.Time
 }
 
 type ConversationTurnRecord = conversationTurnRecord
@@ -345,13 +348,14 @@ func (s conversationProjection) listOperatorConversationTurns(ctx context.Contex
 				COALESCE(task_id, '') AS task_id, COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
 				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
-				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at
+				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at,
+				CAST(completion_evidence AS TEXT) AS completion_evidence, resolved_model
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id,
 			trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms,
-			retry_count, usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at
+			retry_count, usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, completion_evidence, resolved_model
 		FROM ordered
 		WHERE %s
 		ORDER BY created_at DESC, turn_id DESC
@@ -420,13 +424,14 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 				COALESCE(task_id, '') AS task_id, COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
 				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
-				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at, agent_frame_bytes
+				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at, agent_frame_bytes,
+				CAST(completion_evidence AS TEXT) AS completion_evidence, resolved_model
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id, trigger_event_id,
 			trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count,
-			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, agent_frame_bytes
+			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, agent_frame_bytes, completion_evidence, resolved_model
 		FROM ordered
 		WHERE turn_id = ?
 	`, runIDProjection), sessionID, turnID)
@@ -500,14 +505,14 @@ func latestPublicConversationTurnQuery(sessionPlaceholder string) string {
 				COALESCE(usage_exactness, '') AS usage_exactness,
 				execution_mode, input_tokens, output_tokens,
 				COALESCE(CAST(failure AS TEXT), 'null') AS failure,
-				created_at
+				created_at, CAST(completion_evidence AS TEXT) AS completion_evidence, resolved_model
 			FROM agent_turns
 			WHERE session_id = %s
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id,
 			trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok,
 			latency_ms, retry_count, usage_exactness, execution_mode, input_tokens,
-			output_tokens, failure, created_at
+			output_tokens, failure, created_at, completion_evidence, resolved_model
 		FROM ordered
 		ORDER BY created_at DESC, turn_id DESC
 		LIMIT 1
@@ -586,6 +591,7 @@ func scanConversationTurnRecord(scanner operatorRowScanner) (conversationTurnRec
 		&record.EntityID, &record.TriggerEventID, &record.TriggerEventType, &record.TaskID,
 		&record.TurnBlocksRaw, &record.ParseOK, &record.LatencyMS, &record.RetryCount,
 		&record.UsageExactness, &record.ExecutionMode, &record.InputTokens, &record.OutputTokens, &failureRaw, &createdAtRaw,
+		&record.CompletionEvidenceRaw, &record.ResolvedModel,
 	); err != nil {
 		return conversationTurnRecord{}, err
 	}
@@ -618,6 +624,7 @@ func scanConversationTurnDetailRecord(scanner operatorRowScanner) (conversationT
 		&record.TurnBlocksRaw, &record.ParseOK, &record.LatencyMS, &record.RetryCount,
 		&record.UsageExactness, &record.ExecutionMode, &record.InputTokens, &record.OutputTokens,
 		&failureRaw, &createdAtRaw, &frameBytes,
+		&record.CompletionEvidenceRaw, &record.ResolvedModel,
 	); err != nil {
 		return conversationTurnRecord{}, nil, err
 	}
@@ -654,6 +661,13 @@ func projectConversationFrameFacts(raw []byte, turn operatorread.OperatorPublicC
 }
 
 func projectPublicConversationTurn(record conversationTurnRecord) (operatorread.OperatorPublicConversationTurn, error) {
+	evidence, err := runtimeeffects.DecodeCompletionEvidence(record.CompletionEvidenceRaw)
+	if err != nil {
+		return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("decode conversation completion evidence: %w", err)
+	}
+	if record.ResolvedModel.String != evidence.ResolvedModel() {
+		return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("persisted conversation model contradicts completion evidence")
+	}
 	var blocks []runtimellm.TurnBlock
 	raw := bytes.TrimSpace(record.TurnBlocksRaw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
@@ -673,6 +687,8 @@ func projectPublicConversationTurn(record conversationTurnRecord) (operatorread.
 		activity = []operatorread.OperatorConversationActivity{}
 	}
 	turn := operatorread.OperatorPublicConversationTurn{
+		CompletionEvidence:     evidence,
+		ResolvedModel:          record.ResolvedModel.String,
 		TurnID:                 strings.TrimSpace(record.TurnID),
 		ExecutionMode:          strings.TrimSpace(record.ExecutionMode),
 		Ordinal:                record.Ordinal,
@@ -744,18 +760,20 @@ func operatorConversationTurnListItemFromPublic(turn operatorread.OperatorPublic
 		}
 	}
 	return operatorread.OperatorConversationTurnListItem{
-		TurnID:           turn.TurnID,
-		ExecutionMode:    turn.ExecutionMode,
-		Ordinal:          turn.Ordinal,
-		CompletedAt:      turn.CompletedAt,
-		DurationMS:       turn.DurationMS,
-		TriggerEventID:   turn.TriggerEventID,
-		TriggerEventType: turn.TriggerEventType,
-		ActivityCounts:   counts,
-		Tokens:           turn.Tokens,
-		Outcome:          turn.Outcome,
-		ParseOK:          turn.ParseOK,
-		Failure:          runtimefailures.CloneEnvelope(turn.Failure),
+		CompletionEvidence: turn.CompletionEvidence.Clone(),
+		ResolvedModel:      turn.ResolvedModel,
+		TurnID:             turn.TurnID,
+		ExecutionMode:      turn.ExecutionMode,
+		Ordinal:            turn.Ordinal,
+		CompletedAt:        turn.CompletedAt,
+		DurationMS:         turn.DurationMS,
+		TriggerEventID:     turn.TriggerEventID,
+		TriggerEventType:   turn.TriggerEventType,
+		ActivityCounts:     counts,
+		Tokens:             turn.Tokens,
+		Outcome:            turn.Outcome,
+		ParseOK:            turn.ParseOK,
+		Failure:            runtimefailures.CloneEnvelope(turn.Failure),
 	}
 }
 

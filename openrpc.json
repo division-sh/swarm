@@ -14589,9 +14589,22 @@
             "minLength": 1,
             "type": "string"
           },
+          "completion_evidence": {
+            "$ref": "#/components/schemas/CompletionEvidence"
+          },
           "cost_display": {
             "description": "Author-facing cost qualification; mock rows are always labeled hypothetical rather than provider-billed.",
             "minLength": 1,
+            "type": "string"
+          },
+          "cost_provenance": {
+            "enum": [
+              "provider_reported",
+              "locally_estimated",
+              "unavailable",
+              "reservation_exhaustion",
+              "unattributed"
+            ],
             "type": "string"
           },
           "execution_mode": {
@@ -14603,7 +14616,7 @@
             "type": "string"
           },
           "model": {
-            "description": "Concrete model string used for legacy grouping and guardrail cost estimation.",
+            "description": "Frozen requested model used for guardrail cost estimation, never replaced by the provider-observed label.",
             "minLength": 1,
             "type": "string"
           },
@@ -14618,7 +14631,7 @@
             "type": "string"
           },
           "resolved_model": {
-            "description": "Concrete provider model resolved from model_alias for backend_profile at write time.",
+            "description": "Provider-observed terminal label or one unambiguous contributor; omitted when missing or ambiguous. No request/config fallback.",
             "minLength": 1,
             "type": "string"
           },
@@ -14643,7 +14656,7 @@
           "backend_profile",
           "provider",
           "transport",
-          "resolved_model",
+          "cost_provenance",
           "cost_display",
           "totals"
         ],
@@ -14668,6 +14681,11 @@
       "AgentUsageTotals": {
         "additionalProperties": false,
         "properties": {
+          "cost_usd": {
+            "description": "Total canonical ledger amount. It is not certified provider billing and does not imply token or price exactness.",
+            "minimum": 0,
+            "type": "number"
+          },
           "estimated_cost_usd": {
             "description": "Guardrail cost estimate from BudgetTracker pricing, not provider billing truth.",
             "minimum": 0,
@@ -14684,13 +14702,30 @@
           "output_tokens": {
             "minimum": 0,
             "type": "integer"
+          },
+          "provider_reported_cost_usd": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "reservation_exhaustion_usd": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "unattributed_cost_usd": {
+            "description": "Explicit manual/non-completion spend has no provider-attempt evidence; no reported model or price is inferred.",
+            "minimum": 0,
+            "type": "number"
           }
         },
         "required": [
           "ledger_entries",
           "input_tokens",
           "output_tokens",
-          "estimated_cost_usd"
+          "cost_usd",
+          "estimated_cost_usd",
+          "provider_reported_cost_usd",
+          "reservation_exhaustion_usd",
+          "unattributed_cost_usd"
         ],
         "type": "object"
       },
@@ -15361,6 +15396,223 @@
         ],
         "type": "object"
       },
+      "CompletionEvidence": {
+        "additionalProperties": false,
+        "description": "Immutable, selected-store completion evidence. Models are source-tagged and sorted by source then exact label for stable encoding, never for first-model selection. Price provenance is independent of token exactness.",
+        "properties": {
+          "cost_provenance": {
+            "enum": [
+              "provider_reported",
+              "locally_estimated",
+              "unavailable",
+              "reservation_exhaustion"
+            ],
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/CompletionModelObservation"
+            },
+            "type": "array"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/CompletionEvidenceProblem"
+            },
+            "type": "array"
+          },
+          "provider_reported_cost_usd": {
+            "description": "Reported terminal total; zero differs from absent. Not recomputed from contributor prices.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "request": {
+            "$ref": "#/components/schemas/CompletionRequest"
+          }
+        },
+        "required": [
+          "request",
+          "models",
+          "cost_provenance"
+        ],
+        "type": "object"
+      },
+      "CompletionEvidenceProblem": {
+        "additionalProperties": false,
+        "description": "Invalid or absent provider evidence is explicit without erasing valid independent dimensions. Private raw responses remain in their existing owner only.",
+        "properties": {
+          "code": {
+            "enum": [
+              "absent",
+              "invalid"
+            ],
+            "type": "string"
+          },
+          "dimension": {
+            "enum": [
+              "model",
+              "tokens",
+              "cost"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "response.model",
+              "claude.result.model",
+              "claude.result.modelUsage",
+              "claude.result.usage",
+              "claude.result.total_cost_usd"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "dimension",
+          "code"
+        ],
+        "type": "object"
+      },
+      "CompletionModelObservation": {
+        "additionalProperties": false,
+        "description": "A provider-reported label, not certification of a concrete model version. CLI terminal and modelUsage contributors are distinct roles; contributor amounts never create additional charges.",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_reported_cost_usd": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "source": {
+            "enum": [
+              "response.model",
+              "claude.result.model",
+              "claude.result.modelUsage"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "source"
+        ],
+        "type": "object"
+      },
+      "CompletionRequest": {
+        "additionalProperties": false,
+        "description": "Exact request selection frozen at provider-attempt admission, not a provider observation or a current configuration lookup.",
+        "properties": {
+          "backend_profile": {
+            "enum": [
+              "anthropic",
+              "claude_cli",
+              "openai_responses",
+              "openai_compatible",
+              "mock"
+            ],
+            "type": "string"
+          },
+          "model_alias": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requested_model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "api",
+              "cli"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_alias",
+          "requested_model",
+          "backend_profile",
+          "provider",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "CompletionUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_creation_1h_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cache_creation_5m_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cache_creation_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "completion_evidence": {
+            "$ref": "#/components/schemas/CompletionEvidence"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_reported_cost_usd": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "resolved_model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "usage_exactness": {
+            "enum": [
+              "exact",
+              "estimated",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "completion_evidence",
+          "usage_exactness"
+        ],
+        "type": "object"
+      },
       "ConnectedChannelActivation": {
         "additionalProperties": false,
         "properties": {
@@ -15648,6 +15900,31 @@
           "publish",
           "output",
           "failure"
+        ],
+        "type": "object"
+      },
+      "ConversationCompletion": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
+          "ordinal": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/CompletionUsage"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "ordinal",
+          "execution_mode",
+          "usage"
         ],
         "type": "object"
       },
@@ -15970,6 +16247,14 @@
         "additionalProperties": false,
         "description": "Fork-local transcript turn. It intentionally is not an agent_turns row and may not have a live trigger event.",
         "properties": {
+          "completions": {
+            "description": "Immutable ordered provider-call children, each retaining its own request, observations, totals and provenance. No parent-config reconstruction.",
+            "items": {
+              "$ref": "#/components/schemas/ConversationCompletion"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
           "execution_mode": {
             "$ref": "#/components/schemas/ExecutionMode"
           },
@@ -16024,7 +16309,8 @@
           "turn_id",
           "parse_ok",
           "latency_ms",
-          "execution_mode"
+          "execution_mode",
+          "completions"
         ],
         "type": "object"
       },
@@ -16128,6 +16414,9 @@
           "completed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
+          "completion_evidence": {
+            "$ref": "#/components/schemas/CompletionEvidence"
+          },
           "duration_ms": {
             "minimum": 0,
             "type": "integer"
@@ -16149,6 +16438,10 @@
           "parse_ok": {
             "type": "boolean"
           },
+          "resolved_model": {
+            "minLength": 1,
+            "type": "string"
+          },
           "tokens": {
             "$ref": "#/components/schemas/ConversationTokenUsage"
           },
@@ -16169,7 +16462,8 @@
           "duration_ms",
           "activity_counts",
           "parse_ok",
-          "execution_mode"
+          "execution_mode",
+          "completion_evidence"
         ],
         "type": "object"
       },
@@ -22339,6 +22633,9 @@
           "completed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
+          "completion_evidence": {
+            "$ref": "#/components/schemas/CompletionEvidence"
+          },
           "duration_ms": {
             "minimum": 0,
             "type": "integer"
@@ -22362,6 +22659,10 @@
           },
           "parse_ok": {
             "type": "boolean"
+          },
+          "resolved_model": {
+            "minLength": 1,
+            "type": "string"
           },
           "retry_count": {
             "minimum": 0,
@@ -22390,7 +22691,8 @@
           "duration_ms",
           "activity",
           "parse_ok",
-          "execution_mode"
+          "execution_mode",
+          "completion_evidence"
         ],
         "type": "object"
       },
@@ -22400,11 +22702,19 @@
           "completed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
+          "completion_evidence": {
+            "$ref": "#/components/schemas/CompletionEvidence"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
           "parse_ok": {
             "type": "boolean"
+          },
+          "resolved_model": {
+            "description": "Unambiguous provider-observed label; omitted when unavailable or ambiguous.",
+            "minLength": 1,
+            "type": "string"
           },
           "turn_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -22413,7 +22723,8 @@
         "required": [
           "turn_id",
           "completed_at",
-          "parse_ok"
+          "parse_ok",
+          "completion_evidence"
         ],
         "type": "object"
       },

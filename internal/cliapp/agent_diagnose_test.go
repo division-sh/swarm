@@ -358,7 +358,7 @@ func validAgentDiagnosisResult() map[string]any {
 		"agent_id":            "agent-1",
 		"status":              "running",
 		"current_session_ref": map[string]any{"session_id": "session-1", "started_at": "2026-05-18T03:00:00Z"},
-		"last_turn_ref":       map[string]any{"turn_id": "turn-1", "completed_at": "2026-05-18T03:05:00Z", "parse_ok": true},
+		"last_turn_ref":       map[string]any{"turn_id": "turn-1", "completed_at": "2026-05-18T03:05:00Z", "parse_ok": true, "completion_evidence": completionEvidenceFixtureForCLI()},
 		"queue": map[string]any{
 			"pending_count":              2,
 			"oldest_pending_age_seconds": 30,

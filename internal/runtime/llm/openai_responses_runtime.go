@@ -288,7 +288,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 			Failure:        agentTurnFailure(err, "openai_responses_turn"),
 		}, nil)
 		if dispatch != nil {
-			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
 				return nil, errors.Join(err, settleErr)
 			}
 		}
@@ -321,7 +321,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_usage"),
 		}, nil)
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableObservedCompletionUsage(parsed.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -342,8 +342,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_decode"),
 		}, nil)
-		usage.Model = reqBody.Model
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionObservedUsage(usage.InputTokens, usage.OutputTokens, usage.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -368,8 +367,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		ParseOK:        true,
 		Latency:        latency,
 	}, &resp)
-	usage.Model = reqBody.Model
-	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
+	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionObservedUsage(usage.InputTokens, usage.OutputTokens, usage.Model), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
 	if !settled.Committed {
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
@@ -406,6 +404,7 @@ func (r *OpenAIResponsesRuntime) sendAdmittedRequest(ctx context.Context, profil
 		return nil, openAIResponsesResponse{}, nil, err
 	}
 	defer release()
+	ctx = withCompletionRequest(ctx, profile, model)
 	raw, response, dispatch, err := r.sendRequest(ctx, payload, managed)
 	if dispatch != nil {
 		dispatch.providerModel = model
@@ -682,13 +681,13 @@ func parseOpenAIResponsesToolArguments(raw string) any {
 }
 
 func openAIResponsesUsage(parsed openAIResponsesResponse) (UsageTokens, bool) {
-	if parsed.Usage.InputTokens == nil || parsed.Usage.OutputTokens == nil {
-		return UsageTokens{}, false
+	if parsed.Usage.InputTokens == nil || parsed.Usage.OutputTokens == nil || *parsed.Usage.InputTokens < 0 || *parsed.Usage.OutputTokens < 0 {
+		return UsageTokens{Model: parsed.Model}, false
 	}
 	return UsageTokens{
 		InputTokens:  *parsed.Usage.InputTokens,
 		OutputTokens: *parsed.Usage.OutputTokens,
-		Model:        strings.TrimSpace(parsed.Model),
+		Model:        parsed.Model,
 	}, true
 }
 

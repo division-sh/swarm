@@ -345,8 +345,8 @@ func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory 
 		}
 	}
 	for index, settlement := range settlements {
-		if settlement.Usage.ResolvedModel != "test-model" || settlement.Spend.ResolvedModel != "test-model" {
-			t.Fatalf("settlement %d = %#v, want sealed frame model", index+1, settlement)
+		if settlement.Usage.ResolvedModel != "" || settlement.Spend.ResolvedModel != "" || settlement.Usage.Evidence.Request.RequestedModel != "test-model" {
+			t.Fatalf("settlement %d = %#v, fabricated unreported provider model", index+1, settlement)
 		}
 	}
 }

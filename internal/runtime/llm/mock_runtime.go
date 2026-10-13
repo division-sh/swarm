@@ -371,6 +371,7 @@ type mockCompletionExecutor func(context.Context, pythonmodule.Request) (pythonm
 
 func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall, execute mockCompletionExecutor) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	model := strings.TrimSpace(providerModel.ConcreteModel)
+	ctx = withCompletionRequest(ctx, llmselection.Profile{ID: providerModel.Backend, Provider: providerModel.Provider, Transport: providerModel.Transport}, providerModel)
 	attempt, err := beginProviderCompletion(ctx, "mock_python", request, managed)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), nil, err
@@ -460,7 +461,7 @@ func parseMockCompletionOutput(raw, request []byte, tools []ToolDefinition, mode
 		if output.Usage.InputTokens < 0 || output.Usage.OutputTokens < 0 {
 			return nil, usage, fmt.Errorf("mock completion usage token counts must be non-negative")
 		}
-		usage = completionUsage(output.Usage.InputTokens, output.Usage.OutputTokens, model, runtimeeffects.CompletionUsageEstimated)
+		usage = completionUsage(output.Usage.InputTokens, output.Usage.OutputTokens, runtimeeffects.CompletionUsageEstimated)
 	}
 	text := ""
 	if output.Text != nil {
@@ -502,7 +503,7 @@ func parseMockCompletionOutput(raw, request []byte, tools []ToolDefinition, mode
 func estimatedMockUsage(input, output []byte, model string) runtimeeffects.CompletionUsage {
 	inputTokens := estimatedTokenCount(input)
 	outputTokens := estimatedTokenCount(output)
-	return completionUsage(inputTokens, outputTokens, model, runtimeeffects.CompletionUsageEstimated)
+	return completionUsage(inputTokens, outputTokens, runtimeeffects.CompletionUsageEstimated)
 }
 
 func estimatedTokenCount(raw []byte) int {

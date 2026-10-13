@@ -336,9 +336,6 @@ func normalizeBudgetSpendRecord(rec budgetspend.SpendRecord) budgetspend.SpendRe
 	if rec.Transport == "" {
 		rec.Transport = "unknown"
 	}
-	if rec.ResolvedModel == "" {
-		rec.ResolvedModel = rec.Model
-	}
 	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
 	rec.UsageAccounting = strings.TrimSpace(strings.ToLower(rec.UsageAccounting))
 	if rec.RecordedAt.IsZero() {

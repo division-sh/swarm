@@ -418,10 +418,6 @@ func TestProviderAttemptDrainAdapterParity(t *testing.T) {
 
 				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "provider-head-current", "")
 				settlement.ProviderHead = nil
-				settlement.Spend.Provider = adapter
-				if registration, ok := runtimeeffects.RegistrationFor(adapter); ok {
-					settlement.Spend.Transport = registration.Transport
-				}
 				applyManagedCompletionTestSurface(t, settlement.AgentTurn, handle.Attempt().Authority, adapter)
 				if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 					t.Fatalf("settle drained %s completion: %v", adapter, err)

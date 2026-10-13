@@ -358,6 +358,7 @@ func forkChatCompletionAuthority(prepared runfork.ConversationForkChatPrepared, 
 
 func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, authority runtimeeffects.Authority, suffix string) context.Context {
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
+	ctx = runtimeeffects.WithCompletionRequest(ctx, runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "forkchat-request", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"})
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }
 
@@ -402,6 +403,7 @@ func settleForkChatCompletionAttempt(t *testing.T, ctx context.Context, handle *
 		failure := runtimefailures.FromError(cause, "forkchat-test", "settle")
 		settlement.Settlement.Failure = &failure.Failure
 	}
+	bindCompletionEvidenceForTest(&settlement, handle.Attempt().Authority.CompletionRequest, []runtimeeffects.CompletionModelObservation{{Model: "forkchat-test", Source: runtimeeffects.CompletionModelResponse}})
 	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle forkchat completion: %v", err)
 	}
@@ -423,6 +425,7 @@ func settleForkChatPrelaunchFailure(t *testing.T, ctx context.Context, handle *r
 		},
 		Now: now,
 	}
+	bindCompletionEvidenceForTest(&settlement, handle.Attempt().Authority.CompletionRequest, nil)
 	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle prelaunch forkchat completion: %v", err)
 	}
