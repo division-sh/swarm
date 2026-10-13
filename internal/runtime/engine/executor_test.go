@@ -7890,7 +7890,7 @@ scoring-node:
           scores: entity.scores
   state_schema:
     fields:
-      dimensions_received: "[DimensionScore]"
+      dimensions_received: [DimensionScore]
 result-observer:
   execution_type: system_node
   event_handlers:
