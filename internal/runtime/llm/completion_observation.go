@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -14,7 +15,6 @@ import (
 )
 
 type claudeCompletionResult struct {
-	Type       string          `json:"type"`
 	Model      json.RawMessage `json:"model"`
 	ModelUsage json.RawMessage `json:"modelUsage"`
 	Usage      json.RawMessage `json:"usage"`
@@ -26,13 +26,14 @@ type claudeCompletionResult struct {
 // token totals, and missing tokens cannot erase an observed model or price.
 func claudeCompletionUsageFromRaw(raw []byte) (runtimeeffects.CompletionUsage, error) {
 	var terminal claudeCompletionResult
+	var terminalErr error
 	found := false
 	decode := func(raw []byte) bool {
-		result, err := decodeClaudeCompletionResult(raw)
-		if err != nil || strings.ToLower(strings.TrimSpace(result.Type)) != "result" {
+		result, candidate, err := decodeClaudeCompletionResult(raw)
+		if !candidate {
 			return false
 		}
-		terminal, found = result, true
+		terminal, terminalErr, found = result, err, true
 		return true
 	}
 	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte{'\n'}) {
@@ -44,6 +45,14 @@ func claudeCompletionUsageFromRaw(raw []byte) (runtimeeffects.CompletionUsage, e
 	usage := unavailableCompletionUsage()
 	if !found {
 		return usage, fmt.Errorf("claude ResultMessage missing exact usage")
+	}
+	if terminalErr != nil {
+		for _, dimension := range []struct{ source, name string }{
+			{runtimeeffects.CompletionModelCLITerminal, "model"}, {"claude.result.usage", "tokens"}, {"claude.result.total_cost_usd", "cost"},
+		} {
+			completionObservationProblem(&usage.Evidence, dimension.source, dimension.name, "invalid")
+		}
+		return usage, terminalErr
 	}
 	modelErr := observeClaudeTerminalModel(&usage.Evidence, terminal.Model)
 	contributorErr := observeClaudeContributors(&usage.Evidence, terminal.ModelUsage)
@@ -87,20 +96,21 @@ func removeCompletionObservationSource(models []runtimeeffects.CompletionModelOb
 	return result
 }
 
-func decodeClaudeCompletionResult(raw []byte) (claudeCompletionResult, error) {
-	var result claudeCompletionResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return result, err
+func decodeClaudeCompletionResult(raw []byte) (claudeCompletionResult, bool, error) {
+	entries, parseErr := completionObservationFieldList(raw)
+	fields, duplicates, keyErr := completionObservationFieldMap(entries)
+	candidate := false
+	for _, entry := range entries {
+		var kind string
+		if entry.name == "type" && entry.err == nil && completionObservationDecode(entry.value, &kind) == nil && strings.ToLower(strings.TrimSpace(kind)) == "result" {
+			candidate = true
+		}
 	}
-	var err error
-	result.duplicates, err = completionDuplicateFields(raw)
-	if err != nil {
-		return result, err
+	result := claudeCompletionResult{Model: fields["model"], ModelUsage: fields["modelUsage"], Usage: fields["usage"], Cost: fields["total_cost_usd"], duplicates: duplicates}
+	if duplicates["type"] {
+		parseErr = errors.Join(parseErr, fmt.Errorf("duplicate claude result type"))
 	}
-	if result.duplicates["type"] {
-		return result, fmt.Errorf("duplicate claude result type")
-	}
-	return result, nil
+	return result, candidate, errors.Join(parseErr, keyErr)
 }
 
 func completionObservationProblem(evidence *runtimeeffects.CompletionEvidence, source, dimension, code string) {
@@ -181,15 +191,64 @@ func completionDuplicateFields(raw []byte) (map[string]bool, error) {
 }
 
 func completionObservationFields(raw []byte) (map[string]json.RawMessage, map[string]bool, error) {
+	entries, parseErr := completionObservationFieldList(raw)
+	fields, duplicates, keyErr := completionObservationFieldMap(entries)
+	return fields, duplicates, errors.Join(parseErr, keyErr)
+}
+
+type completionObservationField struct {
+	name  string
+	value json.RawMessage
+	err   error
+}
+
+// Decoder offsets retain each exact key lexeme for strict Unicode admission.
+// Values stay raw so one invalid contributor cannot erase its valid siblings.
+func completionObservationFieldList(raw []byte) ([]completionObservationField, error) {
 	if !utf8.Valid(raw) {
-		return nil, nil, fmt.Errorf("invalid UTF-8 completion fields")
+		return nil, fmt.Errorf("invalid UTF-8 completion fields")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, nil, err
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, fmt.Errorf("completion fields require an object")
 	}
-	duplicates, err := completionDuplicateFields(raw)
-	return fields, duplicates, err
+	var fields []completionObservationField
+	for decoder.More() {
+		start := decoder.InputOffset()
+		if _, err := decoder.Token(); err != nil {
+			return fields, err
+		}
+		key := bytes.TrimSpace(raw[start:decoder.InputOffset()])
+		key = bytes.TrimSpace(bytes.TrimPrefix(key, []byte{','}))
+		var field completionObservationField
+		field.err = completionObservationDecode(key, &field.name)
+		if err := decoder.Decode(&field.value); err != nil {
+			return fields, err
+		}
+		fields = append(fields, field)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return fields, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fields, fmt.Errorf("trailing completion fields")
+	}
+	return fields, nil
+}
+
+func completionObservationFieldMap(entries []completionObservationField) (map[string]json.RawMessage, map[string]bool, error) {
+	fields, duplicates := map[string]json.RawMessage{}, map[string]bool{}
+	var errs []error
+	for _, entry := range entries {
+		if entry.err != nil {
+			errs = append(errs, entry.err)
+			continue
+		}
+		_, exists := fields[entry.name]
+		duplicates[entry.name] = exists || duplicates[entry.name]
+		fields[entry.name] = entry.value
+	}
+	return fields, duplicates, errors.Join(errs...)
 }
 
 func observeClaudeTerminalModel(evidence *runtimeeffects.CompletionEvidence, raw json.RawMessage) error {
@@ -217,11 +276,11 @@ func observeClaudeContributors(evidence *runtimeeffects.CompletionEvidence, raw 
 		return nil
 	}
 	contributors, duplicates, err := completionObservationFields(raw)
+	var errs []error
 	if err != nil {
 		completionObservationProblem(evidence, runtimeeffects.CompletionModelCLIUsage, "model", "invalid")
-		return fmt.Errorf("claude modelUsage: %w", err)
+		errs = append(errs, fmt.Errorf("claude modelUsage: %w", err))
 	}
-	var errs []error
 	for model, raw := range contributors {
 		if strings.TrimSpace(model) == "" || duplicates[model] {
 			completionObservationProblem(evidence, runtimeeffects.CompletionModelCLIUsage, "model", "invalid")

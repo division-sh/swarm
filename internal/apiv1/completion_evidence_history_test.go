@@ -37,7 +37,7 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 				if memory {
 					sessionID = completion2270HistorySession(t, selected.(sessions.Registry), identity)
 				}
-				want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, memory)
+				want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, memory, 0.125)
 				actor.Model = "cheap"
 				storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: actor, Status: "active", StartedAt: time.Now().UTC()})
 				before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
@@ -45,7 +45,7 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, owner := range []completion2270PublicStore{selected, reopen()} {
-					proveCompletion2270FrozenPublicHistory(t, owner, identity, sessionID, turnID, frameHash, want)
+					proveCompletion2270FrozenPublicHistory(t, owner, identity, sessionID, turnID, frameHash, want, 0.125)
 				}
 				after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 				if err != nil || !reflect.DeepEqual(before, after) {
@@ -53,6 +53,30 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCompletion2270SubNanodollarPublicHistoryBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected, reopen := completion2270HistoryStore(t, backend)
+			ctx := context.Background()
+			runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			identity := sqliteAgentUsageIdentityForRun(t, runID, "fractional-price-2270")
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
+			seedCompletion2270Agent(t, ctx, selected, identity)
+			want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, false, 0.0000000004)
+			actor := withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "cheap",
+				ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance()})
+			storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: actor, Status: "active", StartedAt: time.Now().UTC()})
+			charged := 0.0000000004
+			if backend == "postgres" {
+				charged = 0 // The existing spend_ledger NUMERIC(18,9) contract is unchanged.
+			}
+			for _, owner := range []completion2270PublicStore{selected, reopen()} {
+				proveCompletion2270FrozenPublicHistory(t, owner, identity, sessionID, turnID, frameHash, want, charged)
+			}
+		})
 	}
 }
 
@@ -87,12 +111,12 @@ func completion2270HistorySession(t *testing.T, selected sessions.Registry, iden
 	return lease.SessionID
 }
 
-func persistCompletion2270History(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID string, memory bool) (effects.CompletionEvidence, string) {
+func persistCompletion2270History(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID string, memory bool, total float64) (effects.CompletionEvidence, string) {
 	t.Helper()
 	ctx, at := context.Background(), time.Now().UTC()
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "completion.history", "completion-2270", "", []byte(`{}`), 0, identity.RunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, "subscribed")
-	input, output, total := int64(12), int64(3), 0.125
+	input, output := int64(12), int64(3)
 	request := effects.CompletionRequest{ModelAlias: "regular", RequestedModel: "frozen-request-A", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli"}
 	evidence := effects.CompletionEvidence{Request: request, Models: []effects.CompletionModelObservation{{Model: "reported-B", Source: effects.CompletionModelCLITerminal},
 		{Model: "contributor-C", Source: effects.CompletionModelCLIUsage, InputTokens: &input, ProviderReportedCostUSD: &total}}, CostProvenance: effects.CompletionCostReported, ProviderReportedCostUSD: &total}
@@ -103,7 +127,7 @@ func persistCompletion2270History(t *testing.T, selected completion2270PublicSto
 	return evidence.Canonical(), result.Frame.ContentHash
 }
 
-func proveCompletion2270FrozenPublicHistory(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID, frameHash string, want effects.CompletionEvidence) {
+func proveCompletion2270FrozenPublicHistory(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID, frameHash string, want effects.CompletionEvidence, charged float64) {
 	t.Helper()
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: selected, Conversations: selected, Usage: selected})})
 	params := fmt.Sprintf(`{"run_id":%q,"agent_id":%q}`, identity.RunID, identity.AgentID())
@@ -124,7 +148,7 @@ func proveCompletion2270FrozenPublicHistory(t *testing.T, selected completion227
 	}
 	var usage operatorread.OperatorAgentUsage
 	decodeCompletion2270RPC(t, rpcCall(t, handler, `{"jsonrpc":"2.0","id":4,"method":"agent.usage","params":`+params+`}`), &usage)
-	if len(usage.Breakdown) != 1 || usage.Breakdown[0].CompletionEvidence == nil || !reflect.DeepEqual(*usage.Breakdown[0].CompletionEvidence, want) || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.ProviderReportedCostUSD != 0.125 {
+	if len(usage.Breakdown) != 1 || usage.Breakdown[0].CompletionEvidence == nil || !reflect.DeepEqual(*usage.Breakdown[0].CompletionEvidence, want) || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.ProviderReportedCostUSD != charged || usage.Usage.Exact.CostUSD != charged {
 		t.Fatalf("usage reconstructed history or double-charged contributors: %+v", usage)
 	}
 }

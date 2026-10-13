@@ -64,6 +64,9 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 			retErr = &claudeCompletionAttemptFailure{state: runtimeeffects.StateOutcomeUncertain, err: retErr, operation: "provider_execution"}
 		}
 		if retErr != nil {
+			if resp != nil {
+				retErr = retainClaudeFailureObservations(retErr, resp.Raw)
+			}
 			resp = nil
 		}
 	}()
@@ -113,12 +116,12 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		if errors.Is(context.Cause(runCtx), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
+		return nil, retainClaudeFailureObservations(returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText}), stdout.Bytes())
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
 	if err := attempt.MarkResponseObserved(heartbeatCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)})
+		return nil, retainClaudeFailureObservations(returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}), raw)
 	}
 	resp = parseCLIResponse(raw)
 	resp.Raw = raw
@@ -185,7 +188,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(settlementCtx, ctx context.Conte
 		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
+		return nil, retainClaudeFailureObservations(returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText}), joinRawLines(stdoutLines))
 	}
 
 	acc := newCLIStreamAccumulator()
@@ -194,7 +197,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(settlementCtx, ctx context.Conte
 	}
 	resp := acc.Response()
 	if err := attempt.MarkResponseObserved(settlementCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)})
+		return nil, retainClaudeFailureObservations(returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}), resp.Raw)
 	}
 	if monitor != nil {
 		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(coalesce(resp.SessionID, meta.SessionID)))
@@ -219,6 +222,23 @@ type claudeCompletionAttemptFailure struct {
 	err       error
 	operation string
 	evidence  map[string]any
+	usage     *runtimeeffects.CompletionUsage
+}
+
+func retainClaudeFailureObservations(err error, raw []byte) error {
+	if failure := claudeAttemptFailure(err); failure != nil {
+		usage, _ := claudeCompletionUsageFromRaw(raw)
+		owned := usage.Clone()
+		failure.usage = &owned
+	}
+	return err
+}
+
+func claudeFailureUsage(err error) runtimeeffects.CompletionUsage {
+	if failure := claudeAttemptFailure(err); failure != nil && failure.usage != nil {
+		return failure.usage.Clone()
+	}
+	return unavailableCompletionUsage()
 }
 
 func (e *claudeCompletionAttemptFailure) Error() string { return e.Unwrap().Error() }

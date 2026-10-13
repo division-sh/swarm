@@ -288,7 +288,6 @@ func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, m
 		return nil, err
 	}
 	completionModel := strings.TrimSpace(providerModel.ConcreteModel)
-	usageModel := coalesce(completionModel, "unknown")
 	toolProjection, err := projectClaudeInvocationTools(ctx, actor, s.Tools)
 	if err != nil {
 		return nil, err
@@ -358,7 +357,7 @@ func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, m
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
 	}
 	args := r.claudeContinuationArgs(s, childSessionID, confirmedHead, completionModel, toolProjection, mcpEnabled, mcpConfig)
-	prepared := claudePreparedContinuation{profile: profile, model: providerModel, tools: toolProjection, target: target, prompt: prompt, confirmedHead: confirmedHead, childSessionID: childSessionID, usageModel: usageModel}
+	prepared := claudePreparedContinuation{profile: profile, model: providerModel, tools: toolProjection, target: target, prompt: prompt, confirmedHead: confirmedHead, childSessionID: childSessionID}
 	return r.executeClaudeContinuation(ctx, s, message, managed, actor, resolved, lease, prepared, args, mcpContextToken, dispatch, completionTargetID)
 }
 
@@ -370,7 +369,6 @@ type claudePreparedContinuation struct {
 	prompt         string
 	confirmedHead  string
 	childSessionID string
-	usageModel     string
 }
 
 func (r *ClaudeCLIRuntime) claudeContinuationArgs(s *Session, childSessionID, confirmedHead, completionModel string, toolProjection claudeInvocationToolProjection, mcpEnabled bool, mcpConfig string) []string {
@@ -451,13 +449,13 @@ func (r *ClaudeCLIRuntime) executeClaudeContinuation(ctx context.Context, s *Ses
 		"prompt_arg_fallback_used":      fallback.Used,
 	})
 	if err != nil {
-		return nil, r.failClaudeContinuation(ctx, s, resolved, lease, dispatch, completionTargetID, prepared.profile, prepared.usageModel, requestPayload, latency, err)
+		return nil, r.failClaudeContinuation(ctx, s, resolved, lease, dispatch, completionTargetID, prepared.profile, requestPayload, latency, err)
 	}
 	reply := claudeContinuationReply{response: resp, requestPayload: requestPayload, latency: latency, dispatch: dispatch, targetID: completionTargetID, profile: prepared.profile}
 	return r.acceptClaudeContinuation(ctx, s, message, managed, actor, resolved, *lease, prepared, reply)
 }
 
-func (r *ClaudeCLIRuntime) failClaudeContinuation(ctx context.Context, s *Session, resolved resolvedMemoryExecution, lease **sessions.Lease, dispatch *completionDispatch, completionTargetID string, profile llmselection.Profile, usageModel string, requestPayload []byte, latency time.Duration, err error) error {
+func (r *ClaudeCLIRuntime) failClaudeContinuation(ctx context.Context, s *Session, resolved resolvedMemoryExecution, lease **sessions.Lease, dispatch *completionDispatch, completionTargetID string, profile llmselection.Profile, requestPayload []byte, latency time.Duration, err error) error {
 	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
 	state := claudeCompletionFailureState(err)
 	evidence := map[string]any{"stage": "provider_call"}
@@ -467,7 +465,7 @@ func (r *ClaudeCLIRuntime) failClaudeContinuation(ctx context.Context, s *Sessio
 			evidence[key] = value
 		}
 	}
-	if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(), state, turn.Failure, evidence); settleErr != nil {
+	if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, claudeFailureUsage(err), state, turn.Failure, evidence); settleErr != nil {
 		return errors.Join(err, settleErr)
 	}
 	projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
