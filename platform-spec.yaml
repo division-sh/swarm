@@ -41247,8 +41247,12 @@ agent_lifecycle_authority:
       operation. Known successful commit readback is owned independently of caller
       cancellation. Historical outcomes and changed process/source authority cannot
       publish execution. Candidate factories run outside the cell-map lock, but
-      publication revalidates the captured Manager phase and run occurrence after
-      construction, so completed shutdown cannot admit a late candidate.
+      publication revalidates the captured Manager phase, run occurrence and
+      monotonic process-local reset occurrence after construction and before native
+      commit. Admitting a new reset advances that occurrence even when the Manager
+      starts and ends stopped with the same run generation; concurrent callers join
+      the admitted reset. Completed shutdown or reset cannot admit a late candidate.
+      This preparation fence is not durable agent generation or process authority.
       Proven immutable-outcome absence discards the uncommitted preparation and
       returns to ordinary fresh candidate/row admission; it neither adopts an
       existing row nor blocks a new readiness attachment attempt.
