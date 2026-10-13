@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -34,17 +35,19 @@ func requireIssue2564EvidenceOwner(selected any) error {
 }
 
 func ObserveWriterStageForTest(ctx context.Context, selected any, runID, entityID, stage string) (WriterStageEvidence, error) {
-	if err := requireIssue2564EvidenceOwner(selected); err != nil {
+	if err := validateChannelObservationOwner(selected); err != nil {
 		return WriterStageEvidence{}, err
 	}
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		return owner.pipelinePostgresOwner.ObserveWriterStageForTest(ctx, runID, entityID, stage)
-	case *SQLiteRuntimeStore:
-		return owner.pipelineSQLiteOwner.ObserveWriterStageForTest(ctx, runID, entityID, stage)
-	default:
-		return WriterStageEvidence{}, fmt.Errorf("writer stage requires selected owner")
+	var out WriterStageEvidence
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = storepipeline.ObserveWriterStageTxForTest(ctx, tx, runID, entityID, stage)
+		return err
+	})
+	if err != nil {
+		return WriterStageEvidence{}, err
 	}
+	return out, nil
 }
 func ObserveCardContentionForTest(ctx context.Context, selected any, key, cardID string) (CardContentionEvidence, error) {
 	if err := requireIssue2564EvidenceOwner(selected); err != nil {

@@ -951,6 +951,8 @@ func waitServedRunDeliveryQuiescence(t *testing.T, reader servedRunDeliveryReade
 }
 
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -976,7 +978,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
-	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
+	runServedEventPublishFollowUpProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe)
 }
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
@@ -1003,6 +1005,8 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -1028,10 +1032,12 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for event.publish target-route proof")
 	}
-	runServedEventPublishTargetRouteProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
+	runServedEventPublishTargetRouteProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1052,10 +1058,12 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishTargetRouteProof(t, endpoint, db, "postgres", bundleHash, probe)
+	runServedEventPublishTargetRouteProof(t, endpoint, db, reader, "postgres", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -1085,10 +1093,12 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for active-load event.publish proof")
 	}
-	runServedEventPublishActiveLoadProof(t, endpoint, servedDB, "sqlite", bundleHash, probe, agentStarted, release, &releaseOnce)
+	runServedEventPublishActiveLoadProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1114,7 +1124,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
-	runServedEventPublishActiveLoadProof(t, endpoint, db, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
+	runServedEventPublishActiveLoadProof(t, endpoint, db, reader, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
@@ -2684,7 +2694,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	})
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
-	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
+	requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
@@ -3526,6 +3536,8 @@ func servedEventDeliveryProjection(t *testing.T, db *sql.DB, backend, eventID, s
 }
 
 func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -3573,10 +3585,12 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for dynamic event.publish proof")
 	}
-	runServedDynamicAutoEmitProof(t, endpoint, servedDB, "sqlite", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, blocked, release, &releaseOnce)
 }
 
 func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	t.Helper()
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -3601,14 +3615,14 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
-	runServedDynamicAutoEmitProof(t, endpoint, db, "postgres", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, db, reader, "postgres", bundleHash, blocked, release, &releaseOnce)
 }
 
 // Typed input routing derives this concrete path from the declared instance_id
 // business key; the retired create action used that key verbatim as its path.
 const servedTypedCreationInstancePath = "operating/ti-637499c0f9a5eda60519f6d3"
 
-func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
+func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "opco.bootstrap_requested",
@@ -3620,7 +3634,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
-	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	parentEntityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
@@ -3751,7 +3765,7 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
-	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
+	entityID = requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, result.RunID, "", "waiting")
 	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
 }
@@ -5187,7 +5201,7 @@ type servedEventPublishFollowUpProof struct {
 	FollowUpEventID string
 }
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
 	t.Helper()
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "item.received",
@@ -5210,7 +5224,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/item-handler authority", backend, got)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
-	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", identitytest.RootNode(t, "item-handler").Key())
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
@@ -5238,7 +5252,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
@@ -5306,7 +5320,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 }
 
-func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
+func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
 	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "opco.bootstrap_requested",
@@ -5322,7 +5336,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
 		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
 	}
-	requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
@@ -5349,7 +5363,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if entityID == "" {
 		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "waiting")
 	targetFlowInstance := requireServedEventPublishEntityFlowInstance(t, db, backend, runID, entityID)
 	if targetFlowInstance != servedTypedCreationInstancePath {
 		t.Fatalf("typed receiver path = %q, want %q", targetFlowInstance, servedTypedCreationInstancePath)
@@ -5369,7 +5383,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	}
 	// The selected receiver exists and has executed its creation event, but its
 	// address must never grant public write access to a private input.
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "waiting")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, "issue-1438-"+backend+"-target"); got != 0 {
 		t.Fatalf("%s rejected private target wrote %d events", backend, got)
@@ -5383,6 +5397,7 @@ func runServedEventPublishActiveLoadProof(
 	t *testing.T,
 	endpoint string,
 	db *sql.DB,
+	reader receiverProofStateReader,
 	backend string,
 	bundleHash string,
 	probe *lifecycletest.Probe,
@@ -5403,7 +5418,7 @@ func runServedEventPublishActiveLoadProof(
 		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
-	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
@@ -5507,7 +5522,7 @@ func runServedEventPublishActiveLoadProof(
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
@@ -5795,12 +5810,20 @@ func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantSt
 	}
 }
 
-func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) string {
+func requireServedEventPublishEntityState(t *testing.T, reader receiverProofStateReader, backend, runID, entityID, wantState string) string {
 	t.Helper()
 	var lastState, lastEntityID string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		gotEntityID, state := servedEventPublishEntityState(t, db, backend, runID, entityID, wantState)
+		var evidence storetest.WriterStageEvidence
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			evidence, err = storetest.ReadWriterStage(ctx, reader, runID, entityID, wantState)
+			return err
+		}); err != nil {
+			t.Fatalf("%s entity_state query: %v", backend, err)
+		}
+		gotEntityID, state := evidence.EntityID, evidence.State
 		if state == wantState && gotEntityID != "" {
 			return gotEntityID
 		}
@@ -5808,7 +5831,7 @@ func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, run
 		lastState = state
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedInspectionRunDebugSummary(reader, runID))
 	return ""
 }
 
@@ -6553,52 +6576,6 @@ func servedEventPublishNodeDeliveryCountValue(ctx context.Context, db *sql.DB, b
 		return 0, err
 	}
 	return count, nil
-}
-
-func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) (string, string) {
-	t.Helper()
-	var sqlText string
-	var args []any
-	switch backend {
-	case "postgres":
-		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid`
-			args = []any{runID, entityID}
-		} else {
-			sqlText = `SELECT entity_id::text, current_state FROM flow_instances WHERE run_id = $1::uuid AND current_state = $2 ORDER BY created_at, entity_id LIMIT 1`
-			args = []any{runID, wantState}
-		}
-	case "sqlite":
-		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = ? AND entity_id = ?`
-			args = []any{runID, entityID}
-		} else {
-			sqlText = `SELECT entity_id, current_state FROM flow_instances WHERE run_id = ? AND current_state = ? ORDER BY created_at, entity_id LIMIT 1`
-			args = []any{runID, wantState}
-		}
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	var gotEntityID, state string
-	if strings.TrimSpace(entityID) != "" {
-		gotEntityID = strings.TrimSpace(entityID)
-		err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&state)
-		if err == sql.ErrNoRows {
-			return gotEntityID, ""
-		}
-		if err != nil {
-			t.Fatalf("%s entity_state query: %v", backend, err)
-		}
-		return gotEntityID, state
-	}
-	err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&gotEntityID, &state)
-	if err == sql.ErrNoRows {
-		return "", ""
-	}
-	if err != nil {
-		t.Fatalf("%s entity_state query: %v", backend, err)
-	}
-	return gotEntityID, state
 }
 
 func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {

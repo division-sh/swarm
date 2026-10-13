@@ -55,7 +55,7 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			if published.RunID != run {
 				t.Fatalf("wrong run %#v", published)
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, run, run, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, run, run, "done")
 			requireServedEntityReadback(t, rt.Endpoint, run, run, "done")
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": run}, &public)
 			if public.Fields["score"] != float64(10) {

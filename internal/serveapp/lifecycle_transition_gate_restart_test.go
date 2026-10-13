@@ -49,7 +49,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			}
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			var decision map[string]any
 			requestCtx, cancelRequest := context.WithCancel(context.Background())
@@ -88,7 +88,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			case <-time.After(15 * time.Second):
 				t.Fatal("gate committed-output barrier not reached")
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "approved")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "approved")
 			before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(before) != 1 {
 				t.Fatalf("gate did not commit before barrier: %#v", before)
@@ -112,7 +112,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			case <-time.After(15 * time.Second):
 				t.Fatal("released verdict did not complete")
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("pre-consumer stop=%d", code)
@@ -121,7 +121,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			opts.TestWorkflowNodeHandlerStartHook = nil
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {

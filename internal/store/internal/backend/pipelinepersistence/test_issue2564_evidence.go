@@ -27,29 +27,9 @@ type PipelineReceiptEvidence struct {
 type WriterStageEvidence struct{ EntityID, State string }
 type CardContentionEvidence struct{ Requests, DecidedChanges int }
 
-func (s *PipelinePostgresOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return WriterStageEvidence{}, err
-	}
+func ObserveWriterStageTxForTest(ctx context.Context, tx *sql.Tx, runID, entityID, stage string) (WriterStageEvidence, error) {
 	var out WriterStageEvidence
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return observeWriterStage(ctx, tx, runID, entityID, stage, &out)
-	})
-	if err != nil {
-		return WriterStageEvidence{}, err
-	}
-	return out, nil
-}
-
-func (s *PipelineSQLiteOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return WriterStageEvidence{}, err
-	}
-	var out WriterStageEvidence
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return observeWriterStage(ctx, tx, runID, entityID, stage, &out)
-	})
-	if err != nil {
+	if err := observeWriterStage(ctx, tx, runID, entityID, stage, &out); err != nil {
 		return WriterStageEvidence{}, err
 	}
 	return out, nil

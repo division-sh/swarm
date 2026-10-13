@@ -91,7 +91,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if !fieldless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 					seedEventID = seed.EventID
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
 					if admitted {
 						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 						requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "receiver-fork-pause"})

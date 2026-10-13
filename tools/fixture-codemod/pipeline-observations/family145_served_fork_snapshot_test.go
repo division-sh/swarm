@@ -130,6 +130,7 @@ var family145ServedSnapshotCallers = map[string]int{
 }
 
 func family145ServedSnapshotCallerProofError(function, before, after string) error {
+	after = family145WriterStageCallerInverse(function, after)
 	var err error
 	after, err = family145ForkSourceDomainCallerInverse(function, after)
 	if err != nil {

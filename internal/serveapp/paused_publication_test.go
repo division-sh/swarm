@@ -30,7 +30,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 						t.Log(servedEventPublishDebugSummary(t, rt.DB, rt.Backend, created.RunID))
 					}
 				})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, "", "review")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, created.RunID, "", "review")
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": created.RunID, "idempotency_key": "pause-" + family})
 				requireServedRunStatus(t, rt.Endpoint, created.RunID, "paused")
 				var eventID string
@@ -92,7 +92,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 						t.Fatalf("accepted timer activation active=%d fired=%d err=%v", active, fired, err)
 					}
 				}
-				if got := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, entityID, "review"); got != entityID {
+				if got := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, created.RunID, entityID, "review"); got != entityID {
 					t.Fatalf("paused outcome changed entity identity: %s", got)
 				}
 				requireServedRunStatus(t, rt.Endpoint, created.RunID, "paused")
@@ -105,7 +105,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 				if family == "timer" {
 					state = "cancelled"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, entityID, state)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, created.RunID, entityID, state)
 				requireServedRunStatus(t, rt.Endpoint, created.RunID, "completed")
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, created.RunID, eventID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("continue duplicated accepted occurrence = %d, %v", count, err)

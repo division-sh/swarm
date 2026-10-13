@@ -110,7 +110,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			first, rt := start()
 			seedParams := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "frozen-start"}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
@@ -147,7 +147,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 				t.Fatal("stale hash mutated pending gate")
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var entity operatorread.OperatorEntityFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
@@ -220,12 +220,12 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				}
 				first, rt := start()
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "restart-seed"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
 					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var capParams map[string]any
 				var capRevision string
@@ -234,14 +234,14 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					capRevision = loop.RevisionID
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					capParams = params("loop.repeat", fmt.Sprintf("restart-repeat-%d", attempt), payload)
 					if attempt == 2 {
 						break
 					}
 					repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
@@ -256,15 +256,15 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if cut == "before_escape_consumer" {
 					state = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, state)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, state)
 				if code := first.stop(); code != 0 {
 					t.Fatalf("first stop=%d", code)
 				}
 				opts.TestWorkflowNodeHandlerStartHook = nil
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "escaped")
-				receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "escaped")
+				receipt := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 				if closed.RevisionID != capRevision || closed.Attempt != 2 || closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" {

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -41,9 +42,10 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			source := writeServedLiveAgentFixture(t)
 			hash := servedEventPublishFixtureBundleHash(t, source)
 			var db *sql.DB
-			var cfg, storeMode, backendName string
+			var cfg, storeMode, backendName, location string
 			if backend == servedparity.BackendDefaultSQLite {
 				path := filepath.Join(t.TempDir(), "diagnostics.db")
+				location = path
 				cfg = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", path, channelOnboardingHostWorkspaceFields())
 				var err error
 				db, err = sql.Open("sqlite", path)
@@ -54,6 +56,7 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				backendName = "sqlite"
 			} else {
 				dsn, postgres, _ := testutil.StartEmptyPostgres(t)
+				location = dsn
 				db, storeMode, backendName = postgres, "postgres", "postgres"
 				cfg = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 			}
@@ -77,12 +80,18 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			env := []string{"SWARM_TEST_DIAGNOSTIC_PROCESS_HELPER=1", "SWARM_TEST_DIAGNOSTIC_CONFIG=" + cfg,
 				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
 			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
+			inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = inspection.Close() })
+			reader := requireReceiverProofStateReader(t, inspection)
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
 			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
 			})
-			requireServedEventPublishEntityState(t, db, backendName, initial.RunID, "", "waiting")
+			requireServedEventPublishEntityState(t, reader, backendName, initial.RunID, "", "waiting")
 			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "before-crash")
 			var restarted servedAgentRestartProofResult
 			requireServedJSONRPCResult(t, proof.Endpoint, "agent.restart", map[string]any{
@@ -123,7 +132,7 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
 			})
-			requireServedEventPublishEntityState(t, db, backendName, later.RunID, "", "waiting")
+			requireServedEventPublishEntityState(t, reader, backendName, later.RunID, "", "waiting")
 			if response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); response.Error != nil {
 				t.Fatalf("historical reset replay: %+v", response.Error)
 			}

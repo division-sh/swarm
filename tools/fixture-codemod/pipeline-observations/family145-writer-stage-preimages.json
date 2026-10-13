@@ -1,0 +1,237 @@
+[
+  {
+    "File": "internal/serveapp/gate_completion_diagnostic_test.go",
+    "Function": "TestServedGateCompletionInterruptionDiagnosticOnBothStores",
+    "SHA256": "820b5c15adf920d503eac314a9821e8c5767b98cbdedae4d50e5bd7e3dff98fb"
+  },
+  {
+    "File": "internal/serveapp/issue2277_audit_probe_test.go",
+    "Function": "TestAudit2277StoppedRunReadinessRestart",
+    "SHA256": "2257ecc5d81cdc02acbda9a3ff25500c1d5b3613293192850ee704319f2507c4"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_diagnostic_recovery_test.go",
+    "Function": "TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores",
+    "SHA256": "efcc265ed9344c04bd2600efe8241481ee626f96cec2c929a0b52493d9f4e2a0"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_admission_test.go",
+    "Function": "TestServedLifecycleEmitterPublicInputAdmissionNoMutation",
+    "SHA256": "14bf8e66c905e2bc5934b7c478d8b488fc5bd3adcb543d074cf8e05508b1940d"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_competing_exit_test.go",
+    "Function": "TestServedLifecycleEmitterCompetingExitPublication",
+    "SHA256": "39cb84578e897988203951d8b6584bc05a77fff527a343fdbe34b8b5d938e215"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_test.go",
+    "Function": "TestServedLifecycleEmitterGateJourney",
+    "SHA256": "a259c2ac3482e2f418038e90abd1e8e049cdc969c6ae08daacea3ae9b41da845"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_test.go",
+    "Function": "TestServedLifecycleEmitterLoopEscapeJourney",
+    "SHA256": "7b2925f910b5292e861c6f6f3b078acb1ad3b5027217f840e4d47a2205b67ebf"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_release_process_test.go",
+    "Function": "TestReleaseCompiledLifecycleJourneysBothStores",
+    "SHA256": "4771b8439bc7a536e336d0572a98c5566b9c9b77518fa7b2fe23002bf6b634da"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "requireLifecycleFrozenGateControlRefusal",
+    "SHA256": "0e6ca6567bccfbf02464d6cc4fdea360d7c06132eb6de1b566bd4fdd0d2745a8"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "requireLifecycleRootLoopForkRevision",
+    "SHA256": "d2cc716e205979da6ae2afb50fe5f7aed6869651d1552144b6cc589f7646318e"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "runLifecycleRootForkPolicy",
+    "SHA256": "6ea5e3e15f296bf6b2936fb934f07f4eb27491934facb4c06dfb95af5db15959"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_process_test.go",
+    "Function": "TestServedCompiledGateOutcomeRestartOnBothStores",
+    "SHA256": "9a64465ec8fda3d5ef08d1df0bdbee8546fe7cf761b7f457fde4a7219f744885"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_restart_test.go",
+    "Function": "proveServedCompiledGateOutcomeRestart",
+    "SHA256": "3cf347fcaaf8bc5809745f6a0d9c3f00433c49b455027e322e28f7ceb09015d5"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_test.go",
+    "Function": "TestServedCompiledGateAdvanceOnlyOnBothStores",
+    "SHA256": "a4db6b946db7a6dcb31175ab51971b8d7e36dd43b738fccb4c5395790bb13cce"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_node_recovery_test.go",
+    "Function": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores",
+    "SHA256": "02c32f2e4b09d1f8ef1d04cd8c24d83dfd5aa846fb3587f568a25c53d4862ad8"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_replay_test.go",
+    "Function": "TestServedCompiledLoopTransitionReplayOnBothStores",
+    "SHA256": "6156664ad6dcf1134a4e2c5961386acde28bf85ac5951a5a9d5c93496a4e5745"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_restart_test.go",
+    "Function": "TestServedCompiledGateFrozenTransitionEvidenceOnBothStores",
+    "SHA256": "6372b72ea41bb262eba381335e9ac402421e71c06ae7975108720731b01b9442"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_restart_test.go",
+    "Function": "TestServedCompiledTransitionRestartOnBothStores",
+    "SHA256": "320dc93be820ec33bd4e31a4706fd189a07a810bf7982f39939523cb8c8fb7e9"
+  },
+  {
+    "File": "internal/serveapp/mailbox_completion_fixture_test.go",
+    "Function": "mailboxCompletionFixtureInRuntime",
+    "SHA256": "1af42c63f9fb4628acb5651ed6625a271d2b3b667ed56ad44addb2abcc535a60"
+  },
+  {
+    "File": "internal/serveapp/mailbox_completion_process_test.go",
+    "Function": "TestServedMailboxCompletionProcessBoundariesBothStores",
+    "SHA256": "3a4213e838a3d588730625cf69bc8141861f1939a40ff270acde7ab80e56ae08"
+  },
+  {
+    "File": "internal/serveapp/mailbox_completion_test.go",
+    "Function": "TestServedMailboxCompletionInsertRollbackAndRestartBothStores",
+    "SHA256": "5f841ab7c5713c344803834abdc58e857edf3dc4e012fdd497800a3cc2226a11"
+  },
+  {
+    "File": "internal/serveapp/mailbox_entity_filter_test.go",
+    "Function": "startServedMailboxEntityFilterProof",
+    "SHA256": "ad3dd6d8875481d5ff103cf700d5a089f483d02183a09b8ff11714087b247155"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite",
+    "SHA256": "5604a1d1f377ce1202d307db5475773dd145ee338ba703fae631d4f3c1cf28f0"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres",
+    "SHA256": "4409c1774f051b8d3432d95ef0fd38739979964ca42cefc18d471f14a3313831"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
+    "SHA256": "e2d1859db9c48a640494a2be4b4a11e16c25cb43b3be178bbf4abe399de3bd11"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite",
+    "SHA256": "cbc13981f8306bb965552a7128346170c36955823914ae9093e669b853ce3f42"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres",
+    "SHA256": "ebec118524715e23fecad4bd1e1971617ba9d69ffed3d3f4f622e7ef19b6cbdf"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "createServedControlWaitingRun",
+    "SHA256": "b9f724f22e806b9ed41c36388f5021faec3b00c96a72ff38909e309b39ab7b35"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedDynamicAutoEmitPostgresProof",
+    "SHA256": "ffcbd68129db076f0b7ec0d5543817b7341c64f300b8818805aa8adb93855508"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedDynamicAutoEmitProof",
+    "SHA256": "34cbbc186ba2c165a50d1708f3df3d8ac5ebc7150c70093fd06854fc118e0392"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedDynamicAutoEmitSQLiteProof",
+    "SHA256": "3c015d969ea13cb3ce469fd6bc9bb42633b0e14d5e63e65b6c90298215ee9e5d"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedEventPublishActiveLoadProof",
+    "SHA256": "c9ca3c17c821ed9f88883d04ce32518e16289ad960da5b02921fb6d3b645d8a4"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedEventPublishFollowUpProof",
+    "SHA256": "b88f7b1d10b68072e7bbc5be5bb0f4c4325d0f29e16f6fdf6bab6e3dda7216de"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedEventPublishTargetRouteProof",
+    "SHA256": "9436dc577635ba058f4ed22f8133f42f8007daaaff8dc95d2ec6bd5b3e979bd5"
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Function": "runServedRunControlLifecycleProof",
+    "SHA256": "fb4d4eac861469474873e82f21dcf7e440d36d4805746745672c497abadb1b4a"
+  },
+  {
+    "File": "internal/serveapp/paused_publication_test.go",
+    "Function": "TestPausedAcceptedTimerAndDecisionPublicBothStores",
+    "SHA256": "49b56e8feaef64bc2ef3e6c0baf1d24fde97b02f903782efa2a4ef5590541f97"
+  },
+  {
+    "File": "internal/serveapp/postgres_commit_loss_contract_test.go",
+    "Function": "TestServePostgresLostCommitResponseRecoversDurablePublication",
+    "SHA256": "11240cdf3d26b74f9f3430f7ca37fba7f081a789ccf76bb9275159755e481b96"
+  },
+  {
+    "File": "internal/serveapp/postgres_three_contracts_test.go",
+    "Function": "TestServePostgresLossAndRestartFromDurableState",
+    "SHA256": "3d2a581768bc87ea51f6f762645b06ac2eae9068dc992a422a6f1b4c97c85805"
+  },
+  {
+    "File": "internal/serveapp/receiver_composition_probe_test.go",
+    "Function": "TestReceiverCompositionSharedChildJourney",
+    "SHA256": "553d410aca0466c52c3a09ca81a8a33d35b33260912b895b5bbbd156dc750c71"
+  },
+  {
+    "File": "internal/serveapp/receiver_entityless_onward_test.go",
+    "Function": "TestReceiverCompositionEntitylessOnwardBothStores",
+    "SHA256": "eb12f749d679232e165f04a284be3189de9e5d39ec44cdd2963b689230f4396a"
+  },
+  {
+    "File": "internal/serveapp/receiver_failure_settlement_test.go",
+    "Function": "TestReceiverCompositionFailureSettlementBothStores",
+    "SHA256": "ae4c59e10750b4fe704ef84e1de7c62f1eea5d4062fdcbf5f9553492e6a5b3ca"
+  },
+  {
+    "File": "internal/serveapp/receiver_fork_test.go",
+    "Function": "TestReceiverCompositionForkBothStores",
+    "SHA256": "8eb64583ba2be0ff717d2d2768956a062ebe7d0164f3587493ac7b7836853c73"
+  },
+  {
+    "File": "internal/serveapp/receiver_mixed_agent_test.go",
+    "Function": "TestReceiverCompositionMixedAgentBothStores",
+    "SHA256": "a695ee09bc6acac5911b8ea361ab12847446cb052300c9aaf1401275464cec62"
+  },
+  {
+    "File": "internal/serveapp/selection_process_recovery_test.go",
+    "Function": "TestServedSelectionProcessCutsBothStores",
+    "SHA256": "8dc201f49814eddb3f31d5099b86b6414f4d2ee74ebedb12479dd3761fb99b18"
+  },
+  {
+    "File": "internal/serveapp/semantic_numeric_setup_test.go",
+    "Function": "TestScenarioSetupSemanticNumericParity",
+    "SHA256": "cee504ea8789543eb9dd119a3329b868416753a337def3ad3d875bdd19f194db"
+  },
+  {
+    "File": "internal/serveapp/source_admission_fork_proof_test.go",
+    "Function": "Test2376ForkSourceAndPinsFollowSourceRunBothStores",
+    "SHA256": "b769d459761ddc4c3dea2ecf83c9668bd16a9afac3e23b34950e8dad45390a48"
+  },
+  {
+    "File": "internal/serveapp/transition_receiver_probe_test.go",
+    "Function": "proveReceiverMaterializationBothStores",
+    "SHA256": "442f99c24d1a825e2b8f3431a7629c1d7a33b73315cb5fceb3fcc4e6ba03a6c2"
+  }
+]

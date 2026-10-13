@@ -45,14 +45,14 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if gate {
 				stage = "review"
 			}
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, stage)
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, stage)
 			var parentCard map[string]any
 			if gate {
 				parentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			} else {
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
 				stage = "drafting"
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, stage)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "fork-pause"})
@@ -92,7 +92,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 
 func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
+	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
 	childParams := lifecycleGateDecisionParams(t, rt, runID, "approve")
 	readCard := func(id any) map[string]any {
 		var detail struct {
@@ -202,7 +202,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 
 func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
+	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
 	parent := readLifecycleStoredLoop(t, rt, parentRun, parentEntity)
 	child := readLifecycleStoredLoop(t, rt, runID, entity)
 	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID ||

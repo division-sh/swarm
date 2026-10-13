@@ -6144,3 +6144,101 @@ all qualification holds, including the separately recorded static-fork seed
 timeout, survive. No push/PR/tier/server2/rebase. Next high-yield dependency is
 entity-state plus the reconciled debug-summary caller chain, preserving exact
 entity versus earliest matching-state selection and independent-process roles.
+
+## Whole 90-call entity-stage observation dependency (2026-10-13, Held)
+
+The 6134544118 rule gate explicitly covers both exact-entity and earliest
+matching-state flow-header selection. This bundle migrates ALL90 calls to
+requireServedEventPublishEntityState through the original receiver state reader
+or the existing independent release-process inspection role. It removes the
+entire servedEventPublishEntityState raw helper and its paired dialect queries.
+The existing pipeline persistence observeWriterStage leaf is the semantic
+owner: the requested entity is retained on exact-ID absence; first-match
+absence remains empty/empty; exact lookup does not accidentally add a state
+filter; earliest match is ordered by created_at/entity_id with LIMIT1. This is
+flow_instances evidence, deliberately NOT the entity_state business projection.
+Accepted inputs remain canonical run/entity UUIDs or the explicit empty-entity
+first-match selection; invalid authority/identity fails closed.
+
+The private bridge uses the existing initialized read-projection validator,
+not runtime schema admission, and the exact selected read coordinator. The
+duplicate backend method wrappers are gone. The existing ObserveWriterStage
+public assertion helper and the nonfatal ReadWriterStage port share that one
+bridge and physical leaf. ObserveCardContention and the other issue2564
+current-schema evidence policies remain unchanged. A read-only process
+inspector is not promoted into an executable store or historical certificate.
+
+The wait preserves its full predicate, last returned facts, 15s deadline,
+50ms poll and exact backend/run/entity diagnostic. Only its failure diagnostic
+uses the already-reconciled eleven-section selected owner. The other raw debug
+consumers remain a separate queued dependency, not falsely credited here.
+Four enclosing journey helpers retain their raw pools for OTHER live consumers;
+an additional non-raw reader is propagated to them, not inferred from those
+pools, hidden in transaction context, globally mapped, or reconstructed.
+Seven parent fixtures capture p.deps.EventStore. The mixed-agent, stopped-run
+and PostgreSQL loss/restart fixtures capture the same original role. The
+diagnostic SIGKILL/recovery/reset proof opens the existing independent read-only
+inspection after readiness, registering cleanup immediately; child lifecycle,
+crash, diagnostic fault, reset, replay and all original assertions remain real.
+
+The existing finite codemod now contains1354 recipes/636 family145 transitions,
+digest e33bd127491c72e8cbcc7ebafad3d4afe03aa307c18211a45458eeec5cfa89fb.
+The 47 complete caller/constructor bodies are independently pinned at signed
+b9a6bc338a0a6e9182c5045c53b53e02ae7cfc1e, after earlier native migrations.
+Their manifest digest is32b872e34a7a9d23a2bc59068317940fd00de4a9e6c2fa3e235a30977571ea31.
+The inverse admits only exact typed argument/signature/capture splices;
+whole-body hashes preserve every assertion/source/cancellation/receipt/restart/
+cleanup cut. Owned-source walking accounts for all90 calls and refuses the
+retired helper. Three rule roots retain whole bodies, exact wait/error behavior
+and both dialect query inventories. Hostile owner/assertion/temporal/predicate/
+projection/order/LIMIT/placeholder changes refuse; candidate typing covers
+every finite rewritten package/test variant. All24 immutable receipts and all
+historical Before/After/Successor obligations remain unchanged.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Exact entity versus first matching state, requested-ID versus first-match absence, sibling run, case, full storage immutability and original read coordinator | reproduced and fixed | TestWriterStageObservationPreservesExactEntityAndEarliestMatchingStateBothStores, BOTH stores under race, native transaction counters and whole-storage before/after |
+| Wrong earliest-row ordering | reproduced and fixed | Actual compilable ORDER BY created_at DESC/entity_id DESC mutation returns the later entity and fails BOTH stores; exact original order restored, both native roots PASS15.304s |
+| Raw/nil/uninitialized/invalid/cancelled/closed role and independent unaccepted inspection | execution-proven through the same corrected path | Native refusal root BOTH stores under race; existing release-process construction root extended without runtime admission, BOTH stores PASS11.01s |
+| Original native loop and dynamic-publication/held-handler consumer cuts | execution-proven through the same corrected path | TestServedLifecycleEmitterLoopEscapeJourney BOTH race PASS19.436s; both original dynamic-auto-emit served roots race PASS21.273s |
+| Actual release binary using both lookup variants and compiled gate/loop behavior | execution-proven through the same corrected path | TestReleaseCompiledLifecycleJourneysBothStores: independently built race binary, BOTH stores x nested-gate/connected-loop, PASS73.382s |
+| Gate commit-before-crash, reopened-store observation and exact source/transition replay | execution-proven through the same corrected path | TestServedCompiledGateOutcomeRestartOnBothStores BOTH race PASS32.713s, unchanged kill/barrier/history/identity/receipt assertions |
+| Diagnostic outage/crash/recovery/reset/historical replay with independent process inspection | execution-proven through the same corrected path | TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores BOTH race PASS37.13s; no resurrected run, later-work mutation or weakened pending-receipt assertion |
+
+Qualification: all three rule roots PASS0.925s; full cheap family/historical/
+idempotence collection passes every other root, with its original single query-
+control RED preserved and repaired exactly (placeholder indices must NOT be
+normalized together). Corrected query control PASS. Candidate-overlay typing
+PASS224.89s for the entire1354-recipe candidate. All eight persistence-boundary/
+ownership/fixture/selected-read guards PASS4.572s. All seven affected U1000
+targets PASS. New rule/native-test/reconciler functions have no cognitive
+complexity over29. The invalid first compile (missing import) and the initial
+inverse composition failures are preserved; no runtime failure was waived.
+The earlier anchored collection, native witness, mailbox and source-domain
+receipts carry where their source/workloads are unchanged; no duplicate tier.
+
+IMPORTANT: the fresh real downward census is RED175.97s, actual7556 against
+committed7654, because SEVEN existing residual raw-bearing parent calls acquire
+new exact resolved signatures when their additional native reader is passed.
+This is not an authorized addition and has NOT been normalized away or charged
+against the98 apparent removals. The committed baseline remains7654 findings /
+5364 raw sites, unchanged. A generated, source-typed exact seven-pair request
+is in issue-2542-writer-stage-signature-transition-request.json. All seven have
+the SAME file, enclosing caller, operation, kind, family, owner and multiplicity
+1->1, and the SAME live raw DB and other arguments; only the additional original
+native reader changes the signature. This bundle is held for explicit
+bookkeeping authorization with zero deletion credit for those seven. Do not
+extend the nine run-fixture pairs or the signal pair, relax classification,
+adopt a larger baseline, hide the pool or remove still-live unrelated consumers.
+
+The owner repair and supported-surface evidence are complete, but ratchet
+qualification and bundle stacking are NOT claimed. Existing #2542/#2151 and
+watchlist mapping remain sufficient; no new issue/framework/spec/runtime
+contract. The old generic db carriers and raw diagnostic/scalar families remain
+explicit parent debt. No push, PR, local tier, server2 or rebase. Next ready
+work can proceed independently of this exact accounting hold. Rebase remains
+once after #2617 and the orchestrator's handoff. All existing semantic and
+qualification holds, including the static-fork initial publication intake,
+remain open.
+
+Receipts:~/.cache/swarm-2542-family145/entity-state-* and entity-debug-*.

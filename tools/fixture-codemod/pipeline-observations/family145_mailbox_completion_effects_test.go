@@ -150,6 +150,7 @@ func family145MailboxCompletionCheckCaller(t *testing.T, function, before, after
 }
 
 func family145MailboxCompletionCallerProofError(function, before, normalized string) error {
+	normalized = family145WriterStageCallerInverse(function, normalized)
 	// Master's approved reporter serving-window assertions postdate the frozen
 	// corpus. Pin their entire predecessor body at ee05cae31d, not the old subset.
 	if function == "runIssue2394OriginalReporterHTTP" {

@@ -21,7 +21,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-request"}
 				if existing {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-seed"})
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-request"}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params)

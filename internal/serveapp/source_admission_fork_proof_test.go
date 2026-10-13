@@ -245,7 +245,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 				if err := selectedA.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", seed.RunID).Scan(&exact); err != nil || exact != hashA {
 					t.Fatalf("new-work source=%s want=%s: %v", exact, hashA, err)
 				}
-				requireServedEventPublishEntityState(t, selectedA.DB, backend, seed.RunID, "", "review")
+				requireServedEventPublishEntityState(t, selectedA.ReceiverStateReader, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, selectedA.ReadRunDeliveries, seed.RunID)
 				if name == "pin" {
 					if err := selectedA.DB.QueryRow("SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.requested' ORDER BY created_at,event_id LIMIT 1", seed.RunID).Scan(&seed.EventID); err != nil {

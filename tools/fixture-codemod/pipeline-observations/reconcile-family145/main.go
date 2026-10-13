@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "ef1d13e7a57ee6c4351390b878495621de107fb47de01f57315a9f7a3c55f67c"
+const targetDigest = "e33bd127491c72e8cbcc7ebafad3d4afe03aa307c18211a45458eeec5cfa89fb"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -171,6 +171,24 @@ var files = []string{
 	"internal/runtime/runforkexecution/runtime_outcome_test.go",
 	"internal/runtime/runforkexecution/selected_execution_authority_fixture_test.go",
 	"internal/serveapp/main_runtime_test.go",
+	"internal/serveapp/gate_completion_diagnostic_test.go",
+	"internal/serveapp/lifecycle_diagnostic_recovery_test.go",
+	"internal/serveapp/lifecycle_emitter_admission_test.go",
+	"internal/serveapp/lifecycle_emitter_competing_exit_test.go",
+	"internal/serveapp/lifecycle_emitter_test.go",
+	"internal/serveapp/mailbox_completion_process_test.go",
+	"internal/serveapp/mailbox_entity_filter_test.go",
+	"internal/serveapp/paused_publication_test.go",
+	"internal/serveapp/postgres_commit_loss_contract_test.go",
+	"internal/serveapp/postgres_three_contracts_test.go",
+	"internal/serveapp/receiver_composition_probe_test.go",
+	"internal/serveapp/receiver_entityless_onward_test.go",
+	"internal/serveapp/receiver_failure_settlement_test.go",
+	"internal/serveapp/receiver_fork_test.go",
+	"internal/serveapp/selection_process_recovery_test.go",
+	"internal/serveapp/semantic_numeric_setup_test.go",
+	"internal/serveapp/source_admission_fork_proof_test.go",
+	"internal/serveapp/transition_receiver_probe_test.go",
 	"internal/serveapp/mailbox_completion_fault_witness_test.go",
 	"internal/serveapp/mailbox_card_completion_matrix_test.go",
 	"internal/serveapp/mailbox_human_budget_completion_test.go",
@@ -308,6 +326,9 @@ var renamedHelpers = map[string]map[string]string{
 }
 
 var retiredEventFixtureHelpers = map[string]map[string]bool{
+	"internal/serveapp/main_runtime_test.go": {
+		"servedEventPublishEntityState": true,
+	},
 	"internal/serveapp/fork_receiver_ownership_test.go": {
 		"readForkReceiverRows": true,
 	},
@@ -337,7 +358,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/serveapp/standing_ingress_supported_surface_test.go":    {"TestStandingRestartMixedHealthyAndTerminalProcessParity": true},
 	"internal/serveapp/agent_mock_supported_surface_test.go":          {"runMockAgentSupportedSurface": true},
 	"internal/serveapp/agent_memory_supported_surface_test.go":        {"runStandingTelegramMemorySupportedSurface": true},
-	"internal/serveapp/mailbox_completion_fixture_test.go":            {"newRetainedMailboxCompletionRuntimeConfigured": true, "mailboxCompletionNotice": true},
+	"internal/serveapp/mailbox_completion_fixture_test.go":            {"newRetainedMailboxCompletionRuntimeConfigured": true, "mailboxCompletionNotice": true, "mailboxCompletionFixtureInRuntime": true},
 	"internal/serveapp/fork_receiver_ownership_test.go":               {"readForkReceiverProducerEvidence": true, "readForkReceiverRows": true, "requireForkReceiverDelivery": true, "TestSelectedForkIndependentReceiverBusinessMutationBothStores": true, "snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true, "TestServedForkSourceCompletionWithoutForkBothStores": true},
 	"internal/serveapp/fork_receiver_execution_effect_test.go":        {"requireForkReceiverExecution": true},
 	"internal/serveapp/fork_receiver_acquisition_effect_only_test.go": {"requireSupplementalForkAcquisitionSettlement": true, "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores": true},

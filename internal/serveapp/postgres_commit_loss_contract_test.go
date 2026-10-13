@@ -145,6 +145,10 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = observer.Close() })
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	var port string
 	if _, err := fmt.Sscanf(server.options, "-h 127.0.0.1 -p %s", &port); err != nil {
 		t.Fatal(err)
@@ -201,7 +205,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	restarted := startServeRuntimeTestProcess(t, opts)
 	restarted.waitForReadyLine()
 	nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
-	entity := requireServedEventPublishEntityState(t, observer, "postgres", runID, "", "waiting")
+	entity := requireServedEventPublishEntityState(t, reader, "postgres", runID, "", "waiting")
 	requireServedEntityReadback(t, nextEndpoint, runID, entity, "waiting")
 	replay := requireServedEventPublishRPCResult(t, nextEndpoint, params)
 	if replay.RunID != runID || replay.EventID != eventID {

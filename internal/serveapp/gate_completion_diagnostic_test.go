@@ -47,7 +47,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 				}
 				first, rt := start()
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
 				var cardID, hash string
 				if err := rt.DB.QueryRow(`SELECT card_id,card_content_hash FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&cardID, &hash); err != nil {
 					t.Fatal(err)
@@ -90,7 +90,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 					case <-time.After(15 * time.Second):
 						t.Fatal("acknowledged control did not answer")
 					}
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					ack := gateCompletionRead(t, rt, "acknowledged_success", seed.RunID, cardID, domain)
 					gateCompletionAssertResponse(t, firstReply, ack, false)
@@ -109,7 +109,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 				opts.TestWorkflowNodeHandlerStartHook = nil
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				after := gateCompletionRead(t, rt, "after_restart_before_retry", seed.RunID, cardID, domain)
 				retry := gateCompletionHTTP(ctx, rt.Endpoint, params)

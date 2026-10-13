@@ -20,19 +20,19 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "replay-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 			params := func(event, key string, payload map[string]any) map[string]any {
 				return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 			}
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 			first := readLifecycleLoop(t, rt, seed.RunID, entityID)
 			admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-1", map[string]any{"revision_id": first.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -56,7 +56,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			}
 			current := readLifecycleLoop(t, rt, seed.RunID, entityID)
 			admit = requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-2", map[string]any{"revision_id": current.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			var replies [2]servedJSONRPCEnvelope
 			start := make(chan struct{})

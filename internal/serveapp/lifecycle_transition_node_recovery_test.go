@@ -116,12 +116,12 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				}
 				first, rt := start()
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "node-recovery-seed"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
 					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 				}
 				requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "drafting")
 				attempts := 1
 				if escape {
 					attempts = 2
@@ -130,12 +130,12 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				for attempt := 1; attempt <= attempts; attempt++ {
 					loop = readLifecycleLoop(t, rt, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "review")
 					if attempt == attempts {
 						break
 					}
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "ordinary-before-cap", map[string]any{"revision_id": loop.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -178,7 +178,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				if escape {
 					target = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, target)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, target)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(after) != 1 || len(before) != 1 || after[0].TriggerEventID == before[0].TriggerEventID {
@@ -205,9 +205,9 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					}
 					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "final-admit", map[string]any{"revision_id": current.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "review")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.close", "close", map[string]any{"revision_id": current.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				if closed := readLifecycleLoop(t, rt, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {

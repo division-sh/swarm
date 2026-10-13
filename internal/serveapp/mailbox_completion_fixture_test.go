@@ -129,7 +129,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntime, owner cursorMailboxStore) cursorMailboxFixture {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
-	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+	requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	var id string
 	if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id); err != nil {

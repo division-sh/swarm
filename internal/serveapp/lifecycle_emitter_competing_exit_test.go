@@ -58,7 +58,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							if diagnostic != nil {
 								diagnostic.runID, diagnostic.seedEventID = seed.RunID, seed.EventID
 							}
-							entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+							entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 							receiverID = entityID
 							if diagnostic != nil {
 								diagnostic.entityID = entityID
@@ -79,7 +79,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							switch order {
 							case "gate_first":
 								gateReply = requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", decision)
-								requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+								requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 								if exit == "ordinary" {
 									exitReply = requestServedJSONRPC(t, rt.Endpoint, "event.publish", cancel)
 								}
@@ -90,7 +90,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 										t.Fatalf("ordinary exit admission: %#v", exitReply.Error)
 									}
 								}
-								requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "cancelled")
+								requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "cancelled")
 								gateReply = requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", decision)
 							case "contended":
 								if exit == "ordinary" {

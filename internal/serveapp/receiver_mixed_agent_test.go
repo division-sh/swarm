@@ -25,10 +25,12 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
 			var diagnosticStore any
+			var reader receiverProofStateReader
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 				diagnosticStore = p.deps.EventStore
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
 				db, _, _ = selectedRuntimeStoreForTest(t, p)
 			})
 			if backend == "sqlite" {
@@ -52,7 +54,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
-			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
+			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			var childID, parentID string
 			if err := db.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, seed.RunID).Scan(&childID); err != nil {

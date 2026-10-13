@@ -1,0 +1,79 @@
+[
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedEventPublishActiveLoadProof",
+    "Kind": "raw-operation",
+    "Family": "event",
+    "Owner": "selected canonical event operation and domain event observation port",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe, agentStarted \u003c-chan struct{}, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|arg=chan struct{}|arg=chan struct{}|arg=*sync.Once|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe, agentStarted \u003c-chan struct{}, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|arg=chan struct{}|arg=chan struct{}|arg=*sync.Once|results=()",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedEventPublishActiveLoadProof",
+    "Kind": "raw-operation",
+    "Family": "event",
+    "Owner": "selected canonical event operation and domain event observation port",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe, agentStarted \u003c-chan struct{}, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|arg=chan struct{}|arg=chan struct{}|arg=*sync.Once|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe, agentStarted \u003c-chan struct{}, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|arg=chan struct{}|arg=chan struct{}|arg=*sync.Once|results=()",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedEventPublishFollowUpProof",
+    "Kind": "raw-operation",
+    "Family": "event",
+    "Owner": "selected canonical event operation and domain event observation port",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe) github.com/division-sh/swarm/internal/serveapp.servedEventPublishFollowUpProof|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=(github.com/division-sh/swarm/internal/serveapp.servedEventPublishFollowUpProof)",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe) github.com/division-sh/swarm/internal/serveapp.servedEventPublishFollowUpProof|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=(github.com/division-sh/swarm/internal/serveapp.servedEventPublishFollowUpProof)",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedEventPublishTargetRouteProof",
+    "Kind": "raw-operation",
+    "Family": "event",
+    "Owner": "selected canonical event operation and domain event observation port",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedEventPublishTargetRouteProof",
+    "Kind": "raw-operation",
+    "Family": "event",
+    "Owner": "selected canonical event operation and domain event observation port",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "runServedDynamicAutoEmitPostgresProof",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedDynamicAutoEmitProof",
+    "Kind": "raw-operation",
+    "Family": "lifecycle",
+    "Owner": "selected run lifecycle/candidate/source owner and bounded lifecycle observation",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, blocked \u003c-chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof|arg=chan struct{}|arg=*sync.Once|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, blocked \u003c-chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof|arg=chan struct{}|arg=*sync.Once|results=()",
+    "Multiplicity": 1
+  },
+  {
+    "File": "internal/serveapp/main_runtime_test.go",
+    "Enclosing": "runServedDynamicAutoEmitSQLiteProof",
+    "Operation": "call:github.com/division-sh/swarm/internal/serveapp.runServedDynamicAutoEmitProof",
+    "Kind": "raw-operation",
+    "Family": "lifecycle",
+    "Owner": "selected run lifecycle/candidate/source owner and bounded lifecycle observation",
+    "Before": "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string, blocked \u003c-chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|arg=chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof|arg=chan struct{}|arg=*sync.Once|results=()",
+    "After": "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string, blocked \u003c-chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once)|recv=\u003cnil\u003e|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=chan github.com/division-sh/swarm/internal/serveapp.servedEventPublishPreHandlerProof|arg=chan struct{}|arg=*sync.Once|results=()",
+    "Multiplicity": 1
+  }
+]

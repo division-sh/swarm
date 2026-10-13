@@ -26,6 +26,7 @@ var family145LifecycleBusinessCallers = map[string]int{
 }
 
 func family145LifecycleBusinessCallerProofError(function, before, after string) error {
+	after = family145WriterStageCallerInverse(function, after)
 	const native = "lifecycleStoredSnapshot(t, rt.ReceiverStateReader, "
 	want := family145LifecycleBusinessCallers[function]
 	if want == 0 || strings.Count(after, native) != want || strings.Contains(after, "lifecycleStoredSnapshot(t, rt, ") {

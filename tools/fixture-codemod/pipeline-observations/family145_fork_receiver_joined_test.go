@@ -183,7 +183,7 @@ func family145ForkReceiverJoinedOwnedInventory(t *testing.T) map[string]int {
 			if !ok {
 				continue
 			}
-			if function.Name.Name == "readForkReceiverRows" {
+			if function.Name.Name == "readForkReceiverRows" || function.Name.Name == "servedEventPublishEntityState" {
 				t.Fatal("retired duplicate receiver owner returned")
 			}
 			family145ForkReceiverJoinedFunctionCalls(t, function, counts)
@@ -206,6 +206,7 @@ func family145ForkReceiverJoinedFunctionCalls(t *testing.T, function *ast.FuncDe
 		name := family145NodeString(call.Fun)
 		family145LifecycleBusinessRecordCall(t, function.Name.Name, call, counts)
 		family145MailboxCompletionRecordCall(t, function.Name.Name, call, counts)
+		family145WriterStageRecordCall(t, function.Name.Name, call, counts)
 		if name == "readServedForkRecipientSourceDomain" {
 			if family145ForkSourceDomainCallers[function.Name.Name] == 0 || len(call.Args) != 3 || family145NodeString(call.Args[1]) != "rt.Runtime.Bus.Store()" {
 				t.Fatal("source-domain call escaped its finite live selected bus owner")

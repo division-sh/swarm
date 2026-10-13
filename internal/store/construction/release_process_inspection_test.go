@@ -151,6 +151,21 @@ func requireReleaseInspectionMailboxAndDiagnostics(t *testing.T, writer any, obs
 		t.Fatalf("independent unaccepted inspection lost diagnostic sections/fields: %s %v", got, err)
 	}
 	requireReleaseInspectionUnaccepted(t, ctx, observer)
+	requireReleaseInspectionWriterStage(t, observer, runID)
+}
+
+func requireReleaseInspectionWriterStage(t *testing.T, observer storetest.ReleaseProcessReadOnlyInspection, runID string) {
+	t.Helper()
+	if err := observer.InspectSnapshot(context.Background(), func(scoped context.Context) error {
+		out := storetest.ObserveWriterStage(t, scoped, observer, runID, "b3c04b72-07f1-4097-a1f0-779955000002", "wrong-filter")
+		if out.EntityID != "b3c04b72-07f1-4097-a1f0-779955000002" || out.State != "" {
+			t.Fatalf("independent header-absence observation lost requested exact entity: %+v", out)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requireReleaseInspectionUnaccepted(t, context.Background(), observer)
 }
 
 func readReleaseInspectionLifecycle(ctx context.Context, observer storetest.ReleaseProcessReadOnlyInspection, runID string) ([]storetest.LifecycleBusinessStorageRow, error) {

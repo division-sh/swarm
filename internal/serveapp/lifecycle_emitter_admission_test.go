@@ -133,7 +133,7 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress",
 					})
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", tc.state)
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, "", tc.state)
 				})
 			}
 		})

@@ -37,14 +37,14 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "loop-create",
 			})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, started.RunID, "waiting")
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key,
 				})
 			}
 			publish("loop.start", "loop-start", map[string]any{"seed": true})
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "drafting")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, "drafting")
 			first := readLifecycleLoop(t, rt, started.RunID, entityID)
 			if first.Attempt != 1 || first.MaxAttempts != 2 || first.Status != loopruntime.StatusOpen {
 				t.Fatalf("first loop=%#v", first)
@@ -56,19 +56,19 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 				}
 				payload := map[string]any{"revision_id": current.RevisionID}
 				publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "review")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, "review")
 				publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 				state := "drafting"
 				if attempt == 2 {
 					state = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, state)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, state)
 			}
 			closed := readLifecycleLoop(t, rt, started.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 || closed.RevisionID == first.RevisionID {
 				t.Fatalf("closed loop=%#v", closed)
 			}
-			receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "done")
+			receipt := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, "", "done")
 			if receipt == entityID {
 				t.Fatal("connected consumer reused producer entity")
 			}
@@ -109,7 +109,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash,
 					})
-					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "review")
+					entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, "", "review")
 					cardID := waitLifecycleGateCard(t, rt, started.RunID)
 					var detail struct {
 						DecisionCard struct {
@@ -126,7 +126,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 					if decided["status"] != "decided" {
 						t.Fatalf("decision = %#v", decided)
 					}
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, "done")
 					requireServedEntityReadback(t, rt.Endpoint, started.RunID, entityID, "done")
 					var replay map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &replay)

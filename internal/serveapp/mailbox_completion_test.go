@@ -233,7 +233,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var cardID, hash string
 			if err := rt.DB.QueryRow(`SELECT card_id, card_content_hash FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&cardID, &hash); err != nil {
@@ -262,7 +262,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 			if firstSuccess.Err != nil || firstSuccess.Envelope.Error != nil {
 				t.Fatalf("first execution after removing completion fault: %#v", firstSuccess)
 			}
-			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			committed := gateCompletionRead(t, rt, "first_success_after_restart", seed.RunID, cardID, domain)
 			gateCompletionAssertResponse(t, firstSuccess, committed, false)

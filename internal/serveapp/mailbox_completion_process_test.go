@@ -90,7 +90,7 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 				first, rt := start(true)
 				db := rt.DB
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
-				entityID := requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "review")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var id, hash string
 				if err := db.QueryRow(`SELECT card_id,card_content_hash FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id, &hash); err != nil {
@@ -129,14 +129,14 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					gateCompletionAssertResponse(t, <-response, committed, false)
-					requireServedEventPublishEntityState(t, db, backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					if err := first.stop(); err != nil {
 						t.Fatalf("graceful stop: %v\n%s", err, first.output.String())
 					}
 				}
 				second, rt := start(false)
-				requireServedEventPublishEntityState(t, db, backend, seed.RunID, entityID, "done")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				replay := gateCompletionHTTP(context.Background(), rt.Endpoint, params)
 				after := gateCompletionRead(t, rt, "retained_restart_exact_replay", seed.RunID, id, domain)

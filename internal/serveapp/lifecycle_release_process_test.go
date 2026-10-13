@@ -42,11 +42,11 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
 				})
 				if gate {
-					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+					entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 					params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 					var decision map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
@@ -71,7 +71,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					return
 				}
 
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -79,7 +79,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					})
 				}
 				started := publish("loop.start", "release-start", map[string]any{"seed": true})
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
@@ -89,21 +89,21 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					}
 					payload := map[string]any{"revision_id": current.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("release-admit-%d", attempt), payload)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					finalEvent = publish("loop.repeat", fmt.Sprintf("release-repeat-%d", attempt), payload).EventID
 					next := "drafting"
 					if attempt == 2 {
 						next = "escaped"
 					}
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, next)
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, next)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), finalEvent, "review", next)
 				}
 				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
 					t.Fatalf("loop cap not closed: %+v", closed)
 				}
-				receiver := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
+				receiver := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "done")
 				if receiver == entityID {
 					t.Fatal("connected receiver borrowed the producer entity")
 				}

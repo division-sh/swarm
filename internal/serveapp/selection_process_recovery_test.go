@@ -77,7 +77,7 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				<-responseDone
 				second, recovered := start(false)
 				assertServedSelectionTrace(t, recovered, eventID, seed.RunID, true)
-				requireServedEventPublishEntityState(t, recovered.DB, backend, seed.RunID, "", "done")
+				requireServedEventPublishEntityState(t, recovered.ReceiverStateReader, backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, recovered.ReadRunDeliveries, seed.RunID)
 				duplicate := requireServedEventPublishRPCResult(t, recovered.Endpoint, params)
 				if duplicate.EventID != eventID || duplicate.RunID != seed.RunID {

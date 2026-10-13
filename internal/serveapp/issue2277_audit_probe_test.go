@@ -103,9 +103,13 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			opts.TestLifecycleProbe = probe
 			var db *sql.DB
+			var reader receiverProofStateReader
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+			})
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "audit2277.sqlite"))
 			} else {
@@ -123,7 +127,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			first.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
-			requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "waiting")
+			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, "", "waiting")
 			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
 			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
