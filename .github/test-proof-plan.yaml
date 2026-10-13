@@ -1066,6 +1066,8 @@ units:
       TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
       TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores: [sqlite, postgres]
       TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores: [sqlite, postgres]
+      TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores: [sqlite, postgres]
+      TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [postgres/creation_wins, postgres/terminal_wins, sqlite/creation_wins, sqlite/terminal_wins]
       TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores: [sqlite, postgres]

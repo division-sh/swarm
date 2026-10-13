@@ -206,8 +206,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			siblingBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)
 			sourceCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
 			siblingCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)
-			sourceNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
-			siblingNotices := readForkReceiverNoticeDomain(t, rt, sibling.RunID)
+			sourceNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)
+			siblingNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, sibling.RunID)
 			var result apiv1.RunForkExecutionResult
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
@@ -222,7 +222,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)) ||
 				!reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)) ||
-				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, sibling.RunID)) {
+				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")
 			}
 			completed := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)

@@ -343,9 +343,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 		frontiers = append(frontiers, frontier)
 		beforeDuplicate := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
-		beforeDuplicateNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
+		beforeDuplicateNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)
 		duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
-		if !reflect.DeepEqual(second, duplicate) || !reflect.DeepEqual(beforeDuplicate, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(beforeDuplicateNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) {
+		if !reflect.DeepEqual(second, duplicate) || !reflect.DeepEqual(beforeDuplicate, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(beforeDuplicateNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) {
 			t.Fatal("duplicate ingress rematerialized a source occurrence")
 		}
 	}
@@ -461,16 +461,16 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			requireEffect(t, rt, siblingSeed.RunID, siblingFrontier, path, receiver.Path, "existing_entity", siblingRows[path].ID)
 		}
 		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), siblingSeed.RunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, siblingSeed.RunID)
-		siblingNotices := readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)
+		siblingNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		defer func() {
-			if !reflect.DeepEqual(siblingDomain, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), siblingSeed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, siblingSeed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)) {
+			if !reflect.DeepEqual(siblingDomain, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), siblingSeed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, siblingSeed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, siblingSeed.RunID)) {
 				t.Error("fork mutated the independently executed sibling run")
 			}
 		}()
 	}
 	before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 	beforeCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
-	beforeNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
+	beforeNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)
 	defer func() {
 		if after := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID); !reflect.DeepEqual(before, after) {
 			t.Errorf("fork mutated source domain: before=%v after=%v", before, after)
@@ -478,7 +478,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if after := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(beforeCompanions, after) {
 			t.Errorf("fork mutated source companion/readiness rows: before=%v after=%v", beforeCompanions, after)
 		}
-		if !reflect.DeepEqual(beforeNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) {
+		if !reflect.DeepEqual(beforeNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) {
 			t.Error("fork changed source business notices")
 		}
 	}()
@@ -580,9 +580,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("root remap/restoration: %+v", childRows)
 	}
 	childBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
-	childNotices, childCompanions := readForkReceiverNoticeDomain(t, rt, fork.ForkRunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)
+	childNotices, childCompanions := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, fork.ForkRunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(childNotices, readForkReceiverNoticeDomain(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)) {
+	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(childNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)) {
 		t.Fatal("same-key fork replay changed response, committed targets, or final effects")
 	}
 }

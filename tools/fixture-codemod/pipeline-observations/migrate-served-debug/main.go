@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/receiverreadback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
@@ -195,7 +196,12 @@ func currentOutput(r result) []byte {
 		must(err)
 		companionPins, err := forkcompanion.Decode(companionManifest)
 		must(err)
-		previous := forkcompanion.Previous(companionPins, r.path, key, actual)
+		noticeManifest, err := os.ReadFile(forknotice.Path)
+		must(err)
+		noticePins, err := forknotice.Decode(noticeManifest)
+		must(err)
+		previous := forknotice.Previous(noticePins, r.path, key, actual)
+		previous = forkcompanion.Previous(companionPins, r.path, key, previous)
 		previous = receiverreadback.Previous(pins, key, previous)
 		previous = publicendpoint.Previous(r.path, key, previous)
 		if actual != p.Before && previous != p.After {

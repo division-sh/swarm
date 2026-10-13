@@ -31,7 +31,7 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 			children[root] = cells
 		}
 	}
-	if err := separateNewCompanionEvidence(children); err != nil {
+	if err := separateNewForkWitnessEvidence(children); err != nil {
 		return err
 	}
 	// This source-pinned digest preserves every original named backend/fault
@@ -49,13 +49,15 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 
 // New owner proofs add obligations without changing the original split's
 // immutable evidence digest. Only these exact cells leave that comparison.
-func separateNewCompanionEvidence(children map[string][]string) error {
+func separateNewForkWitnessEvidence(children map[string][]string) error {
 	for _, root := range []string{
 		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
 		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+		"TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores",
+		"TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores",
 	} {
 		if !slices.Equal(children[root], []string{"sqlite", "postgres"}) {
-			return fmt.Errorf("new companion proof lost exact both-store evidence: %s", root)
+			return fmt.Errorf("new fork witness proof lost exact both-store evidence: %s", root)
 		}
 		delete(children, root)
 	}
@@ -120,6 +122,8 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 	for _, root := range []string{
 		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
 		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+		"TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores",
+		"TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores",
 	} {
 		for _, cells := range [][]string{nil, {"sqlite"}, {"postgres"}, {"sqlite", "postgres", "foreign"}} {
 			policy := loadPersistenceDebtPolicy(t)
@@ -127,7 +131,7 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 			unit.RequiredChildren[root] = cells
 			policy.Units["store-runtime-full-02"] = unit
 			if validateRuntime02RequiredEvidence(policy) == nil {
-				t.Fatal("new companion obligation lost or broadened backend evidence:", root, cells)
+				t.Fatal("new fork witness obligation lost or broadened backend evidence:", root, cells)
 			}
 		}
 	}

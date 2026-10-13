@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 )
 
 const predecessor = "f0ce6f7bea8f8f89d44f98a317ed0432e2ba90ce"
@@ -166,7 +167,14 @@ func currentEdit(fset *token.FileSet, file *ast.File, pin pin) edit {
 		}
 		current := nodeString(function)
 		if current != pin.Before && current != pin.After {
-			panic("companion consumer escaped complete source: " + pin.File + "/" + pin.Function)
+			raw, err := os.ReadFile(forknotice.Path)
+			must(err)
+			pins, err := forknotice.Decode(raw)
+			must(err)
+			if forknotice.Previous(pins, pin.File, pin.Function, current) != pin.After {
+				panic("companion consumer escaped complete source: " + pin.File + "/" + pin.Function)
+			}
+			return edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, current}
 		}
 		return edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, pin.Source}
 	}

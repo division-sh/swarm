@@ -30,6 +30,7 @@ func forkCompanionPins(t *testing.T) []forkcompanion.Pin {
 }
 
 func family145ForkCompanionCallerInverse(function, current string) string {
+	current = family145ForkNoticeCallerInverse(function, current)
 	pins, err := forkcompanion.Decode(family145ForkCompanionBytes)
 	if err != nil {
 		panic(err)
@@ -44,6 +45,7 @@ func family145ForkCompanionCallerInverse(function, current string) string {
 
 func family145CheckForkCompanionWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145ForkNoticeCallerInverse(function, current)
 	for _, pin := range forkCompanionPins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -75,7 +77,7 @@ func TestFamily145ForkCompanionWholeChainRetainsAll22CallsAndOriginalPhysicalWit
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145PublicA2CurrentDeclaration(t, raw, pin.Function) != pin.After {
+		if family145ForkNoticeCallerInverse(pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("current companion body escaped its whole rule:", key)
 		}
 		forkCompanionHostiles(t, pin)
