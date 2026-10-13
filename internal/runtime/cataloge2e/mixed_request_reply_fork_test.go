@@ -68,6 +68,9 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			}
 			step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "same-account", "request_id": "mixed-key"},
 				eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
+			if returnedRequester {
+				step.Payload["items"] = []any{step.Payload["request_id"]}
+			}
 			cut := ""
 			if settledProvider {
 				cut = holdMixedRequestObserverUntilProviderSettles(t, h, selected, step, returnedRequester)
