@@ -6355,7 +6355,7 @@ composition with prior transitions and metadata policies. Final affected
 control collection:24 roots/477 cases PASS, zero failures/skips. Three current
 fingerprint guard expectations advance to this exact successor; their immutable
 historical epoch checks remain unchanged. An early sidecar check before the
-atomic owner refresh rejected old metadata as designed; it passes afterward.
+owner refresh rejected old metadata as designed; it passes afterward.
 
 Fresh global downward census PASS226.502s:
 7654 ->7502 findings;5364 ->5216 raw sites;152/148 genuine removals; ZERO added.
