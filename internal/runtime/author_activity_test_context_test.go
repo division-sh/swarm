@@ -521,6 +521,18 @@ func registerRuntimeTestAgent(manager *runtimemanager.AgentManager, cfg runtimea
 	})
 }
 
+// These controls use ephemeral actors and native delivery fixtures, not durable
+// agent rows. Their explicitly supplied unit lifecycle still owns exact outcomes.
+func runtimeTestEphemeralManagerLifecycle(t testing.TB) (runtimestartupownership.LiveGenerationGrant, runtimemanager.PersistenceRoles) {
+	t.Helper()
+	session := newRuntimeTestRetainedSession(t)
+	_, grant, err := newRuntimeTestProcessCapabilityWithSession(t, nil, nil, sourceartifactfixture.Fact(), authorActivityTestRuntimeInstanceID, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return grant, runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: session}
+}
+
 type runtimeTestUnavailableProposedEffects struct {
 	decisioncard.ProposedEffectStore
 }

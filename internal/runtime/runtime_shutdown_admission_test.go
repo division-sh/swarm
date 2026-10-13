@@ -289,6 +289,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
 	managerStore := &runtimeShutdownManagerStore{}
+	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	busRoles := runtimeTestManagerBusRoles(bus)
+	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != agent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
@@ -299,8 +302,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
+		LifecycleStore:                 lifecycle,
 		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
+		PersistenceRoles:               busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
 	rt.Manager = am
 	bindRuntimeShutdownAgentReadinessFinalizer(bus)
@@ -465,6 +469,9 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
+	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	busRoles := runtimeTestManagerBusRoles(bus)
+	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
@@ -472,8 +479,9 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
+		LifecycleStore:                 lifecycle,
 		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
+		PersistenceRoles:               busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	rt.Manager = am
 	bindRuntimeShutdownAgentReadinessFinalizer(bus)

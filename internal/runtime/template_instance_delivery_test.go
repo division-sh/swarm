@@ -251,7 +251,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
-		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		PersistenceRoles:   externalRuntimeTestManagerLifecycleRoles(bus, pg),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
@@ -373,7 +373,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
-		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		PersistenceRoles:   externalRuntimeTestManagerLifecycleRoles(bus, pg),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
@@ -476,7 +476,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
-		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		PersistenceRoles:   externalRuntimeTestManagerLifecycleRoles(bus, pg),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	producer := seedRuntimeTestKeylessSource(t, ctx, pg, pc, "producer")
@@ -577,7 +577,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
-		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		PersistenceRoles:   externalRuntimeTestManagerLifecycleRoles(bus, pg),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
@@ -709,7 +709,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
-		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		PersistenceRoles:   externalRuntimeTestManagerLifecycleRoles(bus, pg),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))

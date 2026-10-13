@@ -19,11 +19,20 @@ type r52DirectiveSuccessorPin struct {
 var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
 	{"native-api-adjacent-physical-counter", "TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay", "e8d989054244da2f565a981f2216df53f0d452b4711bc57cacfa0e0487141185", "066cc1e33cb20476729a7747bbb55eebdcb038557c26249945eb935362a5bffe", "95215bdf6e95a85244925a8e15df23dc226586cde25f329fec899ce87f71af1f"},
 	{"native-run-setup-family144", "TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact", "c0eaf89bc345b262f37e11cc05167e28265aca31d9b410fdcee8b38bdd7b9062", "26ad327def48912c3491bc904123ec5b006057f6e3b3f06df01cc0463ff8ea96", "8ebb5ec37d9696aed6360fc029546ab4f8a234241282004856659569e4951f94"},
+	{"native-shared-coordinator-authority", "TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect", "7347cf0251892924de72a0c6b4690a62d0c905e5dded04032e46a4afd46b86ae", "cc1b95c98cc97dd7328a2a19969b10860af079adb54a7a1432e245fb23747009", "80fb0aecd3a5382d16e40f8256e43bfcef9af610a9da881eef83132d9777035b"},
+	{"native-shared-coordinator-authority", "TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows", "965d5e1bbdf33ca4b352b28ddba3d1802689bc0f6a2a9c09d4c90259489827ad", "bd73bdb4b74a58332bad5b7b710dfd38e36830acb055e2100cf82060442bbe78", "88fcee7dc761248ec3b3eb95a6183692724cb2f6b0b8ff6ef5a1d154d61e22ae"},
+	{"native-shared-coordinator-authority", "TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute", "ce067ed1f6dc41eaaf9a816097443abcf8262ed8ecf18f42eea8c22243becbbd", "8a64abfc56dda32c5468cfc5d02992ce8b324905948a815fa8c7691d1d8cefc0", "66132e2a5a7e9084c31ae79d98f9463de8b8e7dae13f0f4439a21c5769355077"},
+	{"native-shared-coordinator-authority", "TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect", "6058228764f30bcca2ad50e0c5d98ef6f5f064216f7baedf04edfb1e95810462", "e367e1c62e38d10214ecb1f8340543bb00479219c4f8661b6f82e052e89d4bf5", "197c62cf40ee26c8b06a36733f440803672bc6d54c7e8a75b90e8ff203a225a1"},
+	{"native-shared-coordinator-authority", "TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect", "a207e449344318c6595e45192410bcb5772f8e475c0003311f18e01353fe82fd", "99025c4eeadc090a6c162b2ac0ac1c7cb249c59c5225993ca46a07dab7aa7687", "db0d0d87613c3518a43ca82c37c0c0704e22726ed7d01df69b6fa547656c064d"},
 }
 
-// Only the two complete endpoints authorized by reviewer-b6145065880 reverse.
+// Only the seven complete endpoints authorized by reviewer-b6145065880/6145833450 reverse.
 func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
-	if row.Family != pin.family || row.Function != pin.function || row.File != "internal/apiv1/operator_agent_control_test.go" {
+	wantFile := "internal/apiv1/operator_agent_control_test.go"
+	if pin.family == "native-shared-coordinator-authority" {
+		wantFile = "internal/runtime/template_instance_delivery_test.go"
+	}
+	if row.Family != pin.family || row.Function != pin.function || row.File != wantFile {
 		return fmt.Errorf("foreign directive recipe")
 	}
 	history := row
@@ -40,13 +49,22 @@ func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuc
 	if err != nil || current != reviewed {
 		return fmt.Errorf("directive source differs from its successor")
 	}
-	roles := "runtimemanager.PersistenceRoles{LifecycleState: pg, LifecycleOutcome: pg, DirectiveOperations: pg, DirectiveTargets: pg}"
-	config := ", Config: json.RawMessage(`{}`)"
-	if strings.Count(current, roles) != 1 || strings.Count(current, config) != 1 {
-		return fmt.Errorf("directive role/config cardinality changed")
+	var reversed string
+	if pin.family == "native-shared-coordinator-authority" {
+		call := "externalRuntimeTestManagerLifecycleRoles(bus, pg)"
+		if strings.Count(current, call) != 1 {
+			return fmt.Errorf("template role cardinality changed")
+		}
+		reversed = strings.Replace(current, call, "externalRuntimeTestManagerBusRoles(bus)", 1)
+	} else {
+		roles := "runtimemanager.PersistenceRoles{LifecycleState: pg, LifecycleOutcome: pg, DirectiveOperations: pg, DirectiveTargets: pg}"
+		config := ", Config: json.RawMessage(`{}`)"
+		if strings.Count(current, roles) != 1 || strings.Count(current, config) != 1 {
+			return fmt.Errorf("directive role/config cardinality changed")
+		}
+		reversed = strings.Replace(current, roles, "runtimemanager.PersistenceRoles{DirectiveOperations: pg, DirectiveTargets: pg}", 1)
+		reversed = strings.Replace(reversed, config, "", 1)
 	}
-	reversed := strings.Replace(current, roles, "runtimemanager.PersistenceRoles{DirectiveOperations: pg, DirectiveTargets: pg}", 1)
-	reversed = strings.Replace(reversed, config, "", 1)
 	prior, err := canonicalFunction(reversed)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(prior))) != pin.prior {
 		return fmt.Errorf("directive reversal changed other setup or assertions")
@@ -59,6 +77,40 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("same_selected_role_composer", func(t *testing.T) {
+		name := "externalRuntimeTestManagerLifecycleRoles"
+		path := "internal/runtime/author_activity_external_test_context_test.go"
+		source, err := os.ReadFile(filepath.Join("../../..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		set := token.NewFileSet()
+		file, err := parser.ParseFile(set, path, source, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		function, err := uniqueFunction(file, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := string(source[set.Position(function.Pos()).Offset:set.Position(function.End()).Offset])
+		valid := func(body string) bool {
+			canonical, err := canonicalFunction(body)
+			return err == nil && fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) == "c25fdca7fa33457442b94812bcf49d47c0cdd51fb9a5ce1b32c30df35139a914"
+		}
+		if !valid(actual) {
+			t.Fatal("role composer changed bus roles or same-selected lifecycle roles")
+		}
+		for _, mutant := range []string{
+			strings.Replace(actual, "selected, selected", "selected, foreign", 1),
+			strings.Replace(actual, "roles.LifecycleState, roles.LifecycleOutcome = selected, selected", "roles.LifecycleState = selected", 1),
+			strings.Replace(actual, "externalRuntimeTestManagerBusRoles(bus)", "runtimemanager.PersistenceRoles{}", 1),
+		} {
+			if mutant == actual || valid(mutant) {
+				t.Fatal("hostile role composer accepted")
+			}
+		}
+	})
 	for _, pin := range r52DirectiveSuccessorPins {
 		t.Run(pin.function, func(t *testing.T) {
 			var row *recipe
@@ -90,16 +142,30 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 			if err := reverseR52DirectiveSuccessor(*row, actual, pin); err != nil {
 				t.Fatal(err)
 			}
-			for name, mutant := range map[string]string{
+			mutants := map[string]string{
 				"foreign_store":   strings.Replace(actual, "LifecycleState:      pg", "LifecycleState:      foreign", 1),
 				"missing_outcome": strings.Replace(actual, "LifecycleOutcome:    pg,", "", 1),
 				"late_config":     strings.Replace(actual, ", Config: json.RawMessage(`{}`)", "", 1),
 				"assertion":       strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
 				"unrelated_body":  strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
-			} {
+			}
+			if pin.family == "native-shared-coordinator-authority" {
+				mutants = map[string]string{
+					"foreign_store":  strings.Replace(actual, "externalRuntimeTestManagerLifecycleRoles(bus, pg)", "externalRuntimeTestManagerLifecycleRoles(bus, foreign)", 1),
+					"missing_roles":  strings.Replace(actual, "externalRuntimeTestManagerLifecycleRoles(bus, pg)", "externalRuntimeTestManagerBusRoles(bus)", 1),
+					"assertion":      strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
+					"unrelated_body": strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
+				}
+			}
+			for name, mutant := range mutants {
 				if mutant == actual || reverseR52DirectiveSuccessor(*row, mutant, pin) == nil {
 					t.Fatalf("hostile directive delta accepted: %s", name)
 				}
+			}
+			unlisted := *row
+			unlisted.Function += "Unlisted"
+			if reverseR52DirectiveSuccessor(unlisted, actual, pin) == nil {
+				t.Fatal("unlisted recipe accepted")
 			}
 			for _, field := range []string{"before", "after", "mechanical"} {
 				mutant := *row

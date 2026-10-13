@@ -123,12 +123,15 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 			return nil, ctx.Err()
 		},
 	}
+	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	busRoles := runtimeTestManagerBusRoles(bus)
+	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	rt.Manager = manager.NewAgentManagerWithOptions(bus, func(actors.AgentConfig) (manager.Agent, error) {
 		return agent, nil
 	}, manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, SemanticSource: runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed, WorkOwner: rt.workOccurrence,
-		DeliveryStore: store, PersistenceRoles: runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore: lifecycle, DeliveryStore: store, PersistenceRoles: busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, &runtimeShutdownManagerStore{})
 	bindRuntimeShutdownAgentReadinessFinalizer(bus)
 	if err := registerRuntimeTestAgent(rt.Manager, runtimeTestAgentConfig(t, actors.AgentConfig{

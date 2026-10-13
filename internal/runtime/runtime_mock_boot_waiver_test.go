@@ -69,7 +69,10 @@ func TestCommandMockStartupRejectsRestoredLiveDescriptor(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		LifecycleStore:    lifecycle,
+		PersistenceRoles:  roles,
 		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        "anthropic",
 		ReceiverExecution: eventreceiver.NormalExecution(),
