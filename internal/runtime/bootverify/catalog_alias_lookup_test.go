@@ -74,6 +74,21 @@ func TestLoopValidationAdmittedTextAlias(t *testing.T) {
 	}
 }
 
+func TestLoopValidationRevisionDomainsRemainExact(t *testing.T) {
+	for _, ref := range []string{"integer", "numeric", "uuid", "timestamp", "Status"} {
+		t.Run(ref, func(t *testing.T) {
+			bundle := loopValidationBundle()
+			bundle.RootTypes = c.TypeCatalogDocument{Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"ready"}, Default: "ready"}}}
+			field := bundle.Events["draft.ready"].Payload.Properties["revision_id"]
+			field.Type = ref
+			bundle.Events["draft.ready"].Payload.Properties["revision_id"] = field
+			if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "event must require text field revision_id") {
+				t.Fatalf("non-text revision %s admitted: %#v", ref, findings)
+			}
+		})
+	}
+}
+
 func TestPolicySheetLookupAliasedBooleanNoDefault(t *testing.T) {
 	handler := bootverifyLookupHandler(false, true)
 	lookup := handler.Rules[0].Compute.Lookup
