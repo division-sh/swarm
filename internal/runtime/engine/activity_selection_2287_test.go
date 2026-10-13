@@ -114,7 +114,7 @@ func TestExecutor_HandlerActivityCompletionSelectionKeepsCatalogOwnership(t *tes
 					}
 					if selected {
 						ref, _ := handler.OnComplete[0].DeclarationIdentity()
-						if fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow || ref.SemanticPath() != `nodes["scanner"].handlers["source.requested"].on_complete[0]` {
+						if fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow || ref.SemanticPath() != `nodes["scanner"].handlers["source.requested"].on_complete[0]` || fact.DisplayLabel() != "on_complete[0]: else" {
 							t.Fatalf("handler activity lost selected completion identity: %#v", fact)
 						}
 					} else if fact.Disposition() != handlerselection.DispositionNoMatch || fact.Ref().Valid() {
@@ -158,7 +158,11 @@ func TestExecutor_JoinOutcomeDoesNotInventActivityOwnership(t *testing.T) {
 				}
 				fact := requireResolvedSelection(t, frame.result.HandlerRuleSelection)
 				ref, _ := row.DeclarationIdentity()
-				if fact.Context() != wantContext || fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow {
+				wantDisplay := "join.on_complete"
+				if deadline {
+					wantDisplay = "join.on_deadline"
+				}
+				if fact.Context() != wantContext || fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow || fact.DisplayLabel() != wantDisplay {
 					t.Fatalf("activity borrowed foreign join-outcome identity: %#v", fact)
 				}
 				bundle, _ := semanticview.Bundle(source)
@@ -174,5 +178,46 @@ func TestExecutor_JoinOutcomeDoesNotInventActivityOwnership(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestExecutor_SelectionPresentationKeepsFullAdmittedText(t *testing.T) {
+	predicate := strings.Repeat("payload.url != '' &&\n", 80) + "payload.url != ''"
+	admitted, err := loadNodeHandlerFixture("on_complete:\n  - condition: |-\n      " + strings.ReplaceAll(predicate, "\n", "\n      ") + "\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flow := range []string{".", "research"} {
+		t.Run(flow, func(t *testing.T) {
+			admitted.Activity = c.ActivitySpec{Tool: "source_scrape", Input: map[string]c.ExpressionValue{"url": c.RefExpression("payload.url")}}
+			source, node, handler := activitySelectionSource2287(t, flow, admitted)
+			order := []string{}
+			repo, writer := &orderedStateRepo{order: &order}, &orderedActivityWriter{order: &order}
+			exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: repo, MutationOwner: composedMutationOwner{state: repo, activities: writer, order: &order}, Locker: orderedLocker{order: &order}}, stubEvaluator{bools: map[string]bool{predicate: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+				EntityID: "entity-1", Node: node, HandlerEventKey: "source.requested", Handler: handler,
+				Event: eventtest.RunCreatingRootIngress("evt-full-predicate", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+				State: testStateSnapshot("pending", nil, nil, nil),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact := requireResolvedSelection(t, result.HandlerRuleSelection)
+			ref, _ := handler.OnComplete[0].DeclarationIdentity()
+			if fact.Context() != handlerselection.ContextOnComplete || fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || fact.DisplayLabel() != "on_complete[0]: condition "+predicate {
+				t.Fatalf("selection lost positional identity or full admitted predicate: %#v", fact)
+			}
+			readback, err := handlerselection.Hydrate(string(fact.Context()), string(fact.Disposition()), ref.Flow().String(), ref.Family(), ref.SemanticPath(), fact.DisplayLabel())
+			if err != nil || !readback.Equal(fact) {
+				t.Fatalf("selection readback changed the immutable full-text fact: %#v, %v", readback, err)
+			}
+			if len(writer.intents) != 1 || !reflect.DeepEqual(order, []string{"lock", "tx", "save", "activity_intents"}) {
+				t.Fatalf("presentation changed handler effects: %v, %#v", order, writer.intents)
+			}
+			assertHandlerActivityIntentCatalog2287(t, source, node, handler, writer.intents[0])
+		})
 	}
 }
