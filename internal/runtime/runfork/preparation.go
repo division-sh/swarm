@@ -13,7 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
@@ -139,14 +141,54 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 	if !ok {
 		return "", fmt.Errorf("selected preparation requires admitted fixed-revision history")
 	}
+	var firstTurn *InputPublicationCoordinates
+	input, present, err := plan.OriginalStartFirstTurn()
+	if err != nil {
+		return "", err
+	}
+	if present {
+		coordinates := input.Coordinates()
+		firstTurn = &coordinates
+	}
+	joinSchedules := make([]string, 0, len(plan.JoinSchedules))
+	for _, schedule := range plan.JoinSchedules {
+		digest, err := schedule.EvidenceDigest()
+		if err != nil {
+			return "", fmt.Errorf("selected preparation join schedule: %w", err)
+		}
+		joinSchedules = append(joinSchedules, digest)
+	}
+	transferred := make([]string, 0, len(plan.TransferredJoins))
+	for _, source := range plan.TransferredJoins {
+		digest, err := source.EvidenceDigest()
+		if err != nil {
+			return "", err
+		}
+		transferred = append(transferred, digest)
+	}
+	oneShots := make([]string, 0, len(plan.OneShotSchedules))
+	for _, schedule := range plan.OneShotSchedules {
+		digest, err := schedule.EvidenceDigest()
+		if err != nil {
+			return "", fmt.Errorf("selected preparation one-shot schedule: %w", err)
+		}
+		oneShots = append(oneShots, digest)
+	}
 	raw, err := canonicaljson.Bytes(struct {
-		Plan         RunForkPlan
-		History      []string
-		Inputs       []InputPublicationCoordinates
-		Frontier     RunForkContractFrontierAdmission
-		Recipients   RunForkSelectedContractRecipientPlanning
-		Declarations string
-	}{plan, history, plan.HistoricalInputCoordinates(), frontier, planning, declarationRevision})
+		Plan          RunForkPlan
+		History       []string
+		Inputs        []InputPublicationCoordinates
+		Arrivals      []InputPublicationCoordinates
+		FirstTurn     *InputPublicationCoordinates
+		Replies       []replycontext.Record
+		Timers        []timerobligation.WorkflowTimerActivationRecord
+		JoinSchedules []string
+		Transferred   []string
+		Frontier      RunForkContractFrontierAdmission
+		Recipients    RunForkSelectedContractRecipientPlanning
+		Declarations  string
+		OneShots      []string `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots})
 	if err != nil {
 		return "", err
 	}

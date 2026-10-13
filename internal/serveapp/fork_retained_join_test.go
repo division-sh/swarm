@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -12,23 +13,31 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
-// #642 owns future completed-history fork admission. Its original success oracle
-// is preserved verbatim in testdata/future_capabilities; these tests prove current
-// source completion and the exact fail-closed policy without mutation.
+// Ordinary materialization retains its exact blockers. Selected preparation
+// supplies the admitted historical evidence for the original success oracles.
 func TestServedJoinWriterCompletedHistoryRefusalBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, false)
+	testServedJoinWriterCompletedHistoryRefusal(t, false, false)
 }
 
 func TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, true)
+	testServedJoinWriterCompletedHistoryRefusal(t, true, false)
 }
 
-func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint bool) {
+func TestServedJoinWriterForkRetainedGenerationsBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, false, true)
+}
+
+func TestServedJoinWriterForkRetainedGenerationsSeparateCheckpointBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, true, true)
+}
+
+func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint, success bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			var selected *selectedStoreOwner
@@ -175,6 +184,11 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, started.RunID, frontier).Scan(&frontierRevision); err != nil || frontierRevision <= 0 {
 				t.Fatalf("missing fixed-revision frontier: revision=%d err=%v", frontierRevision, err)
 			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
+			if success {
+				requireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)
+				return
+			}
 			// Delivery settlement does not join the lifecycle candidate executor. Stop
 			// the real source writers before measuring the store-only refusal.
 			if err := rt.Runtime.Shutdown(); err != nil {
@@ -185,7 +199,6 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if !ok {
 				t.Fatal("missing fork owner")
 			}
-			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
 			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
@@ -215,6 +228,88 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				}
 			}
 		})
+	}
+}
+
+func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, request runfork.RunForkMaterializeRequest,
+	current loopruntime.Activation, sourceJoins []joinruntime.Activation) {
+	t.Helper()
+	owner, ok := selected.RunFork()
+	if !ok {
+		t.Fatal("retained join success requires the original selected store owner")
+	}
+	ctx := servedControlProofAuthorActivityContext(t, rt)
+	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
+		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
+			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
+		},
+		AgentRuntime: rt.ForkRuntime,
+	})
+	if err != nil {
+		t.Fatalf("prepare the original completed join success: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := prepared.Close(); err != nil {
+			t.Errorf("join retained join preparation: %v", err)
+		}
+	})
+	admitted, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	materializer, ok := owner.Availability().(issue642TimerStagedMaterializer)
+	if !ok {
+		t.Fatal("retained join success requires the canonical selected materialization owner")
+	}
+	sourceBefore := readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)
+	before := snapshotForkReceiverApplication(t, rt)
+	child, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	if err != nil {
+		if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+			t.Fatal("failed join-history materialization changed application state")
+		}
+		t.Fatalf("materialize the original completed join success: %v", err)
+	}
+	childLoop, childJoins := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	wantLoop, err := loopruntime.Fork(current, child.ForkRunID, child.ForkRunID)
+	if err != nil || !reflect.DeepEqual(childLoop, wantLoop) || childLoop.Attempt != 2 || len(childJoins) != len(sourceJoins) {
+		t.Fatalf("materialized join/loop ownership: loop=%+v joins=%+v error=%v", childLoop, childJoins, err)
+	}
+	for _, source := range sourceJoins {
+		want, err := loopruntime.ForkGeneration(source.JoinRef().Generation(), child.ForkRunID, child.ForkRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		matches := 0
+		for _, projected := range childJoins {
+			if projected.JoinRef().Generation() != want {
+				continue
+			}
+			matches++
+			if projected.JoinRef().Node() != source.JoinRef().Node() || projected.Key() == source.Key() ||
+				!reflect.DeepEqual(projected.Members, source.Members) || !reflect.DeepEqual(projected.Outputs, source.Outputs) ||
+				projected.Status != source.Status || projected.CloseReason != source.CloseReason || projected.TimerCancelled != source.TimerCancelled ||
+				projected.OutcomePending != source.OutcomePending || projected.OutcomeFired != source.OutcomeFired ||
+				projected.TimerEventType() != source.TimerEventType() || projected.JoinRef().Declaration() != source.JoinRef().Declaration() ||
+				!reflect.DeepEqual(projected.MemberCount, source.MemberCount) || !projected.DeadlineAt.Equal(source.DeadlineAt) ||
+				!projected.ArmedAt.Equal(source.ArmedAt) || !projected.FireAt.Equal(source.FireAt) {
+				t.Fatalf("retained join evidence changed: source=%+v child=%+v", source, projected)
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("expected exactly one historical child generation %+v, got%d", want, matches)
+		}
+	}
+	again, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) ||
+		!reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)) {
+		t.Fatalf("repeated materialization changed child/source history: %v", err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatalf("join retained join preparation: %v", err)
 	}
 }
 

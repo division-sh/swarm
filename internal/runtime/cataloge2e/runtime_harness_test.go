@@ -240,14 +240,14 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 }
 
 func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, additionalRunIDs ...string) *runtimeHarness {
-	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, nil, nil, additionalRunIDs...)
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, nil, nil, nil, additionalRunIDs...)
 }
 
 func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript) *runtimeHarness {
-	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil)
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil, nil)
 }
 
-func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, additionalRunIDs ...string) *runtimeHarness {
+func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), additionalRunIDs ...string) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -292,6 +292,9 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	}
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
+	if chunkObserver != nil {
+		ctx = runtimestartupownership.WithFanOutChunkObserverForTest(ctx, chunkObserver)
+	}
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
 	var runSetup storetest.RunFixtureStore = pg

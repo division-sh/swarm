@@ -19,6 +19,7 @@ import (
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Frozen pre-batch validator. Do not delegate its checks to the production
@@ -115,7 +116,7 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 	}
 	db.SetMaxOpenConns(1)
 	columns := []string{}
-	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority") {
+	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority run_owner_key") {
 		columns = append(columns, name+" TEXT")
 	}
 	idType, jsonType, bytesType, timeType := "TEXT", "TEXT", "BLOB", "TIMESTAMP"
@@ -132,7 +133,7 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 	coords := "run_id TEXT, deployment_feed_id TEXT, triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT, semantic_path TEXT"
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
-		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
+		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT, source_obligation_event_id " + idType + ")",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE fan_out_outcomes (" + coords + ", ordinal INTEGER, outcome_kind TEXT, event_id " + idType + ")",
 		"CREATE UNIQUE INDEX handler_outcome_key ON fan_out_outcomes(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal) WHERE deployment_feed_id IS NULL",
@@ -217,6 +218,10 @@ func TestPublicationOutcomeSelectionKeepsDeploymentAndHandlerOriginsDistinct(t *
 }
 
 func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record eventrecord.Record) error {
+	runOwnerKey := "COALESCE('run:' || CAST($3 AS TEXT), '')"
+	if _, postgres := db.Driver().(*pq.Driver); postgres {
+		runOwnerKey = "COALESCE('run:' || CAST($3::uuid AS TEXT), '')"
+	}
 	jsonValue := func(raw []byte) any {
 		if len(raw) == 0 {
 			return nil
@@ -228,8 +233,8 @@ func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record 
 		payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,payload_schema_digest,payload_schema_class,
 		execution_mode,chain_depth,produced_by,produced_by_type,source_event_id,created_at,
 		routing_source_kind,routing_source_authority,source_route,target_route,target_set,route_settlement,
-		operator_reference_event_id,inherited_fan_out_origin
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+		operator_reference_event_id,inherited_fan_out_origin,run_owner_key
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,`+runOwnerKey+`)`,
 		record.Class, record.EventID, nullableText(record.RunID), record.EventName, nullableText(record.TaskID), nullableText(record.EntityID), nullableText(record.FlowInstance), record.Scope,
 		jsonValue(record.Payload), record.Payload, record.PayloadSchemaBundleHash, nullableText(record.PayloadSchemaFlowID), record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass,
 		record.ExecutionMode, record.ChainDepth, record.ProducedBy, record.ProducedByType, nullableText(record.SourceEventID), record.CreatedAt,
@@ -296,7 +301,7 @@ func TestPublicationGroupBatchNativeDifferentialBothStores(t *testing.T) {
 				{"corrupt_settlement", `UPDATE events SET route_settlement='{}' WHERE event_id=$1`, "event record corrupt", []any{members[2].event.ID()}},
 				{"corrupt_payload", `UPDATE events SET payload_bytes=$1 WHERE event_id=$2`, "event record corrupt", []any{[]byte(`{"n":null}`), members[2].event.ID()}},
 				{"changed_payload", `UPDATE events SET payload_bytes=$1 WHERE event_id=$2`, "committed event changed", []any{[]byte(`{"n":2}`), members[2].event.ID()}},
-				{"lineage_owner", `INSERT INTO run_fork_selected_contract_executions VALUES ($1,$2,$3,'fixture')`, "event record corrupt", []any{members[2].event.ID(), uuid.NewString(), uuid.NewString()}},
+				{"lineage_owner", `INSERT INTO run_fork_selected_contract_executions (fork_event_id,source_run_id,source_event_id,selection_authority) VALUES ($1,$2,$3,'fixture')`, "event record corrupt", []any{members[2].event.ID(), uuid.NewString(), uuid.NewString()}},
 				{"unselected_corrupt", `UPDATE events SET route_settlement='{}' WHERE event_id=$1`, "", []any{members[3].event.ID()}},
 			}
 			for _, tc := range cases {

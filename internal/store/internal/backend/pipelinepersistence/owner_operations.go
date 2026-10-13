@@ -611,7 +611,7 @@ func SelectedDeploymentPipelineDrainCountsTx(ctx context.Context, tx *sql.Tx, ru
 	}
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes o
 		LEFT JOIN committed_replay_scopes s ON s.run_id=o.run_id AND s.event_id=o.event_id
-		WHERE o.run_id=$1 AND o.deployment_feed_id IS NOT NULL AND o.outcome_kind='committed'
+		WHERE o.run_id=$1 AND o.deployment_feed_id IS NOT NULL AND o.outcome_kind IN ('committed','continued')
 		AND o.event_id IS NOT NULL AND s.event_id IS NULL`, runID).Scan(&missingScope)
 	if err != nil {
 		return 0, 0, fmt.Errorf("read selected deployment event scopes: %w", err)

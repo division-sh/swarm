@@ -365,3 +365,47 @@ func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 		t.Fatalf("rejected legacy requests reached admission: calls=%d", scheduler.calls)
 	}
 }
+
+func TestScheduleBuiltinPreservesIncomingOneShotReply(t *testing.T) {
+	const replyID = "7132b158-06b6-45e5-9c63-8677f3967c21"
+	for _, mode := range []string{"absolute", "delay", "cron", "every"} {
+		for _, incoming := range []string{"", replyID} {
+			t.Run(mode+"/reply="+incoming, func(t *testing.T) {
+				scheduler := &captureScheduleScheduler{}
+				exec := NewExecutorWithOptions(nil, ExecutorOptions{
+					WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "."),
+					GenericSchedules: scheduler,
+				})
+				actor := models.AgentConfig{
+					ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), FlowID: ".",
+					EntityID: "00000000-0000-4000-8000-000000002164", Permissions: []string{"schedule"},
+				}
+				ctx := runtimeeffects.WithExecutionMode(WithActor(runtimecorrelation.WithRunID(t.Context(), toolTestRunID), actor), runtimeeffects.ExecutionModeLive)
+				if incoming != "" {
+					ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: incoming}})
+				}
+				input := map[string]any{"schedule_key": "incoming-proof", "event_type": "root.timer.fired", "mode": mode}
+				switch mode {
+				case "absolute":
+					input["at"] = time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+				case "delay":
+					input["delay"] = "10m"
+				case "cron":
+					input["cron"] = "0 * * * *"
+				case "every":
+					input["every"] = "10m"
+				}
+				_, err := exec.Execute(ctx, "schedule", input)
+				if incoming != "" && (mode == "cron" || mode == "every") {
+					if err == nil || !strings.Contains(err.Error(), "reply context") || scheduler.calls != 0 {
+						t.Fatalf("recurring reply was not refused before admission: calls=%d error=%v", scheduler.calls, err)
+					}
+					return
+				}
+				if err != nil || scheduler.calls != 1 || scheduler.command.ReplyContext != incoming {
+					t.Fatalf("incoming reply changed at tool admission: calls=%d reply=%q want=%q error=%v", scheduler.calls, scheduler.command.ReplyContext, incoming, err)
+				}
+			})
+		}
+	}
+}

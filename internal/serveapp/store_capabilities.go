@@ -41,6 +41,7 @@ type selectedAPICapabilities struct {
 	RunForkOperations         apiv1.RunForkOperationReader
 	RunFork                   apiv1.RunForkExecutor
 	SelectedForkControls      apiv1.SelectedForkControlAdmission
+	SelectedForkDecisions     apiv1.SelectedForkDecisionControlOwner
 	SelectedForkRetirement    selectedForkContextRetirement
 	SelectedForkProcess       selectedForkProcessOwner
 	SelectedForkRecovery      runtimerunforkexecution.SelectedForkRecoveryEnvironment
@@ -123,6 +124,7 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		caps.RunForkOperations = family.Operations()
 		caps.RunFork = executor
 		caps.SelectedForkControls = family
+		caps.SelectedForkDecisions = family
 		caps.SelectedForkRetirement = family
 		caps.SelectedForkProcess = family
 	}

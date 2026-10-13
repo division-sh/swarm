@@ -42,7 +42,7 @@ func activityTimestampDatabase(t *testing.T, backend string) *sql.DB {
 		tool TEXT NOT NULL DEFAULT '', effect_class TEXT NOT NULL DEFAULT '',
 		attempt INTEGER NOT NULL DEFAULT 1, success_event TEXT NOT NULL DEFAULT '',
 		failure_event TEXT NOT NULL DEFAULT '', result_event_id TEXT, loop_generation TEXT,
-		loop_stage TEXT)`, stamp, stamp, stamp))
+		loop_stage TEXT, reply_context_id TEXT)`, stamp, stamp, stamp))
 	if err != nil {
 		t.Fatal(err)
 	}

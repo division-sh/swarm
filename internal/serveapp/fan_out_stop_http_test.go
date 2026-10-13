@@ -274,6 +274,7 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 			t.Fatal(err)
 		}
 		ref := contracts.FanOutPlanRef{BundleHash: rt.BundleHash, ElementRef: element, SemanticDigest: digest}
+		capsule.SourcePlanRef = ref
 		if err := capsule.SourceProjection.Validate(ref); err != nil {
 			t.Fatalf("admit exact cancellation fixture source: %v", err)
 		}

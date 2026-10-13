@@ -5,11 +5,13 @@ package selected
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -223,6 +225,14 @@ func (o RunFork) Operations() apiv1.RunForkOperationReader { return o.operations
 
 func (o RunFork) RequireNormalControl(ctx context.Context, runID string, operation runfork.SelectedControl) error {
 	return o.executionOwner.RequireNormalControl(ctx, runID, operation)
+}
+
+func (o RunFork) CommitSelectedDecisionCardMutation(ctx context.Context, runID string, request apiidempotency.Request, mutation runtimepipeline.DecisionCardMutation) (json.RawMessage, bool, bool, error) {
+	return o.executionOwner.CommitSelectedDecisionCardMutation(ctx, runID, request, mutation)
+}
+
+func (o RunFork) AcquireSelectedDecisionCardControl(ctx context.Context, runID string, operation runfork.SelectedControl) (*runtimerunforkexecution.SelectedDecisionCardControl, bool, error) {
+	return o.executionOwner.AcquireSelectedDecisionCardControl(ctx, runID, operation)
 }
 
 func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
@@ -470,6 +480,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, managerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err
@@ -491,6 +502,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, sqliteManagerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err

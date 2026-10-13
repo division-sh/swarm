@@ -41,6 +41,13 @@ type issue2564ServedFixture struct {
 // location. The mock variant retains the existing mailbox lifecycle purpose.
 func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
+	return issue2564ServeHarnessAtLocation(t, backend, root, mock, "")
+}
+
+// An explicit native location lets process-death proofs reopen the same store.
+// Ordinary harness calls retain their original allocation and configuration.
+func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bool, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
@@ -50,12 +57,21 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 	}
 	if backend == "sqlite" {
 		if mock {
-			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "completion.sqlite"))
+			if location == "" {
+				location = filepath.Join(t.TempDir(), "completion.sqlite")
+			}
+			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, location)
 		} else {
-			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "lifecycle.sqlite"))
+			if location == "" {
+				location = filepath.Join(t.TempDir(), "lifecycle.sqlite")
+			}
+			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, location)
 		}
 	} else {
-		dsn := storetest.PostgresFixtureLocation(t)
+		dsn := location
+		if dsn == "" {
+			dsn = storetest.PostgresFixtureLocation(t)
+		}
 		original := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})

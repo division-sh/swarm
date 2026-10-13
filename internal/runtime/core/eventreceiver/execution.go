@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -26,12 +27,13 @@ const (
 // ExecutionVariant is the closed receiver-owned execution state admitted at
 // an EventBus handoff. It deliberately has no generic value or service map.
 type ExecutionVariant struct {
-	configured bool
-	kind       ExecutionKind
-	authority  runtimeeffects.Authority
-	admission  managedexecution.Admission
-	controller *runtimeeffects.Controller
-	lineage    runtimecorrelation.RuntimeLineage
+	configured   bool
+	kind         ExecutionKind
+	authority    runtimeeffects.Authority
+	admission    managedexecution.Admission
+	controller   *runtimeeffects.Controller
+	lineage      runtimecorrelation.RuntimeLineage
+	publications activityresult.PublishedInventory
 }
 
 func NormalExecution() ExecutionVariant {
@@ -62,13 +64,18 @@ func SelectedContractForkExecution(
 	controller *runtimeeffects.Controller,
 	lineage runtimecorrelation.RuntimeLineage,
 ) (ExecutionVariant, error) {
+	publications, err := activityresult.NewPublishedInventory(authority.SelectedFork.ForkRunID, nil)
+	if err != nil {
+		return ExecutionVariant{}, err
+	}
 	variant := ExecutionVariant{
-		configured: true,
-		kind:       ExecutionSelectedContractFork,
-		authority:  authority,
-		admission:  admission,
-		controller: controller,
-		lineage:    lineage.Normalized(),
+		configured:   true,
+		kind:         ExecutionSelectedContractFork,
+		authority:    authority,
+		admission:    admission,
+		controller:   controller,
+		lineage:      lineage.Normalized(),
+		publications: publications,
 	}
 	if err := variant.Validate(); err != nil {
 		return ExecutionVariant{}, err
@@ -97,13 +104,25 @@ func (v ExecutionVariant) WithSelectedAdmission(admission managedexecution.Admis
 	return v, nil
 }
 
+func (v ExecutionVariant) WithSelectedActivityPublications(publications []activityresult.PublishedContinuation) (ExecutionVariant, error) {
+	if v.Kind() != ExecutionSelectedContractFork {
+		return ExecutionVariant{}, errors.New("only selected receiver execution can retain activity publications")
+	}
+	inventory, err := activityresult.NewPublishedInventory(v.authority.SelectedFork.ForkRunID, publications)
+	if err != nil {
+		return ExecutionVariant{}, err
+	}
+	v.publications = inventory
+	return v, v.Validate()
+}
+
 func (v ExecutionVariant) Validate() error {
 	if !v.Configured() {
 		return errors.New("receiver execution owner is not configured")
 	}
 	switch v.Kind() {
 	case ExecutionNormal:
-		if v.authority.Valid() || v.admission.Validate() == nil || v.controller != nil {
+		if v.authority.Valid() || v.admission.Validate() == nil || v.controller != nil || v.publications.Present() {
 			return errors.New("normal receiver execution cannot carry selected execution state")
 		}
 		return nil
@@ -120,9 +139,9 @@ func (v ExecutionVariant) Validate() error {
 		if !v.authority.ExecutionMode.Valid() {
 			return errors.New("selected receiver execution requires an execution mode")
 		}
-		return nil
+		return v.publications.RequireRun(v.authority.SelectedFork.ForkRunID)
 	case ExecutionSelectedRecoveryPublication:
-		if !v.authority.Valid() || v.authority.Kind != runtimeeffects.AuthoritySelectedContractFork || v.admission.Validate() == nil || v.controller != nil ||
+		if !v.authority.Valid() || v.authority.Kind != runtimeeffects.AuthoritySelectedContractFork || v.admission.Validate() == nil || v.controller != nil || v.publications.Present() ||
 			v.authority.Target.Kind != runtimeeffects.UsageTargetAgentTurn || v.authority.Target.RunID != v.authority.SelectedFork.ForkRunID {
 			return errors.New("selected recovery publication requires only its recorded predecessor identity")
 		}
@@ -170,7 +189,7 @@ func (v ExecutionVariant) Bind(ctx context.Context, mode executionmode.Mode) (co
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = runtimeeffects.WithController(ctx, v.controller)
 	ctx = managedexecution.WithAdmission(ctx, v.admission)
-	return ctx, nil
+	return v.publications.Bind(ctx)
 }
 
 func hasRuntimeLineage(lineage runtimecorrelation.RuntimeLineage) bool {
@@ -221,7 +240,7 @@ func (v ExecutionVariant) ValidateBound(ctx context.Context, mode executionmode.
 	if !controllerOK || controller != v.controller {
 		return errors.New("selected receiver effect controller is missing or conflicts with its owner")
 	}
-	return nil
+	return v.publications.RequireBound(ctx)
 }
 
 func (v ExecutionVariant) authorityForMode(mode executionmode.Mode) runtimeeffects.Authority {
