@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +91,9 @@ type FailureMatch struct {
 	Phenomenon  string       `json:"phenomenon"`
 	Attribution string       `json:"attribution"`
 	Review      string       `json:"review,omitempty"`
+	Tracking    string       `json:"tracking,omitempty"`
+	Status      string       `json:"status,omitempty"`
+	Repair      string       `json:"repair,omitempty"`
 	Rate        *FailureRate `json:"historical_rate,omitempty"`
 }
 
@@ -186,7 +191,22 @@ func failureAttribution(value string) bool {
 }
 
 func reviewURL(value string) bool {
-	return strings.HasPrefix(value, "https://github.com/division-sh/swarm/issues/") || strings.HasPrefix(value, "https://github.com/division-sh/swarm/pull/") || strings.HasPrefix(value, "https://github.com/division-sh/swarm/actions/runs/")
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" {
+		return false
+	}
+	path := strings.TrimPrefix(u.Path, "/division-sh/swarm/")
+	family, id, ok := strings.Cut(path, "/")
+	if family == "actions" {
+		family, id, ok = strings.Cut(id, "/")
+		if family != "runs" {
+			return false
+		}
+	} else if family != "issues" && family != "pull" {
+		return false
+	}
+	number, err := strconv.ParseInt(id, 10, 64)
+	return ok && err == nil && number > 0
 }
 
 func hexIdentity(value string, size int) bool {
@@ -210,6 +230,7 @@ func (l FailureLedger) Match(f ObservedFailure) (FailureMatch, error) {
 			return result, fmt.Errorf("ambiguous manifestation match for %s/%s", f.Package, f.Test)
 		}
 		result.Record, result.Phenomenon, result.Rate = record.ID, record.Phenomenon, record.Rate
+		result.Tracking, result.Status, result.Repair = record.Tracking, record.Status, record.Repair
 		for _, observation := range record.Observations {
 			if observation.RunID == f.RunID && observation.Attempt == f.Attempt && observation.JobID == f.JobID && observation.Source == f.Source {
 				result.Attribution, result.Review = observation.Attribution, observation.Review

@@ -122,7 +122,9 @@ func preflightSelector(roots []RequiredTest) string {
 }
 
 func (p PreflightPlan) Validate() error {
-	if p.Version != 1 || len(p.HeadSHA) != 40 || len(p.BaseSHA) != 40 || len(p.Packages) == 0 || p.Digest != p.digest() {
+	head, headErr := hex.DecodeString(p.HeadSHA)
+	base, baseErr := hex.DecodeString(p.BaseSHA)
+	if p.Version != 1 || headErr != nil || len(head) != 20 || baseErr != nil || len(base) != 20 || len(p.Packages) == 0 || p.Digest != p.digest() {
 		return fmt.Errorf("invalid or changed local preflight identity")
 	}
 	if err := p.BuildContext.Validate(); err != nil {

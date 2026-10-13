@@ -21,21 +21,29 @@ type FailureAttempt struct {
 }
 
 type FailurePopulation struct {
-	PRRuns             int `json:"pr_runs"`
-	RedRuns            int `json:"runs_with_failed_attempts"`
-	PRAttributable     int `json:"pr_owned_only_runs"`
-	NonPROnly          int `json:"reviewed_non_pr_only_runs"`
-	UnknownOnly        int `json:"unknown_only_runs"`
-	Mixed              int `json:"mixed_runs"`
-	InFlight           int `json:"in_flight_runs"`
-	Cancelled          int `json:"cancelled_runs"`
-	EarlierRedNowGreen int `json:"earlier_red_now_green_runs"`
-	CancelledJobs      int `json:"cancelled_jobs"`
-	UnstartedJobs      int `json:"unstarted_jobs"`
+	PRRuns             int                               `json:"pr_runs"`
+	RedRuns            int                               `json:"runs_with_failed_attempts"`
+	PRAttributable     int                               `json:"pr_owned_only_runs"`
+	NonPROnly          int                               `json:"reviewed_non_pr_only_runs"`
+	UnknownOnly        int                               `json:"unknown_only_runs"`
+	Mixed              int                               `json:"mixed_runs"`
+	InFlight           int                               `json:"in_flight_runs"`
+	Cancelled          int                               `json:"cancelled_runs"`
+	EarlierRedNowGreen int                               `json:"earlier_red_now_green_runs"`
+	CancelledJobs      int                               `json:"cancelled_jobs"`
+	UnstartedJobs      int                               `json:"unstarted_jobs"`
+	Incomplete         int                               `json:"incompletely_observed_runs"`
+	ByPhenomenon       map[string]FailureClassPopulation `json:"by_phenomenon"`
+}
+
+type FailureClassPopulation struct {
+	RedRuns             int `json:"red_runs"`
+	ReviewedNonPRRuns   int `json:"reviewed_non_pr_runs"`
+	UnknownObservations int `json:"unknown_observations"`
 }
 
 func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
-	var summary FailurePopulation
+	summary := FailurePopulation{ByPhenomenon: make(map[string]FailureClassPopulation)}
 	if err := l.Validate(); err != nil {
 		return summary, err
 	}
@@ -49,9 +57,17 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 			continue
 		}
 		summary.PRRuns++
+		incomplete := len(run.Attempts) == 0 && run.Status == "completed"
 		for _, attempt := range run.Attempts {
 			summary.CancelledJobs += len(attempt.CancelledJobs)
 			summary.UnstartedJobs += len(attempt.UnstartedJobs)
+			incomplete = incomplete || len(attempt.Problems) != 0
+			for _, failure := range attempt.Failures {
+				incomplete = incomplete || failure.Problem != "" || !hexIdentity(failure.Source, 20)
+			}
+		}
+		if incomplete {
+			summary.Incomplete++
 		}
 		if run.Status != "completed" {
 			summary.InFlight++
@@ -66,6 +82,7 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 		if !red {
 			continue
 		}
+		l.countFailurePhenomena(run, &summary)
 		summary.RedRuns++
 		if run.Conclusion == "success" {
 			summary.EarlierRedNowGreen++
@@ -81,6 +98,42 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 		}
 	}
 	return summary, nil
+}
+
+// Class counts can overlap within a run. They are not additive probabilities or
+// substitutes for the whole-run non-PR-only lower bound.
+func (l FailureLedger) countFailurePhenomena(run FailureRun, summary *FailurePopulation) {
+	seen, nonPR := map[string]bool{}, map[string]bool{}
+	for _, attempt := range run.Attempts {
+		if len(attempt.Problems) != 0 || ((attempt.Conclusion == "failure" || attempt.Conclusion == "timed_out") && len(attempt.Failures) == 0) {
+			seen["unknown-variance"] = true
+		}
+		for _, failure := range attempt.Failures {
+			if failure.Conclusion == "cancelled" {
+				continue
+			}
+			match, _ := l.Match(failure) // Already validated by failureRunClasses.
+			seen[match.Phenomenon] = true
+			count := summary.ByPhenomenon[match.Phenomenon]
+			if match.Attribution == "non-PR-proven" {
+				nonPR[match.Phenomenon] = true
+			} else if match.Attribution == "unknown" {
+				count.UnknownObservations++
+			}
+			summary.ByPhenomenon[match.Phenomenon] = count
+		}
+	}
+	if len(seen) == 0 {
+		seen["unknown-variance"] = true
+	}
+	for kind := range seen {
+		count := summary.ByPhenomenon[kind]
+		count.RedRuns++
+		if nonPR[kind] {
+			count.ReviewedNonPRRuns++
+		}
+		summary.ByPhenomenon[kind] = count
+	}
 }
 
 func (l FailureLedger) failureRunClasses(run FailureRun) (map[string]bool, bool, error) {

@@ -51,7 +51,7 @@ func TestPreflightPlanIntegrityAndSourceRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, change := range []string{"source", "base", "build", "selector", "digest", "empty"} {
+	for _, change := range []string{"source", "base", "build", "selector", "digest", "empty", "nonhex-source"} {
 		t.Run(change, func(t *testing.T) {
 			mutant := plan
 			mutant.Packages = append([]PreflightPackage(nil), plan.Packages...)
@@ -68,6 +68,9 @@ func TestPreflightPlanIntegrityAndSourceRefusals(t *testing.T) {
 				mutant.Digest = strings.Repeat("0", 64)
 			case "empty":
 				mutant.Packages = nil
+			case "nonhex-source":
+				mutant.HeadSHA = strings.Repeat("x", 40)
+				mutant.Digest = mutant.digest()
 			}
 			if mutant.Validate() == nil {
 				t.Fatalf("accepted %s mutation", change)

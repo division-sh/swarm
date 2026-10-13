@@ -49,7 +49,7 @@ func observeFailureAttempt(ctx context.Context, run failureRunMetadata, number i
 			continue
 		}
 		seen[job.ID] = true
-		if job.StartedAt.IsZero() {
+		if job.StartedAt.IsZero() || (job.Conclusion == "cancelled" && len(job.Steps) == 0) {
 			attempt.UnstartedJobs = append(attempt.UnstartedJobs, job.ID)
 		}
 		if job.Conclusion == "cancelled" {

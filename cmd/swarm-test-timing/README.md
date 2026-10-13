@@ -18,6 +18,9 @@ the population after a green resample. Cancellation and unstarted work are
 separate from test failures; downstream timing/summary REDs do not duplicate a
 primary failure. Non-PR-only RED share is a reviewed lower bound with unknown
 and mixed outcomes shown, not a waiver or a successful-subset estimate.
+The summary counts incompletely observed runs explicitly. Per-phenomenon run
+counts can overlap and are not additive; an unavailable plan or log does not
+prove that a canceled run had no assertion failure.
 
 The ledger preserves #2353's 61 historical IDs and a frozen body/thread source
 index, including superseding and unnumbered intake links. The six curated seed
