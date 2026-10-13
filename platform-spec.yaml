@@ -24063,6 +24063,66 @@ test_specification:
       executor: github.com/division-sh/swarm/internal/releasee2e
       proves:
       - catalog.runtime.numeric_deployment_feed
+    local_preflight:
+      owner: internal/testplanning finite selection, cmd/swarm-test local execution, and internal/testtiming native results
+      entry: go run ./cmd/swarm-test preflight
+      selection: >-
+        Preflight is local-only informational proof, not a fourth hosted tier or completed core/lifecycle/full.
+        Its reviewed finite selection always runs independently of changed paths. The initial thirteen source-guard
+        candidates retain exact package/root identity; the existing eighty-one structural-owner guards are projected
+        from their canonical source inventory, not duplicated. Bounded command and ledger safety controls are included.
+        Formatting, canonical exact-base/head complexity, OpenRPC check and native vet/type checking execute as real
+        commands. Native proof discovery and required child obligations remain authoritative. Missing, foreign,
+        duplicate, skipped, failed or unstarted proof cannot report successful complete selection.
+        Selected Go tests retain host admission and joined child possession without provisioning unrelated services.
+        Static/compiler processes remain distinct from test-service authority. Clean source and effective build identity
+        must remain unchanged through execution; compilation bytes may be reused, but passing test results may not.
+      eligibility: >-
+        Known-flaky execution variants are excluded by reviewed finite membership, never a dynamic ledger skip list.
+        A selected whole root containing the known-flaky leaf must be excluded rather than filtered or weakened.
+        Debt-ratchet, complete tagged candidate-overlay, redundant test linkage, blocked-SQL/runtime origin and native
+        unused analysis are not in the initial selection; their existing affected/hosted proofs remain mandatory.
+        An eligible hosted escape adds a reviewed candidate or an explicit evidence-backed exclusion; dropping a
+        nonfiring candidate also requires review. No filename/suffix or changed-package heuristic owns membership.
+      qualification: >-
+        Preflight absorbs focused qualification's shared cross-cutting guards once per unchanged source/variant.
+        Local-Tier focused still names affected behavior, stateful, race and process-death proofs. The informational
+        Preflight receipt cannot authorize CI-Tier, CI-Units, hosted deferrals, retries or a merge waiver; hosted
+        qualification and native cadence remain independent. Shared guards are not run twice merely for two labels.
+      measurement: >-
+        Five minutes on warm vemew is a soft target, not a test deadline. Complete command measurement includes
+        launcher compilation, discovery, package compilation/TestMain, actual checks and joined cleanup, with phase
+        timings and source/toolchain identity. Overrun requires explicit reviewed re-ranking rather than truncation,
+        automatic membership loss, timeout inflation or a successful partial receipt. No preparatory suite warm-up
+        or duplicate local tier is justified by this measurement.
+    failure_evidence_ledger:
+      owner: internal/testtiming strict reader and reviewed manifestation matching, surfaced by cmd/swarm-test-timing failures
+      source: .github/flake-ledger.json
+      history: >-
+        The finite source index preserves issue2353 IDs, immutable source hashes/URLs, superseding decisions and
+        unnumbered thread intake evidence. It is not an automated historical-prose classifier or an independent-bug
+        count. New intake links to the single structured ledger; contradictory or unavailable historical cause/status
+        stays explicitly unclassified rather than guessed. Tracking and reviewed evidence remain separate from repair.
+      attribution: >-
+        Phenomenon, reviewed attribution, qualification exceptions and repair status are separate. Green resampling
+        proves neither PR nor non-PR causation and erases no failed attempt. Exact baseline evidence may support
+        reviewed manifestation-specific attribution; matching another run's name/signature does not adopt its cause.
+        Current matches require exact run, attempt, job, executed source, test leaf and variant evidence. Missing,
+        corrupt, duplicate, foreign or ambiguous evidence cannot grant attribution. Full-cadence regression/core-escape
+        proof retains its existing owner and cannot be created from a ledger lookup.
+      observation: >-
+        Run-to-ledger readback preserves all observed attempts and exact executed plan identity, not an author-head
+        alias for a merge checkout. Only outer native Go failure events identify failing tests; expected nested failures
+        and duplicate parent/child reporting earn no extra defect count. Cancellation, unstarted work, API/log/artifact
+        gaps and downstream timing/summary failures are separately visible, never presumed timing or infra causes.
+        Comparable executed exposure and evidence are required for an observed rate; otherwise it is unmeasured.
+        Population reporting retains every sampled PR run, unknown/mixed outcomes and earlier failed attempts; reviewed
+        non-PR-only RED share is a lower bound with its denominator, not an estimate from a successful subset.
+      authority: >-
+        The ledger is informational reviewed eligibility evidence, not a runtime skip/quarantine list. A match,
+        fixed policy status or quarantined label cannot suppress tests, alter deadlines, grant retries, override native
+        evidence acceptance or clear a RED/merge gate. Back-testing distinguishes potential historical root coverage
+        from demonstrated execution under the new local command; omitted roots and missing variants receive no credit.
     qualification_tiers:
       promoted_by: '#2544'
       owners: [internal/testplanning, internal/testtiming, cmd/swarm-test, cmd/swarm-test-timing, .github/workflows/ci.yml]

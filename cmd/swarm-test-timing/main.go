@@ -71,6 +71,13 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "failures" {
+		if err := runFailures(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	var cfg config
 	flag.StringVar(&cfg.testTimeReferencePath, "test-time-reference", ".github/test-time-reference.json", "pinned independently approved full timing inventory")
 	flag.BoolVar(&cfg.captureTestTimeReference, "capture-test-time-reference", false, "capture only the approved immutable hosted full reference")

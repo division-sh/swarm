@@ -26,6 +26,13 @@ func main() {
 }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "preflight" {
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: swarm-test preflight (finite local selection; no selectors)")
+			return 2
+		}
+		return runCompletionWithSignals(runPreflight)
+	}
 	if len(args) > 0 && args[0] == "--internal-create" {
 		return runCreator(args[1:])
 	}

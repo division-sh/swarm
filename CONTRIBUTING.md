@@ -68,6 +68,16 @@ The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
 configuration remains explicitly parked under E's
 [#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
+Before pushing a clean committed candidate, run
+`go run ./cmd/swarm-test preflight`. This fixed local cross-package guard set
+replaces the shared portion of focused proof; it is not an extra local tier.
+Record `Local-Tier: focused` plus `Preflight: pass (Ns)`, then retain separately
+the affected behavioral/race/stateful receipts the reviewer requires. Five
+minutes on warm vemew is a soft measurement target, never a truncated selection
+or a relaxed deadline. See [local preflight](cmd/swarm-test/README.md) and the
+[#2353-backed failure readout](cmd/swarm-test-timing/README.md#failure-evidence-readback).
+Native unused cadence and every hosted qualification obligation remain separate.
+
 The reviewer records exactly one `CI-Tier: core|lifecycle|full` and one
 `Local-Tier: core|lifecycle|full` line in the PR body. The two decisions are
 independent. An absent CI tier selects core feedback; invalid or duplicate tier

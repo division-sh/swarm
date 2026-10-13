@@ -1,5 +1,34 @@
 # Local Qualification
 
+Run `go run ./cmd/swarm-test preflight` on the clean committed candidate before
+pushing. It always executes the same reviewed cross-package source guards,
+canonical structural inventory, formatting, complexity, OpenRPC check and vet.
+It performs no runtime/service bootstrap. `test-results/preflight/` retains
+source/build/selection identity, phase timings, failures and unstarted work.
+The five-minute warm-vemew target is soft: an overrun requires reviewed
+re-ranking, never shorter test deadlines or automatic selector changes.
+
+Preflight replaces focused proof's shared guards. Declare `Local-Tier: focused`
+and an informational `Preflight: pass (Ns)` receipt; run affected behavioral,
+race and stateful proofs separately, not a duplicate core/lifecycle tier.
+Do not repeat a shared guard for two labels on unchanged source/variant.
+Preflight is not a hosted tier and grants no completed hosted qualification.
+
+The finite membership lives in `internal/testplanning/preflight.go`, projected
+through active native root/child ownership. Every eligible hosted escape needs
+a reviewed candidate addition or an explicit exclusion; removing a nonfiring
+candidate also needs review. The debt ratchet, tagged complete candidate-overlay,
+blocked-SQL/runtime origin and native-unused proofs are explicitly outside this
+initial selection; their existing affected/hosted owners remain required.
+Known flaky whole roots cannot be made eligible by filtering their flaky leaf.
+The reviewed ledger is `.github/flake-ledger.json`, not a dynamic skip list.
+
+For the single complete-command measurement, use
+`/usr/bin/time -p go run ./cmd/swarm-test preflight`: the outer time includes
+launcher compilation, while the retained receipt separates discovery/setup and
+each actual phase including build/TestMain and joined cleanup. Do not warm up
+with a whole suite or call a sum of early-failing root durations command latency.
+
 The reviewer chooses independent `CI-Tier` and `Local-Tier` PR-body lines. Use
 `go run ./cmd/swarm-test --tier core`, `--tier lifecycle`, or `--full` for the
 explicit local tier. Plain invocation is unqualified core developer feedback.
