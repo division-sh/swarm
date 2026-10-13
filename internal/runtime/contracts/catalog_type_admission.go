@@ -3,6 +3,9 @@ package contracts
 import (
 	"fmt"
 	"sort"
+
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // Validate every declaration in its exact visible scope, including unused ones,
@@ -54,6 +57,16 @@ func validateEventCatalogReferences(bundle *WorkflowContractBundle) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		source := bundle.scopedEventSources[key]
+		identity, err := runtimeidentity.ParseDeclarationIdentityKey(key)
+		if err != nil {
+			return fmt.Errorf("%s: event declaration identity: %w", source.File, err)
+		}
+		flow := identity.Flow().String()
+		if flow == "." {
+			flow = ""
+		}
+		name := identity.SemanticPath()
+		event := eventidentity.ExternalizeForFlow(flow, []string{name}, name)
 		types := bundle.RootTypeCatalog()
 		if source.FlowPath != "" && source.FlowPath != "." {
 			types = bundle.ResolvedTypeCatalogForFlow(source.FlowPath)
@@ -68,12 +81,22 @@ func validateEventCatalogReferences(bundle *WorkflowContractBundle) error {
 			if fields[name].ExactSchema != nil {
 				continue
 			}
-			if err := validateScopedCatalogReference(types, fields[name].Type, source.File, "event "+key+"."+name); err != nil {
+			if err := validateEventCatalogReference(types, fields[name].Type, source.File, "event "+event+"."+name); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func validateEventCatalogReference(types TypeCatalogDocument, ref, file, path string) error {
+	err := validateScopedCatalogReference(types, ref, file, path)
+	if diagnostic, ok := AsLoaderDiagnostic(err); ok {
+		out := *diagnostic
+		out.Problem = fmt.Sprintf("unsupported structural schema type %q: %s", ref, diagnostic.Problem)
+		return &out
+	}
+	return err
 }
 
 func validateScopedCatalogReference(types TypeCatalogDocument, ref, file, path string) error {
