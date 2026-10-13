@@ -24074,8 +24074,11 @@ test_specification:
         Formatting, canonical exact-base/head complexity, OpenRPC check and native vet/type checking execute as real
         commands. Native proof discovery and required child obligations remain authoritative. Missing, foreign,
         duplicate, skipped, failed or unstarted proof cannot report successful complete selection.
-        Selected Go tests retain host admission and joined child possession without provisioning unrelated services.
-        Static/compiler processes remain distinct from test-service authority. Clean source and effective build identity
+        The finite source/static selection runs serially without acquiring shared native capacity or provisioning
+        a test database/service. A private inherited lifetime descriptor must join launched descendants, including
+        redirected-stdio work, before successful phase completion; signaling and leader exit alone are insufficient.
+        Cancellation and unresolved lifetime remain failed/incomplete proof. Ordinary broad/native admission remains
+        unchanged. Static/compiler processes remain distinct from test-service authority. Clean source and effective build identity
         must remain unchanged through execution; compilation bytes may be reused, but passing test results may not.
       eligibility: >-
         Known-flaky execution variants are excluded by reviewed finite membership, never a dynamic ledger skip list.
@@ -24093,7 +24096,11 @@ test_specification:
         Five minutes on warm vemew is a soft target, not a test deadline. Complete command measurement includes
         launcher compilation, discovery, package compilation/TestMain, actual checks and joined cleanup, with phase
         timings and source/toolchain identity. Overrun requires explicit reviewed re-ranking rather than truncation,
-        automatic membership loss, timeout inflation or a successful partial receipt. No preparatory suite warm-up
+        automatic membership loss, timeout inflation or a successful partial receipt. An overrun alone does not
+        invalidate a complete passing command or justify another qualification run. Receipts distinguish compiled-entry
+        end-to-end elapsed, zero native queue wait, execution, setup/validation and cleanup, with corresponding per-phase
+        costs. Outer launcher-to-exit measurement remains separate and includes launcher compilation; ordinary scheduler
+        contention, compilation, TestMain, discovery and cleanup cannot be subtracted as queue wait. No preparatory suite warm-up
         or duplicate local tier is justified by this measurement.
     failure_evidence_ledger:
       owner: internal/testtiming strict reader and reviewed manifestation matching, surfaced by cmd/swarm-test-timing failures

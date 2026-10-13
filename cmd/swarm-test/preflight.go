@@ -12,11 +12,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
@@ -27,21 +25,27 @@ type preflightPhase struct {
 }
 
 type preflightReceipt struct {
-	Plan         testplanning.PreflightPlan `json:"plan"`
-	Started      time.Time                  `json:"started"`
-	Seconds      float64                    `json:"seconds"`
-	SetupSeconds float64                    `json:"setup_seconds"`
-	Complete     bool                       `json:"complete"`
-	Phases       []preflightPhaseReceipt    `json:"phases"`
-	Unstarted    []string                   `json:"unstarted"`
-	Problem      string                     `json:"problem,omitempty"`
+	Plan             testplanning.PreflightPlan `json:"plan"`
+	Started          time.Time                  `json:"started"`
+	EndToEndSeconds  float64                    `json:"end_to_end_seconds"`
+	QueueWaitSeconds float64                    `json:"queue_wait_seconds"`
+	ExecutionSeconds float64                    `json:"execution_seconds"`
+	CleanupSeconds   float64                    `json:"cleanup_seconds"`
+	SetupSeconds     float64                    `json:"setup_seconds"`
+	Complete         bool                       `json:"complete"`
+	Phases           []preflightPhaseReceipt    `json:"phases"`
+	Unstarted        []string                   `json:"unstarted"`
+	Problem          string                     `json:"problem,omitempty"`
 }
 
 type preflightPhaseReceipt struct {
-	Name    string   `json:"name"`
-	Args    []string `json:"args"`
-	Seconds float64  `json:"seconds"`
-	Passed  bool     `json:"passed"`
+	Name             string   `json:"name"`
+	Args             []string `json:"args"`
+	Seconds          float64  `json:"seconds"`
+	SetupSeconds     float64  `json:"setup_seconds"`
+	ExecutionSeconds float64  `json:"execution_seconds"`
+	CleanupSeconds   float64  `json:"cleanup_seconds"`
+	Passed           bool     `json:"passed"`
 }
 
 func runPreflight(ctx context.Context) int {
@@ -75,24 +79,15 @@ func runPreflight(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	capacity, err := testpostgres.RunCapacityFromEnvironment()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	admission, err := testpostgres.DefaultRunAdmission(os.Stderr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
 	directory := filepath.Join("test-results", "preflight", started.UTC().Format("20060102T150405.000000000"))
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	receipt := preflightReceipt{Plan: plan, Started: started.UTC(), SetupSeconds: time.Since(started).Seconds()}
-	err = executePreflight(ctx, directory, &receipt, admission, capacity)
-	receipt.Seconds = time.Since(started).Seconds()
+	err = executePreflight(ctx, directory, &receipt)
+	receipt.EndToEndSeconds = time.Since(started).Seconds()
+	receipt.SetupSeconds = receipt.EndToEndSeconds - receipt.ExecutionSeconds - receipt.CleanupSeconds
 	if err != nil {
 		receipt.Problem = err.Error()
 	}
@@ -108,10 +103,10 @@ func runPreflight(ctx context.Context) int {
 }
 
 func printPreflightReceipt(output io.Writer, receipt preflightReceipt, directory string) {
-	if receipt.Seconds > 300 {
+	if receipt.EndToEndSeconds > 300 {
 		fmt.Fprintln(output, "preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed")
 	}
-	fmt.Fprintf(output, "preflight: complete=%t %.3fs; source=%s go=%s selection=%s receipts=%s\n", receipt.Complete, receipt.Seconds, receipt.Plan.HeadSHA, receipt.Plan.BuildContext.GOVERSION, receipt.Plan.Digest, directory)
+	fmt.Fprintf(output, "preflight: complete=%t end-to-end=%.3fs queue=%.3fs setup/validation=%.3fs execution=%.3fs cleanup=%.3fs; source=%s go=%s selection=%s receipts=%s\n", receipt.Complete, receipt.EndToEndSeconds, receipt.QueueWaitSeconds, receipt.SetupSeconds, receipt.ExecutionSeconds, receipt.CleanupSeconds, receipt.Plan.HeadSHA, receipt.Plan.BuildContext.GOVERSION, receipt.Plan.Digest, directory)
 }
 
 func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.PreflightPlan, error) {
@@ -167,7 +162,7 @@ func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
 	return phases
 }
 
-func executePreflight(ctx context.Context, directory string, receipt *preflightReceipt, admission *testpostgres.RunAdmission, capacity int) error {
+func executePreflight(ctx context.Context, directory string, receipt *preflightReceipt) error {
 	for _, phase := range preflightPhases(receipt.Plan) {
 		receipt.Unstarted = append(receipt.Unstarted, phase.Name)
 	}
@@ -176,10 +171,13 @@ func executePreflight(ctx context.Context, directory string, receipt *preflightR
 			return err
 		}
 		started := time.Now()
-		err := executePreflightPhase(ctx, directory, phase, admission, capacity)
+		timing, err := executePreflightPhase(ctx, directory, phase)
 		err = errors.Join(err, checkPreflightSource(ctx, receipt.Plan))
 		receipt.Unstarted = receipt.Unstarted[1:]
-		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Seconds: time.Since(started).Seconds(), Passed: err == nil})
+		seconds := time.Since(started).Seconds()
+		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Seconds: seconds, SetupSeconds: seconds - timing.ExecutionSeconds - timing.CleanupSeconds, ExecutionSeconds: timing.ExecutionSeconds, CleanupSeconds: timing.CleanupSeconds, Passed: err == nil})
+		receipt.ExecutionSeconds += timing.ExecutionSeconds
+		receipt.CleanupSeconds += timing.CleanupSeconds
 		fmt.Fprintf(os.Stderr, "preflight %s: passed=%t %.3fs\n", phase.Name, err == nil, time.Since(started).Seconds())
 		if err != nil {
 			return fmt.Errorf("preflight %s: %w", phase.Name, err)
@@ -206,73 +204,39 @@ func checkPreflightSource(ctx context.Context, plan testplanning.PreflightPlan) 
 	return nil
 }
 
-func executePreflightPhase(ctx context.Context, directory string, phase preflightPhase, admission *testpostgres.RunAdmission, capacity int) (err error) {
+func executePreflightPhase(ctx context.Context, directory string, phase preflightPhase) (timing preflightProcessTiming, err error) {
 	path := filepath.Join(directory, strings.ReplaceAll(phase.Name, "/", "_")+".log")
 	log, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if err != nil {
-		return err
+		return timing, err
 	}
-	defer func() { err = errors.Join(err, log.Close()) }()
-	if phase.Package != nil {
-		err = runPreflightProcess(ctx, phase.Args, log, os.Stderr, admission, capacity)
-	} else {
-		err = runPreflightStaticProcess(ctx, phase.Args, log, os.Stderr)
-	}
+	defer func() {
+		started := time.Now()
+		err = errors.Join(err, log.Close())
+		timing.CleanupSeconds += time.Since(started).Seconds()
+	}()
+	timing, err = runPreflightProcess(ctx, phase.Args, log, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("command failed; output retained at %s: %w", path, err)
+		return timing, fmt.Errorf("command failed; output retained at %s: %w", path, err)
 	}
 	if _, err := log.Seek(0, io.SeekStart); err != nil {
-		return err
+		return timing, err
 	}
 	if phase.Package != nil {
 		report, err := testtiming.ParseReport(log)
 		if err != nil {
-			return err
+			return timing, err
 		}
-		return testtiming.ValidatePreflightReport(*phase.Package, report)
+		return timing, testtiming.ValidatePreflightReport(*phase.Package, report)
 	}
 	if phase.Name == "format" {
 		raw, err := io.ReadAll(log)
 		if err != nil {
-			return err
+			return timing, err
 		}
 		if len(bytes.TrimSpace(raw)) != 0 {
-			return fmt.Errorf("unformatted source:\n%s", raw)
+			return timing, fmt.Errorf("unformatted source:\n%s", raw)
 		}
 	}
-	return nil
-}
-
-func runPreflightProcess(ctx context.Context, args []string, out, stderr io.Writer, admission *testpostgres.RunAdmission, capacity int) error {
-	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: args, ModelOnlyETA: true}, capacity)
-	if err != nil {
-		return err
-	}
-	command := exec.CommandContext(ctx, args[0], args[1:]...)
-	command.Stdout, command.Stderr = out, stderr
-	command.Env = replaceEnvironment(os.Environ(), testpostgres.RunWrapperEnv, "1")
-	if err = prepareChildProcessTree(command); err == nil {
-		err = lease.InheritTo(command)
-	}
-	if err == nil {
-		command.Cancel = func() error { return signalChildProcessTree(command, syscall.SIGTERM) }
-		err = command.Run()
-	}
-	settlement, cancel := context.WithTimeout(context.Background(), authoritySettlementTimeout)
-	defer cancel()
-	joinErr := lease.Join(settlement)
-	if joinErr != nil {
-		return errors.Join(err, joinErr)
-	}
-	return errors.Join(err, ctx.Err(), lease.Complete(settlement, err == nil && ctx.Err() == nil))
-}
-
-func runPreflightStaticProcess(ctx context.Context, args []string, out, stderr io.Writer) error {
-	command := exec.CommandContext(ctx, args[0], args[1:]...)
-	command.Stdout, command.Stderr = out, stderr
-	if err := prepareChildProcessTree(command); err != nil {
-		return err
-	}
-	command.Cancel = func() error { return signalChildProcessTree(command, syscall.SIGTERM) }
-	return errors.Join(command.Run(), ctx.Err())
+	return timing, nil
 }

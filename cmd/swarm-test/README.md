@@ -3,10 +3,14 @@
 Run `go run ./cmd/swarm-test preflight` on the clean committed candidate before
 pushing. It always executes the same reviewed cross-package source guards,
 canonical structural inventory, formatting, complexity, OpenRPC check and vet.
-It performs no runtime/service bootstrap. `test-results/preflight/` retains
+It runs serially without acquiring shared native capacity or provisioning a
+test database/service. A private inherited lifetime descriptor joins launched
+descendants, including work with redirected stdio, before a phase can complete.
+Ordinary broad/native admission is unchanged. `test-results/preflight/` retains
 source/build/selection identity, phase timings, failures and unstarted work.
 The five-minute warm-vemew target is soft: an overrun requires reviewed
-re-ranking, never shorter test deadlines or automatic selector changes.
+reviewed re-ranking, never shorter test deadlines or automatic selector changes.
+An overrun alone does not make a complete passing command fail.
 
 Preflight replaces focused proof's shared guards. Declare `Local-Tier: focused`
 and an informational `Preflight: pass (Ns)` receipt; run affected behavioral,
@@ -26,7 +30,14 @@ The reviewed ledger is `.github/flake-ledger.json`, not a dynamic skip list.
 For the single complete-command measurement, use
 `/usr/bin/time -p go run ./cmd/swarm-test preflight`: the outer time includes
 launcher compilation, while the retained receipt separates discovery/setup and
-each actual phase including build/TestMain and joined cleanup. Do not warm up
+each actual phase including build/TestMain and joined cleanup. The receipt's
+`end_to_end_seconds` covers compiled-command entry through joined execution;
+retain the outer launcher-to-exit time separately, without subtracting compile
+time. `queue_wait_seconds` is zero: preflight never enters the shared slot queue.
+`execution_seconds` includes package build/TestMain and actual commands;
+`cleanup_seconds` records descriptor and log cleanup. `setup_seconds` covers
+discovery, source/variant/result validation and remaining command overhead.
+The same execution/setup/cleanup costs are retained per phase. Do not warm up
 with a whole suite or call a sum of early-failing root durations command latency.
 
 The reviewer chooses independent `CI-Tier` and `Local-Tier` PR-body lines. Use
