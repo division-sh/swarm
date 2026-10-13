@@ -179,6 +179,44 @@ func TestIndexCompanionsPreserveReadFailureAndCancellation(t *testing.T) {
 	}
 }
 
+func TestIndexCompanionsCannotTurnExactOrphanOccupancyIntoAbsence(t *testing.T) {
+	const query = `SELECT
+		EXISTS(SELECT 1 FROM entity_state WHERE run_id=$1 AND flow_instance=$2) OR
+		EXISTS(SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2) OR
+		EXISTS(SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2)`
+	for _, occupied := range []bool{false, true} {
+		t.Run(strconv.FormatBool(occupied), func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			mock.ExpectBegin()
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := flowInstanceIndexSnapshot{tx: tx, run: runlifecycle.Snapshot{RunID: "22222222-2222-2222-2222-222222222222"}}
+			mock.ExpectQuery(query).WithArgs(snapshot.run.RunID, "parent/missing-header").WillReturnRows(sqlmock.NewRows([]string{"occupied"}).AddRow(occupied))
+			err = snapshot.requireAbsentCoordinate(context.Background(), "parent/missing-header")
+			var corruption *pipeline.FlowInstanceConstructionCorruption
+			if occupied != errors.As(err, &corruption) || (!occupied && err != nil) {
+				t.Fatalf("exact orphan coordinate was hidden by header-driven joins: occupied=%t err=%v", occupied, err)
+			}
+			if corruption != nil && (corruption.RunID != snapshot.run.RunID || corruption.InstancePath != "parent/missing-header") {
+				t.Fatal("orphan refusal lost its exact coordinate")
+			}
+			mock.ExpectRollback()
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func indexCompanionReadinessFixture(t *testing.T) flowInstanceCompanions {
 	t.Helper()
 	const runID = "22222222-2222-2222-2222-222222222222"
