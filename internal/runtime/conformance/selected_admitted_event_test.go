@@ -84,8 +84,14 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 					}
 				})
 				request, err := prepared.MaterializationRequest()
-				if err != nil || request.ForkOperation != nil || request.At != at || request.Preparation.ForkPoint.Kind != runfork.RunForkPointEvent || request.Preparation.ForkPoint.Input != at || request.Preparation.ForkPoint.EventID != eventID {
-					t.Fatalf("event selector lost its admitted meaning: request=%+v err=%v", request, err)
+				point := request.Preparation.ForkPoint
+				if err != nil || request.ForkOperation != nil || request.At != at || point.Validate() != nil || point.Kind != runfork.RunForkPointEvent || point.Input != at || (explicit && point.EventID != eventID) {
+					t.Fatalf("event selector lost its admitted meaning: at=%q point=%+v err=%v", request.At, point, err)
+				}
+				fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
+				fixed, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: at, ResolvedPoint: &point})
+				if err != nil || fixed.ForkPoint != point {
+					t.Fatalf("prepared event is not its exact committed point: fixed=%+v expected=%+v err=%v", fixed.ForkPoint, point, err)
 				}
 				dialect := authoractivityfixture.DialectSQLite
 				if backend == "postgres" {
@@ -93,14 +99,14 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				}
 				laterEvent := uuid.NewString()
 				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, laterEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "later-event-proof"), []byte(`{"account_id":"later-event","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
-				fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
 				current, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
 				if err != nil || current.ForkPoint.EventID != laterEvent || current.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision {
 					t.Fatalf("source did not acquire a newer event point: current=%+v err=%v", current.ForkPoint, err)
 				}
 				materialized, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
-				if err != nil || materialized.ForkPoint != request.Preparation.ForkPoint || materialized.SelectedContractBinding == nil || materialized.SelectedContractBinding.ForkPoint != request.Preparation.ForkPoint {
-					t.Fatalf("event materialization moved to the new event/selector: result=%+v err=%v", materialized, err)
+				bindingPoint := runfork.RunForkPoint{Kind: point.Kind, Revision: point.Revision, EventID: point.EventID}
+				if err != nil || materialized.ForkPoint != point || materialized.SelectedContractBinding == nil || materialized.SelectedContractBinding.ForkPoint != bindingPoint {
+					t.Fatalf("event materialization moved to the new event/selector: point=%+v expected=%+v binding=%+v err=%v", materialized.ForkPoint, point, materialized.SelectedContractBinding, err)
 				}
 				if history, known := current.HistoricalEventIDs(request.Preparation.ForkPoint.Revision); known || len(history) != 0 {
 					t.Fatal("newer plan incorrectly carries the old revision certificate")
