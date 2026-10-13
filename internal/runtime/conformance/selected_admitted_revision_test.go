@@ -90,8 +90,8 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			if probe.point.Kind != runfork.RunForkPointDeploymentRevision || probe.current.Revision <= probe.point.Revision || before != after {
 				t.Fatalf("source advance did not isolate the revision: prepared=%+v current=%+v", probe.point, probe.current)
 			}
-			if probe.result.ForkPoint != probe.point || result.ForkPoint != probe.point || result.ForkRunID != probe.result.ForkRunID {
-				t.Fatalf("child changed its admitted cut: materialization=%+v result=%+v", probe.result.ForkPoint, result.ForkPoint)
+			if probe.result.ForkPoint != probe.point || result.ForkEventID != probe.point.EventID || result.ForkRunID != probe.result.ForkRunID {
+				t.Fatalf("child changed its admitted cut: materialization=%+v result=%+v", probe.result.ForkPoint, result)
 			}
 			operation := probe.request.ForkOperation
 			if operation == nil || operation.ResolvedPoint == nil || *operation.ResolvedPoint != probe.point || probe.request.At != probe.point.Input {
