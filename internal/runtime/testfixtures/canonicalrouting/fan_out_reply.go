@@ -57,6 +57,28 @@ item.ready:
 	return root
 }
 
+// The source commits its real intent before this ordinary checkpoint is emitted.
+func CopyUnissuedFanOutReply(t testing.TB) string {
+	t.Helper()
+	root := CopyPublishedFanOutReply(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  inputs: [request.started, request.stop]\n", "  inputs: [request.started, request.stop, request.checkpoint]\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"request.stop:\n", "request.stop:\nrequest.checkpoint:\n  note: text\nrequest.checkpointed:\n  note: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `checkpoint-node:
+  execution_type: system_node
+  subscribes_to: [request.checkpoint, request.checkpointed]
+  event_handlers:
+    request.checkpoint:
+      emit:
+        event: request.checkpointed
+        fields: {note: payload.note}
+    request.checkpointed: {}
+result-observer:
+`)
+	return root
+}
+
 // The inner request's publication cut retains two open returns, before either
 // the inner handler or its deferred fan-out has executed.
 func CopyNestedFanOutReply(t testing.TB) string {
