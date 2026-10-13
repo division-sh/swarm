@@ -9,9 +9,9 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func projectNodePolicyValueRow(value yamlsource.Value, kind, rowID string) (PolicySheetRowMetadata, *ComputeSpec, error) {
+func projectNodePolicyValueRow(value yamlsource.Value, kind string) (PolicySheetRowMetadata, *ComputeSpec, error) {
 	if kind == "lookup" {
-		return projectNodePolicyLookupValue(value, rowID)
+		return projectNodePolicyLookupValue(value)
 	}
 	label := "validate"
 	nameKey := "set"
@@ -54,10 +54,10 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind, rowID string) (Poli
 	compute := &ComputeSpec{Operation: operation, StoreAs: into}
 	metadata := PolicySheetRowMetadata{Kind: rowKind}
 	if kind == "validate" {
-		spec := &ComputeValidationSpec{RowID: rowID, Set: name, Into: into, Input: inputs, InputPaths: parsed}
+		spec := &ComputeValidationSpec{Set: name, Into: into, Input: inputs, InputPaths: parsed}
 		compute.Validation, metadata.Validation = spec, spec
 	} else {
-		spec := &ComputeModuleSpec{RowID: rowID, Module: name, Into: into, Input: inputs, InputPaths: parsed}
+		spec := &ComputeModuleSpec{Module: name, Into: into, Input: inputs, InputPaths: parsed}
 		compute.Module, metadata.Module = spec, spec
 	}
 	return metadata, compute, nil
@@ -103,7 +103,7 @@ func projectNodePolicyInputsValue(value yamlsource.Value, label string) (map[str
 	return out, parsed, nil
 }
 
-func projectNodePolicyLookupValue(value yamlsource.Value, rowID string) (PolicySheetRowMetadata, *ComputeSpec, error) {
+func projectNodePolicyLookupValue(value yamlsource.Value) (PolicySheetRowMetadata, *ComputeSpec, error) {
 	fields, err := nodeValueFields(value, "lookup", map[string]struct{}{
 		"on": {}, "entries": {}, "into": {}, "default": {},
 	})
@@ -141,7 +141,7 @@ func projectNodePolicyLookupValue(value yamlsource.Value, rowID string) (PolicyS
 	if err != nil {
 		return PolicySheetRowMetadata{}, nil, err
 	}
-	spec := &ComputeLookupSpec{RowID: rowID, On: on, Entries: entries}
+	spec := &ComputeLookupSpec{On: on, Entries: entries}
 	for _, selector := range on {
 		spec.OnPaths = append(spec.OnPaths, paths.Parse(selector))
 	}
