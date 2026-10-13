@@ -39,14 +39,11 @@ select:
     select:
       guard: {check: has(entity.marker)}
       rules:
-        - id: first
-          when: entity.marker == 'first'
+        - when: entity.marker == 'first'
           emit: {event: selected, fields: {marker: "first"}}
-        - id: second
-          when: entity.marker == 'second'
+        - when: entity.marker == 'second'
           emit: {event: selected, fields: {marker: "second"}}
-        - id: unmatched
-          else: true
+        - else: true
       data_accumulation:
         writes: [{target_field: marker, value: entity.marker}]
 final:

@@ -96,20 +96,27 @@ func issue2564H2CommittedStageEvidence(t *testing.T, rt issue2564H2Fixture, runI
 		if err != nil || len(selections) != 1 {
 			t.Fatalf("H2 exact committed bump selection: event=%s rows=%+v err=%v", event, selections, err)
 		}
-		label := "in_s2"
+		index := 1
 		if paths["c1"] > 0 {
-			label = "in_s1"
+			index = 0
 		}
-		if err := issue2564H2ValidateRule(selections[0], label); err != nil {
+		if err := issue2564H2ValidateRule(selections[0], index); err != nil {
 			t.Fatalf("H2 event=%s: %v", event, err)
 		}
 	}
 	t.Logf("H2 exact committed-stage/rule evidence: bumps=%d", len(accepted))
 }
 
-func issue2564H2ValidateRule(selection storetest.HandlerSelectionStorageEvidence, label string) error {
-	if selection.Context != "handler_rules" || selection.Disposition != "selected" || selection.FlowPath != "hub" || selection.Family != "handler_rule" || selection.DisplayLabel != label {
-		return fmt.Errorf("H2 exact rule does not agree with committed stage effect: want=%s selection=%+v", label, selection)
+func issue2564H2ValidateRule(selection storetest.HandlerSelectionStorageEvidence, index int) error {
+	display := "rules[1]: else"
+	if index == 0 {
+		display = "rules[0]: when _entity.current_state == 's1'"
+	} else if index != 1 {
+		return fmt.Errorf("H2 counter effect has no admitted selection row %d", index)
+	}
+	path := fmt.Sprintf(`nodes["hub-node"].handlers["hub.bump"].rules[%d]`, index)
+	if selection.Context != "handler_rules" || selection.Disposition != "selected" || selection.FlowPath != "hub" || selection.Family != "handler_rule" || selection.SemanticPath != path || selection.DisplayLabel != display {
+		return fmt.Errorf("H2 exact rule does not agree with committed stage effect: want=%s/%s selection=%+v", path, display, selection)
 	}
 	return nil
 }
@@ -143,16 +150,18 @@ func TestIssue2564H2CommitStageRejectsWrongEvidence(t *testing.T) {
 			}
 		})
 	}
-	selection := storetest.HandlerSelectionStorageEvidence{Context: "handler_rules", Disposition: "selected", FlowPath: "hub", Family: "handler_rule", DisplayLabel: "in_s2"}
-	if err := issue2564H2ValidateRule(selection, "in_s2"); err != nil {
+	selection := storetest.HandlerSelectionStorageEvidence{Context: "handler_rules", Disposition: "selected", FlowPath: "hub", Family: "handler_rule", SemanticPath: `nodes["hub-node"].handlers["hub.bump"].rules[1]`, DisplayLabel: "rules[1]: else"}
+	if err := issue2564H2ValidateRule(selection, 1); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"wrong_rule", "wrong_context", "wrong_flow", "not_selected", "wrong_family"} {
+	for _, name := range []string{"wrong_rule", "wrong_display", "wrong_context", "wrong_flow", "not_selected", "wrong_family"} {
 		t.Run(name, func(t *testing.T) {
 			probe := selection
 			switch name {
 			case "wrong_rule":
-				probe.DisplayLabel = "in_s1"
+				probe.SemanticPath = `nodes["hub-node"].handlers["hub.bump"].rules[0]`
+			case "wrong_display":
+				probe.DisplayLabel = "rules[0]: when _entity.current_state == 's1'"
 			case "wrong_context":
 				probe.Context = "transition"
 			case "wrong_flow":
@@ -162,7 +171,7 @@ func TestIssue2564H2CommitStageRejectsWrongEvidence(t *testing.T) {
 			case "wrong_family":
 				probe.Family = "transition"
 			}
-			if issue2564H2ValidateRule(probe, "in_s2") == nil {
+			if issue2564H2ValidateRule(probe, 1) == nil {
 				t.Fatal("wrong committed rule accepted")
 			}
 		})
