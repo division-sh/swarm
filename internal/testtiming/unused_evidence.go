@@ -30,8 +30,14 @@ type UnusedEvidence struct {
 // Identity is independent of the pinned analyzer configuration and U1000
 // verdict. The qualification owner still checks both before granting credit.
 func ValidateUnusedIdentity(e UnusedEvidence, head, platform string) error {
-	if e.Schema != 1 || e.State != "complete" || !hexIdentity(head, 20) || e.SourceSHA != head {
-		return fmt.Errorf("missing, stale or incomplete native unused identity")
+	if e.Schema != 1 || e.State != "complete" {
+		return fmt.Errorf("missing, failed, skipped or unsupported evidence")
+	}
+	if !hexIdentity(head, 20) {
+		return fmt.Errorf("invalid native unused execution source identity")
+	}
+	if e.SourceSHA != head {
+		return fmt.Errorf("stale evidence: source SHA must match current Git HEAD")
 	}
 	if err := ValidateUnusedNative(e.Native, platform, e.Config.Toolchain); err != nil {
 		return err
