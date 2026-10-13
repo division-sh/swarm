@@ -15,22 +15,15 @@ var nodeStateNamedTypePattern = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 // not allow descriptive prose or inline modifiers to masquerade as a type.
 func NormalizeNodeStateFieldType(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
+	if err := rejectAlternateListReference(raw, "state_schema"); err != nil {
+		return "", err
+	}
 	if raw == "" {
 		return "", fmt.Errorf("state_schema field type is required")
 	}
 	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
 		base := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
 		return normalizeNodeStateListElement(base)
-	}
-	if strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") {
-		base := strings.TrimSpace(raw[len("list<") : len(raw)-1])
-		if base == "" {
-			return "", fmt.Errorf("state_schema list type requires an element type")
-		}
-		if !nodeStateNamedTypePattern.MatchString(base) {
-			return "", fmt.Errorf("unsupported state_schema named list type %q; use list<NamedType> for declared types.yaml references", raw)
-		}
-		return "list<" + base + ">", nil
 	}
 	if strings.HasSuffix(raw, "[]") {
 		base := strings.TrimSpace(strings.TrimSuffix(raw, "[]"))
@@ -91,9 +84,6 @@ func NodeStateNamedTypeName(raw string) (string, bool) {
 	}
 	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
 		raw = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
-	}
-	if strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") {
-		raw = strings.TrimSpace(raw[len("list<") : len(raw)-1])
 	}
 	if !nodeStateNamedTypePattern.MatchString(raw) {
 		return "", false

@@ -53,10 +53,10 @@ func TestEventCatalogAdmissionAcceptsExactlyOneFieldLevelOptionalMarkerAcrossTyp
 	}{
 		{name: "scalar", field: "value: text?", wantType: "text"},
 		{name: "named", field: "value: Customer?", wantType: "Customer"},
-		{name: "list scalar", field: "value: '[text]?'", wantType: "[text]"},
+		{name: "list scalar metadata", field: "value: {type: '[text]?'}", wantType: "[text]"},
 		{name: "map scalar", field: "value: 'map[text]uuid?'", wantType: "map[text]uuid"},
 		{name: "mapping scalar", field: "value:\n  type: text?", wantType: "text"},
-		{name: "mapping list", field: "value:\n  type: list?\n  of: Customer", wantType: "[Customer]"},
+		{name: "mapping list", field: "value:\n  type: '[Customer]?'", wantType: "[Customer]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,12 +79,12 @@ func TestEventCatalogAdmissionRejectsEveryNonFieldLevelOptionalMarker(t *testing
 		name  string
 		field string
 	}{
-		{name: "sequence element", field: "value: ['text?']"},
-		{name: "list element", field: "value: '[text?]'"},
+		{name: "sequence element", field: "value:\n  - text?"},
+		{name: "list element", field: "value: {type: '[text?]'}"},
 		{name: "map key", field: "value: 'map[text?]uuid'"},
 		{name: "map value", field: "value: 'map[text]u?uid?'"},
 		{name: "internal scalar", field: "value: te?xt"},
-		{name: "mapping list element", field: "value:\n  type: list\n  of: Customer?"},
+		{name: "mapping list element", field: "value:\n  type: '[Customer?]'"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

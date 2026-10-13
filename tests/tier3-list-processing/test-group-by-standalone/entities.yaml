@@ -1,2 +1,2 @@
 core:
-  grouped: map[text]list<GroupItem>
+  grouped: map[text][GroupItem]

@@ -498,7 +498,7 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	var field wave1ParsedFieldNode
 	switch value.Presence() {
 	case yamlsource.PresenceScalar:
-		raw, err := requiredLiteralString(value, opts.Context+" type")
+		raw, err := listDeclarationScalar(value, opts.Context, false)
 		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
@@ -510,19 +510,12 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 			return wave1ParsedFieldNode{}, err
 		}
 		return field, nil
-	case yamlsource.PresenceSequence:
-		values, err := value.Sequence()
+	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
+		typeRef, err := listDeclarationSequence(value, opts.Context)
 		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
-		if len(values) != 1 {
-			return wave1ParsedFieldNode{}, fmt.Errorf("%s list shorthand requires exactly one element type", opts.Context)
-		}
-		element, err := requiredLiteralString(values[0], opts.Context+" element type")
-		if err != nil {
-			return wave1ParsedFieldNode{}, err
-		}
-		field.Type = "[" + strings.TrimSpace(element) + "]"
+		field.Type = typeRef
 		if err := rejectEventTypeOptionalMarker(field.Type, opts.Context); err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
@@ -541,6 +534,9 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	if err != nil {
 		return wave1ParsedFieldNode{}, err
 	}
+	if err := rejectLongListField(fields, opts.Context); err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
 	allowed := wave1FieldNodeAllowedKeys(opts)
 	byName := make(map[string]yamlsource.MappingField, len(fields))
 	for _, candidate := range fields {
@@ -551,7 +547,7 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 		if key != candidate.Name {
 			return wave1ParsedFieldNode{}, fmt.Errorf("%s field %q must not have surrounding whitespace", opts.Context, candidate.Name)
 		}
-		if _, ok := allowed[key]; !ok && key != "of" {
+		if _, ok := allowed[key]; !ok {
 			return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed, candidate)
 		}
 		byName[key] = candidate
@@ -561,26 +557,13 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	if !ok {
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s type is required", opts.Context)
 	}
-	rawType, err := requiredLiteralString(typeField.Value, opts.Context+" type")
+	rawType, err := listDeclarationScalar(typeField.Value, opts.Context, true)
 	if err != nil {
 		return wave1ParsedFieldNode{}, err
 	}
 	field.Type, field.IsOptional, err = admitEventFieldTypeMarker(rawType, opts.Context)
 	if err != nil {
 		return wave1ParsedFieldNode{}, err
-	}
-	if strings.EqualFold(field.Type, "list") {
-		ofField, exists := byName["of"]
-		if !exists {
-			return wave1ParsedFieldNode{}, fmt.Errorf("%s list declarations require an of: element type", opts.Context)
-		}
-		element, err := requiredLiteralString(ofField.Value, opts.Context+" list element type")
-		if err != nil {
-			return wave1ParsedFieldNode{}, err
-		}
-		field.Type = "[" + strings.TrimSpace(element) + "]"
-	} else if source, exists := byName["of"]; exists {
-		return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, "of", allowed, source)
 	}
 	if err := rejectEventTypeOptionalMarker(field.Type, opts.Context); err != nil {
 		return wave1ParsedFieldNode{}, err
@@ -864,6 +847,9 @@ func validateWave1TypeRef(raw, context string) error {
 	raw = strings.TrimSpace(raw)
 	if err := retiredCatalogListSpelling(raw); err != nil {
 		return fmt.Errorf("%s: %w", context, err)
+	}
+	if err := rejectAlternateListReference(raw, context); err != nil {
+		return err
 	}
 	if raw == "" {
 		return fmt.Errorf("%s type is required", context)

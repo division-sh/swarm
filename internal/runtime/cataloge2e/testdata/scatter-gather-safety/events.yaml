@@ -1,12 +1,12 @@
 batch.opened:
   batch_id: text
-  expected_item_ids: "[text]"
+  expected_item_ids: [text]
 batch.submitted:
   batch_id: text
-  items: "[Item]"
+  items: [Item]
 batch.finished:
   batch_id: text
-  items: "[Item]"
+  items: [Item]
 item.registered:
   key: item_id
   item_id: text

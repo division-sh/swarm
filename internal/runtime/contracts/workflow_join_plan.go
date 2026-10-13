@@ -87,7 +87,7 @@ func (b *WorkflowContractBundle) compileArrivalJoinPlan(plan WorkflowJoinPlan, e
 		}
 		projection, err := AdmitCollectionProjection(CatalogTypeReference{Type: declaration.Type, Catalog: primary.Types})
 		if err != nil || projection.ItemType().Kind != CatalogTypeText {
-			return WorkflowJoinPlan{}, fmt.Errorf("join.members.from requires list<text> or map[text]T: %v", err)
+			return WorkflowJoinPlan{}, fmt.Errorf("join.members.from requires [text] or map[text]T: %v", err)
 		}
 		plan.MembersCollectionProjection = projection
 	}

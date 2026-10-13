@@ -813,7 +813,7 @@ timer-owner:
 				name: "dead-event-schema-fanout",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready:\nstart:\n  items: '[json]'\n",
+						events: "ticket.ready:\nstart:\n  items: [json]\n",
 						nodes: `
 fanout-node:
   execution_type: system_node
@@ -4631,7 +4631,7 @@ case:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   ValidationKit:
-    checklist: list<text>
+    checklist: [text]
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 

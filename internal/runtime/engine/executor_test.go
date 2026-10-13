@@ -7874,7 +7874,7 @@ score.unregistered_dimension_complete:
   dimension: text
   score: integer
 vertical.scored:
-  scores: "[DimensionScore]"
+  scores: [DimensionScore]
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
@@ -7921,7 +7921,7 @@ pins:
 types:
   VerticalState:
     status: text
-    active_jobs: "[Job]"
+    active_jobs: [Job]
   Job:
     id: text
     title: text

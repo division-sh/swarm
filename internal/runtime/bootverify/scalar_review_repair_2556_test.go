@@ -17,7 +17,7 @@ func scalar2556LoadedSource(t *testing.T, handler string) (*checkerContext, cont
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n  items: list<text>\nproof.done:\n  value: text?\n  inherited: text?\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n  items: [text]\nproof.done:\n  value: text?\n  inherited: text?\n")
 	nodes := "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n" + handler
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
 	repo := repoRootForBootverifyTest(t)
