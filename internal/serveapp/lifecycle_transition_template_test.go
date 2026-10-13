@@ -317,8 +317,9 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 			runID, sourceEvent, siblings := prepareLifecycleTemplateSiblings(t, rt)
 			completeLifecycleTemplateSiblings(t, rt, runID, siblings)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
-			var count int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&count); err != nil {
+
+			count, err := readServedRunFieldRows(rt.ReceiverStateReader, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if count != 7 {

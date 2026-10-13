@@ -37,12 +37,13 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 					t.Fatalf("served replay repeated gate deferral: %v", replay)
 				}
 				requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "mailbox.defer", "fieldless-gate-deferral", 1)
-				var fieldRows int
+
 				wantRows := 0
 				if fields {
 					wantRows = 1
 				}
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&fieldRows); err != nil || fieldRows != wantRows {
+				fieldRows, err := readServedRunFieldRows(rt.ReceiverStateReader, seed.RunID)
+				if err != nil || fieldRows != wantRows {
 					t.Fatalf("deferral changed declared field-companion census: rows=%d want=%d err=%v", fieldRows, wantRows, err)
 				}
 			})

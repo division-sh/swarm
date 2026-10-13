@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,8 @@ func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 			if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE event_id IN ($1,$2)`, event.ID(), foreign.ID()).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("preflight persisted event: count=%d err=%v", count, err)
 			}
-			if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, foreign.RunID()).Scan(&count); err != nil || count != 0 {
+			count, err = storetest.CountRunFlowInstanceStorage(h.ctx, h.rt.Bus.Store(), foreign.RunID())
+			if err != nil || count != 0 {
 				t.Fatalf("preflight repaired an unrelated missing header: count=%d err=%v", count, err)
 			}
 		})

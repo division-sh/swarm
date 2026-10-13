@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/workflowstate"
@@ -34,7 +35,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "0c29f1adbd3d1792bd7e52b54395806fe640efeb0522156fd7245b73e6b89d70"
+const targetDigest = "445c8e6cc0a783aab1d11b1d9d88b025eb32e723826fd3b5a29de5afd6a9c567"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -280,6 +281,7 @@ var files = []string{
 }
 
 func main() {
+	includeRunPhysicalTargets()
 	includeServedDebugTargets()
 	includePublicA2EndpointTargets()
 	includeReceiverPublicReadbackTargets()
@@ -342,6 +344,22 @@ func main() {
 		writeJSON(transitionLedger, changes)
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
+	}
+}
+
+func includeRunPhysicalTargets() {
+	raw, err := os.ReadFile(runphysical.Path)
+	must(err)
+	pins, err := runphysical.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
 	}
 }
 

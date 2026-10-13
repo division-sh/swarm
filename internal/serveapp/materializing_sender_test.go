@@ -118,8 +118,9 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyProspectiveTerminalSender(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "terminal"}, "idempotency_key": "seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			var states, publications, failed int
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&states); err != nil {
+			var publications, failed int
+			states, err := readServedRunFieldRows(rt.ReceiverStateReader, seed.RunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if err := rt.DB.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='work.ready'`, seed.RunID).Scan(&publications); err != nil {

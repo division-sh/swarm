@@ -120,8 +120,8 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if fieldless {
 					// Fieldless instances still have canonical construction headers;
 					// absence of business fields is no longer absence of construction.
-					var count int
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, request.RunID).Scan(&count); err != nil || count != 0 {
+					count, err := readServedRunFieldRows(rt.ReceiverStateReader, request.RunID)
+					if err != nil || count != 0 {
 						t.Fatalf("fieldless fixture has %d field rows: %v", count, err)
 					}
 				}
@@ -277,15 +277,17 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				}
 				requireReceiverConstructedInstance(t, rt, forkRunID, forkRunID, ".", forkRunID, rootType, rootState, "", rootPhase, rootRevision, rootFields)
 				requireReceiverConstructedInstance(t, rt, forkRunID, "sink", "sink", flowidentity.EntityID("sink"), childType, "pending", forkRunID, "ready", 1, childFields)
-				var headers, companions int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, forkRunID).Scan(&headers); err != nil || headers != 2 {
+				var companions int
+				headers, err := readServedRunConstructionHeaders(rt.ReceiverStateReader, forkRunID)
+				if err != nil || headers != 2 {
 					t.Fatalf("fork construction census: got=%d want=2 err=%v", headers, err)
 				}
 				wantCompanions := 2
 				if fieldless {
 					wantCompanions = 0
 				}
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, forkRunID).Scan(&companions); err != nil || companions != wantCompanions {
+				companions, err = readServedRunFieldRows(rt.ReceiverStateReader, forkRunID)
+				if err != nil || companions != wantCompanions {
 					t.Fatalf("fork field companion census: got=%d want=%d err=%v", companions, wantCompanions, err)
 				}
 				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, forkRunID)
