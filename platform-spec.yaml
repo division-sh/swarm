@@ -2985,6 +2985,14 @@ type_system:
       YAML [numeric(p,s)] contains two items and is not a valid replacement.
       Existing metadata type slots remain scalar; this does not add a
       sequence-valued metadata type slot.
+      The schema owner keeps PostgreSQL native scalar-array column types.
+      SQLite renders only those supported canonical scalar arrays as TEXT
+      containing a JSON array, including parameterized numeric elements;
+      named lists keep their JSONB representation (TEXT on SQLite). Empty
+      arrays and ordered scalar values retain their array meaning. Unsupported,
+      malformed and nested physical array element types cannot acquire a
+      SQLite column through a generic suffix fallback. This is a fresh-schema
+      dialect projection, not an old-store migration or authored type alias.
       Retirement of the separate list<T> and long type:list/of:T forms belongs
       to the independently governed duplicate-form census, not a compatibility
       path or new support in this admission repair.

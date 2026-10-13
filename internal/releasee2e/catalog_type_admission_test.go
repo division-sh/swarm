@@ -26,6 +26,15 @@ types:
 
 const admissionPublicNodes = `complete-task:
   execution_type: system_node
+  state_table: admission_list_state
+  state_schema:
+    fields:
+      labels: [text]
+      amounts:
+        - numeric(5,2)
+      items: [Item]
+      scalar_amount: numeric(5,2)
+      snapshot: jsonb
   subscribes_to: [task.requested, key.observed]
   produces: [key.observed]
   event_handlers:
@@ -146,7 +155,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			}
 			lookup, _ := stateFields["lookup"].(map[string]any)
 			wantLookup := map[string]any{" 2": map[string]any{"id": "space"}, "+2": map[string]any{"id": "plus"}, "-1": map[string]any{"id": "negative"}, "02": map[string]any{"id": "zero"}, "1": map[string]any{"id": "one"}, "10": map[string]any{"id": "ten"}, "2": map[string]any{"id": "two", "note": "merged"}}
-			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(stateFields["enums"], payload["enums"]) || !reflect.DeepEqual(stateFields["uuids"], payload["uuids"]) {
+			if !reflect.DeepEqual(lookup, wantLookup) || !reflect.DeepEqual(stateFields["labels"], payload["labels"]) || !reflect.DeepEqual(stateFields["enums"], payload["enums"]) || !reflect.DeepEqual(stateFields["uuids"], payload["uuids"]) {
 				t.Fatalf("public whole-map/contained mutation lost typed keys: %#v", stateFields)
 			}
 			assertCatalogAdmissionJoin(t, entity, []string{" 2", "+2", "-1", "02", "1", "10", "2"})
@@ -158,6 +167,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			if got := goldenServedBundleHash(t, process.rpc, "live"); got != hash {
 				t.Fatalf("restart source identity changed: %s != %s", got, hash)
 			}
+			entity = nil
 			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
@@ -210,6 +220,24 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 					}
 					if refused.err == nil || !located {
 						t.Fatalf("%s lacked the exact source admission refusal for %s: %v\n%s", command, invalid.declaration, refused.err, refused.output)
+					}
+				}
+			}
+			for index, spelling := range []string{"text[]", "[]text", "Item[]", "[]Item", "numeric(5,2)[]", "[]numeric(5,2)"} {
+				bad := filepath.Join(base, "node-refusal-"+string(rune('a'+index)))
+				copyReleaseTree(t, source, bad)
+				writeReleaseFile(t, filepath.Join(bad, "nodes.yaml"), "complete-task:\n  execution_type: system_node\n  state_schema:\n    fields:\n      items: {type: '"+spelling+"'}\n  event_handlers: {}\n")
+				for _, command := range []string{"verify", "describe", "serve"} {
+					args := []string{command, bad, "--config", config}
+					if command != "serve" {
+						args = append(args, "--json")
+						if command == "verify" {
+							args = append(args, "--portable")
+						}
+					}
+					refused := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
+					if refused.err == nil || !strings.Contains(refused.output, "nodes.yaml") || !strings.Contains(refused.output, "retired") {
+						t.Fatalf("%s admitted retired authored node list %s: %v\n%s", command, spelling, refused.err, refused.output)
 					}
 				}
 			}
@@ -303,6 +331,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			if err := process.waitReady(ctx); err != nil {
 				t.Fatalf("alias template restart: %v\n%s", err, process.output.String())
 			}
+			entity = nil
 			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
