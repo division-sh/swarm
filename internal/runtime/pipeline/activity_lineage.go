@@ -176,6 +176,17 @@ func (l ActivityRequestLineage) ValidateResult(result events.Event) error {
 		result.ProducerType() != producer.Type || result.Producer().ID() != producer.ID {
 		return fmt.Errorf("activity result has foreign request lineage")
 	}
+	return l.ValidateResultPayload(result)
+}
+
+// Selected physical publications retain their own replay frame. Their payload
+// still belongs to this exact current request; callers prove that frame through
+// the retained selected publication owner, never by inventing a new event.
+func (l ActivityRequestLineage) ValidateResultPayload(result events.Event) error {
+	intent := l.intent
+	if !l.OwnsResultType(result.Type()) {
+		return fmt.Errorf("activity result type has foreign request lineage")
+	}
 	var payload struct {
 		ActivityID  string                    `json:"activity_id"`
 		Tool        string                    `json:"tool"`

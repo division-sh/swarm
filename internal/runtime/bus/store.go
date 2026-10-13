@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -465,11 +466,19 @@ type CommitPublishRequest struct {
 	Disposition         *runtimepipelineobligation.Disposition
 	DeadLetter          *runtimedeadletters.Record
 	ReplyCreations      []runtimereplycontext.Record
+	ReplyContinuations  []runtimepinrouting.ReplyRequestContinuation
+	ReplyReturns        []runtimepinrouting.ReplyReturnContinuation
 	ReplyClaims         []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	if err := r.validateReplyReturns(); err != nil {
+		return err
+	}
+	if err := r.validateReplyContinuations(); err != nil {
+		return err
+	}
 	for _, fence := range r.JoinAdmissionFences {
 		if err := fence.Validate(); err != nil {
 			return err
@@ -483,6 +492,60 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 		Settlement:     r.RouteSettlement,
 		DeliveryRoutes: r.DeliveryRoutes,
 	}).Validate()
+}
+
+func (r CommitPublishRequest) validateReplyReturns() error {
+	if len(r.ReplyReturns) == 0 {
+		return nil
+	}
+	if r.Event.Class() != events.EventAdmissionSelectedForkReplay || len(r.ReplyCreations) != 0 || len(r.ReplyClaims) != 0 || len(r.ReplyContinuations) != 0 || len(r.ReplyReturns) != 1 {
+		return fmt.Errorf("retained return requires one selected terminal obligation without a new claim")
+	}
+	continuation := r.ReplyReturns[0]
+	if err := continuation.Validate(); err != nil {
+		return err
+	}
+	if continuation.Record.RunID != r.Event.Event().RunID() {
+		return fmt.Errorf("retained return has foreign context ownership")
+	}
+	for _, route := range r.DeliveryRoutes {
+		if continuation.MatchesResponseRecipient(route) {
+			claim, err := continuation.ClaimForDelivery(route)
+			if err != nil || !claim.Equal(route.ConnectClaim) {
+				return fmt.Errorf("retained return changed its compiled recipient claim: %v", err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("retained return lacks its context-owned recipient")
+}
+
+func (r CommitPublishRequest) validateReplyContinuations() error {
+	if len(r.ReplyContinuations) == 0 {
+		return nil
+	}
+	if r.Event.Class() != events.EventAdmissionSelectedForkReplay || len(r.ReplyCreations) != 0 {
+		return fmt.Errorf("reply continuation requires selected publication without fresh reply creation")
+	}
+	seen := make(map[string]bool, len(r.ReplyContinuations))
+	for _, continuation := range r.ReplyContinuations {
+		if err := continuation.Validate(); err != nil {
+			return err
+		}
+		record := continuation.Record
+		if record.RunID != r.Event.Event().RunID() || record.State != runtimereplycontext.StateOpen || seen[record.ID] {
+			return fmt.Errorf("reply continuation requires distinct open child obligations")
+		}
+		seen[record.ID] = true
+		matched := false
+		for _, route := range r.DeliveryRoutes {
+			matched = matched || route.Context.ReplyContextID() == record.ID
+		}
+		if !matched {
+			return fmt.Errorf("reply continuation lacks its executable recipient")
+		}
+	}
+	return nil
 }
 
 type CommitSelectedForkEventRequest struct {

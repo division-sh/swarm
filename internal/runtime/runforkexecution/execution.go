@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -24,6 +27,7 @@ type SelectedContractExecutionRequest struct {
 	Recovery                *runfork.SelectedForkRecoveryResult
 	SourceRunID             string
 	At                      string
+	AtStart                 bool
 	ExpectedBundleHash      string
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
@@ -53,18 +57,18 @@ type SelectedContractExecutionResult struct {
 	ForkEvents                         []SelectedContractExecutionForkEvent               `json:"fork_events,omitempty"`
 }
 
-// ResumeRecoveredSelectedFiniteFeed re-enters the selected execution sequence
+// ResumeRecoveredSelectedFork re-enters the selected execution sequence
 // from one durable child and predecessor, never from a new fork materialization.
-func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFiniteFeed(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
-	if recovered.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed {
-		return SelectedContractExecutionResult{}, errors.New("selected finite-feed resume requires unfinished recovery evidence")
+func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFork(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
+	if recovered.Disposition != runfork.SelectedForkRecoveryResume && recovered.Disposition != runfork.SelectedForkRecoveryActivate {
+		return SelectedContractExecutionResult{}, errors.New("selected resume requires unfinished recovery evidence")
 	}
-	admitted, err := o.admitSelectedFiniteFeedRecovery(ctx, recovered, request)
+	admitted, err := o.admitSelectedRecovery(ctx, recovered, request)
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	if admitted.action != selectedRecoveryResumeFiniteFeed {
-		return SelectedContractExecutionResult{}, errors.New("selected finite-feed resume received non-resume action")
+	if admitted.action != selectedRecoveryResume && admitted.action != selectedRecoveryActivate {
+		return SelectedContractExecutionResult{}, errors.New("selected resume received non-executable action")
 	}
 	admitted.request.Recovery = &recovered
 	return ExecuteSelectedContractRunFork(ctx, admitted.request)
@@ -99,7 +103,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if !acknowledged {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, materializationDiagnostic
 	}
-	defer func() { finalErr = errors.Join(finalErr, materializationDiagnostic) }()
+	defer func() {
+		if !out.Activation.Activated {
+			finalErr = errors.Join(finalErr, materializationDiagnostic)
+		}
+	}()
 	ctx = operation.Context()
 	agentRuntime, err = agentRuntime.bindRun(materialization.ForkRunID, materialization.AgentTopologies)
 	if err != nil {
@@ -167,27 +175,35 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
-	defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
-	published, err := container.Publish(ctx)
-	result.ExecutedEventCount = len(published)
-	result.ForkEvents = published
-	if err != nil {
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-			err = errors.Join(err, authorityErr)
-		} else {
+	if err := container.PrepareAttachment(ctx); err != nil {
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		err = errors.Join(err, authorityErr)
+		if acknowledged {
 			err = prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 		}
 		return result, err
 	}
-	if err := container.Quiesce(ctx); err != nil {
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-			return result, errors.Join(err, authorityErr)
+	if req.Recovery != nil {
+		committed, activated, err := req.Recovery.ActivatedResult()
+		if err != nil {
+			return result, err
 		}
-		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
+		if activated {
+			result.Activation = runfork.RunForkActivation{
+				SourceRunID: committed.SourceRunID, ForkRunID: committed.ForkRunID,
+				ForkRunStatus: committed.ForkRunStatus, SourceRunStatus: committed.SourceRunStatus,
+				ForkPoint: committed.ForkPoint, Activated: true, SourceFrozen: committed.SourceFrozen,
+				SelectedContractBinding: materialization.SelectedContractBinding,
+			}
+			result.ExecutedEventCount = committed.ExecutedEventCount
+			container.RetainActivated(prepared, materializationDiagnostic)
+			return result, nil
+		}
 	}
+	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+		InheritedSchedules:    prepared.readiness,
 		ForkOperation:         forkOperation,
-		ExecutedEventCount:    len(published),
 		DataPins:              materialization.DataPins,
 		ExecutionSource:       loadedSource.Source,
 		ForkRunID:             materialization.ForkRunID,
@@ -198,15 +214,20 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RecipientPlanning:     *model.RecipientPlanning,
 	})
 	result.Activation = activation
-	closeErr := container.Close(ctx)
-	err = errors.Join(err, closeErr)
-	if activation.Activated {
-		// A later error must not dispose the context of a committed active fork.
-		err = errors.Join(err, req.Owner.retainPrepared(prepared))
-	} else if err != nil && closeErr == nil {
-		err = prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
+	if !activation.Activated {
+		if err == nil {
+			err = errors.New("selected fork activation was not acknowledged")
+		}
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		if !acknowledged {
+			return result, errors.Join(err, authorityErr)
+		}
+		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, errors.Join(err, authorityErr))
 	}
-	return result, err
+	// The permanent result owns acknowledgment; registration or cleanup loss
+	// cannot reverse it. Recovery resumes the committed child and owed work.
+	container.RetainActivated(prepared, errors.Join(err, materializationDiagnostic))
+	return result, nil
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunForkContractFrontierAdmission) error {
@@ -229,8 +250,18 @@ func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier 
 	if frontier.FrontierEventCount > 0 {
 		return nil
 	}
+	if plan.ForkPoint.Kind == runfork.RunForkPointRunStart {
+		_, present, err := plan.OriginalStartFirstTurn()
+		if err != nil {
+			return err
+		}
+		if present {
+			return fmt.Errorf("run-start first turn is missing from selected frontier")
+		}
+		return plan.ForkPoint.Validate()
+	}
 	if plan.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		return fmt.Errorf("selected-contract event-point execution requires selected frontier events")
+		return admitSelectedEventPointOwedSchedule(plan)
 	}
 	if err := plan.ForkPoint.Validate(); err != nil {
 		return fmt.Errorf("selected-contract deployment fork point: %w", err)
@@ -243,6 +274,29 @@ func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier 
 		return fmt.Errorf("selected-contract deployment revision has no fixed-revision feed work")
 	}
 	return nil
+}
+
+func admitSelectedEventPointOwedSchedule(plan runfork.RunForkPlan) error {
+	// Availability is not execution: native source and child inventory checks
+	// still prove every retained obligation before activation and recovery.
+	for _, timer := range plan.WorkflowTimers {
+		if timer.Status == "active" {
+			return plan.ForkPoint.Validate()
+		}
+	}
+	for _, schedule := range plan.JoinSchedules {
+		if schedule.Status != genericschedule.StatusActive {
+			continue
+		}
+		if err := schedule.Validate(); err != nil {
+			return err
+		}
+		if schedule.Command.RunID != plan.SourceRunID {
+			return fmt.Errorf("selected-contract owed schedule belongs to another source run")
+		}
+		return plan.ForkPoint.Validate()
+	}
+	return fmt.Errorf("selected-contract event-point execution requires selected frontier events or an exact owed schedule")
 }
 
 type selectedForkFailureDiscard struct {
@@ -301,6 +355,26 @@ type publishSelectedContractForkEventsRequest struct {
 
 func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent runfork.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {
 	var event events.Event
+	if sourceEvent.JoinContinuation.Present() {
+		original := sourceEvent.JoinContinuation.SourceEvent()
+		child := sourceEvent.JoinContinuation.ChildCommand()
+		if sourceEvent.JoinContinuation.SourceRunID() != sourceRunID || sourceEvent.JoinContinuation.SourceEventID() != sourceEvent.SourceEventID || child.RunID != forkRunID ||
+			child.EventType != sourceEvent.EventName || child.ExecutionMode != sourceEvent.ExecutionMode ||
+			child.RoutingSource != sourceEvent.RoutingSource {
+			return event, fmt.Errorf("selected arrival contradicts its sealed source/child projection")
+		}
+		if sourceEvent.JoinContinuation.Published() && (original.RunID() != sourceRunID || original.ID() != sourceEvent.SourceEventID || string(original.Type()) != sourceEvent.EventName || original.ExecutionMode() != sourceEvent.ExecutionMode) {
+			return event, fmt.Errorf("selected arrival contradicts its physical source publication")
+		}
+		projected, err := sourceEvent.JoinContinuation.Event(forkEventID, producerID)
+		if err != nil {
+			return event, err
+		}
+		if !bytes.Equal(sourceEvent.Payload, projected.Payload()) {
+			return event, fmt.Errorf("selected arrival payload differs from its sealed projection")
+		}
+		return projected, nil
+	}
 	if len(sourceEvent.Payload) == 0 {
 		return event, fmt.Errorf("selected-contract source event %s has no admitted payload bytes", strings.TrimSpace(sourceEvent.SourceEventID))
 	}
@@ -337,8 +411,13 @@ func newSelectedContractPipeline(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
+	scheduler *runtimepipeline.Scheduler,
+	genericSchedules runtimepipeline.GenericScheduleWakeupOwner,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime))
+	options := selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime)
+	options.TimerScheduler = scheduler
+	options.GenericSchedules = genericSchedules
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 }
 
 func selectedContractPipelineCoordinatorOptions(

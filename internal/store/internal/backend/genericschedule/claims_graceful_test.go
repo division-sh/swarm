@@ -19,7 +19,7 @@ func TestGenericClaimGracefulCancellationPreservesExactSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := NewPostgres(backend, func() error { return nil })
+	owner, err := NewPostgres(backend, func() error { return nil }, standaloneExecutionFixture{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestGenericClaimUnsafeSessionFencesCachedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := NewPostgres(backend, func() error { return nil })
+	owner, err := NewPostgres(backend, func() error { return nil }, standaloneExecutionFixture{})
 	if err != nil {
 		t.Fatal(err)
 	}

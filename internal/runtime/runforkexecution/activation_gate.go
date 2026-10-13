@@ -11,6 +11,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -156,6 +157,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		planRequest.At = binding.ForkPoint.EventID
 	} else {
 		planRequest.ResolvedPoint = &binding.ForkPoint
+		planRequest.AtStart = binding.ForkPoint.Kind == runfork.RunForkPointRunStart
 	}
 	plan, err := req.Store.PlanRunFork(ctx, planRequest)
 	if err != nil {
@@ -164,11 +166,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !sameSelectedForkPointIdentity(plan.ForkPoint, binding.ForkPoint) {
 		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation plan differs from durable fork point")
 	}
+	// Native preparation fingerprints the fixed plan, not resolved diagnostics.
+	fixedPlan := plan
+	plan.ReplayResumeAdmission.Dispositions = append([]runfork.RunForkReplayResumeDisposition(nil), plan.ReplayResumeAdmission.Dispositions...)
+	plan.ReplayResumeAdmission.UnsupportedBlockers = append([]runfork.RunForkUnsupportedBlocker(nil), plan.ReplayResumeAdmission.UnsupportedBlockers...)
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{Owner: runfork.RunForkSelectedContractExecutionActivationGateOwner}, err
 	}
-	replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
 	if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
@@ -256,56 +265,98 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		ContractSwapBootResumeAdmission:    &contractSwapAdmission,
 		HistoricalReplayExecutionAdmission: &historicalReplayAdmission,
 	}
-	if replayAdmission.DeliveryEventReplayReady && routeRecovery == nil {
+	readbackPending := selectedContractStagedReadbackPending(replayAdmission)
+	if (replayAdmission.DeliveryEventReplayReady || readbackPending && frontier.FrontierEventCount > 0) && routeRecovery == nil {
 		return result, fmt.Errorf("selected-contract activation gate requires persisted route recovery before delivery replay")
 	}
-	if !plan.ExecutionReady {
+	if !plan.ExecutionReady && !readbackPending {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if err := req.ExecutionOwner.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
 		return result, err
 	}
-	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+	timerRuntimeRequired := len(plan.WorkflowTimers) > 0 || len(loadedSource.Source.WorkflowTimers()) > 0
+	if replayAdmission.DeliveryEventReplayReady || readbackPending || timerRuntimeRequired {
 		executionPorts, err := req.ExecutionOwner.require()
 		if err != nil {
 			return result, fmt.Errorf("%s: %w", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, err)
 		}
-		historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
-			Admission:             historicalReplayAdmission,
-			ReplayResumeAdmission: plan.ReplayResumeAdmission,
-			PendingWork:           plan.PendingWork,
-		})
-		if err != nil {
-			return result, err
+		sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
+		executionOwner := runfork.RunForkSelectedContractExecutionOwner
+		if replayAdmission.DeliveryEventReplayReady {
+			historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+				Admission:             historicalReplayAdmission,
+				ReplayResumeAdmission: plan.ReplayResumeAdmission,
+				PendingWork:           plan.PendingWork,
+				SourcePlan:            &fixedPlan,
+			})
+			if err != nil {
+				return result, err
+			}
+			contractSwapExecution, err := BuildHistoricalReplayContractSwapBootResumeExecution(HistoricalReplayContractSwapBootResumeRequest{
+				SelectedExecutionAdmission: admission,
+				ContractSwapAdmission:      contractSwapAdmission,
+				HistoricalReplayAdmission:  historicalReplayAdmission,
+				HistoricalReplayExecution:  historicalReplayExecution,
+				RouteRecovery:              routeRecovery,
+			})
+			if err != nil {
+				return result, err
+			}
+			result.ContractSwapBootResumeExecution = &contractSwapExecution
+			sourceEventIDs = contractSwapBootResumeSourceEvents(contractSwapExecution)
+			executionOwner = runfork.RunForkHistoricalReplayContractSwapBootResumeOwner
 		}
-		contractSwapExecution, err := BuildHistoricalReplayContractSwapBootResumeExecution(HistoricalReplayContractSwapBootResumeRequest{
-			SelectedExecutionAdmission: admission,
-			ContractSwapAdmission:      contractSwapAdmission,
-			HistoricalReplayAdmission:  historicalReplayAdmission,
-			HistoricalReplayExecution:  historicalReplayExecution,
-			RouteRecovery:              routeRecovery,
-		})
-		if err != nil {
-			return result, err
-		}
-		result.ContractSwapBootResumeExecution = &contractSwapExecution
-		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
-			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
+			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, fixedPlan, frontier, sourceEventIDs, req.AgentRuntime,
 		)
 		if err != nil {
 			return result, err
 		}
 		resources.agentRuntime = agentRuntime
-		preparation, err := prepareSelectedFork(ctx, operation, executionPorts, loadedSource, plan, frontier, *model.RecipientPlanning, agentRuntime)
+		preparation, err := prepareSelectedFork(ctx, operation, executionPorts, loadedSource, fixedPlan, frontier, *model.RecipientPlanning, agentRuntime)
 		if err != nil {
 			return result, err
 		}
 		preparation.loadedSource, preparation.descriptorLease, preparation.agentRuntime = loadedSource, lease, agentRuntime
 		preparation.originalSource = resources.originalSource
 		preparation.owner = req.ExecutionOwner
+		preparation.readiness = readiness
 		preparation.originalLoopCarriage = original
+		preparation.plan, preparation.frontier, preparation.routeAdmission = fixedPlan, frontier, routeAdmission
+		preparation.routeTopology, preparation.model = routeTopology, model
+		preparation.agentRuntime, preparation.deferredWorkAdmission = agentRuntime, deferredWorkAdmission
 		resources = preparation
+		materializationRequest, err := preparation.MaterializationRequest()
+		if err != nil {
+			return result, err
+		}
+		materialization, err := executionPorts.fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, materializationRequest)
+		if err != nil {
+			return result, err
+		}
+		replayAdmission, err = selectedContractStagedMaterializationAdmission(materialization, forkRunID, binding.SourceRunID, binding.ForkPoint)
+		if err != nil {
+			return result, err
+		}
+		plan.ReplayResumeAdmission = replayAdmission
+		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
+		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
+		contractSwapAdmission, err = BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+			SelectedExecutionAdmission: admission, ReplayResumeAdmission: replayAdmission, RouteRecovery: routeRecovery,
+		})
+		if err != nil {
+			return result, err
+		}
+		historicalReplayAdmission, err = BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+			ReplayResumeAdmission: replayAdmission, SelectedExecutionAdmission: admission,
+			ContractSwapAdmission: contractSwapAdmission, RouteRecovery: routeRecovery,
+		})
+		if err != nil {
+			return result, err
+		}
+		result.ContractSwapBootResumeAdmission = &contractSwapAdmission
+		result.HistoricalReplayExecutionAdmission = &historicalReplayAdmission
 		prepared, err := readiness.Projection()
 		if err != nil {
 			return result, err
@@ -333,7 +384,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
-			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
+			ExecutionOwner:        executionOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 			SourcePlan:            plan,
 			AgentRuntime:          agentRuntime,
@@ -348,26 +399,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			}
 			return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 		}
-		defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
 		ctx = operation.Context()
-		published, err := container.Publish(ctx)
-		result.ExecutedEventCount = len(published)
-		result.ForkEvents = published
-		if err != nil {
-			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-				err = errors.Join(err, authorityErr)
-			} else {
+		if err := container.PrepareAttachment(ctx); err != nil {
+			acknowledged, authorityErr := container.Fail(ctx, err)
+			err = errors.Join(err, authorityErr)
+			if acknowledged {
 				err = resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 			}
 			return result, err
 		}
-		if err := container.Quiesce(ctx); err != nil {
-			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-				return result, errors.Join(err, authorityErr)
-			}
-			return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
-		}
+		ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+			InheritedSchedules:    readiness,
 			ExecutionSource:       loadedSource.Source,
 			ForkRunID:             forkRunID,
 			AllowSourceFreeze:     req.AllowSourceFreeze,
@@ -377,14 +420,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			RecipientPlanning:     *model.RecipientPlanning,
 		})
 		result.RunForkActivation = activation
-		closeErr := container.Close(ctx)
-		err = errors.Join(err, closeErr)
 		if activation.Activated {
-			err = errors.Join(err, req.ExecutionOwner.retainPrepared(resources))
-		} else if err != nil && closeErr == nil {
-			err = resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
+			container.RetainActivated(resources, err)
+			return result, nil
 		}
-		return result, err
+		if err == nil {
+			err = errors.New("selected staged activation was not acknowledged")
+		}
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		if !acknowledged {
+			return result, errors.Join(err, authorityErr)
+		}
+		return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, errors.Join(err, authorityErr))
 	}
 	if plan.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
@@ -407,6 +454,65 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	})
 	result.RunForkActivation = activation
 	return result, err
+}
+
+func selectedContractStagedMaterializationAdmission(materialization runfork.RunForkMaterialization, forkRunID, sourceRunID string, point runfork.RunForkPoint) (runfork.RunForkReplayResumeAdmission, error) {
+	if materialization.ForkRunID != forkRunID || materialization.SourceRunID != sourceRunID ||
+		!sameSelectedForkPointIdentity(materialization.ForkPoint, point) {
+		return runfork.RunForkReplayResumeAdmission{}, errors.New("selected staged materialization readback differs from the exact child and cut")
+	}
+	admission := materialization.ReplayResumeAdmission
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
+		return runfork.RunForkReplayResumeAdmission{}, errors.New("selected staged materialization readback lacks canonical replay admission")
+	}
+	if len(materialization.UnsupportedBlockers) != 0 {
+		return runfork.RunForkReplayResumeAdmission{}, fmt.Errorf("selected staged materialization remains blocked before issuance: %s", selectedContractBlockerCodes(materialization.UnsupportedBlockers))
+	}
+	if len(admission.UnsupportedBlockers) != 0 {
+		return runfork.RunForkReplayResumeAdmission{}, fmt.Errorf("selected staged replay admission remains blocked before issuance: %s", selectedContractBlockerCodes(admission.UnsupportedBlockers))
+	}
+	return admission, nil
+}
+
+// This permits reaching the native proof, not executing or discharging history.
+// Timer history and reply rows remain blocked until their canonical readback.
+func selectedContractStagedReadbackPending(admission runfork.RunForkReplayResumeAdmission) bool {
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !admission.ReplayResumeFactsPresent {
+		return false
+	}
+	pending := make(map[string]string, 2)
+	for _, blocker := range admission.UnsupportedBlockers {
+		var fact string
+		switch blocker.Code {
+		case runfork.RunForkBlockerTimerHistoryUnproven:
+			fact = runfork.RunForkReplayResumeFactTimerHistory
+		case runfork.RunForkBlockerOpenReplyContextUnsupported:
+			fact = runfork.RunForkReplayResumeFactOpenReplyContext
+		default:
+			return false
+		}
+		if _, duplicate := pending[fact]; duplicate {
+			return false
+		}
+		pending[fact] = blocker.Code
+	}
+	if len(pending) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(pending))
+	for _, disposition := range admission.Dispositions {
+		if code, exists := pending[disposition.Fact]; exists {
+			if seen[disposition.Fact] || disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != code {
+				return false
+			}
+			seen[disposition.Fact] = true
+			continue
+		}
+		if disposition.Disposition == runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != "" {
+			return false
+		}
+	}
+	return len(seen) == len(pending)
 }
 
 func selectedContractBlockerCodes(blockers []runfork.RunForkUnsupportedBlocker) string {

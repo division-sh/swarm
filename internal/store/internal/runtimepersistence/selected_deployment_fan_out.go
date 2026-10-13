@@ -9,18 +9,18 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
-func (s *PostgresStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PostgresStore) BindSelectedFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
 	if s == nil || s.startupPostgresOwner == nil {
-		return nil, errors.New("selected deployment serving requires assembled PostgreSQL store")
+		return nil, errors.New("selected fan-out serving requires assembled PostgreSQL store")
 	}
-	return s.startupPostgresOwner.BindSelectedDeploymentFanOutGrant(grant)
+	return s.startupPostgresOwner.BindSelectedFanOutGrant(grant)
 }
 
-func (s *SQLiteRuntimeStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *SQLiteRuntimeStore) BindSelectedFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
 	if s == nil || s.startupSQLiteOwner == nil {
-		return nil, errors.New("selected deployment serving requires assembled SQLite store")
+		return nil, errors.New("selected fan-out serving requires assembled SQLite store")
 	}
-	return s.startupSQLiteOwner.BindSelectedDeploymentFanOutGrant(grant)
+	return s.startupSQLiteOwner.BindSelectedFanOutGrant(grant)
 }
 
 func (s *PostgresStore) ListSelectedDeploymentFeeds(ctx context.Context, grant startupownership.GrantEvidence) ([]fanoutobligation.Intent, error) {

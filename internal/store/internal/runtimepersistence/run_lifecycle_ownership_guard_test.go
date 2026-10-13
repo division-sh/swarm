@@ -66,6 +66,7 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	}
 	allowedCandidateColumns := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
+		"internal/store/internal/backend/runlifecycle/selected_completion.go":      true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
 		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
 	}
@@ -226,7 +227,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	}
 }
 
-// These literals assert counter-owner behavior; none can execute a run mutation.
+// These literals assert canonical owner behavior; none can execute a run mutation.
 func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos]bool {
 	approved := map[token.Pos]bool{}
 	for _, decl := range file.Decls {
@@ -235,6 +236,16 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			continue
 		}
 		mockOracles := map[string]bool{}
+		allowQueryOracle := false
+		if path == "internal/store/internal/backend/runlifecycle/selected_completion_test.go" {
+			switch fn.Name.Name {
+			case "TestSelectedCompletionRequestDerivesModeFromBindingBothDialects":
+				mockOracles["UPDATE runs"] = true
+				allowQueryOracle = true
+			case "TestSelectedCompletionTerminalClearOccursOnlyAfterFreshFence":
+				mockOracles["UPDATE runs SET completion_due_at = NULL"] = true
+			}
+		}
 		if path == "internal/store/internal/backend/mutationprotocol/event_counts_test.go" &&
 			(fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" ||
 				fn.Name.Name == "TestEventCountDeltasPhysicalIdentityAndOrder" ||
@@ -255,7 +266,7 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 					return true
 				}
 				selector, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || selector.Sel.Name != "ExpectExec" {
+				if !ok || (selector.Sel.Name != "ExpectExec" && !(allowQueryOracle && selector.Sel.Name == "ExpectQuery")) {
 					return true
 				}
 				receiver, ok := selector.X.(*ast.Ident)
@@ -328,6 +339,46 @@ func TestCounterRunOracleClassificationDoesNotPermitWriters(t *testing.T) {
 	}
 }
 
+func TestSelectedCompletionOracleClassificationDoesNotPermitWriters(t *testing.T) {
+	const path = "internal/store/internal/backend/runlifecycle/selected_completion_test.go"
+	const request = "package fixture\nfunc TestSelectedCompletionRequestDerivesModeFromBindingBothDialects() { mock.ExpectQuery(`UPDATE runs`) }"
+	const terminal = "package fixture\nfunc TestSelectedCompletionTerminalClearOccursOnlyAfterFreshFence() { mock.ExpectExec(`UPDATE runs SET completion_due_at = NULL`) }"
+	for _, tc := range []struct {
+		name, path, source string
+		approved, refused  int
+	}{
+		{"request-query", path, request, 1, 0},
+		{"request-exec", path, strings.Replace(request, "ExpectQuery", "ExpectExec", 1), 1, 0},
+		{"terminal-exec", path, terminal, 1, 0},
+		{"terminal-query", path, strings.Replace(terminal, "ExpectExec", "ExpectQuery", 1), 0, 1},
+		{"other-path", "internal/runtime/other_test.go", request, 0, 1},
+		{"other-function", path, strings.Replace(request, "TestSelectedCompletionRequestDerivesModeFromBindingBothDialects", "Other", 1), 0, 1},
+		{"executing", path, strings.Replace(request, "mock.ExpectQuery", "db.Exec", 1), 0, 1},
+		{"other-receiver", path, strings.Replace(request, "mock.ExpectQuery", "other.ExpectQuery", 1), 0, 1},
+		{"other-write", path, strings.Replace(request, "UPDATE runs", "DELETE FROM runs", 1), 0, 1},
+		{"extra-writer", path, strings.Replace(request, " { ", " { db.Exec(`DELETE FROM runs`); ", 1), 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved := classifyCounterOracleRunLiterals(tc.path, file)
+			refused := 0
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if ok && literal.Kind == token.STRING && !approved[literal.Pos()] {
+					refused++
+				}
+				return true
+			})
+			if len(approved) != tc.approved || refused != tc.refused {
+				t.Fatalf("classified approved/refused=%d/%d want=%d/%d", len(approved), refused, tc.approved, tc.refused)
+			}
+		})
+	}
+}
+
 func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
@@ -340,7 +391,7 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		"internal/store/internal/backend/mutationprotocol/event_counts_test.go": {
 			"CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))", []string{"INSERT INTO runs (run_id) VALUES ($1)"}},
 		"internal/store/internal/backend/agentpersistence/selected_grant_point_test.go": {
-			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2,$3)"}},
 		"internal/store/internal/backend/delivery/selected_execution_fence_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)", "UPDATE runs SET bundle_hash=$1"}},
 		"internal/store/internal/backend/delivery/selected_successor_handoff_test.go": {

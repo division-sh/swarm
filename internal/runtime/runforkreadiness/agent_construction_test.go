@@ -85,6 +85,7 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 					metadata := selectedAgentConstructionMetadata(t, source, runID, constructed, "", entered)
 					metadata.CreatedAt, metadata.UpdatedAt, metadata.EnteredStateAt = entered, entered, entered
 					metadata.Status, metadata.StageDefined = "active", lifecycle.StageCount() != 0
+					metadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, constructed, nil, entered)
 					plan := runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{{
 						EntityID: constructed.EntityID, MaterializationMetadata: metadata, CurrentState: stage.ID(), EnteredStateAt: &entered,
 					}}}

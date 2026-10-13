@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -103,14 +104,16 @@ type selectedConstructedInputProof struct {
 
 type selectedHistoricalScanProbe struct {
 	SelectedContractReplayPersistence
-	store deliverylifecycle.Store
+	store    deliverylifecycle.Store
+	observed chan<- error
 }
 
 var errSelectedHistoricalScanCut = errors.New("selected historical scan component cut")
 
 // Component proof: commit an acknowledged prepared-publication handoff through
 // its real owner, then inspect pending eligibility before execution consumes it.
-func (p selectedHistoricalScanProbe) CommitSelectedForkEvent(ctx context.Context, req bus.CommitSelectedForkEventRequest) (bus.CommittedSelectedForkEvent, error) {
+func (p selectedHistoricalScanProbe) CommitSelectedForkEvent(ctx context.Context, req bus.CommitSelectedForkEventRequest) (committed bus.CommittedSelectedForkEvent, err error) {
+	defer func() { p.observed <- err }()
 	disposition := pipelineobligation.Acknowledged("selected_predecessor_component")
 	req.Commit.Disposition = &disposition
 	result, err := p.SelectedContractReplayPersistence.CommitSelectedForkEvent(ctx, req)
@@ -316,8 +319,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), selectedBundle.SourceArtifact)
 		sourceLoader = SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	}
+	var scanProof chan error
 	if proof.scan {
-		owner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store)}
+		scanProof = make(chan error, 1)
+		owner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store), observed: scanProof}
 	}
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
 	request := SelectedContractExecutionRequest{
@@ -350,13 +355,52 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
-	if proof.scan {
-		if !errors.Is(err, errSelectedHistoricalScanCut) {
-			t.Fatalf("historical scan did not reach its exact admitted component cut: %v", err)
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
+		t.Fatalf("actual selected constructed-input acknowledgment: result=%#v err=%v", result, err)
+	}
+	if scanProof != nil {
+		select {
+		case observed := <-scanProof:
+			if !errors.Is(observed, errSelectedHistoricalScanCut) {
+				t.Fatalf("historical scan did not reach its exact admitted component cut: %v", observed)
+			}
+		case <-wait.Done():
+			t.Fatalf("historical scan component did not execute: %v", wait.Err())
+		}
+		if err := owner.RetireSelectedContexts(wait); err != nil {
+			t.Fatalf("join historical-scan component: %v", err)
 		}
 	} else {
-		if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
-			t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
+		// Acknowledgment does not establish the later delivery's settlement.
+		var delivery storetest.ManagedDeliveryStorage
+		for {
+			delivery, err = storetest.ReadManagedDeliveryStorage(wait, selected, result.Materialization.ForkRunID, "")
+			if err != nil || len(delivery.Failures) != 0 {
+				t.Fatalf("constructed-input delivery failed: %+v err=%v", delivery, err)
+			}
+			if delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
+				break
+			}
+			select {
+			case <-wait.Done():
+				t.Fatalf("constructed-input delivery did not settle: %+v err=%v", delivery, wait.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		forkEventID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, eventID)
+		forkEvent := storetest.LoadCanonicalEventRecord(t, wait, selected, forkEventID)
+		lineage, retained := forkEvent.SelectedForkLineage()
+		if !retained || lineage.SourceRunID() != runID || lineage.SourceEventID() != eventID || forkEvent.RunID() != result.Materialization.ForkRunID {
+			t.Fatalf("constructed input lost its exact committed lineage: event=%+v lineage=%+v", forkEvent, lineage)
+		}
+		count, err := storetest.ReadLifecycleEventCardinality(wait, selected, result.Materialization.ForkRunID, string(forkEvent.Type()))
+		if err != nil || count != 1 {
+			t.Fatalf("constructed input executed event count=%d, want one: %v", count, err)
+		}
+		if err := owner.RetireSelectedContexts(wait); err != nil {
+			t.Fatalf("join constructed-input selected execution: %v", err)
 		}
 		wantActors := 1
 		if nested {
@@ -376,6 +420,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			if seen := agent.SeenRunIDs(); len(seen) != 0 {
 				if len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {
 					t.Fatalf("actor escaped exact selected owner: %v", seen)
+				}
+				if seenEvents := agent.SeenEventIDs(); len(seenEvents) != 1 || seenEvents[0] != forkEventID {
+					t.Fatalf("actor consumed a different committed input: %v", seenEvents)
 				}
 				executions++
 			}

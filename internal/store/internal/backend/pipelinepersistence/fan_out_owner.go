@@ -364,7 +364,7 @@ func (s *fanOutSQLiteOwner) loadFanOutEvaluationIntent(ctx context.Context, clai
 }
 
 func admitAndLoadSelectedFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, grant startupownership.GrantEvidence, postgres bool, claim fanoutobligation.Claim, now func() time.Time) (fanoutobligation.Intent, error) {
-	if grant.SelectedFork == nil || claim.Key.DeploymentFeedID == "" || claim.Key.RunID != grant.SelectedFork.ForkRunID {
+	if grant.SelectedFork == nil || claim.Key.RunID != grant.SelectedFork.ForkRunID {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
 	}
 	if err := admitFanOutClaim(ctx, tx, admission, grant, postgres, claim); err != nil {
@@ -1127,7 +1127,7 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),MIN(CASE WHEN status IN ('open','blocked') THEN created_at END) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Intents, &summary.Open, &summary.Blocked, &summary.Cardinality, &summary.Cursor, &summary.Owed, &summary.MinNextChunk, &summary.MaxNextChunk, &oldestRaw); err != nil {
 		return summary, err
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind='committed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.SemanticRejected); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind IN ('committed','continued') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.SemanticRejected); err != nil {
 		return summary, err
 	}
 	if summary.SemanticRejected > 0 {

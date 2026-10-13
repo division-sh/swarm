@@ -38,7 +38,7 @@ type selectedCompletionAuthorityStore interface {
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
-	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) (bool, error)
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
 	MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 }
@@ -240,8 +240,8 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	if _, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("new request")); err == nil {
 		t.Fatal("quiesced selected authority admitted a new provider call")
 	}
-	if err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-		t.Fatalf("close selected authority: %v", err)
+	if acknowledged, err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+		t.Fatalf("close selected authority: acknowledged=%t error=%v", acknowledged, err)
 	}
 	if err := fixture.store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, time.Minute); err == nil {
 		t.Fatal("closed selected authority accepted heartbeat")
@@ -309,8 +309,8 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 			if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 				t.Fatalf("quiesce terminal fork authority: %v", err)
 			}
-			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-				t.Fatalf("close terminal fork authority: %v", err)
+			if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+				t.Fatalf("close terminal fork authority: acknowledged=%t error=%v", acknowledged, err)
 			}
 
 			failFixture := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, quiesceFixture.process)
@@ -339,8 +339,8 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 			if err := store.FailRunForkSelectedContractRuntimeExecution(ctx, authority, failure); err != nil {
 				t.Fatalf("fail terminal fork authority: %v", err)
 			}
-			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-				t.Fatalf("close failed terminal fork authority: %v", err)
+			if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+				t.Fatalf("close failed terminal fork authority: acknowledged=%t error=%v", acknowledged, err)
 			}
 		})
 	}
@@ -933,8 +933,8 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 		t.Fatalf("quiesce selected completion authority: %v", err)
 	}
-	if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-		t.Fatalf("close selected completion authority: %v", err)
+	if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+		t.Fatalf("close selected completion authority: acknowledged=%t error=%v", acknowledged, err)
 	}
 	matrix := runForkRevisionMatrixFixture{
 		runID:        fixture.forkRun,

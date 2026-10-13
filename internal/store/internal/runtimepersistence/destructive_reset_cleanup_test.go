@@ -783,12 +783,13 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,
 			reply_input_pin, provider_flow_id, provider_input_pin, provider_output_pin,
-			origin_route, request_correlation_id, state
+			origin_route, request_correlation_id, state, source_run_id, source_request_event_id, source_run_owner_key
 		)
 		VALUES (
 			$1, $2::uuid, $3::uuid, 'requester', 'provider_requested', 'provider_replied',
 			'provider', 'provider_requested', 'provider_replied',
-			'{"flow_id":"requester","flow_instance":"requester/a"}'::jsonb, $3::text, 'open'
+			'{"flow_id":"requester","flow_instance":"requester/a"}'::jsonb, $3::text, 'open',
+			$2::uuid, $3::uuid, 'run:' || CAST($2::uuid AS TEXT)
 		)
 	`, replyContextID, runID, eventID); err != nil {
 		t.Fatalf("seed cleanup reply context: %v", err)

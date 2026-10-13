@@ -66,7 +66,7 @@ func selectedDeploymentResourceFixture(t *testing.T, backend, route string) *dep
 }
 
 func selectedDeploymentResourceFixtureKeyless(t *testing.T, backend, route string) *deploymentResourceFixture {
-	return selectedDeploymentResourceFixtureConfigured(t, backend, route, false, nil, nil, nil)
+	return selectedDeploymentResourceFixtureConfigured(t, backend, route, false, false, nil, nil, nil)
 }
 
 func selectedDeploymentResourceFixtureWithProbe(t *testing.T, backend, route string, probe runtimelifecycleprobe.Observer) *deploymentResourceFixture {
@@ -74,12 +74,20 @@ func selectedDeploymentResourceFixtureWithProbe(t *testing.T, backend, route str
 }
 
 func selectedDeploymentResourceFixtureWithDelivery(t *testing.T, backend, route string, probe runtimelifecycleprobe.Observer, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store, wrapExecutor func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) *deploymentResourceFixture {
-	return selectedDeploymentResourceFixtureConfigured(t, backend, route, true, probe, wrapDelivery, wrapExecutor)
+	return selectedDeploymentResourceFixtureConfigured(t, backend, route, true, false, probe, wrapDelivery, wrapExecutor)
 }
 
-func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route string, keyed bool, probe runtimelifecycleprobe.Observer, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store, wrapExecutor func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) *deploymentResourceFixture {
+func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route string, keyed, closeAfterInput bool, probe runtimelifecycleprobe.Observer, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store, wrapExecutor func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) *deploymentResourceFixture {
 	t.Helper()
-	root := canonicalrouting.CopySelectedDeploymentResource(t, route, keyed)
+	var root string
+	if closeAfterInput {
+		if route != "singleton" || !keyed {
+			t.Fatal("finite pending receiver proof requires its exact singleton fixture")
+		}
+		root = canonicalrouting.CopySelectedDeploymentResourceFiniteSingleton(t)
+	} else {
+		root = canonicalrouting.CopySelectedDeploymentResource(t, route, keyed)
+	}
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -219,19 +227,19 @@ func logSelectedDeploymentForkFailure(t *testing.T, db *sql.DB, forkRunID string
 		}
 		feeds.Close()
 	}
-	executions, err := db.QueryContext(ctx, `SELECT CAST(execution_id AS TEXT),generation,state,CAST(lease_expires_at AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation`, forkRunID)
+	executions, err := db.QueryContext(ctx, `SELECT CAST(execution_id AS TEXT),generation,state,CAST(lease_expires_at AS TEXT),CAST(failure AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation`, forkRunID)
 	if err != nil {
 		t.Logf("selected fork diagnostic executions query: %v", err)
 	} else {
 		for executions.Next() {
 			var executionID, state string
 			var generation int64
-			var lease sql.NullString
-			if err := executions.Scan(&executionID, &generation, &state, &lease); err != nil {
+			var lease, failure sql.NullString
+			if err := executions.Scan(&executionID, &generation, &state, &lease, &failure); err != nil {
 				t.Logf("selected fork diagnostic execution scan: %v", err)
 				break
 			}
-			t.Logf("selected fork diagnostic execution=%s generation=%d state=%s lease=%q", executionID, generation, state, lease.String)
+			t.Logf("selected fork diagnostic execution=%s generation=%d state=%s lease=%q failure=%s", executionID, generation, state, lease.String, failure.String)
 		}
 		if err := executions.Err(); err != nil {
 			t.Logf("selected fork diagnostic executions rows: %v", err)
@@ -395,13 +403,23 @@ func deploymentForkOwnerWithDelivery(t *testing.T, f *deploymentResourceFixture,
 }
 
 func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture, delivery runtimedelivery.Store, fork runforkexecution.SelectedContractForkLifecycle) (runforkexecution.SelectedContractExecutionOwner, []runfork.SelectedForkRecoveryResult) {
+	return deploymentForkOwnerWithReplay(t, f, delivery, fork, nil)
+}
+
+func deploymentForkOwnerWithReplay(t *testing.T, f *deploymentResourceFixture, delivery runtimedelivery.Store, fork runforkexecution.SelectedContractForkLifecycle, replay runforkexecution.SelectedContractReplayPersistence) (runforkexecution.SelectedContractExecutionOwner, []runfork.SelectedForkRecoveryResult) {
 	t.Helper()
 	if delivery == nil {
 		delivery = f.selected
 	}
+	if replay == nil {
+		var ok bool
+		replay, ok = f.selected.(runforkexecution.SelectedContractReplayPersistence)
+		if !ok {
+			t.Fatalf("selected store %T lacks the canonical fork publication owner", f.selected)
+		}
+	}
 	durable := bus.DurableDependencies{
 		ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: delivery,
-
 		ActiveAgents:   f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
 		RunOrigins: f.selected, StandingRestarts: f.selected,
@@ -424,10 +442,11 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, forkOwner, selected, selected, selected,
+			workflow, forkOwner, selected, replay, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	case *store.PostgresStore:
 		durable.EmitFeedback = selected
@@ -444,10 +463,11 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, forkOwner, selected, selected, selected,
+			workflow, forkOwner, selected, replay, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	default:
 		t.Fatalf("selected fork store %T is not supported", f.selected)

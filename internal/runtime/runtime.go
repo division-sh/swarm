@@ -1219,7 +1219,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
 		}
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.SourceArtifactFact.BundleHash()}
-		terminalCatalog, err := runLifecycleTerminalCatalog(source)
+		terminalCatalog, err := RunLifecycleTerminalCatalog(source)
 		if err != nil {
 			return nil, fmt.Errorf("build run lifecycle stage catalog: %w", err)
 		}
@@ -2168,10 +2168,12 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 		}
 	}
 	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
+		// Retire may return an early settlement diagnostic; only the final
+		// join below reports it. The drain deadline remains a separate failure.
+		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil && drainCtx.Err() != nil {
 			shutdownErr = errors.Join(
 				shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, err),
+				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)),
 			)
 		}
 	}
@@ -2242,6 +2244,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 				"error", err.Error(),
 			)
 			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
+		}
+	}
+	if rt.runLifecycleExecutor != nil {
+		if err := rt.runLifecycleExecutor.Wait(context.Background()); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("run lifecycle executor joined diagnostics: %w", err))
 		}
 	}
 	if rt.runLifecycleRegistration != nil {

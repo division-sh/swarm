@@ -43,6 +43,7 @@ var rootDeferralReasons = map[string]map[string]string{
 	},
 	"internal/serveapp": {
 		"TestIssue2564H2ServeProcessHelper":                               "subprocess entry point, not a standalone proof",
+		"TestIssue642FutureProviderRecoveryProcessHelper":                 "subprocess entry point, not a standalone proof",
 		"TestSelectedForkDockerGatewayTransportBothStores":                "opt-in real Docker selected-fork transport proof; both-store execution is qualified separately",
 		"TestMockForkChatRealDockerPublicMCPTransportBothStores":          "opt-in real Docker public fork-chat proof; both-store execution is qualified separately",
 		"TestMockForkChatOversizedRealDockerPublicMCPTransportBothStores": "opt-in real Docker oversized public fork-chat proof; mandatory both-store affected-path supplement, no skip credit",

@@ -425,6 +425,8 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	record := runtimereplycontext.Record{
 		RunID:                runID,
 		RequestEventID:       requestEventID,
+		SourceRunID:          runID,
+		SourceRequestEventID: requestEventID,
 		RequesterFlowID:      "requester",
 		RequestOutputPin:     "provider_requested",
 		ReplyInputPin:        "provider_replied",

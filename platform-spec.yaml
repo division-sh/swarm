@@ -974,8 +974,12 @@ contract_formats:
         terminal source evidence is copied into a fork-local terminal activity_attempt
         and the existing dispatcher republishes that fork-local result without invoking
         the connector. An activity.approval proposal pending at the fork point mints a
-        fork-local card, request identity, effect hash, and continuation, clears source-run
-        reply context authority, and requires a fresh decision. A revised or rejected proposal remains terminal evidence. An
+        fork-local card, request identity, effect hash, and continuation, projects an
+        admitted incoming reply reference into the child's own captured context row,
+        and requires a fresh decision. Lawful absence stays absent; missing or contradictory
+        captured reply evidence refuses, never silently detaches. The owned context rows
+        are materialized before pending effect carriers in the same transaction.
+        A revised or rejected proposal remains terminal evidence. An
         approved proposal may copy only an unambiguous succeeded or failed terminal
         attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
         fails the fork closed. Source-run approval never authorizes a fork-local provider
@@ -983,7 +987,46 @@ contract_formats:
         Repeated recorded-result materialization confirms the complete child
         attempt against the projected source evidence: exact owner and request
         coordinates, generation, status and execution mode, result identity and
-        payload, failure, input hash, detached reply authority and copied times.
+        payload, failure, input hash, exact child reply reference and copied times.
+        Recorded activity reuse retains the journal's captured incoming reply reference,
+        projected through the immediate cut's complete context inventory into the child's
+        own row. The same reference is read back on repeat and restored by ordinary
+        journaled-result publication. Missing, foreign or contradictory captured reply
+        evidence fails closed; a projected reference never reopens a terminal context or
+        grants execution authority.
+        Recorded result publication rebuilds reply-only output from the journal, including
+        recorded absence, on both direct and deferred paths. It explicitly masks ambient
+        delivery facts while preserving caller cancellation and other ownership bindings;
+        incoming references and consumed joins never substitute for an empty journal.
+        Published fan-out continuation carries the exact unfinished receiver routes from
+        the fixed-cut native projection, including each child's own reply/return context,
+        into selected publication. The existing selected-recipient scope restores context
+        only after canonical resolution produces the same complete routes, independently
+        of recipient kind; it never creates a second route or chooses a receiver.
+        The native publication fence still checks the complete
+        projected source-delivery partition; transferred evidence is not execution authority.
+        A terminal reply publication refusal retains the same canonical failure class
+        and detail in its pipeline receipt and dead letter. Reply-already-terminal
+        and stale-arrival refusals are not generic target or internal-construction failures.
+        Emit-tool recipient preflight consumes that same canonical refusal mapping,
+        retaining its tool/event diagnostics and refusing before publication. Unknown
+        or noncanonical planner failure codes fail closed; generic target validation
+        remains strict and does not admit reply classes as target details.
+        Ordinary and selected materialization consume the same exact captured-row
+        projection and native readback. Prospective validation can admit reconstruction
+        of the open-reply family only; it cannot discharge any other capability blocker.
+        Ordinary activation revalidates the complete child inventory inside its mutation
+        attempt before the existing historical-replay owner can authorize delivery work.
+        Selected activation may reach native require-only materialization readback while
+        exactly the timer-history or open-reply inventory blockers remain pending. This
+        routing step grants neither readiness nor reply authority: exact child/cut readback
+        must discharge every pending blocker before publication or execution. Unrelated,
+        duplicate or contradictory blockers still refuse before activation.
+        A captured platform.activity_requested publication without its terminal pipeline
+        receipt remains exact owed work even before any node delivery exists. The fixed-cut
+        event and receipt projections identify it for the existing platform activity owner;
+        no synthetic delivery, source approval grant or general absent-receipt replay is
+        created. A terminal receipt retains its outcome and prevents rearming.
         Matching request/result IDs alone do not establish agreement. Conflicting
         evidence fails without overwriting the row or appending a lifecycle story;
         an unchanged repeat is a no-op. JSON evidence uses the canonical semantic
@@ -4771,9 +4814,30 @@ handler_specification:
             rereads mutable current entity state or the process-current contract. Same-handler source mutation binds the
             post-write immutable revision. Source/count cycles fail strict load and boot verification.
         evaluation_capsule: >-
-          Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
-          or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
-          still prove the same element before any ordinal is evaluated.
+          Carries source_plan_ref and its digest-validated source_projection separately from the intent's exact
+          bundle-qualified executable plan reference, plus trigger/run/delivery/route lineage and only mutable or
+          turn-local expression values needed after the handler returns. Ordinary creation binds both references to
+          the same compiled plan. Fork projection retains the original source witness and immutable item order,
+          multiplicity and cardinality while admitting the exact selected plan for future ordinal evaluation.
+          A changed selected emit digest does not invalidate the original source. Neither reference is inferred or
+          replaced on read. References to the same artifact and declaration must have the same semantic digest,
+          including a return to the original artifact after an intermediate selection. A selection also cannot
+          change its previous interpretation under an unchanged execution artifact.
+          The selected compiled plan must validate its own digest, accept the frozen item type
+          through the catalog assignment owner, and admit the retained cardinality within its bound. Historical
+          ordinal facts are never reissued because the selected plan changed.
+          Fixed-cut admission distinguishes closed issuance from settled history: unissued ordinals, pending
+          recipients and nonterminal barriers still require the exact selected executable declaration. An inert
+          settled or canceled history retains its original executable reference without requiring a replacement
+          declaration. This decision is per intent, not per declaration: a settled sibling cannot excuse an owed
+          intent. Original source integrity and complete ordinal evidence remain mandatory in both cases.
+          A subsequent fork consumes the exact archived artifact for a retained historical declaration and its
+          loop role, through detached original-source carriage. It neither infers the role from the current
+          artifact nor changes the primary source identity or grants execution authority. Each distinct archive
+          is admitted once per preparation, with its temporary projection released before continuing.
+          The semantic-view owner supplies detached compiled evidence from the exact selected artifact to every
+          native materialization path. Caller-authored plan references or decoded JSON cannot mint that evidence;
+          native writers recheck artifact identity, declaration, source integrity and selected interpretation.
           Its receiver projection carries only the exact executable node and typed target ownership, validated against
           the capsule execution coordinates. It is not a delivery route or publication obligation: initialization
           suppliers and dependency plans remain with their original publication and are never copied into a capsule.
@@ -4928,11 +4992,45 @@ handler_specification:
           global-work accounting consume this same owner.
         fork: >-
           fan_out_obligations is a closed fixed-revision family. A child inherits frozen capsule data, source, cardinality,
+          and the originating handler's exact reply-only continuation context. Capture consumes the admitted delivery
+          route and claim; native persistence compares it with the actual handler input and its canonical settled
+          delivery route before commit, including when a caller omits both ambient and capsule references. Deferred ordinals consume
+          that frozen context, not a pump worker's ambient context. Fork projection maps its opaque reply reference
+          through the captured reply inventory to the child's own row, refusing missing or contradictory evidence.
+          Return joins remain on that reply row; consumed input join-admission receipts are not copied into the
+          capsule or inherited by new ordinal publications. Absence remains absent, and a retained reference grants
+          neither execution nor approval authority. The child inherits
           cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
           claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
           closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
-          terminal. Same-contract and selected-contract execution require the same stable element identity and semantic
-          digest. Unsupported historical prefix work, a missing retained source artifact, or digest disagreement fails closed;
+          terminal.
+          An already-published unfinished ordinal continues through precisely its unfinished fixed-cut recipient
+          partition, not re-emission of the ordinal or replay of settled recipients. Admission carries explicit
+          source delivery IDs and retains the terminal source contribution. Selected routing resolves those exact
+          executable slots before receiver preparation, while current child grants, claims and generation checks
+          still authorize execution. Materialization and activation consume that exact canonical delivery admission
+          before applying generic source-attempt/session-coupling refusal. A pending, in-progress or retryable source
+          attempt in the admitted partition remains lineage, never a resumed child claim, session or provider turn.
+          An unrelated delivery, mismatched disposition, or unresolved source-history blocker still fails closed.
+          Publication, child delivery obligations, selected execution lineage and the
+          continued ordinal outcome commit together. The outcome pairs the child event with its distinct immediate
+          source event; it never fabricates terminal child deliveries. An unfinished child keeps the ordinal pending
+          even when its retained contribution is failure or cancellation. Once all continuing recipients settle,
+          reduce the ordinal once with dead-letter, cancellation, then success precedence. Re-fork combines retained
+          terminal contributions with the new cut's settled recipients and anchors to the immediate child's event.
+          Both handler and deployment pending-publication carriers consume that same partition law. A same-version
+          deployment continuation binds the original ordinal in the child's feed. A changed pin preserves the old
+          publication and delivery lineage separately from the new version's fresh feed; it never assigns an old
+          ordinal to the new version. Compiled receiver-pin projection supplies the handler event before selected
+          filtering; the filter cannot infer it or authorize a target outside canonical route evaluation.
+          Exact duplicate publication and successor recovery require the retained event, lineage, recipient set and
+          outcome timestamp to agree. Readback never inserts missing continuation evidence or substitutes a retry's
+          later timestamp for the original publication time.
+          Generic node historical replay remains unsupported; this relation alone grants no execution authority.
+          Same-artifact execution requires exact source/selected digest agreement. A selected artifact may change
+          semantics only through the existing source-integrity and selected-plan correspondence owners, retaining
+          stable declaration identity and the immutable source projection. Contradictory same-artifact digests,
+          unsupported historical prefix work or a missing retained source artifact fail closed;
           source event and delivery rows are never copied.
           Capsule node/declaration, handler, current state, chain depth, ancestor lineage and all frozen business,
           computed and state maps retain their exact values. Only execution entity/route, typed producer source,
@@ -5789,13 +5887,18 @@ engine:
         receiver_handoff: EventBus copies this typed route fact into its closed receiver projection. It never preserves a publisher context value tree to carry reply authority.
         creation: Request publication creates the full reply_contexts row in the same typed event mutation after the request
           event exists and before provider delivery commits. Recipient preflight computes the deterministic id but performs no write.
+        enclosing: A request emitted by a turn holding an open inbound reply reference retains that exact enclosing_reply_context_id as a nullable self-reference on its own context row. The atomic owner validates the same-run provider/requester relation and fresh open admission. Its return restores only this reference beside ReturnJoins; it neither claims the enclosing row nor guesses a parent from provider-global state, events or payload correlation. Fork projection maps every enclosing link through child context IDs from the immediate captured cut. No inline tree or suspended agent-session owner is implied.
         identity: Deterministic from request event, paired topology, and normalized origin route. Logical resolution identity
           is (origin_instance_id, request_correlation_id) within the paired topology.
         consumption: Only publication through the declared provider reply output consumes the ref and terminally claims it.
       continuation_carriers:
         ordinary_emit: EmitIntent.Context and route-aware EventBus publish preserve the ref.
         activity: ActivityIntent.Context and activity_attempts.reply_context_id preserve the ref across request, provider call,
-          journal readback, and result publication.
+          journal readback, and result publication. Decoding a platform activity request consumes the actual admitted
+          pipeline handoff's reply-only context before creating its attempt. Journaled result collection contributes
+          a typed EmitIntent with that recorded reference through the existing emission owner, not a bare event that
+          loses the continuation. A copied journal's own child reference remains authoritative for its recorded output;
+          neither a worker's ambient context nor source provenance grants reply or execution authority.
         timer: TimerIntent.Context and timers.reply_context_id preserve the ref for one-shot schedules; recurring schedules
           carrying an open reply context fail closed.
         child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
@@ -5818,7 +5921,8 @@ engine:
       persistence:
         owner: store.ReplyContextStore
         backends: [postgres, sqlite]
-        full_record: reply_contexts owns request/topology/origin/correlation/lifecycle/accepted-event facts.
+        full_record: reply_contexts owns logical request/topology/origin/correlation/lifecycle/accepted-event facts, nullable enclosing continuation, and an immutable evidence-only original source_run_id/source_request_event_id pair. Fresh publication initializes the pair from its actual request; projection preserves it. Resolution reads only its own context row and never dereferences the original event. The physical original event FK and checked non-null original-run owner key enforce exact run ownership including genuinely runless evidence; logical projected request/accepted coordinates require no fabricated physical event.
+        correlation_scope: Same-run correlation uniqueness is retained by one partial unique index including run_id; a separate runless partial unique index retains runless collision enforcement. Different runs and sibling forks do not share claims. This does not expand runless runtime admission.
         durable_refs: [event_deliveries.delivery_context, activity_attempts.reply_context_id, timers.reply_context_id, mailbox.reply_context_id]
         rule: Durable consumers store only the opaque reply_context_id.
       terminal_claim:
@@ -5834,8 +5938,9 @@ engine:
       replay_and_fork:
         restart: Event deliveries and continuation rows restore refs only from their typed columns.
         same_run_replay: Uses the persisted delivery route context; it does not reconstruct reply identity.
-        timestamp_fork: A source run with an open reply context at the selected frontier fails closed with
-          open_reply_context_unsupported. The context is never copied or reopened in the fork.
+        timestamp_fork: Exact captured contexts project child-local logical request, accepted-reply, origin, return and enclosing-reference coordinates while preserving their original physical evidence and captured lifecycle. Projection itself never copies a request/reply event or reopens a terminal context; independently owed deliveries use ordinary replay. Materialization and activation require the complete exact child reply inventory. Successor recovery rechecks each inherited immutable binding and permits only its unchanged open state or one monotonic terminal settlement; later child requests do not replace inherited evidence. Executable continuation still requires the existing admission and actual current selected execution authority, not projection or original provenance.
+        owed_request_publication: An independently owed request consumes its exact captured child reply row before the compiled publication owner generates the complete child execution claim, including the reply context. It does not create a second row. Required bindings come only from the unfinished request-bearing delivery partition; a settled request/reply does not block unrelated pending recipients, but an actually pending request with a terminal context is contradictory and refuses. The native cut supplies that complete unfinished request-publication partition to planning even when no provider remains pending; settled provider connections must not create new reply contexts. Only that request-bearing subset rebinds reply claims; other recipients retain their canonical complete projected route, context and claim. Native publication locks and rechecks the existing open row, immutable enclosing and return bindings, original evidence and clocks, and the complete unfinished recipient routes against immediate-parent cut evidence and canonical compiled claims. Complete-recipient validation still applies when the retained reply history is terminal and no open reply binding is consumed. Logical request coordinates do not alias physical child publications; recursive physical requests retain their exact own row through native immediate-source cut and committed input-lineage evidence even when only ordinary observers remain. Canonical root names have no root path prefix. An observer never acquires a provider reply reference. Exact committed retries use ordinary duplicate/recovery evidence without reopening terminal rows. Fresh requests retain ordinary creation and correlation-collision admission.
+        owed_accepted_return: An accepted reply occurrence with unfinished requester delivery consumes the child's own projected terminal context through a require-only return continuation, never a second reply claim or new context. Native fixed-cut admission associates the original accepted event or its exact recursively committed selected input with the captured context, preserving distinct logical accepted coordinates and physical publication IDs. Frontier admission and selected route-history reconstruction consume that same fixed-run/revision physical-publication correspondence, validate the unchanged own terminal row, and never infer a return from logical-ID equality, target address or correlation. Runtime resolution loads only that own row and restores its enclosing reference and frozen return admissions. Response membership uses the captured claim's exact compiled receiver-pin and event identity paired with that context, never requester-address equality; ordinary connections to the same instance retain their own claims and contexts. Matched ordinary plans travel with the existing continuation; their original complete claims are checked before projecting child claims through their own plans and unchanged contexts. Root ordinary claims bind the composition's root-instance blueprint before state-owner admission; delivered state ownership remains independently validated. The response plan derives the complete child recipient claim; native admission verifies the complete source claim, exact projected routes, current child terminal row and unchanged clocks before acknowledged publication. Captured provenance never grants execution authority. Fresh, wrong-level, late and second replies retain ordinary refusal semantics.
       observability:
         graph: Generated connect route plans expose both request and response roles and name the paired request/reply/provider pins.
         trace: run.trace exposes reply_context_id from event_deliveries.delivery_context for platform debugging; business payload remains unchanged.
@@ -6224,7 +6329,7 @@ engine:
         - Startup consumes the current selected-store attempt and source, prepares non-executable stopped agents, then reconstructs the complete physical topology through the five phases after grant and Manager admission. Every successor starts planned. Post-run completion consumes the exact retained pre-run admission receipt and its observed predecessor ordinal, not equality between a successor ordinal and the startup snapshot. A retired attempt's historical ready phase or a prior creation occurrence does not authorize current process resources; interrupted reconstruction remains pending and requires explicit recovery admission. Construction, creating-delivery receipts and initial-entry lifecycle are unchanged by reconstruction.
         - Rebinding a retained declared agent from prepared topology to an exact activation attempt, or to a successor attempt after process recovery, replaces its lifecycle generation without rotating or terminating reusable memory when the canonical agent configuration revision is unchanged. A changed configuration revision retains the ordinary subordinate-session mutation. Topology authority alone is not an authored memory change.
         - Lifecycle-only recovery of a retained agent preserves its exact durable configuration and revision in the stopped cell while admitting no executable subscriptions or provider work. Its later attempt-bound rebind cannot interpret a stripped placeholder configuration as an authored change or rotate memory on that basis.
-        - 10. The reconciler verifies the exact current attempt and grant before process publication and transactionally reconciles the initial timer declaration set under that same attempt and source revision. Each durable mutation checks the current attempt and grant inside its own transaction; a preceding read is never sufficient permission. The committed active set is projected before topology completion. While the instance remains at its initial-entry stage, the selected-store operation preserves unchanged exact activations, monotonically cancels changed and removed activations, and inserts changed and added successors. Once the instance has progressed beyond that stage, it preserves unchanged initial-caused activations, cancels changed or removed ones, and does not retroactively arm changed or newly added declarations after their initial-entry causal edge has passed. Stale wakeups and accepted timer events from a prior declaration revision fail closed before publication or workflow handling. The current attempt's ready phase means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint or proof that the current process still owns a publication. Any reconciliation failure leaves the row pending for automatic retry. The selected-store transition itself rejects terminal/inactive work.
+        - 10. The reconciler verifies the exact current attempt and grant before process publication and transactionally reconciles the initial timer declaration set under that same attempt and source revision. Each durable mutation checks the current attempt and grant inside its own transaction; a preceding read is never sufficient permission. The committed active set is projected before topology completion. While the instance remains at its initial-entry stage, the selected-store operation preserves unchanged exact activations, monotonically cancels changed and removed activations, and inserts changed and added successors. Once the instance has progressed beyond that stage, it preserves unchanged initial-caused activations, cancels changed or removed ones, and does not retroactively arm changed or newly added declarations after their initial-entry causal edge has passed. Stale wakeups and accepted timer events from a prior declaration revision fail closed before publication or workflow handling. The current attempt's ready phase means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint or proof that the current process still owns a publication. Any reconciliation failure leaves the row pending for automatic retry. Ordinary and authoritative-delivery managers use the same joined readiness-retry owner; authoritative-delivery retry acts only on persisted pending construction under freshly checked current run authority, never live subscription-derived recipients or generic replay recovery. The selected-store transition itself rejects terminal/inactive work.
         - Timer reconciliation consumes the same current run/instance lifecycle eligibility, source bundle, exact attempt ID and disposition and admitted grant as activation verification under the timer mutation's own locks. Terminalization, stop, source revision or grant retirement winning first rejects the entire timer insert/cancel/projection transaction; a healthy timer mutation winning first may commit before subsequent lifecycle transition. Caller-side Verify is not transaction authority.
         - 11. One selected-store operation locks the exact run and flow-instance lifecycle rows, verifies the current attempt and admitted grant, reloads the immutable readiness plan, appends the deterministic creation-only event through EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only after commit. This operation linearizes with terminalization; when terminalization wins, neither event nor completion exists and terminal-owned agent topology is retired; when creation wins, event and completion commit together before the terminal transition. A failed or cancelled creation commit without terminal evidence retires only this attempt's process projections; it does not terminate still-desired durable agents. Accepted cleanup joins before the attempt is released for another same-process admission.
         - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, the joined manager automatic-retry loop, and startup all consume this same keyed reconciler. Post-commit failure signals that retry owner rather than abandoning durable pending work.
@@ -16322,6 +16427,7 @@ platform_tables:
             event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'instance_publication', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID NOT NULL UNIQUE,
             run_id                      UUID REFERENCES runs(run_id),
+            run_owner_key               TEXT NOT NULL,
             event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
             task_id                     TEXT CHECK (task_id IS NULL OR task_id = TRIM(task_id)),
             entity_id                   UUID,
@@ -16364,6 +16470,8 @@ platform_tables:
             CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'deployment_feed') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
             CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('root', 'flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
+            CHECK ((run_id IS NULL AND run_owner_key = '') OR (run_id IS NOT NULL AND run_owner_key = ('run:' || CAST(run_id AS TEXT)))),
+            UNIQUE (event_id, run_owner_key),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
             INDEX idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,
@@ -16419,11 +16527,23 @@ platform_tables:
         transaction MUST collect all affected run IDs and lock their parent runs rows in stable run-ID
         order before owning a corresponding revision head or revision ledger row. The shared allocator
         uses the minimum foreign-key-compatible parent lock; destructive owners MAY retain a stronger lock.
+        Canonical run creation also publishes one immutable start_revision and version-1 start_projection in
+        this same transaction. The projection retains the original source hash, the actual creating-ingress
+        event reference when present, and the exact family/key membership contributed by initial root/keyless
+        construction and deployment work. It contains no payload copy or process execution state. The start
+        excludes that ingress and its routed receivers/effects even when they share its creation revision.
+        Eventless creation records an explicit empty set. Start lookup reads only this membership and never
+        infers a cut from the first event, a timestamp, revision-minus-one or the current head. Inclusive event
+        lookup stays distinct; source work outside initial membership is advanced beyond the exclusive start
+        even at the same revision. Rollback/retry discards the uncommitted start alongside ordinary effects.
       ddl: |
         CREATE TABLE run_fork_revision_heads (
             run_id        UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
             last_revision BIGINT NOT NULL DEFAULT 0 CHECK (last_revision >= 0),
-            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            start_revision BIGINT CHECK (start_revision > 0 AND start_revision <= last_revision),
+            start_projection JSONB,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((start_revision IS NULL) = (start_projection IS NULL))
         );
     run_fork_revisions:
       description: >-
@@ -17930,6 +18050,12 @@ platform_tables:
         request event, paired request/reply topology, concrete origin route, and request correlation.
         Terminal claim is atomic: the first reply event wins, replay of that same event is idempotent,
         and a distinct later reply fails closed as platform.reply_already_terminal.
+        The original source_run_id/source_request_event_id pair is separately constrained physical evidence,
+        never execution authority. Projected request_event_id and accepted_reply_event_id are logical coordinates.
+        A nullable enclosing_reply_context_id retains the publishing turn's own open inbound obligation;
+        nested returns restore that reference with ReturnJoins. Correlation uniqueness is run-local, with
+        separate unchanged collision enforcement for runless rows. Preserved contexts prevent destructive
+        cleanup of their original or enclosing evidence; cleanup never broadens its explicit run set or nulls those refs.
         origin_route is one closed typed object carrying the concrete route and any exact join_admissions
         frozen by this request. Its reader rejects malformed UTF-8, duplicate JSON keys, alternate field
         spellings, unknown fields and null roots before decoding. Return receipts stay scoped to the
@@ -17939,7 +18065,11 @@ platform_tables:
         CREATE TABLE reply_contexts (
             reply_context_id        TEXT PRIMARY KEY,
             run_id                  UUID REFERENCES runs(run_id),
-            request_event_id        UUID NOT NULL REFERENCES events(event_id),
+            request_event_id        UUID NOT NULL,
+            source_run_id           UUID REFERENCES runs(run_id),
+            source_request_event_id UUID NOT NULL REFERENCES events(event_id),
+            source_run_owner_key    TEXT NOT NULL,
+            enclosing_reply_context_id TEXT REFERENCES reply_contexts(reply_context_id),
             requester_flow_id       TEXT NOT NULL,
             request_output_pin      TEXT NOT NULL,
             reply_input_pin         TEXT NOT NULL,
@@ -17950,12 +18080,16 @@ platform_tables:
             request_correlation_id  TEXT NOT NULL,
             correlation_key         TEXT,
             state                   TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'terminal')),
-            accepted_reply_event_id UUID REFERENCES events(event_id),
+            accepted_reply_event_id UUID,
             created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at             TIMESTAMPTZ,
             CHECK ((state = 'open' AND accepted_reply_event_id IS NULL AND terminal_at IS NULL) OR (state = 'terminal' AND accepted_reply_event_id IS NOT NULL AND terminal_at IS NOT NULL)),
-            UNIQUE (requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route),
+            CHECK ((source_run_id IS NULL AND source_run_owner_key = '') OR (source_run_id IS NOT NULL AND source_run_owner_key = ('run:' || CAST(source_run_id AS TEXT)))),
+            FOREIGN KEY (source_request_event_id, source_run_owner_key) REFERENCES events(event_id, run_owner_key),
+            CHECK (enclosing_reply_context_id IS NULL OR enclosing_reply_context_id <> reply_context_id),
+            UNIQUE INDEX idx_reply_contexts_runful_identity (run_id, requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route) WHERE run_id IS NOT NULL,
+            UNIQUE INDEX idx_reply_contexts_runless_identity (requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route) WHERE run_id IS NULL,
             INDEX idx_reply_contexts_run_state (run_id, state),
             INDEX idx_reply_contexts_request (request_event_id),
             INDEX idx_reply_contexts_correlation (request_correlation_id, state)
@@ -17980,7 +18114,7 @@ platform_tables:
         split/fail-closed.'
       ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
-      description: Durable selected-contract source binding for event or deployment-revision forks. One row binds a fork run to the selected
+      description: Durable selected-contract source binding for event, original-start or deployment-revision forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
@@ -17990,14 +18124,14 @@ platform_tables:
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_run_id    UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_bindings_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -18021,7 +18155,7 @@ platform_tables:
             semantic_hash TEXT NOT NULL,
             request_json JSONB NOT NULL,
             source_run_id UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id UUID REFERENCES events(event_id),
             fork_run_id UUID NOT NULL REFERENCES runs(run_id),
@@ -18033,7 +18167,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (NULLIF(TRIM(actor), '') IS NOT NULL),
             CHECK (idempotency_key IS NULL OR NULLIF(TRIM(idempotency_key), '') IS NOT NULL),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             CHECK ((state = 'activated' AND result_json IS NOT NULL AND failure_json IS NULL) OR (state = 'materialized' AND result_json IS NULL AND failure_json IS NULL) OR (state IN ('failed', 'uncertain') AND result_json IS NULL AND failure_json IS NOT NULL)),
             UNIQUE (fork_run_id),
             UNIQUE (selected_binding_id)
@@ -18056,7 +18190,7 @@ platform_tables:
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
             binding_id                     UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID REFERENCES events(event_id),
             generation                     BIGINT NOT NULL CHECK (generation > 0),
@@ -18079,7 +18213,7 @@ platform_tables:
             updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at                     TIMESTAMPTZ,
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id, generation),
             UNIQUE (fork_run_id, generation),
             UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
@@ -18092,37 +18226,49 @@ platform_tables:
       description: Source-to-fork lineage table for mutating selected-contract fixed-event fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
         frontier event each fork event executed from. Source events, deliveries, receipts, dead letters, retry state, and
-        post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors.
+        post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors. For a retained
+        unpublished join, source_run_id remains the immediate source, source_obligation_event_id identifies its pending
+        coordinate, and source_event_id plus committed_cause_run_id retain the actual committed cause. No intermediate
+        event is invented. The physical-event FK remains mandatory and the cause pair is constrained atomically.
       ddl: |
         CREATE TABLE run_fork_selected_contract_executions (
             execution_id       UUID PRIMARY KEY,
             fork_run_id        UUID NOT NULL REFERENCES runs(run_id),
             source_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_event_id    UUID NOT NULL REFERENCES events(event_id),
+            source_obligation_event_id UUID,
+            committed_cause_run_id UUID REFERENCES runs(run_id),
             fork_event_id      UUID NOT NULL REFERENCES events(event_id),
             event_name         TEXT NOT NULL CHECK (NULLIF(TRIM(event_name), '') IS NOT NULL),
             selection_authority TEXT NOT NULL CHECK (NULLIF(TRIM(selection_authority), '') IS NOT NULL),
             created_at         TIMESTAMPTZ NOT NULL,
-            UNIQUE (fork_run_id, source_event_id),
+            CHECK ((source_obligation_event_id IS NULL AND committed_cause_run_id IS NULL) OR (source_obligation_event_id IS NOT NULL AND committed_cause_run_id IS NOT NULL AND source_obligation_event_id <> source_event_id)),
+            FOREIGN KEY (source_event_id, committed_cause_run_id) REFERENCES events(event_id, run_id),
             UNIQUE (fork_event_id),
             INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),
             INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)
         );
+        CREATE UNIQUE INDEX idx_run_fork_selected_contract_executions_input
+            ON run_fork_selected_contract_executions (fork_run_id, source_event_id)
+            WHERE source_obligation_event_id IS NULL;
+        CREATE UNIQUE INDEX idx_run_fork_selected_contract_executions_pending_input
+            ON run_fork_selected_contract_executions (fork_run_id, source_obligation_event_id)
+            WHERE source_obligation_event_id IS NOT NULL;
     run_fork_selected_contract_branch_divergences:
-      description: Durable source/fork branch divergence evidence for selected-contract event or deployment-revision fork execution. This
+      description: Durable source/fork branch divergence evidence for selected-contract event, original-start or deployment-revision fork execution. This
         table is written only by the selected-contract execution owner when the source has advanced after the fork point
         and selected execution proceeds as a branch rather than freezing or rewinding the source. Source post-fork facts
         remain source-run evidence only; fork-local work is regenerated under the fork run_id. The typed point must match
         the child origin, selected binding and source ledger. Its event projection is derived, not a second authority.
         Activation, divergence, author activity and permanent operation completion commit atomically. Exact retries retain
         the first committed evidence and timestamp; conflicting identity or evidence fails closed. Source/fork lineage
-        cleanup applies to both variants, including deployment-revision rows with no event.
+        cleanup applies to every variant, including original-start and deployment-revision rows with no event.
       ddl: |-
         CREATE TABLE run_fork_selected_contract_branch_divergences (
             divergence_id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                     UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                   UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                   UUID REFERENCES events(event_id),
             owner                           TEXT NOT NULL,
@@ -18132,7 +18278,7 @@ platform_tables:
             source_frozen                   BOOLEAN NOT NULL DEFAULT FALSE,
             source_advanced_facts           TEXT[] NOT NULL DEFAULT '{}',
             created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_branch_divergences_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_branch_divergences_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -18153,7 +18299,7 @@ platform_tables:
             recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID REFERENCES events(event_id),
             owner                          TEXT NOT NULL,
@@ -18173,7 +18319,7 @@ platform_tables:
             recipient_planning             JSONB NOT NULL,
             created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)
@@ -18479,6 +18625,12 @@ platform_tables:
         typed corruption without any route-membership predicate. Old instance-route tables are unsupported. A valid projected fixed-cut header may
         lack fresh native rows but never receives a synthetic readiness phase. Older valid plans remain source-transition
         diagnostics without acquiring current-source execution or attachment authority. Present crossed evidence fails.
+        The captured incoming creating_input (including typed publication absence) remains distinct from the outgoing
+        creation occurrence or explicit absence. Selected child reconstruction projects exact recorded identities,
+        parents, initialized values and publication references through the shared immutable codec, retaining current-at-cut
+        fields separately. Where selected reconstruction installs a child construction receipt, its materialization birth
+        and fresh attachment remain distinct from the original initialized values. An outgoing creation occurrence absent
+        from the fixed cut is owed work under fresh child readiness; one already published is not re-emitted by attachment.
       ddl: |
         CREATE TABLE workflow_instance_initial_materializations (
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -19589,6 +19741,9 @@ platform_tables:
             forked_from_run_id     UUID REFERENCES runs(run_id),
             forked_from_event_id   UUID REFERENCES events(event_id),
             reconstruction_owner  TEXT,
+            forked_from_point_kind TEXT,
+            forked_from_point_revision BIGINT,
+            source_armed_at       TIMESTAMPTZ,
             entity_id             UUID,
             flow_scope_key        TEXT,
             flow_instance_id      TEXT,
@@ -19628,7 +19783,7 @@ platform_tables:
             status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'parked', 'fired', 'cancelled', 'failed')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL AND clock_suspension IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
+            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL AND clock_suspension IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
             CHECK (task_type = 'workflow_timer' OR ((due_basis_kind = 'absolute' AND due_basis_absolute IS NOT NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'delay' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'cron' AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NOT NULL) OR (due_basis_kind = 'every' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL))),
             CHECK (task_type = 'workflow_timer' OR ((recurring = FALSE AND due_basis_kind IN ('absolute', 'delay') AND task_type = 'timer') OR (recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND task_type IN ('scheduled_task', 'global_recurring')))),
             CHECK (task_type = 'workflow_timer' OR ((occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL) OR (occurrence_event_id IS NOT NULL AND occurrence_admitted_at IS NOT NULL))),
@@ -19646,10 +19801,11 @@ platform_tables:
             CHECK (task_type <> 'workflow_timer' OR reply_context_id IS NULL),
             CHECK ((owner_kind = 'instance' AND (routing_source->>'kind') = 'static_flow') OR (owner_kind <> 'instance' AND (routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control'))),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
-            CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
-            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL) OR (source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL))),
+            CHECK (task_type <> 'workflow_timer' OR fire_at >= COALESCE(source_armed_at, created_at)),
+            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_point_revision IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL AND source_armed_at IS NULL) OR (source_timer_id IS NOT NULL AND source_timer_id <> timer_id AND forked_from_run_id IS NOT NULL AND forked_from_run_id <> run_id AND forked_from_point_kind IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_point_revision IS NOT NULL AND forked_from_point_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)) AND reconstruction_owner IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL AND source_armed_at IS NOT NULL AND source_armed_at <= created_at))),
             CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND recurrence_interval IS NULL) OR (recurring = TRUE AND recurrence_interval = TRIM(recurrence_interval) AND NULLIF(recurrence_interval, '') IS NOT NULL))),
-            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= created_at)))),
+            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= COALESCE(source_armed_at, created_at))))),
+            CHECK (task_type <> 'workflow_timer' OR ((status IN ('active', 'fired') AND cancel_cause IS NULL AND cancelled_at IS NULL) OR (status = 'cancelled' AND ((cancel_cause IS NULL AND cancelled_at IS NULL) OR (cancel_cause IS NOT NULL AND cancel_cause = 'rule_removed' AND cancelled_at IS NOT NULL AND cancelled_at >= created_at AND (fired_at IS NULL OR cancelled_at >= fired_at) AND source_timer_id IS NOT NULL))))),
             INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,
             INDEX idx_timers_source_lineage (source_timer_id) WHERE source_timer_id IS NOT NULL,
             INDEX idx_timers_fire (status, fire_at),
@@ -19738,7 +19894,7 @@ platform_tables:
             completion_due_at TIMESTAMPTZ,
             completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),
             forked_from_run_id UUID REFERENCES runs(run_id),
-            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision')),
+            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision', 'run_start')),
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
@@ -19746,7 +19902,7 @@ platform_tables:
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
-            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind = 'deployment_revision' AND forked_from_event_id IS NULL)))),
+            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
@@ -19843,6 +19999,37 @@ platform_tables:
           observational only and cannot derive or write completed.
         completion_candidate:
           canonical_owner: internal/runtime/runlifecycle domain and generation-owned executor plus private PostgreSQL and SQLite selected-store adapters
+          execution_scope: >
+            The existing executor admits either a normal runtime occurrence and bundle scope, or an exact selected-fork
+            occurrence and child-run scope with its admitted source and execution authority. Immutable selected-contract
+            binding membership determines that namespace in canonical request and listing projections, not a caller flag
+            or fork origin. Ordinary enumeration, handoff and direct execution exclude selected children; selected
+            consumers cannot consume their source, a sibling, or an ordinary candidate. A missing selected registration
+            never falls back to the normal bundle sink. Scope is execution evidence, not another durable candidate queue.
+          selected_execution_fence: >
+            Every native completion attempt locks the run first and validates exact selected scope and current selected
+            execution authority before any completion-owned mutation, including due clearing, barrier advancement,
+            schedule creation and completed status. Existing candidate revision/due CAS, global author-activity fence
+            ordering, transaction acknowledgement and historical capture remain unchanged. A stale authority is a typed
+            refusal and cannot enter the ordinary transient retry loop.
+          attachment_and_retirement: >
+            Preparation registers the existing executor stopped. Committed handoffs may represent dormant work but
+            cannot execute before explicit Start after committed activation and durable admission of retained inputs.
+            Startup enumeration and racing notifications preserve dirty-generation and successor representation. Failed
+            activation retires the attachment without deleting the durable candidate. An acknowledged terminal result
+            wakes retained serving to reread authoritative run state; the wake neither grants completion nor replaces
+            restart recovery. Retirement joins candidate chains and accepted admissions and releases the exact
+            registration before selected resources and execution lifetime are released. Cleanup diagnostics cannot
+            erase committed completion or masquerade as unfinished resource release. Selected and ordinary executors
+            consume the same compiled flow-scoped final-stage catalog and canonical pending-work policy, including the
+            existing generic-schedule handoff owner.
+          generic_schedule_resource_custody: >
+            A generic-schedule attachment owns only the exact wakeups it positively claimed. Its retirement fences new
+            callbacks and reconciliation, joins accepted work, and releases only that inventory. An unclaimed or foreign
+            terminal readback cannot acquire release authority. Failed exact releases remain owned for cleanup retry.
+            Retirement cannot close all claims belonging to a shared selected-store owner; whole-owner process cleanup
+            is a separate operation. The native claim owner closes an idle claim connection when no locks remain, including
+            unsuccessful claim admission, while preserving other attachments' held claims.
           durable_identity: >
             One nullable completion_due_at and monotonic completion_revision pair on the canonical runs row is the only
             durable candidate authority. The candidate identity is exact {run_id, bundle_hash, completion_revision,
@@ -20091,9 +20278,18 @@ platform_tables:
         );
     fan_out_outcomes:
       description: >-
-        Immutable per-ordinal terminal issuance evidence for either exact handler key or exact deployment feed key.
+        Immutable per-ordinal issuance and continuation evidence for either exact handler key or exact deployment feed key.
         Committed events and deterministic semantic rejections advance the same contiguous cursor. Cancellation is
         represented compactly by the intent's canceled status and remaining cursor range, without invented outcomes.
+        A continued outcome binds a child event_id to its distinct immediate source publication source_event_id for an
+        already-issued ordinal, with no failure and an optional succeeded, dead_lettered, or canceled inherited
+        contribution from ended local source-partition work; no_route cannot describe a partial recipient partition.
+        This is a fact shape, never execution permission: existing projection and binding owners must prove the exact
+        original ordinal, publication event, and unfinished recipient subset. An inherited terminal contribution
+        cannot close an unfinished child, and continuation still counts exactly one ordinal, not a second issuance.
+        An issued ordinal retains its actual recipient settlement separately: canceled recipients are never
+        reclassified as inherited success. Whole-ordinal reduction waits for all child recipients to settle, then uses
+        failure (dead-letter) > canceled > success precedence, identically in native barrier folds and fixed-cut fork projection.
       ddl: |
         CREATE TABLE fan_out_outcomes (
             outcome_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -20104,10 +20300,10 @@ platform_tables:
             declaration_family        TEXT,
             semantic_path             TEXT,
             ordinal                   BIGINT NOT NULL CHECK (ordinal >= 0),
-            outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
+            outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected', 'continued')),
             event_id                  UUID REFERENCES events(event_id),
             source_event_id           UUID REFERENCES events(event_id),
-            inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'no_route')),
+            inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'canceled', 'no_route')),
             failure                   JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
             UNIQUE (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal),
@@ -20115,8 +20311,8 @@ platform_tables:
             CHECK ((deployment_feed_id IS NULL AND triggering_delivery_id IS NOT NULL AND flow_path IS NOT NULL AND declaration_family IS NOT NULL AND semantic_path IS NOT NULL) OR (deployment_feed_id IS NOT NULL AND triggering_delivery_id IS NULL AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL)),
             FOREIGN KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path) REFERENCES fan_out_intents(run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             FOREIGN KEY (run_id, deployment_feed_id) REFERENCES fan_out_intents(run_id, deployment_feed_id),
-            CHECK ((outcome_kind = 'committed') = ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))),
-            CHECK ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)),
+            CHECK ((outcome_kind = 'committed' AND ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))) OR (outcome_kind = 'continued' AND event_id IS NOT NULL AND source_event_id IS NOT NULL AND event_id <> source_event_id) OR (outcome_kind = 'semantic_rejected' AND event_id IS NULL AND source_event_id IS NULL)),
+            CHECK ((outcome_kind = 'continued' AND (inherited_disposition IS NULL OR inherited_disposition IN ('succeeded', 'dead_lettered', 'canceled'))) OR (outcome_kind <> 'continued' AND ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)))),
             CHECK ((outcome_kind = 'semantic_rejected') = (failure IS NOT NULL)),
             UNIQUE (event_id),
             INDEX idx_fan_out_outcomes_run (run_id, outcome_kind)
@@ -20126,8 +20322,11 @@ platform_tables:
         Canonical per-intent terminal-disposition barrier. The row binds one exact compiled delivery-barrier declaration
         to one exact fan-out intent and selected execution target. Raw delivery and route facts remain in their owners;
         this row stores only the closed ordinal summary and barrier lifecycle. A closed_pending row also owns the exact
-        server-minted generic-schedule activation that must either fire or be transactionally cancelled before the
-        barrier becomes terminal. Armed and closed_pending rows block run completion. There is no polling, count
+        server-minted generic-schedule activation, or an exact transferred already-published occurrence without
+        schedule authority. Transferred occurrence metadata retains immediate source event/run, deterministic child
+        event, publication stamp, execution mode and original due. The fixed-cut event and unfinished outcome delivery
+        must be independently admitted; metadata alone cannot authorize publication or execution. The occurrence must
+        settle or be transactionally cancelled before the barrier becomes terminal. Armed and closed_pending rows block run completion. There is no polling, count
         inference, fake stage, or compatibility representation.
       ddl: |
         CREATE TABLE fan_out_obligation_barriers (
@@ -20153,12 +20352,14 @@ platform_tables:
             summary                   JSONB,
             schedule_key              TEXT,
             schedule_activation_id    UUID,
+            transferred_occurrence    JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
             updated_at                TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             FOREIGN KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path) REFERENCES fan_out_intents(run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             CHECK ((schedule_activation_id IS NULL) OR (schedule_key IS NOT NULL)),
-            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (status = 'outcome_suppressed_generation_superseded' AND ((summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL))) OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status = 'closed_pending' AND summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL) OR (status IN ('fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
+            CHECK ((transferred_occurrence IS NULL) OR (schedule_activation_id IS NULL AND summary IS NOT NULL AND schedule_key IS NOT NULL AND status <> 'armed')),
+            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL AND transferred_occurrence IS NULL) OR (status = 'outcome_suppressed_generation_superseded' AND ((summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL AND transferred_occurrence IS NULL) OR (summary IS NOT NULL AND schedule_key IS NOT NULL AND (schedule_activation_id IS NOT NULL OR transferred_occurrence IS NOT NULL)))) OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status = 'closed_pending' AND summary IS NOT NULL AND schedule_key IS NOT NULL AND (schedule_activation_id IS NOT NULL OR transferred_occurrence IS NOT NULL)) OR (status IN ('fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
             INDEX idx_fan_out_obligation_barriers_run (run_id, status),
             INDEX idx_fan_out_obligation_barriers_schedule (schedule_key) WHERE schedule_key IS NOT NULL,
             UNIQUE INDEX idx_fan_out_obligation_barriers_activation (schedule_activation_id) WHERE schedule_activation_id IS NOT NULL
@@ -20457,9 +20658,11 @@ run_model:
   fork:
     description: 'Fork creates an isolated run by reconstructing provable current state at a selected event revision,
       optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
-      model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries and
-      deferred-work-free selected-contract frontier execution (no selected revision timer history, workflow timers,
-      or timed joins). The system does not infer arbitrary
+      model includes delivery_event_replay_ready pending unstarted agent deliveries and independently admitted
+      selected-contract frontier execution. Selected workflow and arrival schedules additionally continue only
+      through exact fixed-cut source evidence, complete native child inventory and current selected execution
+      authority. An armed arrival deadline is owed work even without a replayable business event; availability does
+      not discharge materialization or grant execution. The system does not infer arbitrary
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
@@ -20520,6 +20723,13 @@ run_model:
       Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
+    historical_delivery_cut_evidence: >-
+      Delivery/event replay consumes publication and recipient facts only from the exact admitted source cut.
+      After loading that revision, the native writer must not reload the source event or delivery from current
+      tables. An invocation-private index may share those fixed facts across recipients; absent, duplicate, foreign
+      or out-of-cut facts fail closed before child writes. Existing event decoding, schema evidence, full publication
+      receiver validation, current execution authority and generic historical-agent eligibility remain independent
+      requirements. This index is neither a persisted cache nor permission to execute.
     source_freeze:
       owner: store.run_fork.source_freeze
       contract: >
@@ -20572,9 +20782,21 @@ run_model:
       implicit retry. Cache and cleanup diagnostics cannot overwrite an acknowledged committed result.
     selected_deployment_feed_execution: >
       A selected fork with an exact child-live deployment feed may execute that finite feed through the existing
-      fan-out obligation pump and its selected fork-local EventBus. The selected grant binds the fork binding,
-      execution ID, generation, fence, lease, bundle and exact feed; it cannot authorize handler-origin fan-out or
-      normal execution. A changed pin retires only the inherited unissued suffix and creates a new child-live feed
+      process-owned fan-out obligation pump and its selected fork-local EventBus. Activated selected execution
+      registers its exact selected occurrence in the same process capacity and fairness owner as ordinary runtimes;
+      it does not create a normal runtime or another queue. That pump also serves handler-origin obligations
+      canonically created or projected in the same admitted child. The selected grant binds the fork binding,
+      execution ID, generation, fence, lease and bundle; it cannot authorize another child or normal execution.
+      Candidate observation is read-only and is never mutation authority. Claim, evaluation, publication and
+      settlement re-prove current process and selected execution authority and the exact intent/claim at their
+      existing mutation boundaries. Prepared but unactivated work is not serviceable. Retirement cancels and
+      joins this registration's finite work before retiring its grant. The last active registration additionally
+      cancels and joins the shared process observer, leaving no idle work lease behind in a selected-only process.
+      A live registration keeps the same observer; a later registration starts a fresh observer only after the
+      prior epoch joins. Process possession cannot release before either current serving or a closing epoch joins.
+      Closing-grant census evidence remains durable accounting, not a reason to retain an idle observer.
+      A changed pin retires only the inherited
+      unissued suffix and creates a new child-live feed
       at ordinal zero. Committed old-version events, attempts, deliveries and outcomes remain historical old-version
       facts; pending old work retains its original payload and route. Event-level obligations without a committed
       continuation handoff reconcile before their delivery rows can transfer. A successor fences the predecessor,
@@ -20892,7 +21114,14 @@ run_model:
         contradictory evidence remain fail-closed. Approved source effects reuse only unambiguous terminal recorded
         results under fork-local identity, never inherited approval as permission for another external call. Missing,
         uncertain or nonterminal evidence remains refused; human-task authority is not copied and fresh pending
-        proposed effects detach source reply authority and consume the existing fork-generation correspondence.
+        proposed effects retain their captured incoming reference through the child's own reply row and consume the
+        existing fork-generation correspondence. That reference grants neither a new decision nor provider dispatch.
+        A typed run-start cut has no event timestamp. Pending proposed-effect materialization uses the captured
+        source run's canonical creation time for both creation eligibility and pending-at-cut lifecycle checks.
+        Initial projected cards born with that run remain eligible; cards created after that coordinate stay outside
+        the start cut. Missing creation evidence or event metadata on a start point refuses before writes. Event-cut
+        eligibility retains its exact event timestamp. This reconstruction rule does not authorize selected mailbox
+        mutation or provider execution and does not change their existing control refusals.
     selected_contract_readiness_classifier: 'Selected-contract fixed-event revision readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected
@@ -21242,6 +21471,42 @@ run_model:
       Selected-contract source preparation derives fork-local request/result identities from the fork-local frontier
       event and typed selected-fork lineage without rewriting historical request payload bytes. EventBus validates
       those bytes against the selected target contract and persists them unchanged with the target schema binding.
+      When a selected child is itself forked, an inherited activity publication retains its physical selected-lineage
+      identity, which is distinct from the activity owner's derived journal request identity. Source preparation must
+      verify the actual fixed-cut publication, its exact committed selected binding/lineage and publication frame,
+      and the activity owner's same-run execution coordinates before selecting the journal by that derived identity.
+      A manual-confirmation source already executed under that exact selected publication may transfer only its
+      complete, unambiguous recorded result; it does not authorize a new provider call or bypass confirmation for
+      ordinary source requests. Missing, duplicate or contradictory publication/lineage/journal evidence refuses.
+      No logical journal coordinate is minted as an event or accepted as a physical fork cut. Historical evidence
+      does not replace the new child's current selected execution authority.
+      The fixed-cut publication owner and canonical activity request/journal/result validators select exactly one
+      output continuation for an unfinished activity input. If its result is absent at the cut, the policy-authorized
+      journal publication remains owed, regardless of later source progress. If its exact result is already committed,
+      only that physical publication's unfinished recipient partition continues; the copied input and journal remain
+      admitted accounting evidence and settle through the normal pipeline without publishing a second result.
+      Read-only retained input accounting is distinguished from fresh execution before current-loop generation
+      admission: consuming the committed result may already have advanced that loop. Exact current-child authority,
+      input identity and cancellation remain mandatory; unpublished fresh work still requires its current generation.
+      Successor recovery also consumes an exact result already committed by that child through the existing native
+      activity-result owner before fresh-generation admission; the source cut's inventory alone cannot describe that
+      later child-local commit. This is accounting, not a provider relaunch or new inherited publication.
+      Terminal result recipients remain terminal evidence and are not replayed. Initial activation and successor
+      recovery rederive this decision from the same bound cut, preserve projected reply bindings, and independently
+      enforce exact recipient identity at publication and readback. No source receipt is fabricated, no pending input
+      is dropped, and no event-name/payload deduplication or provider replay substitutes for the exact linkage.
+      A physical selected result may precede its inherited request publication in that child. A later fork still
+      recognizes the result through its exact committed selected lineage and immediate-source fixed-cut binding,
+      recursively validating the original activity publication. Each hop must preserve the immediate source's complete
+      result content and projected producer routing. Only the exact request generation admitted by the existing loop
+      correspondence may project its declared revision field; business and activity fields are not rewritten. The
+      child's selected schema remains separately admitted and is not inferred from its ancestor. Only the current cut's unfinished recipients continue;
+      neither a later request nor a fabricated local journal is required to supply that publication's identity.
+      The current selected receiver execution owner retains the immutable publication inventory and binds it on every
+      fresh receiver context, including initial dispatch and successor recovery. Publication-context values alone are
+      not a carrier: receiver isolation deliberately discards them. Empty inventories are bound explicitly; normal
+      receivers and publication-only recovery cannot retain selected accounting. This evidence never grants execution,
+      and current child authority, input identity, journal validation and cancellation are still checked separately.
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
       store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,
@@ -21279,11 +21544,11 @@ run_model:
       runtime.run_fork.historical_replay_execution. This legacy-named owner consumes runtime.run_fork.historical_replay_execution_admission
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
-      emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready and deferred-work-free selected-contract
-      frontier execution (no selected revision timer history, workflow timers, or timed joins). Timer history remains
-      a fail-closed/split fact under #642; a stale reconstruction disposition cannot
-      authorize mutation, and no current store or runtime owner writes fork-local reconstructed timer rows. The
+      emits the executable work set that downstream store/runtime writers may mutate. The delivery_event_replay_ready
+      primitive remains distinct from selected-contract frontier and schedule continuation. Selected workflow and
+      arrival schedules consume exact fixed-cut evidence, canonical native restoration/readback and current selected
+      authority under #642; owner availability or a stale reconstruction disposition cannot authorize mutation.
+      Other unproved timer history remains fail-closed/split. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
       execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
       product-complete source-run resumption for routes, sessions, turns, audits, non-agent/node/system work,
@@ -21366,6 +21631,13 @@ run_model:
         revision/fact order. A reconstructed entity is materializable only after
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present
         in the same fixed projection or produces a named fail-closed blocker. No created_at predicate participates.'
+      1a_original_start_membership: 'The original start projection selects the exact initial fact membership
+        committed with canonical run creation, excluding its creating ingress. Initial writers contribute typed
+        fact coordinates through the existing revision owner. Composite fan-out keys are opaque selection bytes,
+        never scalar fact constructors or delimiter-based SQL coordinates. Reconstruction requires every selected
+        fact at the exact original creation revision and validates its owning run, canonical body/key relation
+        and family semantics through the historical admission owner; a missing or mismatched body fails closed.
+        Wire membership alone grants no historical mutation or execution authority.'
       2_detect_pending: 'Classify event_deliveries and event_receipts present in the same fixed revision R together
         with their revisioned source-event lineage, dead letters, sessions, turns, audits, timers, and reply contexts.
         Only owner-admitted delivery_event_replay_ready work may be redelivered; incomplete, ambiguous, unrevisioned,
@@ -21415,15 +21687,33 @@ run_model:
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
-        runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive current matrix
-        (`create` and `select-or-create` can create; `select`, `fan-out`, and `reply` cannot) as
-        unsupported while the ephemeral selected-fork container has no
-        long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
-        delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
+        runtime.run_fork.selected_contract_deferred_work_admission classifies connect-time resolution through the exhaustive current matrix
+        (`create` and `select-or-create` require construction; `select` and `reply` do not) through
+        the existing retained selected manager, canonical construction and readiness owners. The exact
+        construction requirement is retained in the admission and rechecked against the selected source.
+        Invalid compiled resolution modes remain refused. Workflow,
+        arrival and fan-out delivery-barrier schedules use the retained selected runtime, existing completion owner
+        and generic schedule lifecycle. Their declaration alone is not an unavailable capability. Dynamic construction
+        runs only after exact selected activation, under current child authority; a source declaration, materialized
+        row or preparation receipt alone cannot start it. The retained manager admits readiness from the canonical
+        constructor and observes each actual future provider through its existing selected gateway hook before execution.
+        After terminal business and delivery settlement, the retained manager joins provider lifecycle self-release
+        while the exact selected execution grant is still current, before executor quiesce/close. Scheduler and
+        completion serving work join after the serving goroutine exits; failed joins retain exact cleanup ownership.
+        Executor close carries its native commit acknowledgment independently of cleanup errors. An acknowledged
+        close remains terminal and retains cleanup diagnostics; it is not reinterpreted as a new execution failure.
+        An unacknowledged close remains an unsettled disposition, including when its commit outcome is uncertain.
+        Before activation, acknowledged failure close permits the existing materialization discard even when
+        cleanup reports an error; the refused API result retains both the original failure and cleanup diagnostics.
+        Missing owners, failed construction admission or stale authority still refuse before dependent execution. The admission is
         carried through selected execution admission and every container construction. Exact fan-out barrier historical
         materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
-        selected dispatch of pending schedules. The selected execution gate remains in force before selected mutations.
+        selected dispatch of pending schedules. A child barrier folds exact retained terminal recipient contributions
+        with its fresh child settlements; a terminal failure is never reinterpreted as success. The existing
+        completion transaction owns closure and the exact generic schedule admission; the retained schedule owner
+        publishes the completion occurrence and the ordinary handler commits its authored outcome. Every step still
+        requires current selected authority. Settled recipients are never issued again. The selected execution gate
+        remains in force before selected mutations.
         No rejected path may create
         executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
         lineage, or runtime-execution state. Agent
@@ -21431,7 +21721,181 @@ run_model:
         container. Historical instance evidence comes from the admitted fixed construction/header family, not a
         current membership mirror or synthetic route-history state. Selected execution requires matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted fork-local recovery before exact replay,
-        publish or activation. Feature-preserving timer and dynamic-flow readiness ownership remains gated by #642.'
+        publish or activation. Ordinary workflow timers and
+        retained arrival schedules share one complete fixed-cut source inventory, bound to the exact typed cut and
+        canonical records. The arrival rows must match their physical source rows and exact construction/arm relation;
+        they are not unknown history merely because they use the generic schedule family. Mixed admitted families
+        consume their distinct canonical native readers in one require-only source-history discharge. Neither an
+        ordinary subset nor an arrival subset clears the blocker alone; any missing, extra, foreign, corrupt or
+        unreadable family retains the input admission unchanged. The canonical source owner extracts the arrival
+        relation once and the planner consumes that same evidence, never current source timer state. Materialization,
+        reuse, staged activation and successor recovery consume the same complete discharge boundary in their exact
+        native mutation attempt. Continuing validation permits lawful child progress without changing the immutable
+        source/readback certificate. A source occurrence already published or otherwise outside lawful schedule
+        restoration retains its refusal until exact historical event/delivery continuation is admitted; it must not
+        be rearmed through ForkJoinRequest. This evidence correction does not remove declaration capability blockers
+        or replace activated current execution authority. Before activation,
+        every retained arm has its original due coordinate and no child firing; only admitted rule-removal cancellation
+        may be present at child birth. Recovery of an activated
+        child accepts only lawful occurrence progress under immutable cause replay; pause alone does not prove an
+        unactivated child. Successor timer admission replans using the permanent operation''s full resolved point,
+        including its start selector, not event metadata reconstructed from the minimal child binding. The sealed
+        readiness projection includes every recorded root and descendant attachment even without an immediate
+        delivery frontier; it persists fresh child readiness, not source attachment phases, and creates no dummy
+        delivery or additional root agent. Staged construction admission compares the exact physical owner inventory
+        independently of map or native header iteration order, without deduplication or mutation of retained evidence;
+        missing, duplicate, extra and foreign owners still refuse. Ordinary and selected historical headers consume
+        the same recorded-header control projection: exact child ownership/ancestry and the explicitly selected
+        workflow version change, while retained instance kind, template version and other admitted controls remain.
+        Selected materialization, attachment/reuse and readiness validation do not rebuild a route-only descriptor
+        that drops those controls. Header controls are neither business fields nor current execution authority.
+        Final selected settlement recognizes a workflow timer or accepted one-shot
+        generic schedule publication only through its exact occurrence, canonical child activation and admitted event
+        record, consuming the family''s immutable publication validator within the settlement transaction. Generic
+        publication evidence uses the same semantic payload projection as ordinary emission and proves exact run,
+        mode, source, producer, task, deterministic event identity and retained due/admission/acceptance coordinates.
+        Prepared-only stamps and a recurring activation''s preceding accepted history are not current publication
+        evidence. Prepared targets remain the publication/delivery owner''s evidence, not facts inferred from a timer.
+        The fixed-cut source reader validates an accepted arrival against its exact revisioned event through that
+        same family validator; missing, duplicate, out-of-cut or mismatched events fail closed. This validation does
+        not rearm the occurrence or independently admit its historical delivery continuation. Validated timer
+        publication evidence agrees on execution mode and accepted time; inherited recurrence uses the retained
+        original arming coordinate rather than child birth as its first-due bound. Validated timer
+        publications root the selected event lineage even when there was no replayed input. Producer spelling alone
+        grants nothing; preactivation emptiness, current selected fencing and no-live-attempt checks remain unchanged.
+        A removed declaration is canceled at child materialization as rule_removed, retaining
+        original arming lineage and child birth; terminal source timers are never rearmed. Extra, missing, duplicate,
+        corrupt or foreign inherited rows cannot discharge admission. Source certificates alone grant no execution,
+        and wakeups/publication require activated current selected authority. Changed delay applies only to newly
+        armed work. Arrival-join schedule admission consumes the retained typed stage entry, frozen arm and
+        original due coordinate through the shared generic-schedule projection. Live lifecycle writers and fixed-cut
+        reconstruction consume that same command owner; callers do not supply a separate run identity. The
+        preparation fingerprint binds the exact retained join schedule records. Generic schedule identity is the
+        canonical scoped key, never the schedule key alone; unrelated owners may lawfully use the same key.
+        A pending nonempty completion retains its completion schedule and the original canceled timeout separately.
+        An empty membership with a completion handle firing at its retained arming coordinate has only its original
+        completion schedule, even with a declared deadline. Historical membership is independent of later legal
+        outcome changes, including stage-exit cancellation; current lifecycle evidence is validated separately.
+        Reconstruction neither demands nor invents a timeout that was never created.
+        Child commands project through the existing exact construction, stage-entry and generation correspondence,
+        preserving due and execution mode. Source lifecycle evidence stays separate: projection cannot turn a
+        published occurrence or canceled companion into fresh executable work. Immutable arm correspondence alone is
+        not child materialization, activation or recovery permission. Unpublished arrival-schedule restoration
+        composes the existing generic admission, exact source/cut provenance and require-only child readback in the
+        same native mutation attempt. Canonical child run/source admission is fresh; an ordinary same-key row cannot
+        acquire inherited provenance on reuse. Original absolute due and execution mode are retained.
+        An active prepared-but-unpublished source occurrence remains an owed arm only when the complete exact-cut
+        event inventory proves its reserved occurrence has no committed publication. Unknown/different-revision
+        inventory or a present source event fails closed; a reservation stamp alone grants nothing. Source shape,
+        materialization eligibility and native projection share that evidence gate. The child keeps the original
+        due and stage-entry relation, does not copy the source candidate/claim, and admits its own occurrence only
+        under current selected authority after child birth. Source preparation cannot postdate that birth.
+        A canceled source occurrence may retain its earlier reservation when the same complete fixed-cut event
+        inventory proves it was never published. Its child remains canceled with the original cause and due,
+        no copied candidate and no wakeup; cancellation must precede child birth. Unknown or present publication
+        still refuses, and failed or fired sources do not use this canceled-restoration branch.
+        Already-published sources still use exact event/delivery continuation, never this restoration path. A canceled
+        source arm records a canceled child disposition atomically at child birth, with its source admission and
+        typed cut retained separately; no wakeup is installed by persistence. The sealed selected readiness owner
+        resolves retained arrival declarations through the canonical semantic view. Removing an unfulfilled arrival
+        rule cancels its exact child schedule as rule_removed at that same birth and closes the dependent child arm
+        with the same typed reason, canceled timer and no pending or fired outcome. Both canonical header and optional
+        entity-state projections consume one exact admitted child-reference set; original members, collected outputs,
+        arming/due coordinates and source cut remain evidence. The source arm, reservation and lifecycle never change.
+        Already-published occurrences continue their exact historical event/delivery, and already-settled source
+        cancellations retain their original cause rather than being relabeled. Materialization, reuse, activation and
+        successor recovery carry the same sealed selection and require the physical cancellation plus exact dependent
+        state under its canonical instance/entity owner. Missing, reopened, retargeted or altered dependent evidence
+        fails closed without repair or publication. No new timer, outcome, delivery or history family is invented.
+        Generic live reads and fixed-cut
+        reconstruction retain already accepted arrival publications in a separate complete fixed-cut event census,
+        included in the preparation fingerprint. An already-published occurrence has no reconstructed child timer:
+        its original event, due coordinate and unfinished durable node-delivery binding are continued through the
+        existing selected-publication and delivery owners. The strict original declaration and handle kind are
+        retained while child task, stage-entry, entity and generation coordinates consume the canonical fork
+        correspondence. The generic producer and original event timestamp remain distinct from the selected
+        execution authority stamp. Original route context and payload projection are retained through the existing
+        construction-context projection; no new return destination or arm is inferred. Source publication evidence
+        and complete native inventory do not authorize execution or establish delivery settlement. Prepared-only
+        occurrence stamps cannot take this branch, and accepted source occurrences never enter ForkJoinRequest.
+        The child accumulator retains a distinct non-executable transferred-publication fact with deterministic child
+        event identity, immediate source run/event, selection stamp, mode and a typed committed-cause run/event pair.
+        The committed cause is evidence only, never execution authority or proof that the immediate source event
+        exists. Further projection retains that cause unchanged while projecting the immediate pending obligation
+        through each actual fork boundary; it never flattens the child source to the committed ancestor. Canonical
+        decoding rejects missing, noncanonical or contradictory cause coordinates. Historical reconstruction requires either
+        the exact physical arm or that transferred fact, never both, and validates the actual revisioned event and durable
+        delivery when published. Before publication the fact never invents event membership. Pending continuation
+        requires the immediate source''s exact fixed-cut obligation, its recursive captured binding to a still-retained
+        committed cause, and the child''s canonical materialization. One shared continuation owner distinguishes
+        this pending variant from physical publication; both still require current child execution authority.
+        Pending publication records the actual cause through the physical-event and composite run/event constraints
+        while projecting the immediate source obligation as its logical lineage coordinate. This distinction survives
+        settlement, restart and further forks through complete inventory, native accumulator readback and preparation
+        certificates. Native readback binds each transferred reference to the containing canonical instance header''s
+        exact entity, instance path and flow template through the stage-entry identity owner before inventory
+        comparison. A retained historical stage need not equal the header''s later current stage or revision.
+        Self-consistent transfer coordinates beneath a different physical owner fail closed. Physical continuation
+        requires the exact historical unfinished delivery; pending continuation carries that committed cause''s frozen
+        route through each actual fork binding without loading a later intermediate event. Provenance alone grants
+        neither execution nor rearm. Event history retains the same complete selected-lineage owner relation as live
+        readback, including duplicate-owner rejection. No additional timer or history family is created.
+        Current selected authority still gates publication, original event/lineage readback precedes duplicate
+        receiver preflight on successor recovery, and terminal completion requires the exact child delivery outcome.
+        Generic live reads and fixed-cut reconstruction share the typed origin decoder and reject partial or
+        mismatched provenance. Arrival command
+        admission validates its typed stage-entry run, entity and instance path against its routed owner, not only
+        self-consistent payload/hash fields. Staged activation and successor recovery require complete inherited
+        arrival-schedule inventory through the canonical generic decoder in the exact native attempt. The inventory
+        includes any generic row carrying partial provenance; an unexpected inherited row cannot hide behind an
+        expected-key lookup or an empty expected set. Ordinary newly admitted child schedules are not inherited rows.
+        Unactivated rows must exactly match their cut projection. Continuing readback retains the original child
+        admission, due, command and source/cut identity while accepting canonically validated chronological child
+        progress. When an occurrence is retained, cancellation and failure cannot precede its admission; one-shot
+        firing and acceptance cannot precede it either. Equal canonical timestamps are lawful. Without a retained
+        occurrence, cancellation and failure may precede due. A recurring schedule''s preceding accepted occurrence
+        remains historical evidence, not the current occurrence''s terminal disposition. The shared generic lifecycle
+        validator enforces these relationships before continuing readback normalizes progress for comparison;
+        a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
+        grants execution or discharges source-history admission by itself. Activated selected startup recovers exact
+        child event/delivery work, then enumerates only that child''s active generic schedules and reconciles each
+        through the existing lifecycle before releasing the scheduler''s startup fence. The complete scoped census
+        rejects foreign, duplicate and nonactive work before installing any wakeup; each activation is freshly read
+        and claimed, so a cancellation after census cannot be resurrected. No process-global scan or source-run
+        wakeup is used by this path. Generic execution selection and writes
+        consume the existing run-lifecycle execution owner: durable selected binding, current running child state,
+        exact run/source context and the current selected execution fence are required, independently of inherited
+        row provenance. Selected lease freshness uses actual database time at the authority read or fence, not
+        transaction-start time; a wait inside an older transaction cannot extend an expired lease. Ordinary paused
+        runs retain their existing eligibility; selected authority cannot execute
+        ordinary or runless clocks. Selection is nonminting and never substitutes for the fresh transaction-bound
+        check before admission, preparation, publication, cancellation or malformed-row disposition. The run lock
+        precedes timer locks. Exact admission replay may return immutable readback but cannot create work or acquire
+        execution. Native fork construction and admitted run/standing lifecycle cleanup remain distinct owned
+        transitions; retired execution authority cannot prevent their required cleanup. Preactivation authority and
+        published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
+        validates its exact captured source schedule before writes and retains the admitted absolute due rather
+        than resetting it to child birth. An already published barrier occurrence requires its historical delivery
+        continuation and is never rearmed. A closed-pending barrier with a fired source schedule must prove the
+        exact schema-admitted occurrence event and its unfinished outcome delivery at the retained revision. The
+        event must agree with the schedule''s immutable owner, handle, payload, due, mode and producer; the delivery
+        must agree with the barrier''s exact node, existing entity, flow instance and deterministic obligation
+        identity. Missing, duplicate, foreign, future or already-settled outcome evidence fails closed. Other
+        observers do not become the barrier''s outcome owner. This fixed-cut evidence is non-executable and never
+        replaces current selected authority or grants timer reconstruction. Published arrival and fan-out joins
+        consume one sealed continuation carrier and one fixed-cut publication census. Read-only selected barrier
+        recipient admission consumes the sealed original publication and the exact compiled selected counterpart
+        of its node, handler event, join ID and fan-out declaration. The original publication retains its original
+        artifact/digest; selection does not rewrite that event or apply its old digest to counterfactual code.
+        Child materialization still projects and validates the selected handle through canonical fan-out correspondence.
+        Ordinary live occurrence admission continues to require its own exact artifact/digest. A transferred fan-out barrier
+        retains publication lineage and due in its existing barrier row, never a copied or rearmed timer. Pending
+        publication intent is distinct from a committed event and from settled receiver work. Historical readback
+        proves a present event against its exact payload, producer, mode and due, then its exact outcome delivery;
+        fired or dead-lettered barriers cannot omit that evidence. Completion consumes the canonical barrier row
+        and exact inbound delivery in the ordinary atomic business/settlement commit. A transferred row or successful
+        materialization alone cannot authorize that commit. Dynamic-flow and other unproved
+        continuation capabilities remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, consumes admitted fixed construction, and uses the selected contract route table only
@@ -21582,8 +22046,9 @@ run_model:
         a later scope write is source advancement and cannot inherit the underlying event''s earlier revision or
         occurrence time. Fork-local replay/recovery
         proof must be newly written under the fork run_id by selected-contract execution or approved fork-local
-        delivery-event replay owners. Source committed replay-scope facts absent from the selected revision
-        remain fail-closed unless a separate approved owner changes that policy. This owner does not close same-run
+        delivery-event replay owners. Later source scope writes remain source-only advancement evidence: they cannot
+        inherit the older cut and cannot suppress independently admitted child obligations. Exact child scope conflicts
+        still refuse atomically. This owner does not close same-run
         recovery, fork-local delivery-event replay recovery, sessions, turns, audits, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
       3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract fixed-event execution,
@@ -21658,10 +22123,14 @@ run_model:
         them against the reconstructed fork-local state and admitted fork fact matrix. Boot only the fork-local runtime
         context required by approved owners; boot does not reconstruct source sessions, turns, audits, routes,
         idempotency, or arbitrary in-flight work.'
-      5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
-        delivery_event_replay_ready primitive and deferred-work-free selected-contract frontier execution when
-        independently admitted: no selected revision timer history, workflow timers, timed joins, or semantically
-        dynamic-flow-creating input resolution. Unsupported
+      5_resume: 'Execute only owner-admitted fork-local work under the new run_id. The delivery_event_replay_ready
+        primitive and selected-contract frontier execution retain their distinct admission owners. Workflow and
+        arrival schedules require exact retained source evidence, native child inventory and current selected
+        authority; pending arrival deadlines continue their original due and membership through actual publication,
+        delivery and settlement. Completed or failed source occurrences are not fresh arms. Handler fan-out barriers
+        preserve all-settled semantics through their retained completion and schedule owners. Current compiled
+        dynamic-flow-creating resolutions consume the retained selected construction/readiness owner under fresh
+        child authority, never ordinary runtime authority or inferred source ownership. Other unproved capabilities remain blocked. Unsupported
         historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized
@@ -30785,7 +31254,7 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -31354,7 +31823,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -33273,7 +33742,7 @@ api_specification:
               type: boolean
               description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
             fork_run_id: {$ref: '#/components/schemas/OpaqueId'}
-            fork_point_kind: {type: string, const: deployment_revision}
+            fork_point_kind: {type: string, enum: [deployment_revision, run_start]}
             fork_revision: {type: integer, minimum: 1}
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
@@ -38343,9 +38812,15 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: fork_event_id
         required: false
-        description: Optional explicit fork-point event id in source_run_id. When omitted, the run-fork store owner selects the latest persisted source-run event; no CLI/current-session ambient event is allowed.
+        description: Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: at_start
+        required: false
+        description: Select the one immutable original start, exclusive of its creating ingress. Event evidence is absent from this point; any real first-turn intention remains a separate immutable origin/schema reference. Mutually exclusive with fork_event_id, including an explicitly empty or null value.
+        schema:
+          type: boolean
+          default: false
       - name: bundle_hash
         required: false
         description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
@@ -42124,7 +42599,7 @@ managed_agent_capability_surface:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
     actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-fork preparation probes consume the exact prospective declaration-owned runless agent plan before fork domain materialization. A startup surface cannot carry a live actor, fabricate a run, infer a run from context, or reuse a provider-turn identity. Concrete selected actors are bound later through the admitted plan and actual materialization, not by relabeling a probe receipt.
     candidate_census: Already-live manager configurations remain distinct by exact concrete actor identity, including run_id, through workspace and provider preflight. Only pre-admission blueprints deduplicate by declaration-owned runless agent plan. Projecting a live candidate into a normal startup surface cannot merge sibling runs or suppress validation of differing resolved configurations.
-    selected_fork_census: The fixed admitted readiness projection owns the complete prepared actor census, comprising root declarations and every exact known constructed header's declared/required actors, including static keyless descendants below keyed parents and concrete template instances. All consume exact fixed-revision construction, parent and configuration evidence. Immediate recipients determine initial dispatch only, not provider preparation. Identical declaration/required-flow references denote one actor only when their complete configuration and derived prompt agree. Unknown future keyed instances and unrelated live/source actors are excluded. Every census actor requires configuration and provider/catalog probes before fork-domain mutation even when not an initial recipient; there is no reachability heuristic or late provider expansion. Preparation creates no entity, initial delivery or provider business turn. These plans are not selected-fork execution authority. Missing, crossed, same-name sibling, or live actor identities fail before provider resolution. Binding consumes this exact census and actual materialized fork-run actor identities; it cannot reconstruct correspondence from names.
+    selected_fork_census: The fixed admitted readiness projection owns the complete prepared actor census, comprising root declarations and every exact known constructed header's declared/required actors, including static keyless descendants below keyed parents and concrete template instances. All consume exact fixed-revision construction, parent and configuration evidence. Immediate recipients determine initial dispatch only, not provider preparation. Identical declaration/required-flow references denote one actor only when their complete configuration and derived prompt agree. Unknown future keyed instances and unrelated live/source actors are excluded. Every census actor requires configuration and provider/catalog probes before fork-domain mutation even when not an initial recipient; there is no reachability heuristic or late expansion of this initial catalog. A later canonically constructed child actor instead requires its exact current native readiness attempt, selected-run execution ownership, actor configuration and entity expectation, and unpublished physical lifecycle occurrence. Its prospective provider snapshot is separate and non-executable; it cannot borrow or extend the initial catalog. An originally admitted actor cannot replace its frozen configuration through this entrance. A source declaring future agents retains its configured factory and workspace even when the initial actor census is empty; declarations alone never admit an actor. Preparation creates no entity, initial delivery or provider business turn. These plans are not selected-fork execution authority. Missing, crossed, same-name sibling, or live actor identities fail before provider resolution. Binding consumes this exact census and actual materialized fork-run actor identities; it cannot reconstruct correspondence from names.
     selected_fork_preparation_authority:
       process_admission: The selected owner must be explicitly bound to one process and complete startup reconciliation before admitting preparation or staged activation. Unbound, unreconciled, retired and foreign-process calls fail closed; ambient process presence alone never supplies this admission. Preparation and staged activation must prove the bound process capability current and require any supplied capability to identify that exact authority, generation, acquisition, owner, boot, runtime instance and backend. A successor capability cannot revive a stale selected owner, even when the same in-memory process barrier is supplied.
       execution_kind: selected_fork_preparation
@@ -42148,10 +42623,54 @@ managed_agent_capability_surface:
       provider_construction: Preparation constructs provider protocol/catalog clients without completion controllers, event publishers, conversations, or managed/live session services. These dependencies are rejected, not inherited from a loaded runtime. Normal provider construction continues to require its completion authority. The readiness owner retains immutable derived prompts beside its sealed runtime projection, keyed by the exact runless plan; it neither persists rendered prompts in configuration JSON nor reconstructs them through a later Manager.
       source_consumption: Direct and admitted staged orchestration retain the loaded selected artifact and its projection through binding, execution, activation and failure disposition. Execution admission verifies the durable binding against that same loaded value; it cannot reload another artifact or release the preparation owner's projection. Materialization evidence is detached from mutable consumer copies. Closed, consumed, cancelled or incomplete preparation cannot expose a new materialization request. Both selected and original-source acquisition transfer their exact cleanup handles to the already-admitted preparation before loaded-evidence validation or original-carriage compilation can fail, including a loader result carrying both a resource and an error. Original carriage used by non-selected staged activation consumes this same acquisition/disposition owner without acquiring selected execution authority. Invalid loaded evidence cannot discard a release handle on its error return.
       resource_settlement: The existing preparation/context owner retains the exact original-source projection, selected-source projection, workspace projection and catalog lease through disposition and any retained-control handoff. Retirement first joins selected execution, then releases workspace, catalog and source resources before finishing process possession. Each successful resource release settles once; an error or panic leaves that resource and all not-yet-settled resources attached to the same owner for an explicit cleanup/retirement retry. Cleanup errors are propagated and panics remain visible, but neither means the resource settled. No cleanup-complete entry removal or successful process/store join is allowed until every release succeeds. A failed release fences further use without retiring source/selected siblings; successful retry removes the exact remaining resources without reopening execution. No detached cleanup, retry registry or generic cleanup framework is introduced.
+      retained_execution_failure: >
+        After activation acknowledgment, every serving exit transfers to the same preparation's disposition and
+        resource-retirement owner. Business failure, startup failure, cancellation and panic join subordinate work
+        before the exact current execution fence atomically records execution failure and the canonical run-lifecycle
+        terminal disposition. An already-terminal child keeps its committed disposition. The permanent activated
+        fork-operation response is immutable; later failure never becomes failed creation or child deletion.
+      selected_input_serving_order: >
+        After acknowledged activation, the existing container commits its exact initial source publications before
+        releasing withheld timer callbacks or starting the process-owned fan-out pump. It then releases the original
+        wakeups and dispatches the acknowledged publication results through the existing bus handoff owner.
+        Publication commit and dispatch are explicit separate steps; no SQL transaction spans handler execution or
+        waiting for a deadline. Undispatched acknowledged results retain their durable event/pipeline/delivery evidence
+        across startup failure or crash. Cleanup releases only their exact process-local publication claims, without
+        deleting committed evidence or repeating publication. Successor recovery consumes those existing rows.
+        Original due coordinates, current execution fencing and successful-commit cleanup diagnostics remain unchanged.
+        The selected generation-grant proof acquires the existing mutation-order fence, then the canonical child run,
+        before its execution/binding proof, matching timer mutation's run-before-execution order. Every current grant,
+        artifact, binding, lease and fingerprint check remains mandatory; observation never grants mutation authority.
+      selected_prepared_source_publication: >-
+        Non-executing attachment preparation validates every immutable selected source-publication frame through
+        the same selected input/schema admission consumed by serving. Missing or substituted original input,
+        changed source identity/type/mode/payload/schema and malformed retained occurrence projections refuse
+        before activation acknowledgment or source freezing. This step performs no route planning, publication
+        claim, SQL event/delivery mutation or receiver execution. Serving revalidates the same original input and
+        store-projected payload; a successful activation response is not a synchronous returned-event receipt.
+        An accepted operator stop owns the child's canceled disposition, while process retirement preserves a fenced
+        predecessor for startup recovery. Serving completion is joined without self-join or holding the runtime
+        resource mutex across that join. Business failure is diagnostic evidence, not resource-release failure.
+        Unacknowledged failure settlement and actual release failures remain attached to the exact preparation
+        with process possession for explicit retry; acknowledged settlement cleanup diagnostics do not repeat it.
+        Completion retirement joins accepted attempts before sampling their final settlement diagnostics, including
+        a cleanup failure returned after retirement began. The completion owner distinguishes an incomplete join
+        from a successfully joined diagnostic. Joined diagnostics remain observable without replaying acknowledged
+        work or retaining released registrations and leases; incomplete joins retain exact cleanup custody.
       retained_context_lifetime: After successful execution closure and activation of an active fork, the selected execution owner explicitly transfers its exact bound context and retained projection resources from synchronous orchestration to process-owned controls. Request completion settles the orchestration lease, not the selected occurrence or retained process ownership. Terminal or failed operations release their own resources after settlement. The selected owner registers preparation before loading and publishes materialization and its exact binding under the same admission boundary consumed by stop and retirement. Reset and process shutdown retire this owner, reject further preparation, cancel accepted operations, join their disposition and retained contexts, and only then permit process join and store release. A retired owner is terminal; fresh process composition, or fresh same-process composition under the retained-source reset supervisor after exact predecessor join, must construct a new owner rather than reopening it or adopting old tokens. The selected-store RunFork boundary owns reset-successor construction, and the process supervisor retains all unjoined candidate responsibility through convergence and final store release.
       selected_stop_commit: The named selected-fork stop operation consumes an exact durable binding and current process possession. Both selected stores reprove those facts in the terminal transaction, serialize against execution claim through the run lock, reject unsettled running execution, and consume the existing run-lifecycle terminalization owner. A prepared but unclaimed execution is terminally closed with cancellation evidence and a new fence in the same transaction, so a late claim cannot execute it. An admitted stop use remains process-owned while selected execution settles and joins; that stop owns terminal disposition, and execution failure cleanup must not separately discard its fork. A conflicting binding, stale process or failed terminal mutation changes no run, delivery, control or author-activity state. Terminal repeats retain the existing run-control refusal. This operation grants no ordinary ingress, historical replay, deferred execution or loaded-runtime authority.
       selected_stop_fork_point: Selected stop validates the exact closed fork-point kind, positive revision and event-ID correspondence in its durable binding. An event point requires its canonical event ID; a deployment revision has no event ID. Terminal repeat refusal and control/readback-only recovery apply to both kinds.
       startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, the original native admitted preparation and its fingerprint, exact persisted execution/fork/source/point/declaration/origin provenance, and a strictly earlier admitted process generation; a different UUID, lower counter alone or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Outside the exact selected_deployment_feed_recovery exception, recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery reconstructs an exact keyed run.fork result only from the permanent fork-operation record after activation; the expiring API cache is not result authority.
+      paused_unkeyed_recovery: >
+        A paused child without a permanent fork operation, recorded failure or unsettled external effects may
+        recover control-only from an interrupted prepared/running attachment. The existing effect inventory must
+        prove every operation and attempt across that child's execution generations settled; absent attempts,
+        uncertainty, failed inventory reads and cancellation cannot grant this disposition. Paused does not prove
+        never activated, and prior outputs remain unchanged. Planning is read-only. Only after current-process
+        and recorded-predecessor proof under the locked run/execution transaction may recovery compare-and-set
+        that exact prepared/running row to quiesced, advance its fence and remove its lease. No continuation,
+        replay grant, provider retry, business mutation or run-terminal mutation follows from this disposition.
+        Already quiesced/closed rows remain idempotent; keyed, running-child and failure-bearing policies are unchanged.
       selected_deployment_feed_recovery: >
         An interrupted selected execution may resume only a durably admitted finite deployment-feed phase under
         the same child and permanent fork operation. The process supervisor owns the rebuilt selected container;
@@ -42279,11 +42798,25 @@ managed_external_effect_authority:
     activation_gateway_observation: >
       A fresh initialize/list-only observation precedes publication of every exact executable receiver occurrence.
       It consumes the current normal grant or the process-owned frozen selected-preparation catalog, together with
-      the exact unpublished lifecycle token. It cannot reuse a startup receipt as current network proof, authorize
+      the exact unpublished lifecycle token. Before and after observation, the lifecycle owner also checks the
+      candidate actor's exact run-independent configuration revision against that occurrence's admitted revision;
+      identity equality alone cannot hide configuration drift. Cancellation, configuration change or a stale
+      occurrence refuses before route publication. This observation does not mint a durable run grant: ephemeral
+      process-only receivers and durable selected/readiness receivers retain their distinct existing authority
+      owners. It cannot reuse a startup receipt as current network proof, authorize
       tools/call or /tools, start a model, advance readiness, or impersonate a provider turn. Foreign, retired and
       already-published lifecycle tokens refuse. Existing lifecycle compensation owns failure; a current-occurrence
       replay or same-plan restamp does not create another attempt. Concrete actors observe their selected workspace
       without materializing a run-bound data projection; runless preparation remains non-executable.
+      A later constructed selected actor obtains a separate prospective snapshot only after the lifecycle owner
+      checks its exact current native readiness attempt, owning source, selected-run execution ownership and
+      declared actor/configuration/entity expectation. The native attempt and unpublished occurrence are rechecked
+      after observation. This neither extends the original frozen catalog nor authorizes an unknown instance from
+      its declaration; the existing construction/attachment and delivery owners retain execution authority.
+      Before observing a probing actor, initial or later, the retained selected workspace's existing lifecycle
+      owner initializes its prerequisites and system workspaces exactly once. An empty or API-only initial census
+      does not eagerly initialize future workspaces. Initialization never touches the source workspace; cancellation,
+      failure or release refuses observation through that same owner without weakening the post-observation checks.
       Non-executing host admission may create only its owned workspace root. Selected preparation requires exact
       receipts for every admitted subprocess descriptor, including mock, and preserves its closed actor census;
       an API descriptor does not acquire a fictional subprocess receipt. A complete native worker response retains
@@ -42648,6 +43181,25 @@ llm_completion_execution_authority:
     unavailable_accounting: One synthetic spend row uses MAX reservation amount, usage_accounting estimated, and accounting_basis accounting_unavailable_exhaustion; reservations are deleted in the same transaction.
   selected_fork:
     issuer: run_fork_selected_contract_runtime_executions is the sole container-generation issuer. The non-mutating admission is prerequisite evidence, never the execution grant.
+    activation_and_retention: >-
+      Resolve and admit the exact cut, materialize the child, prepare its exact stopped attachment, atomically activate
+      with the permanent fork-operation result, retain the process-owned executor, acknowledge activation, then serve
+      and settle owed work. Attachment prepares the exact selected generation, stopped agents, readiness attempts,
+      gateway and existing scheduler with callbacks withheld. No business publication, provider turn or timer firing
+      precedes committed activation and current selected authority. The runtime lease descends from the process-owned
+      selected occurrence, not the expiring request-orchestration lease. Direct and staged activation consume the same
+      attachment and retention owner. A committed activation remains successful after registration, handoff or cleanup
+      failure; retained diagnostics and durable recovery account for unfinished child work without another materialization.
+      Idle quiescence is not terminality: pending deadlines and replies keep their existing obligation owners live.
+      Normal settlement checks the canonical terminal run and exact current completion authority before quiescing and
+      closing execution. Process retirement cancels and joins serving, continuations and wakeups before releasing
+      manager, gateway, generation grant and source projection. No second executor or callback-only success is permitted.
+      A continuing successor admits the exact source-scoped persisted dynamic-readiness inventory before starting
+      its selected Manager, then completes that inventory's process topology after Manager start and before recovered
+      delivery synchronization. Completed durable readiness is evidence for fresh attachment, not a surviving process
+      route or execution grant. Late-constructed child actors retain their current selected ownership, native readiness
+      attempt and provider admission; they are neither borrowed from the ordinary Manager nor added to the frozen
+      preparation census. No creation input or settled provider response is replayed by topology attachment.
     lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition. Runtime execution admission, claim, launch, and new child effects require an active fork run. Exact fenced quiescence/failure and terminal close are completion finalizers and remain available after accepted fork-local work terminalizes the run; they MUST NOT reuse the active-run admission guard or leave a live execution generation behind a completed run.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.

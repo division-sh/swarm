@@ -19,7 +19,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -35,6 +34,8 @@ type eventCommitTxStore interface {
 	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
 	createReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	requireReplyContextContinuationTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	requireReplyContextReturnTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
 	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
 	PrepareDynamicFlowCreationOccurrenceCommitTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error)
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
@@ -148,9 +149,19 @@ func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context
 			return nil, fmt.Errorf("commit reply context creation: %w", err)
 		}
 	}
+	for _, continuation := range req.ReplyContinuations {
+		if err := c.store.requireReplyContextContinuationTx(ctx, c.attempt, continuation.Record); err != nil {
+			return nil, fmt.Errorf("commit reply context continuation: %w", err)
+		}
+	}
 	for _, claim := range req.ReplyClaims {
 		if err := c.store.claimReplyContextTx(ctx, c.attempt, claim); err != nil {
 			return nil, fmt.Errorf("commit reply context claim: %w", err)
+		}
+	}
+	for _, continuation := range req.ReplyReturns {
+		if err := c.store.requireReplyContextReturnTx(ctx, c.attempt, continuation.Record); err != nil {
+			return nil, fmt.Errorf("commit retained reply return: %w", err)
 		}
 	}
 	if requirePublicationClaim {
@@ -216,7 +227,7 @@ func commitSelectedForkEvent(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
-	insertLineage func(context.Context, *sql.Tx, runfork.RunForkSelectedContractExecutionLineage) error,
+	lineageOwner selectedForkLineageOwner,
 	req runtimebus.CommitSelectedForkEventRequest,
 ) (runtimebus.CommittedSelectedForkEvent, error) {
 	if err := validateSelectedForkCommitRequest(req); err != nil {
@@ -230,18 +241,19 @@ func commitSelectedForkEvent(
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	if result.AppendOutcome == runtimebus.EventAppendExactDuplicate {
+		if err := lineageOwner.RequireSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage); err != nil {
+			return runtimebus.CommittedSelectedForkEvent{}, err
+		}
 		return result, result.Validate()
 	}
 	if result.AppendOutcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("selected-fork operation returned invalid append outcome")
 	}
-	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return insertLineage(ctx, tx, req.Lineage)
-	}); err != nil {
-		return runtimebus.CommittedSelectedForkEvent{}, err
-	}
 	result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(ctx, req.Commit, true)
 	if err != nil {
+		return runtimebus.CommittedSelectedForkEvent{}, err
+	}
+	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes, req.Commit.ReplyContinuations, req.Commit.ReplyReturns); err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	return result, result.Validate()
@@ -251,14 +263,14 @@ func (s *EventPostgresOwner) CommitSelectedForkTx(ctx context.Context, attempt *
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event PostgreSQL run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork, req)
 }
 
 func (s *EventSQLiteOwner) CommitSelectedForkTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event SQLite run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork, req)
 }
 
 func commitPublication(
@@ -420,6 +432,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelinePostgresOwner); err != nil {
 					return err
 				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
+					return err
+				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)
 				if completeErr != nil {
 					return completeErr
@@ -516,6 +531,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 					return completeErr
 				}
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelineSQLiteOwner); err != nil {
+					return err
+				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
 					return err
 				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)

@@ -33,7 +33,7 @@ func commitWorkflowEngineTimerMutation(
 		case runtimepipeline.WorkflowTimerMutationInsert:
 			changed, err = insertWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)
 		case runtimepipeline.WorkflowTimerMutationCancel:
-			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)
+			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation, mutation.CancelCause, mutation.CancelledAt)
 		default:
 			err = fmt.Errorf("workflow timer mutation kind %q is unsupported", mutation.Kind)
 		}
@@ -68,18 +68,19 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 				flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
-				reconstruction_owner
+				reconstruction_owner, forked_from_point_kind, forked_from_point_revision, source_armed_at
 			)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, NULLIF($14, ''),
 		        NULL, $15, 'system', 'workflow_timer', 'active', $16, NULLIF($17, '')::uuid,
-		        NULLIF($18, '')::uuid, NULLIF($19, '')::uuid, NULLIF($20, ''))
+		        NULLIF($18, '')::uuid, NULLIF($19, '')::uuid, NULLIF($20, ''), NULLIF($21, ''), NULLIF($22, 0), $23)
 			ON CONFLICT(timer_id) DO NOTHING
 			RETURNING CAST(run_id AS TEXT), CAST(timer_id AS TEXT)
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
-			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner).Scan(&storedRunID, &storedTimerID)
+			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner,
+			activation.ForkedFromPointKind, activation.ForkedFromPointRevision, nullableWorkflowTimerSourceArmedAt(activation.SourceArmedAt)).Scan(&storedRunID, &storedTimerID)
 		if errors.Is(err, sql.ErrNoRows) {
 			err = nil
 		} else if err == nil {
@@ -92,16 +93,17 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 				flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
-				reconstruction_owner
+				reconstruction_owner, forked_from_point_kind, forked_from_point_revision, source_armed_at
 			)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', 'workflow_timer', 'active', ?,
-			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
+			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), ?)
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
-			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
+			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner,
+			activation.ForkedFromPointKind, activation.ForkedFromPointRevision, nullableWorkflowTimerSourceArmedAt(activation.SourceArmedAt))
 		if err == nil {
 			rows, err = result.RowsAffected()
 		}
@@ -127,7 +129,12 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 	return rows == 1, nil
 }
 
-func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, facts workflowTimerFactSink, expected runtimepipeline.WorkflowTimerActivation) (bool, error) {
+func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, facts workflowTimerFactSink, expected runtimepipeline.WorkflowTimerActivation, cause runtimepipeline.WorkflowTimerCancelCause, at time.Time) (bool, error) {
+	cause = runtimepipeline.WorkflowTimerCancelCause(strings.TrimSpace(string(cause)))
+	at = at.UTC().Truncate(time.Microsecond)
+	if err := expected.ValidateCancellation(cause, at); err != nil {
+		return false, err
+	}
 	persisted, found, err := loadWorkflowEngineTimerActivation(ctx, tx, postgres, expected.Ref)
 	if err != nil {
 		return false, err
@@ -139,14 +146,20 @@ func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 		return false, fmt.Errorf("workflow timer cancellation target %s changed before commit", expected.Ref.ActivationID)
 	}
 	if persisted.Status != "active" {
+		if cause != "" && (persisted.Status != "cancelled" || persisted.CancelCause != cause || !persisted.CancelledAt.Equal(at)) {
+			return false, fmt.Errorf("workflow timer cancellation conflicts with its persisted terminal cause or time")
+		}
 		return false, nil
 	}
-	query := `UPDATE timers SET status = 'cancelled' WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active'`
-	args := []any{expected.Ref.ActivationID}
+	if err := persisted.ValidateCancellation(cause, at); err != nil {
+		return false, err
+	}
+	query := `UPDATE timers SET status = 'cancelled', cancel_cause = NULLIF(?, ''), cancelled_at = ? WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active'`
+	args := []any{cause, nullableWorkflowTimerSourceArmedAt(at), expected.Ref.ActivationID}
 	storedRunID, storedTimerID := persisted.RunID, persisted.Ref.ActivationID
 	var rows int64
 	if postgres {
-		query = `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'
+		query = `UPDATE timers SET status = 'cancelled', cancel_cause = NULLIF($1, ''), cancelled_at = $2 WHERE timer_id = $3::uuid AND task_type = 'workflow_timer' AND status = 'active'
 			RETURNING CAST(run_id AS TEXT), CAST(timer_id AS TEXT)`
 		err = tx.QueryRowContext(ctx, query, args...).Scan(&storedRunID, &storedTimerID)
 		if err == nil {
@@ -175,6 +188,8 @@ func sameWorkflowEngineTimerCancellationTarget(left, right runtimepipeline.Workf
 	left, right = left.Canonical(), right.Canonical()
 	left.FireAt, right.FireAt = time.Time{}, time.Time{}
 	left.FiredAt, right.FiredAt = time.Time{}, time.Time{}
+	left.CancelCause, right.CancelCause = "", ""
+	left.CancelledAt, right.CancelledAt = time.Time{}, time.Time{}
 	left.Status, right.Status = "", ""
 	return sameWorkflowEngineTimerActivation(left, right)
 }
@@ -191,7 +206,8 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 		       fire_event, fire_payload, routing_source, execution_mode, fire_at, recurring, COALESCE(recurrence_interval, ''),
 		       owner_agent, status, fired_at, created_at, COALESCE(CAST(source_timer_id AS TEXT), ''),
 		       COALESCE(CAST(forked_from_run_id AS TEXT), ''), COALESCE(CAST(forked_from_event_id AS TEXT), ''),
-		       COALESCE(reconstruction_owner, '')
+		       COALESCE(reconstruction_owner, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_point_revision, 0), source_armed_at, COALESCE(cancel_cause, ''), cancelled_at
 		FROM timers WHERE timer_id = ? AND task_type = 'workflow_timer'
 	`
 	args := []any{activationID}
@@ -199,9 +215,9 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 		query = strings.Replace(query, "timer_id = ?", "timer_id = $1::uuid", 1) + " FOR UPDATE"
 	}
 	var (
-		taskID, interval, status                                          string
-		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw any
-		activation                                                        runtimepipeline.WorkflowTimerActivation
+		taskID, interval, status                                                                            string
+		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw, sourceArmedAtRaw, cancelledAtRaw any
+		activation                                                                                          runtimepipeline.WorkflowTimerActivation
 	)
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&taskID, &activation.RunID, &activation.EntityID, &activation.Route.ScopeKey,
@@ -209,6 +225,8 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 		&activation.EventType, &payloadRaw, &routingSourceRaw, &activation.ExecutionMode, &fireAtRaw, &activation.Recurring, &interval,
 		&activation.OwnerAgent, &status, &firedAtRaw, &createdAtRaw, &activation.SourceTimerID,
 		&activation.ForkedFromRunID, &activation.ForkedFromEventID, &activation.ReconstructionOwner,
+		&activation.ForkedFromPointKind, &activation.ForkedFromPointRevision, &sourceArmedAtRaw,
+		&activation.CancelCause, &cancelledAtRaw,
 	)
 	if err == sql.ErrNoRows {
 		return runtimepipeline.WorkflowTimerActivation{}, false, nil
@@ -241,6 +259,12 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 	if activation.FiredAt, _, err = sqliteTimeValue(firedAtRaw); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, false, err
 	}
+	if activation.SourceArmedAt, _, err = sqliteTimeValue(sourceArmedAtRaw); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, false, err
+	}
+	if activation.CancelledAt, _, err = sqliteTimeValue(cancelledAtRaw); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, false, err
+	}
 	if interval = strings.TrimSpace(interval); interval != "" {
 		duration, ok := timeridentity.ParseDelayDuration(interval)
 		if !ok {
@@ -253,6 +277,13 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 		return runtimepipeline.WorkflowTimerActivation{}, false, err
 	}
 	return activation, true, nil
+}
+
+func nullableWorkflowTimerSourceArmedAt(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
 }
 
 func workflowEngineJSONBytes(raw any) []byte {

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -133,17 +134,55 @@ func TestFixedRevisionBarrierScheduleRejectsSubstitution(t *testing.T) {
 }
 
 func TestFixedRevisionBarrierExtraScheduleRemainsBlocker(t *testing.T) {
-	snapshot, obligations := barrierScheduleProjectionFixture(t)
-	extra := snapshot.Timers[0]
-	extra.TimerID = uuid.NewString()
-	snapshot.Timers = append(snapshot.Timers, extra)
-	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, nil, nil, obligations)
-	if err != nil || !evidence.RelevantTimer {
-		t.Fatalf("extra schedule escaped generic gate: %+v %v", evidence, err)
-	}
-	if reflect.DeepEqual(snapshot.Timers[0], snapshot.Timers[1]) {
-		t.Fatal("extra schedule fixture must have distinct activation")
-	}
+	t.Run("unowned_schedule", func(t *testing.T) {
+		snapshot, obligations := barrierScheduleProjectionFixture(t)
+		extra := snapshot.Timers[0]
+		extra.TimerID = uuid.NewString()
+		registration := obligations[0].Barrier.Registration
+		registration.IntentKey.TriggeringDeliveryID = uuid.NewString()
+		ref, _ := registration.Handle.JoinRef()
+		ref, err := ref.BindFanOutIntent(registration.IntentKey.TriggeringDeliveryID, ref.Generation())
+		if err != nil {
+			t.Fatal(err)
+		}
+		registration.Handle, err = timeridentity.JoinCompleteHandle(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		command, err := genericschedule.FanOutBarrierAdmission(registration, *obligations[0].Barrier.Summary, extra.FireAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		extra.ScheduleKey, extra.TimerName, extra.TaskID = command.ScheduleKey, command.ScheduleKey, command.TaskID
+		extra.ImmutableHash, err = command.ImmutableHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		extra.FirePayload, err = canonicaljson.Encode(command.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := projectRunForkGenericActivation(extra); err != nil {
+			t.Fatalf("unowned schedule is not internally consistent: %v", err)
+		}
+		snapshot.Timers = append(snapshot.Timers, extra)
+		evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, nil, nil, obligations)
+		if err != nil || !evidence.RelevantTimer {
+			t.Fatalf("extra schedule escaped generic gate: %+v %v", evidence, err)
+		}
+		if reflect.DeepEqual(snapshot.Timers[0], snapshot.Timers[1]) {
+			t.Fatal("extra schedule fixture must have distinct activation")
+		}
+	})
+	t.Run("duplicate_scoped_key", func(t *testing.T) {
+		snapshot, obligations := barrierScheduleProjectionFixture(t)
+		extra := snapshot.Timers[0]
+		extra.TimerID = uuid.NewString()
+		snapshot.Timers = append(snapshot.Timers, extra)
+		if _, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, nil, nil, obligations); err == nil || !strings.Contains(err.Error(), "repeats scoped key") {
+			t.Fatalf("duplicate scoped schedule key was not rejected: %v", err)
+		}
+	})
 }
 
 // This is a transport/semantic owner fixture. The both-store six-state matrix
@@ -199,7 +238,7 @@ func barrierScheduleProjectionFixture(t *testing.T) (*runForkRevisionSnapshot, [
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
-	timer := runForkRevisionTimer{TimerID: id, TimerName: command.ScheduleKey, ScheduleKey: command.ScheduleKey, ScheduleScope: scope, ImmutableHash: hash, RunID: runID, EntityID: runID, FireEvent: command.EventType, FirePayload: payload, RoutingSource: source, ExecutionMode: string(command.ExecutionMode), FireAt: at, InitialFireAt: &at, OwnerAgent: command.OwnerID, OwnerKind: string(command.OwnerKind), TaskID: command.TaskID, DueBasisKind: string(genericschedule.DueAbsolute), DueBasisAbsolute: &at, TaskType: "timer", Status: "active", CreatedAt: at}
+	timer := runForkRevisionTimer{TimerSnapshot: runforkrevision.TimerSnapshot{TimerID: id, TimerName: command.ScheduleKey, ScheduleKey: command.ScheduleKey, ScheduleScope: scope, ImmutableHash: hash, RunID: runID, EntityID: runID, FireEvent: command.EventType, FirePayload: payload, RoutingSource: source, ExecutionMode: string(command.ExecutionMode), FireAt: at, InitialFireAt: &at, OwnerAgent: command.OwnerID, OwnerKind: string(command.OwnerKind), TaskID: command.TaskID, DueBasisKind: string(genericschedule.DueAbsolute), DueBasisAbsolute: &at, TaskType: "timer", Status: "active", CreatedAt: at}}
 	barrier := &fanoutbarrier.Barrier{Registration: registration, Status: fanoutbarrier.StatusClosedPending, ScheduleKey: command.ScheduleKey, ScheduleActivationID: id, Summary: &summary, UpdatedAt: at}
 	obligations := []runfork.RunForkFanOutObligation{{Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: key, PlanRef: plan}}, Barrier: barrier}}
 	return &runForkRevisionSnapshot{RunID: runID, Timers: []runForkRevisionTimer{timer}}, obligations

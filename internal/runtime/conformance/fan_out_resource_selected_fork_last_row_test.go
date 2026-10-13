@@ -89,10 +89,17 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 				finished <- forkResult{result: result, rpcErr: rpcErr, err: err}
 			}()
 			var finalEventID string
+			var result forkResult
+			select {
+			case result = <-finished:
+				if result.err != nil || len(result.rpcErr) != 0 || result.result.ForkRunStatus != "running" {
+					t.Fatalf("R6a activation did not acknowledge its retained owner: %+v", result)
+				}
+			case <-ctx.Done():
+				t.Fatalf("R6a activation acknowledgment not reached: %v", ctx.Err())
+			}
 			select {
 			case finalEventID = <-gate.entered:
-			case result := <-finished:
-				t.Fatalf("R6a fork finished before selected final receiver claim: %+v", result)
 			case <-ctx.Done():
 				t.Fatalf("R6a selected final receiver claim not reached: %v", ctx.Err())
 			}
@@ -100,8 +107,6 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 				select {
 				case eventID := <-settled:
 					matched = eventID == finalEventID
-				case result := <-finished:
-					t.Fatalf("R6a fork finished before final publication settlement: %+v", result)
 				case <-ctx.Done():
 					t.Fatalf("R6a final publication settlement not reached: %v", ctx.Err())
 				}
@@ -141,33 +146,19 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 					t.Fatal(err)
 				}
 			}
-			if operationState != "materialized" || executionState != "running" || feedStatus != "closed" || cursor != 1 || cardinality != 1 || outcomes != 1 || receipts != 1 || deliveryStatus != "pending" || !handoff || attempts != 0 || gate.deferred.Load() == 0 {
+			if operationState != "activated" || executionState != "running" || feedStatus != "closed" || cursor != 1 || cardinality != 1 || outcomes != 1 || receipts != 1 || deliveryStatus != "pending" || !handoff || attempts != 0 || gate.deferred.Load() == 0 || childID != result.result.ForkRunID {
 				t.Fatalf("R6a final-row pending cut: operation=%s execution=%s feed=%s cursor=%d/%d outcomes=%d receipts=%d delivery=%s handoff=%t attempts=%d deferred=%d", operationState, executionState, feedStatus, cursor, cardinality, outcomes, receipts, deliveryStatus, handoff, attempts, gate.deferred.Load())
-			}
-			select {
-			case result := <-finished:
-				t.Fatalf("R6a returned success or failure with final receiver pending: %+v", result)
-			default:
 			}
 			if err := owner.FenceSelectedContexts(); err != nil {
 				t.Fatal(err)
 			}
 			gate.held.Store(false)
-			var result forkResult
-			select {
-			case result = <-finished:
-			case <-ctx.Done():
-				t.Fatalf("R6a fenced pending selected receiver did not relinquish execution: %v", ctx.Err())
-			}
-			if result.err == nil && len(result.rpcErr) == 0 {
-				t.Fatalf("R6a unfinished receiver was reported as activated: %+v", result.result)
-			}
 			var activated int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE idempotency_key=$1 AND state='activated'`, key).Scan(&activated); err != nil {
 				t.Fatal(err)
 			}
-			if activated != 0 {
-				t.Fatal("R6a pending receiver falsely activated selected fork")
+			if activated != 1 {
+				t.Fatal("R6a retirement rewrote the acknowledged activation")
 			}
 		})
 	}

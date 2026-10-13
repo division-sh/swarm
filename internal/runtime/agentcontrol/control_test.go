@@ -1,4 +1,4 @@
-package agentcontrol
+package agentcontrol_test
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -15,14 +16,14 @@ import (
 )
 
 func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
-	evt, err := NewDirectiveEvent(SendDirectiveRequest{
+	evt, err := agentcontrol.NewDirectiveEvent(agentcontrol.SendDirectiveRequest{
 		AgentID:   "agent-1",
 		Directive: "run corpus",
 		RunID:     "00000000-0000-0000-0000-000000000701",
-		Source:    DirectiveSourceV1RPC,
-	}, RunTargetResolution{
+		Source:    agentcontrol.DirectiveSourceV1RPC,
+	}, agentcontrol.RunTargetResolution{
 		RunID: "00000000-0000-0000-0000-000000000701",
-		Mode:  RunResolutionSpecified,
+		Mode:  agentcontrol.RunResolutionSpecified,
 	}, "00000000-0000-0000-0000-000000000702", "00000000-0000-0000-0000-000000000703", time.Date(2026, 5, 14, 3, 10, 0, 0, time.UTC), executionposture.Live)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
@@ -31,8 +32,8 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if payload["mode"] != DirectiveEventMode {
-		t.Fatalf("mode = %#v, want %q", payload["mode"], DirectiveEventMode)
+	if payload["mode"] != agentcontrol.DirectiveEventMode {
+		t.Fatalf("mode = %#v, want %q", payload["mode"], agentcontrol.DirectiveEventMode)
 	}
 	if payload["directive_text"] != "run corpus" || payload["run_id"] != evt.RunID() {
 		t.Fatalf("payload = %#v", payload)
@@ -51,9 +52,9 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 
 func TestNewDirectiveEventRequiresExactSpecifiedRunAuthority(t *testing.T) {
 	runID := "00000000-0000-0000-0000-000000000711"
-	event, err := NewDirectiveEvent(
-		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: DirectiveSourceV1RPC},
-		RunTargetResolution{RunID: runID, Mode: RunResolutionSpecified},
+	event, err := agentcontrol.NewDirectiveEvent(
+		agentcontrol.SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: agentcontrol.DirectiveSourceV1RPC},
+		agentcontrol.RunTargetResolution{RunID: runID, Mode: agentcontrol.RunResolutionSpecified},
 		"00000000-0000-0000-0000-000000000712",
 		"00000000-0000-0000-0000-000000000713",
 		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
@@ -70,9 +71,9 @@ func TestNewDirectiveEventRequiresExactSpecifiedRunAuthority(t *testing.T) {
 		t.Fatalf("run disposition = %q, want %q", admitted.RunDisposition(), events.AdmittedRunRequireActive)
 	}
 
-	if _, err := NewDirectiveEvent(
-		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: "00000000-0000-0000-0000-000000000721", Source: DirectiveSourceV1RPC},
-		RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: "unknown"},
+	if _, err := agentcontrol.NewDirectiveEvent(
+		agentcontrol.SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: "00000000-0000-0000-0000-000000000721", Source: agentcontrol.DirectiveSourceV1RPC},
+		agentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: "unknown"},
 		"00000000-0000-0000-0000-000000000722",
 		"00000000-0000-0000-0000-000000000723",
 		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
@@ -80,9 +81,9 @@ func TestNewDirectiveEventRequiresExactSpecifiedRunAuthority(t *testing.T) {
 	); err == nil {
 		t.Fatal("NewDirectiveEvent unknown resolution error = nil")
 	}
-	if _, err := NewDirectiveEvent(
-		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: DirectiveSourceV1RPC},
-		RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: RunResolutionSpecified},
+	if _, err := agentcontrol.NewDirectiveEvent(
+		agentcontrol.SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: agentcontrol.DirectiveSourceV1RPC},
+		agentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: agentcontrol.RunResolutionSpecified},
 		"00000000-0000-0000-0000-000000000722",
 		"00000000-0000-0000-0000-000000000723",
 		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),

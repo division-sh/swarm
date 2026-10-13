@@ -374,8 +374,11 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 		t.Fatal(err)
 	}
 	instanceKey := ""
+	// Initial fields are authored separately from current-at-cut state and IDs.
+	initialFields := map[string]any{}
 	if scope.Mode == "template" {
 		instanceKey = "recorded-business-key"
+		initialFields["worker_id"] = "recorded-business-key"
 	}
 	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 	if err != nil {
@@ -399,7 +402,7 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), Mode: scope.Mode,
 		InstanceID: instance.InstanceID, StorageRef: path, EntityID: id, InstanceKey: instanceKey,
 		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
-		EntityType: entityType, StageDefined: graph.StageCount() != 0, CurrentState: initial.ID(), Fields: map[string]any{}, CreatedAt: entered, EnteredStageAt: entered,
+		EntityType: entityType, StageDefined: graph.StageCount() != 0, CurrentState: initial.ID(), Fields: initialFields, CreatedAt: entered, EnteredStageAt: entered,
 	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, entered)
 	if err != nil {
 		t.Fatal(err)

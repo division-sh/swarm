@@ -11,27 +11,24 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred_work_owner_unavailable"
 
-const (
-	selectedContractDeferredWorkRevisionTimerHistory = "revision_timer_history"
-	selectedContractDeferredWorkWorkflowTimer        = "workflow_timer"
-	selectedContractDeferredWorkWorkflowJoinTimeout  = "workflow_join_timeout"
-	selectedContractDeferredWorkFanOutBarrier        = "fan_out_delivery_barrier"
-	selectedContractDeferredWorkDynamicFlowCreation  = "dynamic_flow_instance_creation"
-)
+const selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
 
 type selectedContractDeferredWorkAdmission struct {
-	owner           string
-	sourceRunID     string
-	forkPoint       runfork.RunForkPoint
-	workflowName    string
-	workflowVersion string
-	fanOutPlanRefs  []runtimecontracts.FanOutPlanRef
+	owner                       string
+	sourceRunID                 string
+	forkPoint                   runfork.RunForkPoint
+	workflowName                string
+	workflowVersion             string
+	fanOutPlanRefs              []runtimecontracts.FanOutPlanRef
+	fanOutPlans                 semanticview.FanOutPlanCarriage
+	dynamicConstructionRequired bool
 }
 
 func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
@@ -48,28 +45,33 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 	if err != nil {
 		return selectedContractDeferredWorkAdmission{}, err
 	}
-
-	capabilities, revisionTimerHistory := selectedContractDeferredWorkCapabilities(plan, source)
-	if len(capabilities) > 0 {
-		detailCode := selectedContractDeferredWorkOwnerUnavailable
-		if revisionTimerHistory {
-			detailCode = runfork.RunForkBlockerTimerHistoryUnproven
+	var fanOutPlans semanticview.FanOutPlanCarriage
+	if len(fanOutPlanRefs) != 0 {
+		fanOutPlans, err = semanticview.CompileFanOutPlanCarriage(source)
+		if err != nil {
+			return selectedContractDeferredWorkAdmission{}, err
 		}
+	}
+
+	capabilities := selectedContractDeferredWorkCapabilities(source)
+	if len(capabilities) > 0 {
 		return selectedContractDeferredWorkAdmission{}, runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
-			detailCode,
+			selectedContractDeferredWorkOwnerUnavailable,
 			"selected-contract-run-fork",
 			"admit-deferred-work-ownership",
 			map[string]any{"capabilities": capabilities},
 		)
 	}
 	return selectedContractDeferredWorkAdmission{
-		owner:           runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		sourceRunID:     sourceRunID,
-		forkPoint:       plan.ForkPoint,
-		workflowName:    workflowName,
-		workflowVersion: workflowVersion,
-		fanOutPlanRefs:  fanOutPlanRefs,
+		owner:                       runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+		sourceRunID:                 sourceRunID,
+		forkPoint:                   plan.ForkPoint,
+		workflowName:                workflowName,
+		workflowVersion:             workflowVersion,
+		fanOutPlanRefs:              fanOutPlanRefs,
+		fanOutPlans:                 fanOutPlans,
+		dynamicConstructionRequired: selectedContractSourceCanCreateDynamicFlow(source),
 	}, nil
 }
 
@@ -87,6 +89,9 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, poin
 	if a.workflowName != strings.TrimSpace(source.WorkflowName()) || a.workflowVersion != strings.TrimSpace(source.WorkflowVersion()) {
 		return fmt.Errorf("selected-contract deferred-work admission workflow identity does not match selected source")
 	}
+	if a.dynamicConstructionRequired != selectedContractSourceCanCreateDynamicFlow(source) {
+		return fmt.Errorf("selected-contract deferred-work construction requirement no longer matches selected source")
+	}
 	wantFanOutPlanRefs, err := selectedContractCompiledFanOutPlans(source)
 	if err != nil {
 		return err
@@ -98,14 +103,15 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, poin
 			}
 		}
 	}
-	if capabilities, _ := selectedContractDeferredWorkCapabilities(runfork.RunForkPlan{}, source); len(capabilities) > 0 {
+	if capabilities := selectedContractDeferredWorkCapabilities(source); len(capabilities) > 0 {
 		return fmt.Errorf("selected-contract deferred-work admission source now declares unsupported capabilities: %s", strings.Join(capabilities, ","))
 	}
 	return nil
 }
 
 func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticview.Source) ([]runtimecontracts.FanOutPlanRef, error) {
-	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+	requirements, err := runfork.FanOutContinuationRequirements(plan)
+	if err != nil {
 		return nil, err
 	}
 	compiled, err := selectedContractCompiledFanOutPlans(source)
@@ -127,13 +133,16 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 			}
 			continue
 		}
+		if !requirements[obligation.Intent.Request.Key] {
+			continue
+		}
 		sourceRef := obligation.Intent.Request.PlanRef
 		selectedRef, ok := compiled[sourceRef.ElementRef]
 		if !ok {
 			return nil, fmt.Errorf("selected contract is missing pending fan_out declaration %s", fanOutElementLabel(sourceRef.ElementRef))
 		}
-		if selectedRef.SemanticDigest != sourceRef.SemanticDigest {
-			return nil, fmt.Errorf("selected contract fan_out declaration %s changed semantic digest", fanOutElementLabel(sourceRef.ElementRef))
+		if err := requireSelectedFanOutCorrespondence(obligation.Intent.Request, selectedRef, source); err != nil {
+			return nil, fmt.Errorf("selected contract fan_out correspondence: %w", err)
 		}
 		if obligation.Barrier != nil {
 			if err := obligation.Barrier.Validate(); err != nil {
@@ -172,6 +181,14 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 	return refs, nil
 }
 
+func requireSelectedFanOutCorrespondence(request fanoutobligation.IntentRequest, selectedRef runtimecontracts.FanOutPlanRef, source semanticview.Source) error {
+	selectedPlan, ok := source.FanOutPlanForElement(selectedRef.ElementRef)
+	if !ok || selectedPlan.Ref != selectedRef {
+		return fmt.Errorf("selected contract fan_out declaration %s has contradictory compiled evidence", fanOutElementLabel(selectedRef.ElementRef))
+	}
+	return request.AdmitSelectedPlan(selectedRef, selectedPlan.SemanticEvidence())
+}
+
 func selectedContractCompiledFanOutPlans(source semanticview.Source) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
 	if source == nil {
 		return nil, fmt.Errorf("selected-contract fan-out admission requires selected semantic source")
@@ -194,41 +211,22 @@ func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
 	return identity.Key()
 }
 
-func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source semanticview.Source) ([]string, bool) {
+func selectedContractDeferredWorkCapabilities(source semanticview.Source) []string {
 	capabilities := make([]string, 0, 4)
-	revisionTimerHistory := false
-	for _, blocker := range plan.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerTimerHistoryUnproven {
-			revisionTimerHistory = true
-			capabilities = append(capabilities, selectedContractDeferredWorkRevisionTimerHistory)
-			break
-		}
-	}
-	if source != nil && len(source.WorkflowTimers()) > 0 {
-		capabilities = append(capabilities, selectedContractDeferredWorkWorkflowTimer)
-	}
+	// The retained manager owns construction and readiness for current compiled
+	// resolution modes. Source capability is not execution permission: the normal
+	// container sequence still admits current authority before starting that owner.
 	if source != nil {
-		hasTimedJoin, hasFanOutBarrier := false, false
-		for _, join := range source.WorkflowJoins() {
-			if join.Spec.Deadline != nil && strings.TrimSpace(join.Spec.Deadline.After) != "" {
-				hasTimedJoin = true
+		graph := runtimepinrouting.CompileConnectGraph(source)
+		for _, plan := range graph.Plans() {
+			if key := plan.InstanceKey(); key != nil && !key.Mode().Valid() {
+				capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
+				break
 			}
-			if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
-				hasFanOutBarrier = true
-			}
-		}
-		if hasTimedJoin {
-			capabilities = append(capabilities, selectedContractDeferredWorkWorkflowJoinTimeout)
-		}
-		if hasFanOutBarrier {
-			capabilities = append(capabilities, selectedContractDeferredWorkFanOutBarrier)
-		}
-		if selectedContractSourceCanCreateDynamicFlow(source) {
-			capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
 		}
 	}
 	sort.Strings(capabilities)
-	return capabilities, revisionTimerHistory
+	return capabilities
 }
 
 func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool {

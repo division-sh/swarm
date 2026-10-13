@@ -60,7 +60,7 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 		}
 		eventsByID[record.EventID] = admitted.Event()
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(source_event_id AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
+	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(COALESCE(source_obligation_event_id,source_event_id) AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +158,23 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 			if err := request.ValidateDiagnostic(event); err != nil {
 				return reject(id, err)
 			}
+		}
+		if roots[id] {
+			// These are exact selected physical inputs, not newly emitted
+			// results under a reminted journal identity. Recheck their source
+			// partition through the publication owner before final settlement.
+			binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
+			if err != nil {
+				return reject(id, err)
+			}
+			lineage, selected := event.SelectedForkLineage()
+			if !selected || lineage.SourceRunID() != binding.SourceRunID {
+				return reject(id, fmt.Errorf("selected input has foreign publication binding"))
+			}
+			if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, lineage.SourceEventID(), postgres); err != nil {
+				return reject(id, err)
+			}
+			continue
 		}
 		resultType, validResult := false, false
 		for _, request := range requests {

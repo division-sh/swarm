@@ -111,7 +111,7 @@ func discardMaterializedSelectedContractExecutionFork(ctx context.Context, forkR
 				runforkrevision.FamilyEntityMetadata, runforkrevision.FamilyEventDeliveries,
 				runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts,
 				runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
-				runforkrevision.FamilyAgentSessions, runforkrevision.FamilyFanOutObligations,
+				runforkrevision.FamilyAgentSessions, runforkrevision.FamilyReplyContexts, runforkrevision.FamilyFanOutObligations,
 			} {
 				if err := attempt.AddWholeFamily(forkRunID, family); err != nil {
 					return err
@@ -144,6 +144,7 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 		{"committed replay scopes", `DELETE FROM committed_replay_scopes WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1)`},
 		{"timers", `DELETE FROM timers WHERE run_id = $1`},
 		{"activity evidence", `DELETE FROM activity_attempts WHERE run_id = $1`},
+		{"reply contexts", `DELETE FROM reply_contexts WHERE run_id = $1`},
 		{"mutations", `DELETE FROM entity_mutations WHERE run_id = $1`},
 		{"constructed instances", `DELETE FROM flow_instances WHERE run_id = $1`},
 	}

@@ -146,6 +146,14 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, postgres bool,
 
 func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID string, capsule fanoutobligation.Capsule) (fanoutobligation.Capsule, error) {
 	projected := capsule
+	if err := capsule.Validate(); err != nil {
+		return capsule, err
+	}
+	var err error
+	projected.Context, err = projectRunForkConstructionContext(plan, forkRunID, capsule.Context)
+	if err != nil {
+		return capsule, err
+	}
 	node, err := identity.ParseExecutableNodeKey(capsule.NodeKey)
 	if err != nil || node.FlowPath() != capsule.ExecutionFlowID {
 		return capsule, fmt.Errorf("fan-out execution scope contradicts its node")

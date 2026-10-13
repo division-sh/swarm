@@ -37,8 +37,10 @@ const (
 )
 
 type WorkflowTimerMutation struct {
-	Kind       WorkflowTimerMutationKind
-	Activation WorkflowTimerActivation
+	Kind        WorkflowTimerMutationKind
+	Activation  WorkflowTimerActivation
+	CancelCause WorkflowTimerCancelCause
+	CancelledAt time.Time
 }
 
 func (m WorkflowTimerMutation) Validate(runID string, route runtimeflowidentity.Route, entityID string) error {
@@ -52,6 +54,9 @@ func (m WorkflowTimerMutation) Validate(runID string, route runtimeflowidentity.
 	}
 	switch m.Kind {
 	case WorkflowTimerMutationInsert:
+		if m.CancelCause != "" || !m.CancelledAt.IsZero() {
+			return fmt.Errorf("workflow timer insertion cannot carry cancellation instructions")
+		}
 		if m.Activation.Status != workflowTimerStatusActive {
 			return fmt.Errorf("workflow timer insertion requires active status")
 		}
@@ -59,6 +64,7 @@ func (m WorkflowTimerMutation) Validate(runID string, route runtimeflowidentity.
 		if m.Activation.Status != workflowTimerStatusActive {
 			return fmt.Errorf("workflow timer cancellation requires the exact active record")
 		}
+		return m.Activation.ValidateCancellation(m.CancelCause, m.CancelledAt)
 	default:
 		return fmt.Errorf("workflow timer mutation kind %q is unsupported", m.Kind)
 	}
@@ -419,7 +425,6 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		command.RunID = runID
 		if workflowLifecycleHasScheduleMutation(plan.Schedules, command.ScheduleKey) {
 			continue
 		}
@@ -681,7 +686,6 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			if err != nil {
 				return err
 			}
-			command.RunID = runID
 			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		}
 		plan.RequestCompletionCandidate = true
@@ -762,7 +766,6 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		if err != nil {
 			return err
 		}
-		command.RunID = runID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
@@ -787,14 +790,12 @@ func (pc *PipelineCoordinator) planPendingJoinContinuations(owner runtimeflowide
 			if err != nil {
 				return err
 			}
-			command.RunID = owner.RunID
 			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_closed", CancelledAt: occurredAt})
 		}
 		command, err := joinSchedule(pc.SemanticSource(), owner, instance, activation, mode)
 		if err != nil {
 			return err
 		}
-		command.RunID = owner.RunID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	return nil

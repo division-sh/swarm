@@ -339,8 +339,8 @@ func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-				operator_reference_event_id, route_settlement
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				operator_reference_event_id, route_settlement, run_owner_key
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE('run:' || CAST(?3 AS TEXT), ''))
 	`, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
@@ -348,11 +348,12 @@ func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-				operator_reference_event_id, route_settlement
+				operator_reference_event_id, route_settlement, run_owner_key
 			) VALUES (
 				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10::bytea,
 				$11, $12, $13, $14, $15, $16, $17, $18, $19,
-				$20::uuid, $21, $22, $23, $24::jsonb, $25::jsonb, $26::jsonb, $27::uuid, $28::jsonb
+				$20::uuid, $21, $22, $23, $24::jsonb, $25::jsonb, $26::jsonb, $27::uuid, $28::jsonb,
+				COALESCE('run:' || CAST($3::uuid AS TEXT), '')
 			)
 		`, args
 }

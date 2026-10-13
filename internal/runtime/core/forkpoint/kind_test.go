@@ -16,11 +16,15 @@ func TestValidateIdentityClosedForkPoints(t *testing.T) {
 	}{
 		{Event, 1, eventID, true},
 		{DeploymentRevision, 2, "", true},
+		{RunStart, 3, "", true},
 		{Event, 0, eventID, false},
 		{Event, 1, "", false},
 		{Event, 1, "not-a-uuid", false},
 		{DeploymentRevision, 0, "", false},
 		{DeploymentRevision, 2, eventID, false},
+		{RunStart, 0, "", false},
+		{RunStart, -1, "", false},
+		{RunStart, 3, eventID, false},
 		{Kind("unknown"), 1, "", false},
 	} {
 		err := ValidateIdentity(tc.kind, tc.revision, tc.eventID)

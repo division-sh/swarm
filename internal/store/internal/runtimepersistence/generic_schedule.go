@@ -22,6 +22,14 @@ func (s *SQLiteRuntimeStore) ListActiveGenericScheduleActivations(ctx context.Co
 	return s.genericScheduleSQLiteOwner.ListActiveGenericScheduleActivations(ctx)
 }
 
+func (s *PostgresStore) ListActiveGenericScheduleActivationsForRun(ctx context.Context, runID string) ([]runtimegenericschedule.Activation, error) {
+	return s.genericSchedulePostgresOwner.ListActiveGenericScheduleActivationsForRun(ctx, runID)
+}
+
+func (s *SQLiteRuntimeStore) ListActiveGenericScheduleActivationsForRun(ctx context.Context, runID string) ([]runtimegenericschedule.Activation, error) {
+	return s.genericScheduleSQLiteOwner.ListActiveGenericScheduleActivationsForRun(ctx, runID)
+}
+
 func (s *PostgresStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
 	return s.genericSchedulePostgresOwner.PrepareGenericScheduleOccurrence(ctx, wakeup)
 }

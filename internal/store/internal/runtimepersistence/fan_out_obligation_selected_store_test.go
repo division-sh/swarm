@@ -1901,76 +1901,116 @@ func TestPinnedResourceVersionRequiresPinAndRejectsHandlerRemapBothStores(t *tes
 }
 
 func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 2, createdAt)
-	captureRunForkTestRevision(t, db, fixture.runID)
-	forkPointEventID := uuid.NewString()
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.selected-bundle", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(time.Second))
-	captureRunForkTestRevision(t, db, fixture.runID)
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			for _, selectionMode := range []string{"unchanged", "changed_emit"} {
+				t.Run(selectionMode, func(t *testing.T) {
+					opened := backend.open(t)
+					db := opened.db
+					owner := opened.store.(runForkSelectedLifecycleStore)
+					createdAt := time.Now().UTC().Truncate(time.Microsecond)
+					ctx, fixture := seedDeclaredForkFanOutFixture(t, backend.name, opened, 2, createdAt)
+					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, backend.name == "postgres")
+					forkPointEventID := uuid.NewString()
+					point := eventtest.ExistingRunRootIngressWithRoutingSource(forkPointEventID, "fork.selected-bundle", "fork-test", "", []byte(`{}`), 0, fixture.runID, events.EventEnvelope{}, eventtest.RootRoutingSource(fixture.runID), createdAt.Add(time.Second))
+					if err := insertCanonicalEventRecordFixture(ctx, opened.store, point); err != nil {
+						t.Fatal(err)
+					}
+					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, backend.name == "postgres")
 
-	targetRoot := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
-	schemaPath := filepath.Join(targetRoot, "schema.yaml")
-	schema, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(schemaPath, append(schema, []byte("\n# Semantically unchanged replacement bundle.\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	repo := canonicalrouting.RepoRoot(t)
-	targetBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, targetRoot, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
-	if err != nil {
-		t.Fatal(err)
-	}
-	targetArtifact := targetBundle.SourceArtifact
-	targetHash := targetArtifact.BundleHash()
-	if targetHash == fixture.bundleHash {
-		t.Fatal("replacement proof requires distinguishable source artifacts")
-	}
-	targetPlans := semanticview.Wrap(targetBundle).FanOutPlansForHandler(mustPersistenceRootNode("fan-out-source"), "items.ready")
-	if len(targetPlans) != 1 {
-		t.Fatal("replacement must carry the exact compiled fan-out declaration")
-	}
-	seedStoreTestPersistedArtifact(t, db, targetArtifact)
-	targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
-	if _, err := pg.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
-		t.Fatalf("missing selected fan-out proof error = %v", err)
-	}
-	changed := base
-	changed.FanOutPlanRefs = []runtimecontracts.FanOutPlanRef{{
-		BundleHash:     targetHash,
-		ElementRef:     runtimecontracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath},
-		SemanticDigest: "sha256:" + strings.Repeat("f", 64),
-	}}
-	if _, err := pg.MaterializeRunFork(ctx, changed); err == nil || !strings.Contains(err.Error(), "changed pending fan_out") {
-		t.Fatalf("changed selected fan-out proof error = %v", err)
-	}
-	var prematureForks int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1::uuid`, fixture.runID).Scan(&prematureForks); err != nil || prematureForks != 0 {
-		t.Fatalf("forks after rejected selected proofs = %d err=%v", prematureForks, err)
-	}
-	matching := changed
-	matching.FanOutPlanRefs = []runtimecontracts.FanOutPlanRef{targetPlans[0].Ref}
-	materialized, err := pg.MaterializeRunFork(ctx, matching)
-	if err != nil {
-		t.Fatalf("materialize semantically unchanged selected fan-out: %v", err)
-	}
-	var childBundleHash, childPlanHash string
-	if err := db.QueryRowContext(ctx, `
-		SELECT r.bundle_hash,i.bundle_hash
+					targetRoot := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
+					schemaPath := filepath.Join(targetRoot, "schema.yaml")
+					schema, err := os.ReadFile(schemaPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(schemaPath, append(schema, []byte("\n# Semantically unchanged replacement bundle.\n")...), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					nodesPath := filepath.Join(targetRoot, "nodes.yaml")
+					nodes, err := os.ReadFile(nodesPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if selectionMode == "changed_emit" {
+						if err := os.WriteFile(nodesPath, []byte(strings.Replace(string(nodes), "value: entry", "value: entry + '-selected'", 1)), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					}
+					repo := canonicalrouting.RepoRoot(t)
+					targetBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, targetRoot, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+					if err != nil {
+						t.Fatal(err)
+					}
+					targetArtifact := targetBundle.SourceArtifact
+					targetHash := targetArtifact.BundleHash()
+					if targetHash == fixture.bundleHash {
+						t.Fatal("replacement proof requires distinguishable source artifacts")
+					}
+					targetPlans := semanticview.Wrap(targetBundle).FanOutPlansForHandler(mustPersistenceRootNode("fan-out-source"), "items.ready")
+					if len(targetPlans) != 1 {
+						t.Fatal("replacement must carry the exact compiled fan-out declaration")
+					}
+					if (targetPlans[0].Ref.SemanticDigest != fixture.plan.Ref.SemanticDigest) != (selectionMode == "changed_emit") {
+						t.Fatal("selected fixture does not reflect its intended semantic change")
+					}
+					if _, err := opened.store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, targetArtifact); err != nil {
+						t.Fatal(err)
+					}
+					targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
+					if err != nil {
+						t.Fatal(err)
+					}
+					base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, OriginalLoopCarriage: originalCarriageForRun(t, opened.store, fixture.runID)}
+					if _, err := owner.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
+						t.Fatalf("missing selected fan-out proof error = %v", err)
+					}
+					forged := base
+					if err := json.Unmarshal([]byte(`{"bundle_hash":"`+targetHash+`","semantic_digest":"sha256:`+strings.Repeat("f", 64)+`"}`), &forged.SelectedFanOutPlans); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := owner.MaterializeRunFork(ctx, forged); err == nil || !strings.Contains(err.Error(), "has no proof") {
+						t.Fatalf("fabricated selected fan-out proof error = %v", err)
+					}
+					var prematureForks int
+					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, fixture.runID).Scan(&prematureForks); err != nil || prematureForks != 0 {
+						t.Fatalf("forks after rejected selected proofs = %d err=%v", prematureForks, err)
+					}
+					matching := base
+					matching.SelectedFanOutPlans, err = semanticview.CompileFanOutPlanCarriage(semanticview.Wrap(targetBundle))
+					if err != nil {
+						t.Fatal(err)
+					}
+					materialized, err := owner.MaterializeRunFork(ctx, matching)
+					if err != nil {
+						t.Fatalf("materialize exact selected fan-out (%s): %v", selectionMode, err)
+					}
+					var childBundleHash, childPlanHash, childDigest string
+					var capsuleRaw []byte
+					if err := db.QueryRowContext(ctx, `
+		SELECT r.bundle_hash,i.bundle_hash,i.semantic_digest,i.capsule
 		FROM runs r JOIN fan_out_intents i ON i.run_id=r.run_id
-		WHERE r.run_id=$1::uuid
-	`, materialized.ForkRunID).Scan(&childBundleHash, &childPlanHash); err != nil {
-		t.Fatal(err)
-	}
-	if childBundleHash != targetHash || childPlanHash != targetHash {
-		t.Fatalf("selected fork bundle ownership = run:%q plan:%q, want %q", childBundleHash, childPlanHash, targetHash)
+		WHERE r.run_id=$1
+	`, materialized.ForkRunID).Scan(&childBundleHash, &childPlanHash, &childDigest, &capsuleRaw); err != nil {
+						t.Fatal(err)
+					}
+					if childBundleHash != targetHash || childPlanHash != targetHash {
+						t.Fatalf("selected fork bundle ownership = run:%q plan:%q, want %q", childBundleHash, childPlanHash, targetHash)
+					}
+					var capsule fanoutobligation.Capsule
+					if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+						t.Fatal(err)
+					}
+					if childDigest != targetPlans[0].Ref.SemanticDigest || capsule.SourcePlanRef != fixture.plan.Ref || !reflect.DeepEqual(capsule.SourceProjection, fixture.plan.SemanticEvidence()) {
+						t.Fatal("selected materialization replaced the original source witness or lost the exact selected plan")
+					}
+					reused, err := owner.MaterializeRunFork(ctx, matching)
+					if err != nil || reused.ForkRunID != materialized.ForkRunID {
+						t.Fatalf("exact counterfactual materialization readback failed: %+v %v", reused, err)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -2119,7 +2159,7 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 		Lineage: events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
 	}
 	plan := fanOutOwnerFixtureEvidence(t, fixture)
-	capsule.SourceProjection = plan.SemanticEvidence()
+	capsule.SourcePlanRef, capsule.SourceProjection = plan.Ref, plan.SemanticEvidence()
 	digest := plan.Ref.SemanticDigest
 	capsuleJSON, err := json.Marshal(capsule)
 	if err != nil {
@@ -2190,7 +2230,7 @@ func bindFanOutEntityRevision(t *testing.T, ctx context.Context, db *sql.DB, pos
 	capsule.EntityID = entityID
 	fixture.plan.ItemsFrom = "entity.items"
 	plan := fanOutOwnerFixtureEvidence(t, fixture)
-	capsule.SourceProjection = plan.SemanticEvidence()
+	capsule.SourcePlanRef, capsule.SourceProjection = plan.Ref, plan.SemanticEvidence()
 	capsuleRaw, err := json.Marshal(capsule)
 	if err != nil {
 		t.Fatal(err)
@@ -2234,7 +2274,7 @@ func rekeyFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, fixt
 	rekeyed := fixture
 	rekeyed.flowPath, rekeyed.semanticPath = flowPath, semanticPath
 	plan := fanOutOwnerFixtureEvidence(t, rekeyed)
-	capsule.SourceProjection = plan.SemanticEvidence()
+	capsule.SourcePlanRef, capsule.SourceProjection = plan.Ref, plan.SemanticEvidence()
 	raw, err := fanoutobligation.MarshalCapsule(capsule)
 	if err != nil {
 		t.Fatal(err)
@@ -2262,7 +2302,7 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 		StateFields: map[string]any{"integer": int64(75), "decimal": float64(75)},
 	}
 	plan := fanOutOwnerFixtureEvidence(t, fixture)
-	capsule.SourceProjection = plan.SemanticEvidence()
+	capsule.SourcePlanRef, capsule.SourceProjection = plan.Ref, plan.SemanticEvidence()
 	capsuleJSON, err := fanoutobligation.MarshalCapsule(capsule)
 	if err != nil {
 		t.Fatalf("encode fan-out capsule: %v", err)

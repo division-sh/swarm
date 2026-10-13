@@ -62,7 +62,10 @@ func TestSelectedForkReceiverOwnershipBoundary(t *testing.T) {
 func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 	const model = "write:runtime/runfork."
 	const backend = "store/internal/backend/runforkpersistence::"
+	const metadata = "write:store/internal/backend/runforkpersistence.runForkEntityMetadata."
 	return map[string]recipientBoundaryAllowance{
+		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.EntityID":                                                     {1, "compare canonical source ownership before shared primitive timer projection"},
+		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.FlowInstance":                                                 {1, "compare canonical source ownership before shared primitive timer projection"},
 		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.EntityID":                                                                       {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
 		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.FlowInstance":                                                                   {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
 		backend + "projectRunForkJoinReference/" + model + "EntityIdentity.EntityID":                                                                    {1, "compare canonical source ownership after stage-entry admission to select only the root declaration scope"},
@@ -83,7 +86,7 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Slug":                           {1, "fixed-revision presentation metadata, not event payload"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Name":                           {1, "fixed-revision presentation metadata, not event payload"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.FlowConfig":                     {1, "defensive copy of the exact config envelope captured with entity metadata at the selected revision; no live read or route-derived business key"},
-		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InitialMaterialization":         {1, "defensive copy of the immutable native constructor receipt from the fixed-revision metadata owner"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InitialMaterialization":         {1, "retain the immutable constructor receipt paired with fixed-revision metadata; the canonical decoder validates initial values and ancestry independently of readiness"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.HistoricalConstruction":         {1, "retain the captured historical-construction classification from fixed-revision evidence, never infer it from native absence"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.ParentInstance":                 {1, "retain the exact captured parent coordinate from the fixed-revision metadata owner"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InstanceKey":                    {1, "retain the exact captured constructor key from the fixed-revision metadata owner"},
@@ -97,6 +100,7 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.EnteredStateAt":                 {1, "retain the constructed stage-entry clock from the paired revision"},
 		backend + "loadExactRunForkMaterialization/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":                  {1, "compare the canonical ProjectEntityOwnership result against exact persisted fork materialization for idempotent reuse"},
 		backend + "materializeRunForkForSelectedContractExecution/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.PreparedHeader": {1, "attach the validated selected historical header before the named atomic materialization operation; no handler construction"},
+		backend + "materializeRunForkForSelectedContractExecution/" + metadata + "RemovedArrivalRefs":                                                   {1, "carry only exact child references admitted by projectRunForkRemovedArrivalRefs into both dependent-state projections; never derive receiving ownership"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":                        {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.EntityType":                          {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.Slug":                                {1, "copy presentation metadata into SQL adapter"},
@@ -285,12 +289,36 @@ func receiverOwnershipCollect(pkg *types.Package, info *types.Info, fset *token.
 			case *ast.TypeSpec:
 				if obj := info.Defs[n.Name]; obj != nil && receiverOwnershipCarrier(obj.Type()) {
 					structure := obj.Type().Underlying().(*types.Struct)
-					// InputPublication carries the strict original event for bounded
-					// input revalidation, not a competing receiver/source identity.
+					// Publication carriers retain original facts. The route remains
+					// a typed delivery owned by the canonical fixed-cut projection.
 					allowed := map[string]bool{"SourceEventID": true, "EventName": true, "ExecutionMode": true, "Scope": true, "RoutingSource": true, "Payload": true}
 					for i := 0; i < structure.NumFields(); i++ {
 						if field := structure.Field(i); field.Name() == "InputPublication" && receiverOwnershipType(field.Type()) == "runtime/runfork.InputPublication" {
 							continue
+						}
+						if field := structure.Field(i); field.Name() == "JoinContinuation" && receiverOwnershipType(field.Type()) == "runtime/genericschedule.JoinContinuation" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "JoinRoute" && receiverOwnershipType(field.Type()) == "events.DeliveryRoute" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "PublishedActivityResult" && receiverOwnershipType(field.Type()) == "runtime/activityresult.PublishedContinuation" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "ContinuedRecipientRoutes" {
+							if slice, ok := field.Type().(*types.Slice); ok && receiverOwnershipType(slice.Elem()) == "events.DeliveryRoute" {
+								continue
+							}
+						}
+						if field := structure.Field(i); field.Name() == "ContinuedReplyRequests" {
+							if slice, ok := field.Type().(*types.Slice); ok && receiverOwnershipType(slice.Elem()) == "runtime/replycontext.Record" {
+								continue
+							}
+						}
+						if field := structure.Field(i); field.Name() == "ContinuedReplyReturn" {
+							if pointer, ok := field.Type().(*types.Pointer); ok && receiverOwnershipType(pointer.Elem()) == "runtime/replycontext.Record" {
+								continue
+							}
 						}
 						if !allowed[structure.Field(i).Name()] {
 							add(n, "competing_source_carrier_field:"+structure.Field(i).Name())
@@ -330,6 +358,10 @@ func surprise(a e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
  return f.RunForkMaterializedEntitySnapshotMetadata{FlowInstance: a.FlowInstance(), EntityType: "invented"}
 }
 `, []string{"surprise/write:", "event_receiver_projection_to_owner"}},
+		{"removed_arrival_refs_do_not_authorize_other_writers", "store/internal/backend/runforkpersistence", "run_fork_selected_contract_materialization_owner.go", `package runforkpersistence
+type runForkEntityMetadata struct { RemovedArrivalRefs bool }
+func alternate(p *runForkEntityMetadata) { p.RemovedArrivalRefs = true }
+`, []string{"alternate/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.RemovedArrivalRefs"}},
 		{"source_carrier_reconstruction", "runtime/runforkexecution", "recipient_planning.go", `package runforkexecution
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func unexpected(a e.Event) f.RunForkSelectedContractSourceEvent {
@@ -364,8 +396,8 @@ type EntityIdentity struct { EntityID, FlowInstance string }
 func ordinary(a, b string) EntityIdentity { return EntityIdentity{a, b} }
 `, []string{"ordinary/write:runtime/runfork.EntityIdentity.EntityID", "ordinary/write:runtime/runfork.EntityIdentity.FlowInstance"}},
 		{"carrier_cannot_grow_competing_fields", "runtime/runfork", "models.go", `package runfork
-type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string }
-`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication"}},
+type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string; JoinContinuation string; JoinRoute string; ContinuedFanOutRoutes string; ContinuedReplyRequests string; ContinuedReplyReturn string }
+`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication", "competing_source_carrier_field:JoinContinuation", "competing_source_carrier_field:JoinRoute", "competing_source_carrier_field:ContinuedFanOutRoutes", "competing_source_carrier_field:ContinuedReplyRequests", "competing_source_carrier_field:ContinuedReplyReturn"}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			fset := token.NewFileSet()

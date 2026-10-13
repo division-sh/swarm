@@ -64,7 +64,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 				Request: fanoutobligation.IntentRequest{
 					Key:     fanoutobligation.IntentKey{RunID: sourceRun, TriggeringDeliveryID: triggerID, ElementRef: ref.ElementRef},
 					PlanRef: ref, Source: source, Cardinality: 2,
-					Capsule: fanoutobligation.Capsule{SourceProjection: plans[0].SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
+					Capsule: fanoutobligation.Capsule{SourcePlanRef: plans[0].Ref, SourceProjection: plans[0].SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
 						Route: flowidentity.StoredRoute(".", sourceRun, sourceRun), ProducerSource: producer,
 						Lineage: events.EventLineage{RunID: sourceRun, ParentEventID: eventID, ExecutionMode: executionmode.Live}},
 				},
@@ -75,7 +75,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 			}
 			outcome := fanoutobligation.Outcome{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(), InheritedDisposition: "no_route"}
 			plan := runfork.RunForkPlan{SourceRunID: sourceRun, FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{outcome}}}}
-			refs := map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef{ref.ElementRef: ref}
+			refs := map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef{intent.Request.Key: ref}
 			// Persist the child execution coordinates, keeping the original causal
 			// lineage. Timestamp probes must not depend on a stale source capsule.
 			childCapsule := intent.Request.Capsule

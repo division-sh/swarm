@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 // This is structural enforcement, not a claim that syntax proves complete
@@ -25,7 +27,11 @@ func TestRunForkRevisionProjectionContributorCensusIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := revisionProjectionContributors(string(body))
+	replyBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/runforkrevision/reply_context_projection.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := revisionProjectionContributors(string(body), string(replyBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +46,7 @@ func TestRunForkRevisionProjectionContributorCensusIsClosed(t *testing.T) {
 
 func revisionProjectionContributorCensus() map[string][]string {
 	return map[string][]string{
-		"FamilyEvents":                  {"events"},
+		"FamilyEvents":                  {"events", "run_fork_delivery_event_replays", "run_fork_selected_contract_executions"},
 		"FamilyEntityMutations":         {"entity_mutations"},
 		"FamilyEntityMetadata":          {"entity_state", "flow_instances", "workflow_instance_initial_materializations"},
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
@@ -56,7 +62,10 @@ func revisionProjectionContributorCensus() map[string][]string {
 	}
 }
 
-func revisionProjectionContributors(source string) (map[string][]string, error) {
+func revisionProjectionContributors(source string, replyHelperSource ...string) (map[string][]string, error) {
+	if len(replyHelperSource) > 1 {
+		return nil, fmt.Errorf("reply projection requires exactly its canonical helper source")
+	}
 	functions, err := revisionGuardFunctions(source)
 	if err != nil {
 		return nil, err
@@ -65,8 +74,8 @@ func revisionProjectionContributors(source string) (map[string][]string, error) 
 	if fn == nil {
 		return nil, fmt.Errorf("canonicalProjectionSpec missing")
 	}
-	from := regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-z_][a-z_0-9]*)`)
 	result := map[string][]string{}
+	var contributorErr error
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		clause, ok := node.(*ast.CaseClause)
 		if !ok || len(clause.List) != 1 {
@@ -76,51 +85,142 @@ func revisionProjectionContributors(source string) (map[string][]string, error) 
 		if !ok || !strings.HasPrefix(family.Name, "Family") {
 			return true
 		}
-		tables := map[string]struct{}{}
-		ast.Inspect(clause, func(node ast.Node) bool {
-			if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
-				if literal, ok := field.Value.(*ast.BasicLit); ok && literal.Kind == token.STRING {
-					if sql, err := strconv.Unquote(literal.Value); err == nil {
-						for _, match := range from.FindAllStringSubmatch("FROM "+sql, -1) {
-							tables[strings.ToLower(match[1])] = struct{}{}
-						}
+		var contributor ast.Node = clause
+		if family.Name == "FamilyReplyContexts" {
+			if len(clause.Body) != 1 || revisionGuardNode(clause.Body[0]) != "spec = replyContextProjectionSpec()" {
+				contributorErr = fmt.Errorf("FamilyReplyContexts requires its exact canonical replyContextProjectionSpec call")
+				return false
+			}
+			if len(replyHelperSource) != 1 {
+				contributorErr = fmt.Errorf("replyContextProjectionSpec source missing")
+				return false
+			}
+			helpers, err := revisionGuardFunctions(replyHelperSource[0])
+			if err != nil {
+				contributorErr = err
+				return false
+			}
+			helper := helpers["replyContextProjectionSpec"]
+			if helper == nil {
+				contributorErr = fmt.Errorf("replyContextProjectionSpec missing from canonical helper source")
+				return false
+			}
+			contributor = helper.Body
+		}
+		result[family.Name] = revisionProjectionTables(contributor)
+		return false
+	})
+	return result, contributorErr
+}
+
+func revisionProjectionTables(contributor ast.Node) []string {
+	from := regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-z_][a-z_0-9]*)`)
+	tables := map[string]struct{}{}
+	ast.Inspect(contributor, func(node ast.Node) bool {
+		if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
+			if revisionGuardNode(field.Value) == `"events e " + eventrecord.SelectedForkLineageSQL` {
+				for _, match := range from.FindAllStringSubmatch("FROM events e "+eventrecord.SelectedForkLineageSQL, -1) {
+					table := strings.ToLower(match[1])
+					if table != "candidate" {
+						tables[table] = struct{}{}
 					}
 				}
 			}
-			literal, ok := node.(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				return true
+			if literal, ok := field.Value.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				if sql, err := strconv.Unquote(literal.Value); err == nil {
+					for _, match := range from.FindAllStringSubmatch("FROM "+sql, -1) {
+						tables[strings.ToLower(match[1])] = struct{}{}
+					}
+				}
 			}
-			sql, unquoteErr := strconv.Unquote(literal.Value)
-			if unquoteErr != nil {
-				return true
-			}
-			for _, match := range from.FindAllStringSubmatch(sql, -1) {
-				tables[strings.ToLower(match[1])] = struct{}{}
-			}
+		}
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
 			return true
-		})
-		result[family.Name] = sortedStringKeys(tables)
-		return false
+		}
+		sql, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		for _, match := range from.FindAllStringSubmatch(sql, -1) {
+			tables[strings.ToLower(match[1])] = struct{}{}
+		}
+		return true
 	})
-	return result, nil
+	return sortedStringKeys(tables)
+}
+
+func TestRunForkEventLineageProjectionContributorGuard(t *testing.T) {
+	for _, selector := range []string{"eventrecord.SelectedForkLineageSQL", "other.SelectedForkLineageSQL", "eventrecord.UnknownSQL"} {
+		source := `package p; func canonicalProjectionSpec() { switch family { case FamilyEvents: spec = projectionSpec{source: "events e " + ` + selector + `} } }`
+		got, err := revisionProjectionContributors(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exact := reflect.DeepEqual(got["FamilyEvents"], revisionProjectionContributorCensus()["FamilyEvents"])
+		if exact != (selector == "eventrecord.SelectedForkLineageSQL") {
+			t.Fatalf("lineage contributor guard admitted an unknown owner: %v", got)
+		}
+	}
+}
+
+func TestRunForkRevisionReplyProjectionHelperGuardHostileControls(t *testing.T) {
+	projection := `package p; func canonicalProjectionSpec() { switch family { case FamilyReplyContexts: spec = replyContextProjectionSpec() } }`
+	helper := `package p; func replyContextProjectionSpec() projectionSpec {
+		const query = "SELECT r.id FROM reply_contexts r"
+		return projectionSpec{query: query, source: "reply_contexts r"}
+	}`
+	want := map[string][]string{"FamilyReplyContexts": {"reply_contexts"}}
+	for _, tc := range []struct {
+		name, projection string
+		helpers          []string
+		wantRefusal      bool
+	}{
+		{"exact_named_leaf", projection, []string{helper}, false},
+		{"missing_source", projection, nil, true},
+		{"missing_helper", projection, []string{"package p"}, true},
+		{"renamed_helper", projection, []string{strings.ReplaceAll(helper, "replyContextProjectionSpec", "otherProjectionSpec")}, true},
+		{"changed_call", strings.ReplaceAll(projection, "replyContextProjectionSpec", "otherProjectionSpec"), []string{helper}, true},
+		{"inline_is_not_named_owner", strings.ReplaceAll(projection, "replyContextProjectionSpec()", `projectionSpec{source: "reply_contexts r"}`), []string{helper}, true},
+		{"omitted_table", projection, []string{strings.ReplaceAll(helper, "reply_contexts", "other_table")}, true},
+		{"new_join_in_leaf", projection, []string{strings.Replace(helper, "FROM reply_contexts r", "FROM reply_contexts r JOIN unclassified_dependency d ON d.id=r.id", 1)}, true},
+		{"uncalled_function_is_not_evidence", projection, []string{`package p; func replyContextProjectionSpec() projectionSpec { return projectionSpec{} }; func unrelated() { _ = "SELECT * FROM reply_contexts" }`}, true},
+		{"other_function_is_not_expanded", projection, []string{`package p; func replyContextProjectionSpec() projectionSpec { return unrelated() }; func unrelated() projectionSpec { return projectionSpec{source: "reply_contexts r"} }`}, true},
+		{"duplicate_helper_source", projection, []string{helper, helper}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := revisionProjectionContributors(tc.projection, tc.helpers...)
+			refused := err != nil || !reflect.DeepEqual(got, want)
+			if refused != tc.wantRefusal {
+				t.Fatalf("reply helper guard got=%v err=%v wantRefusal=%t", got, err, tc.wantRefusal)
+			}
+		})
+	}
 }
 
 func validateRevisionPhysicalContributors(families map[string][]string, physical map[string]struct{}) error {
+	// These existing relations contribute lineage to the event fact, not new
+	// revision families or separately captured execution/lifetime history.
+	classified := make(map[string]struct{}, len(physical)+2)
+	for table := range physical {
+		classified[table] = struct{}{}
+	}
+	classified["run_fork_selected_contract_executions"] = struct{}{}
+	classified["run_fork_delivery_event_replays"] = struct{}{}
 	used := map[string]struct{}{}
 	for family, tables := range families {
 		if len(tables) == 0 {
 			return fmt.Errorf("%s has no classified projection tables", family)
 		}
 		for _, table := range tables {
-			if _, ok := physical[table]; !ok {
+			if _, ok := classified[table]; !ok {
 				return fmt.Errorf("%s contributor %s is absent from physical writer census", family, table)
 			}
 			used[table] = struct{}{}
 		}
 	}
-	if !reflect.DeepEqual(sortedStringKeys(used), sortedStringKeys(physical)) {
-		return fmt.Errorf("unclassified physical table: projection=%v physical=%v", sortedStringKeys(used), sortedStringKeys(physical))
+	if !reflect.DeepEqual(sortedStringKeys(used), sortedStringKeys(classified)) {
+		return fmt.Errorf("unclassified physical table: projection=%v physical=%v", sortedStringKeys(used), sortedStringKeys(classified))
 	}
 	return nil
 }
@@ -273,30 +373,38 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.ResetAll", []string{"addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID)"}},
 		{"runlifecycle/active_run_quiescence.go", "terminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
 		{"runlifecycle/active_run_quiescence.go", "sqliteTerminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
-		{"genericschedule/owner.go", "AdmitTx", []string{"admitTx(ctx, tx, attempt, postgres, command, now)"}},
+		{"genericschedule/owner.go", "admitAttempt", []string{"admitTx(ctx, tx, attempt, postgres, command, now, admissionErr)"}},
 		{"genericschedule/owner.go", "admitTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "attempt.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/fork_join.go", "RestoreForkJoinTx", []string{
+			"admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt }, nil)",
+			"stampForkJoinOrigin(ctx, tx, postgres, child.ID, request)",
+			"request.Expected(child.ID)",
+			"cancelLoadedTx(ctx, tx, dialectFor(postgres), child, expected.CancelCause, request.BornAt)",
+			"requireForkJoinTx(ctx, tx, postgres, request)",
+		}},
 		{"genericschedule/owner.go", "addTimerEffect", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyTimers, activationID)"}},
-		{"genericschedule/owner.go", "PostgresOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now())"}},
-		{"genericschedule/owner.go", "SQLiteOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now())"}},
+		{"genericschedule/owner.go", "PostgresOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now(), o.execution)"}},
+		{"genericschedule/owner.go", "SQLiteOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now(), o.execution)"}},
 		{"genericschedule/owner.go", "failMalformedAttempt", []string{"addTimerEffect(attempt, runID, storedTimerID)"}},
-		{"genericschedule/owner.go", "PrepareOccurrenceTx", []string{"prepareOccurrenceTx(ctx, tx, attempt, postgres, wakeup, admittedAt)"}},
+		{"genericschedule/owner.go", "prepareOccurrenceAttempt", []string{"prepareOccurrenceTx(ctx, tx, attempt, postgres, wakeup, admittedAt, admissionErr)"}},
 		{"genericschedule/owner.go", "prepareOccurrenceTx", []string{
 			"addTimerEffect(attempt, runID, storedTimerID)",
 			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
 			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
 			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
 		}},
-		{"genericschedule/owner.go", "CancelTx", []string{"cancelTx(ctx, tx, attempt, postgres, command)"}},
+		{"genericschedule/owner.go", "cancelAttempt", []string{"cancelTx(ctx, tx, attempt, postgres, command)"}},
+		{"genericschedule/owner.go", "cancelOwnedCleanupTx", []string{"cancelTx(ctx, tx, attempt, postgres, command)"}},
 		{"genericschedule/owner.go", "cancelTx", []string{"attempt.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
-		{"genericschedule/owner.go", "CancelAdmissionTx", []string{"cancelAdmissionTx(ctx, tx, attempt, postgres, command, cause, cancelledAt)"}},
+		{"genericschedule/owner.go", "cancelAdmissionAttempt", []string{"cancelAdmissionTx(ctx, tx, attempt, postgres, command, cause, cancelledAt)"}},
 		{"genericschedule/owner.go", "cancelAdmissionTx", []string{"attempt.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
 		{"genericschedule/owner.go", "CancelRunsTx", []string{"cancelRunsTx(ctx, tx, attempt, postgres, runIDs, cause, cancelledAt)"}},
-		{"genericschedule/owner.go", "cancelRunsTx", []string{"CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"}},
+		{"genericschedule/owner.go", "cancelRunsTx", []string{"cancelOwnedCleanupTx(ctx, tx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"}},
 		{"workflowtimer/cancellation.go", "CancelRunsTx", []string{"cancelRunsSQL(ctx, tx, postgres, attempt, runIDs)"}},
 		{"workflowtimer/cancellation.go", "cancelRunsSQL", []string{"facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "commitWorkflowEngineTimerMutation", []string{
 			"insertWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
-			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
+			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation, mutation.CancelCause, mutation.CancelledAt)",
 		}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "insertWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "cancelWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
@@ -378,7 +486,9 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 			"runforkrevision.FanOutIntentFact(intent.Request.Key)", "attempt.AddFacts(forkRunID, intentRef)",
 			"runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)", "attempt.AddFacts(forkRunID, outcomeRef)",
 		}},
-		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)", "attempt.AddFacts(forkRunID, ref)"}},
+		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, forkEventID, now)"}},
+		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkContinuedOutcomeTx", []string{"runforkrevision.FanOutOutcomeFact(childKey, outcome.Ordinal)", "attempt.AddFacts(childKey.RunID, ref)"}},
+		{"runforkpersistence/run_fork_selected_fan_out_evidence.go", "bindSelectedForkFanOutEvidenceTx", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, publication.Event().ID(), publication.Event().CreatedAt())"}},
 	}
 }
 
@@ -494,7 +604,7 @@ func TestRunForkRevisionEnumeratedWriterContributions(t *testing.T) {
 		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)"},
 		{"llmpersistence/owner.go", "addAgentSessionFacts", "otherSessionIDs", "attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, id)"},
 		{"workflowtimer/cancellation.go", "cancelRunsSQL", "refs", "facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"},
-		{"genericschedule/owner.go", "cancelRunsTx", "refs", "CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"},
+		{"genericschedule/owner.go", "cancelRunsTx", "refs", "cancelOwnedCleanupTx(ctx, tx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", row.path))
 		if err != nil {
@@ -718,6 +828,30 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			t.Fatal("unchecked typed ref without contribution passed")
 		}
 	})
+	t.Run("continued_outcome_named_writer", func(t *testing.T) {
+		root := repoRootForRuntimeWriterGuard(t)
+		for _, contract := range revisionExactWriterContracts() {
+			if contract.symbol != "bindRunForkFanOutPendingReplays" && contract.symbol != "bindRunForkContinuedOutcomeTx" && contract.symbol != "bindSelectedForkFanOutEvidenceTx" {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(body)
+			if err := validateRevisionExactWriter(source, contract); err != nil {
+				t.Fatal(err)
+			}
+			for _, required := range contract.calls {
+				if strings.Count(source, required) != 1 {
+					t.Fatalf("exact continuation contract occurrence changed: %s", required)
+				}
+				if err := validateRevisionExactWriter(strings.Replace(source, required, "missingContribution()", 1), contract); err == nil {
+					t.Fatalf("missing exact caller/contribution passed: %s", required)
+				}
+			}
+		}
+	})
 	t.Run("whole_cold_writer_is_not_blanket_forbidden", func(t *testing.T) {
 		source := valid + `; func coldBulk() error { return effects.Add(runID, revision.FamilyEntityMutations) }`
 		if err := validateRevisionExactWriter(source, contract); err != nil {
@@ -776,6 +910,22 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			t.Fatal("joined selection contributor omitted without guard refusal")
 		}
 	})
+	for _, table := range []string{"reply_contexts", "workflow_instance_initial_materializations"} {
+		t.Run("omitted_canonical_table/"+table, func(t *testing.T) {
+			// Isolate this omission from unrelated drift in the live census.
+			families := revisionProjectionContributorCensus()
+			physical := map[string]struct{}{}
+			for _, tables := range families {
+				for _, contributor := range tables {
+					physical[contributor] = struct{}{}
+				}
+			}
+			delete(physical, table)
+			if err := validateRevisionPhysicalContributors(families, physical); err == nil || !strings.Contains(err.Error(), table) {
+				t.Fatalf("omitted canonical contributor %s was not refused: %v", table, err)
+			}
+		})
+	}
 	t.Run("new_join", func(t *testing.T) {
 		source := "package p; func canonicalProjectionSpec() { switch family { case FamilyDeadLetters: query := `SELECT * FROM dead_letters d JOIN unclassified_dependency x ON x.id=d.id`; _ = query } }"
 		got, err := revisionProjectionContributors(source)

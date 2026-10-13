@@ -281,6 +281,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	case *store.PostgresStore:
 		workflow := pipeline.NewWorkflowPersistence(selected)
@@ -308,6 +309,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	default:
 		t.Fatalf("unsupported selected store %T", f.selected)

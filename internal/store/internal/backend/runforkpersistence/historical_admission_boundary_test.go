@@ -49,7 +49,6 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "loadRunForkRevisionSnapshotRaw/ledger_sql":                                                                            {1, "shared full or mutation-only snapshot ranks before filtering tombstones and admits surviving present facts"},
 		historicalBoundaryOwner + "validateRunMutationCoordinates/ledger_sql":                                                                            {1, "run oracle validates every ordering coordinate without decoding payloads or granting historical execution"},
 		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                                         {1, "post-R family inventory, not payload decoding"},
-		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
 		historicalBoundaryWriter + "latestFactReadQuery/ledger_sql":                                                                                      {2, "shared latest equality query: one local constant and its exact formatting use"},
 		historicalBoundaryWriter + "readAffectedLatestFactsWithSeeks/ledger_sql":                                                                         {2, "bounded exact seeks and preserved mixed-family selection both feed the same strict ledger hydration"},
@@ -73,17 +72,27 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed[historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical revision cardinalities stay with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ReadNotifyFanOutWorkForTest/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fan-out diagnostic delegates fixed ledger counts within the original selected read snapshot"}
 	allowed[historicalBoundaryOwner+"validateSelectedForkBranchDivergenceTx/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "typed branch evidence verifies its bound point through the canonical contextual resolver; it neither decodes payloads nor grants replay"}
+	allowed[historicalBoundaryOwner+"validateRunForkHistoricalReplyFactKey/reference:"+historicalBoundaryWriter+"FactKey"] = historicalBoundaryAllowance{1, "complete strict reply evidence validates its exact contextual key before the snapshot admits it"}
+	allowed[historicalBoundaryOwner+"loadRunForkStartFacts/ledger_sql"] = historicalBoundaryAllowance{1, "only the immutable initial coordinate set is ranked/read; creating ingress and downstream receivers are outside the cut"}
+	allowed[historicalBoundaryOwner+"loadRunForkStartFacts/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "start members use the same exact run/family/key/revision admission as inclusive cuts"}
+	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/ledger_sql"] = historicalBoundaryAllowance{1, "the original run-origin event reference is read at creation revision, separately from start membership; no earliest/latest inference"}
+	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "real first-turn input uses canonical historical identity and payload/schema admission without becoming an already-admitted start event"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
-		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
-		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort",
+		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort", "postgresRunForkWorkflowTimerReadbackPort",
+		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
+		"requireRunForkRequestReplyEvidenceTx",
+		"requireRunForkReplyReturnEvidenceTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "exact shared contextual event-point consumer"}
 	}
 	for _, caller := range []string{
 		"lockSQLiteRunForkSourceRevisionFrontier", "RunForkSQLiteOwner.PlanRunFork", "RunForkSQLiteOwner.ReadEntityAtEventCutForTest", "RunForkSQLiteOwner.ActivateRunFork", "RunForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents",
-		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort",
+		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort", "sqliteRunForkWorkflowTimerReadbackPort",
+		"loadSelectedForkFanOutSourceEvidenceTx", "requireRunForkContinuedPublishedRecipientsTx",
+		"requireRunForkRequestReplyEvidenceTx",
+		"requireRunForkReplyReturnEvidenceTx",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "thin SQLite adapter consumes the shared contextual event point"}
 	}

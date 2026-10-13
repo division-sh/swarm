@@ -187,7 +187,7 @@ func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context
 	return s.runForkPostgresOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
 }
 
-func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
+func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	return s.runForkPostgresOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
 
@@ -355,10 +355,6 @@ func (s *PostgresStore) EnsureOperatorPrincipal(ctx context.Context, now time.Ti
 	return s.operatorChannelPostgresOwner.EnsureOperatorPrincipal(ctx, now)
 }
 
-func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkEventID string) error {
-	return s.runForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, sourceRunID, forkEventID)
-}
-
 func (s *PostgresStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (ingress.State, error) {
 	return s.runtimeIngressPostgresOwner.EnsureRuntimeIngressState(ctx, now)
 }
@@ -381,6 +377,10 @@ func (s *PostgresStore) ExpireDecisionCardInputDrafts(ctx context.Context, now t
 
 func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
 	return s.mailboxPostgresOwner.ExpireMailboxItems(ctx, limit)
+}
+
+func (s *PostgresStore) FailActivatedRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) (bool, error) {
+	return s.runForkPostgresOwner.FailActivatedRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
 }
 
 func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
@@ -1071,6 +1071,10 @@ func (s *PostgresStore) RequireGateRouteAdmitted(ctx context.Context, runID stri
 	return s.pipelinePostgresOwner.RequireGateRouteAdmitted(ctx, runID)
 }
 
+func (s *PostgresStore) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	return s.runForkPostgresOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, req)
+}
+
 func (s *PostgresStore) RequirePresentRun(ctx context.Context, runID string) error {
 	return s.runLifecyclePostgresOwner.RequirePresentRun(ctx, runID)
 }
@@ -1081,6 +1085,14 @@ func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID strin
 
 func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	return s.runForkPostgresOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
+}
+
+func (s *PostgresStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	return s.runForkPostgresOwner.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowedSourceEventIDs, source)
+}
+
+func (s *PostgresStore) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+	return s.runForkPostgresOwner.RequireSelectedForkInputPublished(ctx, authority, sourceEvent, expectedSchema)
 }
 
 func (s *PostgresStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {
@@ -1423,7 +1435,7 @@ func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx co
 	return s.runForkSQLiteOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
 }
 
-func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
+func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	return s.runForkSQLiteOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
 
@@ -1595,10 +1607,6 @@ func (s *SQLiteRuntimeStore) EnsureOperatorPrincipal(ctx context.Context, now ti
 	return s.operatorChannelSQLiteOwner.EnsureOperatorPrincipal(ctx, now)
 }
 
-func (s *SQLiteRuntimeStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkEventID string) error {
-	return s.runForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, sourceRunID, forkEventID)
-}
-
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (ingress.State, error) {
 	return s.runtimeIngressSQLiteOwner.EnsureRuntimeIngressState(ctx, now)
 }
@@ -1621,6 +1629,10 @@ func (s *SQLiteRuntimeStore) ExpireDecisionCardInputDrafts(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) ExpireMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
 	return s.mailboxSQLiteOwner.ExpireMailboxItems(ctx, limit)
+}
+
+func (s *SQLiteRuntimeStore) FailActivatedRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) (bool, error) {
+	return s.runForkSQLiteOwner.FailActivatedRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
 }
 
 func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
@@ -2283,6 +2295,10 @@ func (s *SQLiteRuntimeStore) RequireGateRouteAdmitted(ctx context.Context, runID
 	return s.pipelineSQLiteOwner.RequireGateRouteAdmitted(ctx, runID)
 }
 
+func (s *SQLiteRuntimeStore) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	return s.runForkSQLiteOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, req)
+}
+
 func (s *SQLiteRuntimeStore) RequirePresentRun(ctx context.Context, runID string) error {
 	return s.runLifecycleSQLiteOwner.RequirePresentRun(ctx, runID)
 }
@@ -2293,6 +2309,14 @@ func (s *SQLiteRuntimeStore) RequirePresentRunSource(ctx context.Context, runID 
 
 func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	return s.runForkSQLiteOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
+}
+
+func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	return s.runForkSQLiteOwner.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowedSourceEventIDs, source)
+}
+
+func (s *SQLiteRuntimeStore) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+	return s.runForkSQLiteOwner.RequireSelectedForkInputPublished(ctx, authority, sourceEvent, expectedSchema)
 }
 
 func (s *SQLiteRuntimeStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {

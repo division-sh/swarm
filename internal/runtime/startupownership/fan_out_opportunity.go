@@ -34,6 +34,18 @@ type fanOutObservedClaimOwner struct {
 }
 
 func (o *fanOutObservedClaimOwner) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
+	o.service.owner.mu.Lock()
+	registration := o.service.owner.fanOutCapacity.registrations[o.candidate.GrantID]
+	var observer func(context.Context, pipeline.FanOutChunkCommand)
+	if registration != nil {
+		observer = registration.testChunkObserver
+	}
+	o.service.owner.mu.Unlock()
+	if observer != nil {
+		observed := command
+		observed.Outcomes = append([]pipeline.FanOutChunkOutcome(nil), command.Outcomes...)
+		observer(ctx, observed)
+	}
 	if o.commitStarted.IsZero() {
 		o.commitStarted = time.Now()
 	}

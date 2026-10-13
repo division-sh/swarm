@@ -126,6 +126,9 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "invalid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
 		{name: "opaque non uuid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},
 		{name: "blank at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
+		{name: "mixed start and event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-start", "--at-event", "22222222-2222-2222-2222-222222222222"}, wantStderr: "--at-start and --at-event are mutually exclusive"},
+		{name: "mixed start and empty event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-start", "--at-event", ""}, wantStderr: "--at-start and --at-event are mutually exclusive"},
+		{name: "mixed explicit false start and event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-start=false", "--at-event", "22222222-2222-2222-2222-222222222222"}, wantStderr: "--at-start and --at-event are mutually exclusive"},
 		{name: "blank idempotency", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "legacy dry run flag", args: []string{"run", "fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
 		{name: "retired source freeze flag", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--confirm-source-freeze"}, wantStderr: "unknown flag"},
@@ -354,6 +357,7 @@ func TestForkCommandHelpExplainsSourceFreezeConsent(t *testing.T) {
 	for _, want := range []string{
 		"--allow-source-freeze", "Allow permanent source freeze", "beyond the fork point",
 		"a frozen source cannot resume", "An advanced source stays independently live", "Omit and decline the prompt to cancel",
+		"--at-start", "original committed start", "before creating ingress", "mutually exclusive", "omitting both preserves the current latest-point selection",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help omitted %q: %s", want, help)
@@ -410,6 +414,9 @@ func TestRunForkResultRequiresExactPointArm(t *testing.T) {
 		{"zero_revision", func(r *runForkResult) { r.ForkRevision = 0 }, false},
 		{"deployment_with_event", func(r *runForkResult) { r.ForkPointKind = "deployment_revision" }, false},
 		{"deployment", func(r *runForkResult) { r.ForkPointKind = "deployment_revision"; r.ForkEventID = "" }, true},
+		{"start_with_event", func(r *runForkResult) { r.ForkPointKind = "run_start" }, false},
+		{"start", func(r *runForkResult) { r.ForkPointKind = "run_start"; r.ForkEventID = "" }, true},
+		{"start_without_revision", func(r *runForkResult) { r.ForkPointKind = "run_start"; r.ForkEventID = ""; r.ForkRevision = 0 }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := base
@@ -418,7 +425,7 @@ func TestRunForkResultRequiresExactPointArm(t *testing.T) {
 			if (err == nil) != tc.valid {
 				t.Fatalf("point validity=%t want=%t err=%v", err == nil, tc.valid, err)
 			}
-			if tc.name == "deployment" {
+			if tc.name == "deployment" || tc.name == "start" {
 				encoded, err := json.Marshal(result)
 				if err != nil {
 					t.Fatal(err)
@@ -428,12 +435,12 @@ func TestRunForkResultRequiresExactPointArm(t *testing.T) {
 					t.Fatal(err)
 				}
 				if _, exists := fields["fork_event_id"]; exists {
-					t.Fatal("deployment revision fork emitted absent event identity")
+					t.Fatal("eventless fork emitted absent event identity")
 				}
 				var output bytes.Buffer
 				writeRunForkHuman(&output, result)
-				if strings.Contains(output.String(), "fork_event_id=") || !strings.Contains(output.String(), "fork_point=deployment_revision@1") {
-					t.Fatalf("deployment revision fork output = %q", output.String())
+				if strings.Contains(output.String(), "fork_event_id=") || !strings.Contains(output.String(), "fork_point="+result.ForkPointKind+"@1") {
+					t.Fatalf("eventless fork output = %q", output.String())
 				}
 			}
 		})

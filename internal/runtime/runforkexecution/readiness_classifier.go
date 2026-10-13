@@ -15,7 +15,10 @@ type SelectedContractReadinessClassifierRequest struct {
 
 func BuildSelectedContractReadinessClassifier(req SelectedContractReadinessClassifierRequest) (runfork.RunForkSelectedContractReadiness, error) {
 	plan := req.Plan
-	replayAdmission := plan.ReplayResumeAdmission
+	replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	if err != nil {
+		return runfork.RunForkSelectedContractReadiness{}, err
+	}
 	if strings.TrimSpace(replayAdmission.Owner) != runfork.RunForkReplayResumeAdmissionOwner {
 		return runfork.RunForkSelectedContractReadiness{}, fmt.Errorf("selected-contract readiness classifier requires %s; got %q", runfork.RunForkReplayResumeAdmissionOwner, replayAdmission.Owner)
 	}

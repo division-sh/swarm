@@ -625,13 +625,17 @@ func VerifyNativeRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBot
 }
 
 func VerifyNativeRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	runRootAndFlowWorkflowJoinLoopSupersession(t, open, nil)
+	runRootAndFlowWorkflowJoinLoopSupersession(t, open, []any{"a", "b"}, nil)
+}
+
+func VerifyNativeRootAndFlowWorkflowJoinEmptyLoopSupersessionKeepsAdmissionBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, open, []any{}, nil)
 }
 
 // This uses real arm, repeat, cancellation and persistence owners before
 // folding their mutation records, rather than constructing retained join JSON.
 func VerifyNativeWorkflowJoinRetainedGenerationMutationRoundTripBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	runRootAndFlowWorkflowJoinLoopSupersession(t, open, func(t *testing.T, h *nativeExactWorkflowJoinHarness) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, open, []any{"a", "b"}, func(t *testing.T, h *nativeExactWorkflowJoinHarness) {
 		records, err := h.fixture.AccumulatorHistory(h.ctx, runtimecorrelation.RunIDFromContext(h.ctx), h.entityID)
 		if err != nil {
 			t.Fatal(err)
@@ -669,7 +673,7 @@ func VerifyNativeWorkflowJoinRetainedGenerationMutationRoundTripBothStoresForTes
 	})
 }
 
-func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, open pipelineDeliveryNativeOpenerForTest, verify func(*testing.T, *nativeExactWorkflowJoinHarness)) {
+func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, open pipelineDeliveryNativeOpenerForTest, members []any, verify func(*testing.T, *nativeExactWorkflowJoinHarness)) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -678,7 +682,7 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, open pipelineDeliv
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
 				bundle := workflowJoinLifecycleBundleWithOptions(t, false, "repeat")
-				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "dispatching", []any{"a", "b"}, bundle, open)
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "dispatching", members, bundle, open)
 				declarationFlowID := pipelineDeclarationFlowPath(flowID)
 				loop := h.startLoop()
 				createdAt := loop.StartedAt
@@ -739,6 +743,10 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, open pipelineDeliv
 					firstActivation.CloseReason != joinruntime.CloseReasonStageExit || !firstActivation.TimerCancelled ||
 					!firstActivation.JoinRef().Equal(firstRef) {
 					t.Fatalf("superseded join = found:%v activation:%#v err:%v", found, firstActivation, err)
+				}
+				if len(members) == 0 && (!firstActivation.EmptyCompletionWasArmed() || firstActivation.OutcomePending || firstActivation.OutcomeFired ||
+					firstActivation.MemberCount != nil || len(firstActivation.Members) != 0 || !firstActivation.FireAt.Equal(firstActivation.ArmedAt)) {
+					t.Fatalf("loop supersession changed original empty-list admission: %#v", firstActivation)
 				}
 				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {

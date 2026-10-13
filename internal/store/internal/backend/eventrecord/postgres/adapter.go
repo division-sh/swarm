@@ -148,13 +148,14 @@ func insertRecord(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (e
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin, run_owner_key
 		) VALUES (
 			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
 			$11, NULLIF($12,''), $13, $14, $15,
 			$16, $17, $18, $19, NULLIF($20,'')::uuid, $21,
 			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
-			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb
+			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb,
+			COALESCE('run:' || CAST(NULLIF($3,'')::uuid AS TEXT), '')
 		) ON CONFLICT (event_id) DO NOTHING
 		RETURNING event_id::text, COALESCE(run_id::text, '')
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
@@ -226,18 +227,7 @@ const selectRecord = `
 		COALESCE(sf.source_run_id::text, ''), COALESCE(sf.source_event_id::text, ''),
 		COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0), COALESCE(e.inherited_fan_out_origin::text, '')
 	FROM events e
-	LEFT JOIN (
-		SELECT candidate.*,
-			COUNT(*) OVER (PARTITION BY candidate.fork_event_id) AS lineage_owner_count
-		FROM (
-			SELECT fork_event_id, source_run_id, source_event_id, selection_authority
-			FROM run_fork_selected_contract_executions
-			UNION ALL
-			SELECT fork_event_id, source_run_id, source_event_id, selection_authority
-			FROM run_fork_delivery_event_replays
-			GROUP BY fork_event_id, source_run_id, source_event_id, selection_authority
-		) candidate
-	) sf ON sf.fork_event_id = e.event_id`
+	` + eventrecord.SelectedForkLineageSQL
 
 func scanTargets(record *eventrecord.Record) []any {
 	return []any{

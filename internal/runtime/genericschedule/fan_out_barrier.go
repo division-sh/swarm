@@ -6,7 +6,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 // FanOutBarrierAdmission is shared by live closure, fork materialization, and
@@ -15,12 +17,7 @@ func FanOutBarrierAdmission(registration fanoutbarrier.Registration, summary fan
 	if err := registration.Validate(); err != nil {
 		return AdmissionCommand{}, err
 	}
-	if err := summary.Validate(); err != nil {
-		return AdmissionCommand{}, err
-	}
-	payload := registration.Handle.PayloadMetadata()
-	payload["join"] = summary.Context()
-	semanticPayload, err := canonicaljson.FromGo(payload)
+	semanticPayload, err := fanOutBarrierPayload(registration.Handle, summary)
 	if err != nil {
 		return AdmissionCommand{}, err
 	}
@@ -34,6 +31,15 @@ func FanOutBarrierAdmission(registration fanoutbarrier.Registration, summary fan
 		RoutingSource: registration.RoutingSource, ExecutionMode: registration.ExecutionMode, Due: AbsoluteDue(at), TaskID: registration.Handle.TaskID(),
 	}
 	return command, command.Validate()
+}
+
+func fanOutBarrierPayload(handle timeridentity.TimerHandle, summary fanoutbarrier.Summary) (semanticvalue.Value, error) {
+	if err := (fanoutbarrier.Completion{Handle: handle, Summary: summary}).Validate(); err != nil {
+		return semanticvalue.Value{}, err
+	}
+	payload := handle.PayloadMetadata()
+	payload["join"] = summary.Context()
+	return canonicaljson.FromGo(payload)
 }
 
 func ValidateFanOutBarrierScheduleRelation(barrier fanoutbarrier.Barrier, activation Activation) error {

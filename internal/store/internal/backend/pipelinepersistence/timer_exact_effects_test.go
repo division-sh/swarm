@@ -41,7 +41,9 @@ func TestWorkflowTimerExactEffectsReplacementAndCancellationBothStores(t *testin
 				fire_at TIMESTAMP, recurring BOOLEAN, recurrence_interval TEXT,
 				owner_node TEXT, owner_agent TEXT, owner_kind TEXT, task_type TEXT,
 				status TEXT, created_at TIMESTAMP, fired_at TIMESTAMP, source_timer_id TEXT,
-				forked_from_run_id TEXT, forked_from_event_id TEXT, reconstruction_owner TEXT)`
+				forked_from_run_id TEXT, forked_from_event_id TEXT, reconstruction_owner TEXT,
+				forked_from_point_kind TEXT, forked_from_point_revision BIGINT, source_armed_at TIMESTAMP,
+				cancel_cause TEXT, cancelled_at TIMESTAMP)`
 			if backend == "postgres" {
 				for _, column := range []string{"timer_id", "run_id", "entity_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id"} {
 					schema = strings.ReplaceAll(schema, column+" TEXT", column+" UUID")
@@ -89,7 +91,7 @@ func TestWorkflowTimerExactEffectsReplacementAndCancellationBothStores(t *testin
 				case runtimepipeline.WorkflowTimerMutationInsert:
 					changed, err = insertWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", effects, activation)
 				case runtimepipeline.WorkflowTimerMutationCancel:
-					changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", effects, activation)
+					changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", effects, activation, "", time.Time{})
 				default:
 					t.Fatalf("unsupported timer mutation kind %q", kind)
 				}
@@ -125,13 +127,13 @@ func TestWorkflowTimerExactEffectsReplacementAndCancellationBothStores(t *testin
 			assertEffects(replay)
 
 			cancel := runforkrevision.NewEffects()
-			changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", cancel, next)
+			changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", cancel, next, "", time.Time{})
 			if err != nil || !changed {
 				t.Fatalf("timer cancellation = %v: %v", changed, err)
 			}
 			assertEffects(cancel, next.Ref.ActivationID)
 			noop := runforkrevision.NewEffects()
-			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", noop, next)
+			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", noop, next, "", time.Time{})
 			if err != nil || changed {
 				t.Fatalf("cancellation replay = %v: %v", changed, err)
 			}

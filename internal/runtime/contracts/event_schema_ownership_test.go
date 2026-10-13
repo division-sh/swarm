@@ -231,6 +231,27 @@ func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) 
 	}
 }
 
+func TestRootExecutableNodeUsesConnectedProducerFieldTypes(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyConnectedRootInput(t), DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := identitytest.RootNode(t, "root-node")
+	entry, name, found := bundle.ResolveExecutableNodeEventCatalogEntry(node, "work.ready")
+	if !found || name != "producer/work.ready" || entry.Payload.Properties["value"].Type != "text" {
+		t.Fatalf("root node lost its exact connected producer schema: name=%q found=%t entry=%+v", name, found, entry)
+	}
+	field, found := ResolveExecutableNodeEventFieldType(bundle, node, "work.ready", "value")
+	resolved, err := field.Resolve()
+	if !found || err != nil || resolved.Kind != CatalogTypeText {
+		t.Fatalf("root node lost connected text field: found=%t kind=%s error=%v", found, resolved.Kind, err)
+	}
+	if _, found := ResolveExecutableNodeEventFieldType(bundle, node, "work.ready", "undeclared"); found {
+		t.Fatal("root connected schema accepted an undeclared field")
+	}
+}
+
 func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(

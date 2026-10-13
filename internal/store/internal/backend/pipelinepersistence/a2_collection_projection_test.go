@@ -36,7 +36,7 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 		runsDDL = "CREATE TABLE runs (run_id UUID PRIMARY KEY, bundle_hash TEXT NOT NULL, forked_from_run_id UUID)"
 	}
 	columns := []string{}
-	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority") {
+	for _, name := range strings.Fields("event_class event_name task_id flow_instance scope payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type routing_source_kind routing_source_authority run_owner_key") {
 		columns = append(columns, name+" TEXT")
 	}
 	for _, name := range strings.Fields("event_id run_id entity_id source_event_id operator_reference_event_id") {
@@ -49,7 +49,7 @@ func a2CollectionDatabase(t *testing.T, backend string) *sql.DB {
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
 		runsDDL,
-		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
+		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT, source_obligation_event_id " + idType + ")",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE entity_mutations (mutation_id TEXT,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,old_value " + jsonType + ",new_value " + jsonType + ",caused_by_event TEXT,writer_type TEXT,writer_id TEXT,handler_step TEXT,created_at TIMESTAMP)",
 		"CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, fields " + jsonType + ")",
@@ -105,6 +105,7 @@ func a2CollectionRequest(t *testing.T, kind fanoutobligation.SourceKind, ref rc.
 		PlanRef: rc.FanOutPlanRef{BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element, SemanticDigest: digest}, Source: source, Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{SourceProjection: s, NodeKey: "root.scatter", ExecutionFlowID: ".", EntityID: run, HandlerEventKey: "batch.ready", Route: flowidentity.StoredRoute(".", run, run), ProducerSource: producer, Lineage: events.EventLineage{RunID: run, ParentEventID: event, ExecutionMode: executionmode.Live}},
 	}
+	request.Capsule.SourcePlanRef = request.PlanRef
 	if err := request.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +205,7 @@ func TestA2PersistedCollectionProjectionOnBothStores(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
+							r.Capsule.SourcePlanRef = r.PlanRef
 						}
 						field := []byte(`{"items":` + tc.raw + `}`)
 						a2CollectionTrigger(t, db, r, field)

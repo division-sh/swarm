@@ -106,7 +106,9 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 						wantCapsule := original.Intent.Request.Capsule
 						// SourceProjection is frozen evidence, included in the full
 						// equality check after remapping only child execution owners.
-						if reflect.TypeOf(wantCapsule).NumField() != 20 || wantCapsule.Receiver == nil || !wantCapsule.Receiver.Target.ExistingEntity() {
+						// Context is executable reply correspondence, unlike frozen
+						// source lineage; this absence fixture must remain absent.
+						if reflect.TypeOf(wantCapsule).NumField() != 22 || !wantCapsule.Context.Empty() || wantCapsule.Receiver == nil || !wantCapsule.Receiver.Target.ExistingEntity() {
 							t.Fatal("capsule census or declared root receiver changed; reclassify every field")
 						}
 						wantCapsule.Route = flowidentity.StoredRoute(".", child.ForkRunID, child.ForkRunID)

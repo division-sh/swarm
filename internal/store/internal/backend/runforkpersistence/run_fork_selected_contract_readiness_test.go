@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -17,7 +18,8 @@ import (
 func selectedWorkflowConstructionFixture(t *testing.T, state selectedContractWorkflowState) selectedContractWorkflowState {
 	t.Helper()
 	state.SourceRunID = "00000000-0000-0000-0000-000000000229"
-	config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute(state.WorkflowName, flowidentity.LogicalInstanceID(state.Route), state.Route), state.WorkflowVersion)
+	identity := flowidentity.Stored(nil, state.WorkflowName, state.Route, flowidentity.LogicalInstanceID(state.Route), state.EntityID, "")
+	config, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, state.WorkflowVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,11 +27,37 @@ func selectedWorkflowConstructionFixture(t *testing.T, state selectedContractWor
 	if err != nil {
 		t.Fatal(err)
 	}
+	at := time.Unix(100, 0).UTC()
+	record := selectedWorkflowConstructionRecordFixture(t, state.SourceRunID, "bundle-v2:sha256:"+strings.Repeat("a", 64), identity, pipeline.WorkflowInstance{
+		WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Status: "active", EntityType: state.EntityType,
+		CurrentState: "initial", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
+	}, state.ExecutionMode)
 	state.History = runfork.RunForkEntityState{EntityID: state.EntityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		FlowInstance: state.Route, FlowTemplate: state.WorkflowName, FlowConfig: raw,
+		InitialMaterialization: record.InitialMaterialization,
 	}}
 	return state
+}
+
+func selectedWorkflowConstructionRecordFixture(t testing.TB, sourceRunID, bundleHash string, identity flowidentity.Instance, initial pipeline.WorkflowInstance, mode executionmode.Mode) pipeline.FlowInstanceActivationRecord {
+	t.Helper()
+	initial.InstanceID, initial.StorageRef, initial.EntityID = identity.InstanceID, identity.InstancePath, identity.EntityID
+	initial.WorkflowName = identity.TemplateID
+	initial.ParentFlowID, initial.ParentFlowInstance, initial.ParentEntityID = identity.ParentRoute.FlowID, identity.ParentRoute.FlowInstance, identity.ParentEntityID
+	construction := pipeline.FlowInstanceActivationPlan{
+		Identity: identity, Instance: initial, OccurredAt: initial.CreatedAt,
+		Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: identity, RunID: sourceRunID, BundleHash: bundleHash,
+			WorkflowVersion: initial.WorkflowVersion, ExecutionMode: mode,
+		},
+		CreatingInput: pipeline.FlowConstructionInput{},
+	}
+	record, err := construction.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
 }
 
 func TestSelectedContractWorkflowReadinessComposesExactForkAgentTopology(t *testing.T) {
@@ -112,6 +140,12 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 				TemplateID: flow, ScopeKey: flow, InstanceID: "final", InstancePath: path, EntityID: state.EntityID,
 				ParentRoute: parent, ParentEntityID: parent.EntityID, HasStoredPath: true,
 			}
+			at := time.Unix(100, 0).UTC()
+			record := selectedWorkflowConstructionRecordFixture(t, state.SourceRunID, artifact.BundleHash(), identity, pipeline.WorkflowInstance{
+				WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Status: "active",
+				CurrentState: "initial", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
+			}, state.ExecutionMode)
+			state.History.MaterializationMetadata.InitialMaterialization = record.InitialMaterialization
 			config, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, "v1")
 			if err != nil {
 				t.Fatal(err)

@@ -167,6 +167,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			storetest.CommitSemanticEvent(t, ctx, selected, event)
 			return selected.CreateReplyContext(ctx, replycontext.Record{
 				ID: replyContextID, RunID: runID, RequestEventID: requestEventID,
+				SourceRunID: runID, SourceRequestEventID: requestEventID,
 				RequesterFlowID: "requester", RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
 				ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
 				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/a", EntityID: "entity-a"},
