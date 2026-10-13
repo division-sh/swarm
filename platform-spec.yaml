@@ -2957,6 +2957,19 @@ type_system:
       field presence is governed by entity_contracts: bare roots may be
       progressively unassigned; supplied named records remain complete.
   restrictions:
+    declaration_namespace: |
+      Scalars, enums and named types share one unique name namespace in each
+      visible catalog, including root/flow composition. A cross-category name
+      collision or a declaration shadowing one of the six exact built-in scalar
+      names (text, integer, numeric, boolean, timestamp, uuid) fails admission
+      with a typed source-located TYPE-NAME-COLLISION refusal naming both
+      declarations. The authored declaration retains its actual YAML key
+      location; a built-in scalar is identified as built-in, not assigned an
+      invented authored location. Rename one declaration; category precedence
+      is not a compatibility path. Legitimate same-category flow overrides
+      remain unchanged. Every declaration body, including unused root and flow
+      bodies, is validated in its scope; resolution cannot select an alternative
+      declaration to supply that validation.
     reference_admission: |
       The catalog reference owner resolves the exact visible declaration scope
       before structural compilation or consumer projection. Admit every authored
