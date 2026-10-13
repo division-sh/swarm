@@ -61,10 +61,7 @@ func validateHandlerActivitySurface(source semanticview.Source, node runtimeiden
 			errs = append(errs, fmt.Errorf("%s activity: rule activity and handler emit/on_success emit are mutually exclusive in Stage 1; use generated activity result events", context))
 		}
 		for idx, rule := range handler.Rules {
-			ruleContext := fmt.Sprintf("%s.rules[%d]", context, idx)
-			if strings.TrimSpace(rule.ID) != "" {
-				ruleContext = fmt.Sprintf("%s.rules[%s]", context, strings.TrimSpace(rule.ID))
-			}
+			ruleContext := context + "." + rule.DisplayLabel("rules", idx)
 			if rule.Activity.Empty() {
 				continue
 			}
@@ -82,7 +79,7 @@ func rejectUnsupportedNestedActivityContexts(context string, handler runtimecont
 	var errs []error
 	for idx, rule := range handler.OnComplete {
 		if !rule.Activity.Empty() {
-			errs = append(errs, fmt.Errorf("%s.on_complete[%d].activity: durable activity is not supported in on_complete in Stage 1", context, idx))
+			errs = append(errs, fmt.Errorf("%s.%s.activity: durable activity is not supported in on_complete in Stage 1", context, rule.DisplayLabel("on_complete", idx)))
 		}
 	}
 	return errs
