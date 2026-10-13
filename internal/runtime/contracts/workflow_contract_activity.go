@@ -20,13 +20,20 @@ const (
 type ActivitySite struct {
 	Node            runtimeidentity.ExecutableNode
 	HandlerEventKey string
+	Kind            ActivitySiteKind
 	Source          string
-	RuleID          string
 	RuleRef         runtimeidentity.DeclarationIdentity
 	RuleIndex       int
 	Spec            ActivitySpec
 	RevisionField   string
 }
+
+type ActivitySiteKind uint8
+
+const (
+	ActivitySiteHandler ActivitySiteKind = iota + 1
+	ActivitySiteRule
+)
 
 type ActivityResultEvents struct {
 	ActivityID        string
@@ -101,6 +108,7 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 			out = append(out, ActivitySite{
 				Node:            node,
 				HandlerEventKey: handlerEventKey,
+				Kind:            ActivitySiteHandler,
 				Source:          "handler.activity",
 				RuleIndex:       -1,
 				Spec:            handler.Activity,
@@ -114,8 +122,8 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 			out = append(out, ActivitySite{
 				Node:            node,
 				HandlerEventKey: handlerEventKey,
+				Kind:            ActivitySiteRule,
 				Source:          indexedHandlerEmitSiteKey("handler.rules", idx, "activity"),
-				RuleID:          strings.TrimSpace(rule.ID),
 				RuleRef:         ruleRef,
 				RuleIndex:       idx,
 				Spec:            rule.Activity,
@@ -125,10 +133,28 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 	return out
 }
 
-func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
+func ActivityResultEventsForSite(site ActivitySite) (ActivityResultEvents, error) {
+	if !site.Node.Valid() || strings.TrimSpace(site.HandlerEventKey) == "" {
+		return ActivityResultEvents{}, fmt.Errorf("activity result identity requires a node and handler event")
+	}
 	activityID := strings.TrimSpace(site.Spec.ID)
-	if activityID == "" {
-		activityID = DefaultActivityID(site.Node.NodeID(), site.HandlerEventKey, site.RuleID, site.RuleIndex, site.Spec.Tool)
+	switch site.Kind {
+	case ActivitySiteHandler:
+		if site.RuleIndex != -1 {
+			return ActivityResultEvents{}, fmt.Errorf("handler activity site must not carry a rule position")
+		}
+		if activityID == "" {
+			activityID = DefaultActivityID(site.Node.NodeID(), site.HandlerEventKey, site.Spec.Tool)
+		}
+	case ActivitySiteRule:
+		if site.RuleIndex < 0 {
+			return ActivityResultEvents{}, fmt.Errorf("rule activity site requires a rule position")
+		}
+		if activityID == "" {
+			return ActivityResultEvents{}, fmt.Errorf("node %s handler %s rules[%d].activity.id is required; declare an explicit activity.id", site.Node.Key(), site.HandlerEventKey, site.RuleIndex)
+		}
+	default:
+		return ActivityResultEvents{}, fmt.Errorf("activity site must identify handler or rule ownership")
 	}
 	base := activityID
 	flowID := site.Node.FlowPath()
@@ -142,7 +168,7 @@ func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 		FailureEvent:      eventidentity.Normalize(base + "." + ActivityResultStatusFailed),
 		RevisionRequested: eventidentity.Normalize(base + ".revision_requested"),
 		Rejected:          eventidentity.Normalize(base + ".rejected"),
-	}
+	}, nil
 }
 
 func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCatalogEntry {
@@ -175,15 +201,8 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 	}
 }
 
-func DefaultActivityID(nodeID, handlerEventKey, ruleID string, ruleIndex int, tool string) string {
-	parts := []string{nodeID, handlerEventKey}
-	if strings.TrimSpace(ruleID) != "" {
-		parts = append(parts, ruleID)
-	} else if ruleIndex >= 0 {
-		parts = append(parts, fmt.Sprintf("rule_%d", ruleIndex))
-	}
-	parts = append(parts, tool)
-	return strings.Join(activityIDParts(parts...), "_")
+func DefaultActivityID(nodeID, handlerEventKey, tool string) string {
+	return strings.Join(activityIDParts(nodeID, handlerEventKey, tool), "_")
 }
 
 func activityIDParts(parts ...string) []string {
@@ -247,8 +266,11 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 	}
 }
 
-func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) map[string]EventSchema {
-	resultEvents := ActivityResultEventsForSite(site)
+func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) (map[string]EventSchema, error) {
+	resultEvents, err := ActivityResultEventsForSite(site)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]EventSchema{
 		resultEvents.SuccessEvent: {
 			Description: "Generated durable activity success event",
@@ -290,7 +312,7 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 			out[eventType] = schema
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]EventCatalogEntry {
@@ -310,9 +332,13 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 
 // Generated records retain the declaring flow before any catalog projection.
 // A global event-name map cannot establish ownership for a scoped lookup.
-func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []currentEventDeclarationRecord {
+func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]currentEventDeclarationRecord, error) {
 	var out []currentEventDeclarationRecord
 	for _, site := range b.ActivitySites() {
+		events, err := ActivityResultEventsForSite(site)
+		if err != nil {
+			return nil, err
+		}
 		tools := b.ToolEntries()
 		if b.activityToolsByFlow != nil {
 			tools = b.activityToolsByFlow[site.Node.FlowPath()]
@@ -321,12 +347,14 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []current
 		if !ok {
 			continue
 		}
-		events := ActivityResultEventsForSite(site)
 		entries := map[string]EventCatalogEntry{
 			events.SuccessEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusSucceeded),
 			events.FailureEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusFailed),
 		}
-		schemas := ActivityResultEventSchemasForSite(site, tool)
+		schemas, err := ActivityResultEventSchemasForSite(site, tool)
+		if err != nil {
+			return nil, err
+		}
 		if site.Spec.Approval != nil {
 			entries[events.RevisionRequested] = ActivityApprovalEventCatalogEntry(site, true)
 			entries[events.Rejected] = ActivityApprovalEventCatalogEntry(site, false)
@@ -355,7 +383,7 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []current
 			})
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]EventSchema {
@@ -443,7 +471,10 @@ func (b *WorkflowContractBundle) GeneratedActivityEventsForExecutableNode(node r
 		if !site.Node.Equal(node) {
 			continue
 		}
-		events := ActivityResultEventsForSite(site)
+		events, err := ActivityResultEventsForSite(site)
+		if err != nil {
+			continue
+		}
 		out = append(out, events.SuccessEvent, events.FailureEvent)
 		if site.Spec.Approval != nil {
 			out = append(out, events.RevisionRequested, events.Rejected)

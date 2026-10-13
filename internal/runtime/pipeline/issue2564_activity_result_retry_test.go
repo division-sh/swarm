@@ -48,8 +48,11 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"title": "M25 external"})
 			}))
 			t.Cleanup(server.Close)
-			site := contracts.ActivitySite{Node: externalPipelineNode(t, ".", "scanner"), HandlerEventKey: "source.requested", RuleIndex: -1, Spec: contracts.ActivitySpec{Tool: "source_scrape"}}
-			resultEvents := contracts.ActivityResultEventsForSite(site)
+			site := contracts.ActivitySite{Node: externalPipelineNode(t, ".", "scanner"), HandlerEventKey: "source.requested", Kind: contracts.ActivitySiteHandler, RuleIndex: -1, Spec: contracts.ActivitySpec{Tool: "source_scrape"}}
+			resultEvents, err := contracts.ActivityResultEventsForSite(site)
+			if err != nil {
+				t.Fatal(err)
+			}
 			bundle := issue2564M25Bundle(t, server.URL, resultEvents.SuccessEvent)
 			source := semanticview.Wrap(bundle)
 			generated := bundle.GeneratedActivityEventSchemas()[resultEvents.SuccessEvent].Schema

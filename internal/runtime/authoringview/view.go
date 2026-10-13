@@ -362,6 +362,10 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	if err != nil {
 		return View{}, err
 	}
+	approvalPoints, err := buildApprovalPoints(bundle)
+	if err != nil {
+		return View{}, err
+	}
 	view := View{
 		WorkflowName:        bundle.WorkflowName(),
 		WorkflowVersion:     bundle.WorkflowVersion(),
@@ -370,7 +374,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		SourceAuthority:     "projection_only_existing_contract_owners",
 		Root:                root,
 		Flows:               flows,
-		ApprovalPoints:      buildApprovalPoints(bundle),
+		ApprovalPoints:      approvalPoints,
 		ClockSchedules:      semanticview.ClockSchedules(source),
 		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
 		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
@@ -395,16 +399,19 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	return view, nil
 }
 
-func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []ApprovalPointView {
+func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]ApprovalPointView, error) {
 	if bundle == nil {
-		return nil
+		return nil, nil
 	}
 	var out []ApprovalPointView
 	for _, site := range bundle.ActivitySites() {
 		if site.Spec.Approval == nil {
 			continue
 		}
-		result := runtimecontracts.ActivityResultEventsForSite(site)
+		result, err := runtimecontracts.ActivityResultEventsForSite(site)
+		if err != nil {
+			return nil, err
+		}
 		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		out = append(out, ApprovalPointView{
 			FlowID:       site.Node.FlowPath(),
@@ -417,7 +424,7 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []Appr
 			EffectClass:  string(tool.Effect()),
 		})
 	}
-	return out
+	return out, nil
 }
 
 func BuildRoutingTopology(source semanticview.Source) RoutingTopologyView {

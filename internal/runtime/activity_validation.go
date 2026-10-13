@@ -51,7 +51,7 @@ func validateHandlerActivitySurface(source semanticview.Source, node runtimeiden
 		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
 			errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/on_success emit are mutually exclusive in Stage 1; use generated activity result events", context))
 		}
-		errs = append(errs, validateActivitySpec(source, node, handlerEventKey, "", -1, context+".activity", handler.Activity)...)
+		errs = append(errs, validateActivitySpec(source, node, handlerEventKey, runtimecontracts.ActivitySiteHandler, -1, context+".activity", handler.Activity)...)
 	}
 	if hasRuleActivity {
 		if !handler.Activity.Empty() {
@@ -71,7 +71,7 @@ func validateHandlerActivitySurface(source semanticview.Source, node runtimeiden
 			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
 				errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/fan_out emit are mutually exclusive in Stage 1; use generated activity result events", ruleContext))
 			}
-			errs = append(errs, validateActivitySpec(source, node, handlerEventKey, rule.ID, idx, ruleContext+".activity", rule.Activity)...)
+			errs = append(errs, validateActivitySpec(source, node, handlerEventKey, runtimecontracts.ActivitySiteRule, idx, ruleContext+".activity", rule.Activity)...)
 		}
 	}
 	errs = append(errs, rejectUnsupportedNestedActivityContexts(context, handler)...)
@@ -88,8 +88,13 @@ func rejectUnsupportedNestedActivityContexts(context string, handler runtimecont
 	return errs
 }
 
-func validateActivitySpec(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEventKey, ruleID string, ruleIndex int, context string, activity runtimecontracts.ActivitySpec) []error {
+func validateActivitySpec(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEventKey string, kind runtimecontracts.ActivitySiteKind, ruleIndex int, context string, activity runtimecontracts.ActivitySpec) []error {
 	var errs []error
+	site := runtimecontracts.ActivitySite{Node: node, HandlerEventKey: handlerEventKey, Kind: kind, RuleIndex: ruleIndex, Spec: activity}
+	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		return []error{fmt.Errorf("%s: %w", context, err)}
+	}
 	toolID := strings.TrimSpace(activity.Tool)
 	if toolID == "" {
 		return []error{fmt.Errorf("%s: tool is required", context)}
@@ -141,32 +146,19 @@ func validateActivitySpec(source semanticview.Source, node runtimeidentity.Execu
 		} else if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			errs = append(errs, fmt.Errorf("%s.approval: activity approval requires effect_class non_idempotent_write", context))
 		}
-		approvalSite := runtimecontracts.ActivitySite{
-			Node: node, HandlerEventKey: handlerEventKey, RuleID: ruleID, RuleIndex: ruleIndex, Spec: activity,
-		}
-		if !activityRevisionConsumerExists(source, approvalSite) {
-			events := runtimecontracts.ActivityResultEventsForSite(approvalSite)
-			errs = append(errs, fmt.Errorf("%s.approval: generated revision event %q has no consumer; add a handler so operator feedback cannot disappear", context, events.RevisionRequested))
+		if !activityRevisionConsumerExists(source, resultEvents.RevisionRequested) {
+			errs = append(errs, fmt.Errorf("%s.approval: generated revision event %q has no consumer; add a handler so operator feedback cannot disappear", context, resultEvents.RevisionRequested))
 		}
 	}
 	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema())...)
-	site := runtimecontracts.ActivitySite{
-		Node:            node,
-		HandlerEventKey: handlerEventKey,
-		Spec:            activity,
-	}
-	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
-	if resultEvents.SuccessEvent == "" || resultEvents.FailureEvent == "" {
-		errs = append(errs, fmt.Errorf("%s: generated result event names could not be derived", context))
-	}
 	return errs
 }
 
-func activityRevisionConsumerExists(source semanticview.Source, site runtimecontracts.ActivitySite) bool {
-	if source == nil || site.Spec.Approval == nil {
+func activityRevisionConsumerExists(source semanticview.Source, revisionEvent string) bool {
+	if source == nil {
 		return false
 	}
-	want := eventidentity.Normalize(runtimecontracts.ActivityResultEventsForSite(site).RevisionRequested)
+	want := eventidentity.Normalize(revisionEvent)
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -208,7 +200,11 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 		}
 		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
 			context := activitySiteContext(site)
-			resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
+			resultEvents, err := runtimecontracts.ActivityResultEventsForSite(site)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
 			eventTypes := []string{resultEvents.SuccessEvent, resultEvents.FailureEvent}
 			if site.Spec.Approval != nil {
 				eventTypes = append(eventTypes, resultEvents.RevisionRequested, resultEvents.Rejected)
@@ -235,10 +231,7 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 
 func activitySiteContext(site runtimecontracts.ActivitySite) string {
 	context := fmt.Sprintf("node %s handler %s", site.Node.Key(), strings.TrimSpace(site.HandlerEventKey))
-	if site.RuleIndex >= 0 {
-		if strings.TrimSpace(site.RuleID) != "" {
-			return fmt.Sprintf("%s.rules[%s].activity", context, strings.TrimSpace(site.RuleID))
-		}
+	if site.Kind == runtimecontracts.ActivitySiteRule {
 		return fmt.Sprintf("%s.rules[%d].activity", context, site.RuleIndex)
 	}
 	return context + ".activity"

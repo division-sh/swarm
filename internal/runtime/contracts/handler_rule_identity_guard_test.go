@@ -31,9 +31,8 @@ func TestHandlerRuleDisplayLabelReaderBoundary(t *testing.T) {
 		"internal/runtime/contracts/workflow_contract_activity.go::ActivitySitesForNode",
 		"internal/runtime/engine/executor.go::(*Executor).stepActivity",
 	} {
-		allowance := allowedHandlerRuleDisplayLabelReaders()[activityKey]
-		if !strings.Contains(allowance.Reason, "ActivitySite.RuleID -> DefaultActivityID -> generated event identity") || !strings.Contains(allowance.Reason, "#1769/#1775") {
-			t.Fatalf("activity display authority is not truthfully classified: %s %#v", activityKey, allowance)
+		if allowance, permitted := allowedHandlerRuleDisplayLabelReaders()[activityKey]; permitted {
+			t.Fatalf("activity naming still permits rule-label authority: %s %#v", activityKey, allowance)
 		}
 	}
 	readers := loadHandlerRuleDisplayLabelReaders(t, nil)
@@ -94,7 +93,7 @@ func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling Handl
 
 func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
 	return map[string]handlerRuleDisplayLabelAllowance{
-		"internal/runtime/activity_validation.go::validateHandlerActivitySurface":                                                  {Count: 3, Reason: "diagnostic rule label"},
+		"internal/runtime/activity_validation.go::validateHandlerActivitySurface":                                                  {Count: 2, Reason: "diagnostic rule label"},
 		"internal/runtime/authoringview/view.go::containedOperationRefs":                                                           {Count: 2, Reason: "authoring presentation label"},
 		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go::wave1ContainedStateOperations":                  {Count: 2, Reason: "diagnostic operation label"},
@@ -107,7 +106,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/bootverify/workflow_policy_sheet_validation_checks.go::validatePolicySheetValidationDispositionConsumer": {Count: 1, Reason: "diagnostic consumer label; self-exclusion uses RuleIndex"},
 		"internal/runtime/contracts/compute_module_validation.go::validatePolicySheetComputeModuleRows":                            {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/contracts/validation_policy_validation.go::validatePolicySheetValidationRows":                            {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/contracts/workflow_contract_activity.go::ActivitySitesForNode":                                           {Count: 1, Reason: "deferred activity identity authority: HandlerRuleEntry.ID -> ActivitySite.RuleID -> DefaultActivityID -> generated event identity; tracked by #1769/#1775"},
 		"internal/runtime/contracts/workflow_contract_emit.go::HandlerDeclarativeEmitSites":                                        {Count: 4, Reason: "emit-site presentation label"},
 		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":                                       {Count: 1, Reason: "emit-template presentation label"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue":                            {Count: 2, Reason: "keyed-map presentation projection"},
@@ -118,7 +116,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/contracts/workflow_transition_carriers.go::handlerAdvanceCarriers":                                       {Count: 1, Reason: "transition diagnostic carrier label"},
 		"internal/runtime/engine/executor.go::(*Executor).applyRule":                                                               {Count: 2, Reason: "durable fact presentation label"},
 		"internal/runtime/engine/executor.go::(*Executor).selectRule":                                                              {Count: 2, Reason: "failed-evaluation fact and diagnostic presentation label"},
-		"internal/runtime/engine/executor.go::(*Executor).stepActivity":                                                            {Count: 1, Reason: "deferred activity identity authority: HandlerRuleEntry.ID -> ActivitySite.RuleID -> DefaultActivityID -> generated event identity; tracked by #1769/#1775"},
 	}
 }
 

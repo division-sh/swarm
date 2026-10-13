@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -417,6 +418,35 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 				t.Fatalf("validation error = %v, want %q", err, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestRuleActivityValidationRequiresExplicitIDAndPreservesCombinationRefusal(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle("request")
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"send": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
+		),
+	}
+	source := compiledRuntimeValidationSource(t, bundle)
+	node := identitytest.RootNode(t, "worker")
+	for _, id := range []string{"", "  "} {
+		handler := runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{ID: id, Tool: "send"}}}}
+		errs := validateHandlerActivitySurface(source, node, "request", handler)
+		if len(errs) != 1 || !strings.Contains(errs[0].Error(), "rules[0].activity.id is required") {
+			t.Fatalf("unnamed typed rule activity: %v", errs)
+		}
+	}
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Activity: runtimecontracts.ActivitySpec{ID: "direct", Tool: "send"},
+		Rules:    []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{ID: "rule_send", Tool: "send"}}},
+	}
+	errs := validateHandlerActivitySurface(source, node, "request", handler)
+	if len(errs) != 2 || !strings.Contains(errs[0].Error(), "only allowed on handlers without rules") || !strings.Contains(errs[1].Error(), "cannot be combined with rule activities") {
+		t.Fatalf("invalid combined ownership lost its specific refusals: %v", errs)
 	}
 }
 

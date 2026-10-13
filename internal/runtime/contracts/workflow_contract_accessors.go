@@ -1024,7 +1024,10 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 		if site.Node.FlowPath() != flowID {
 			continue
 		}
-		result := ActivityResultEventsForSite(site)
+		result, err := ActivityResultEventsForSite(site)
+		if err != nil {
+			continue
+		}
 		out = append(out,
 			eventidentity.LeafName(result.SuccessEvent),
 			eventidentity.LeafName(result.FailureEvent),

@@ -161,7 +161,13 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		project func(yamlsource.Value) error
 	}{
 		{"emit", func(v yamlsource.Value) error { out.Emit, err = projectNodeEmitValue(v); return err }},
-		{"activity", func(v yamlsource.Value) error { out.Activity, err = projectNodeActivityValue(v); return err }},
+		{"activity", func(v yamlsource.Value) error {
+			out.Activity, err = projectNodeActivityValue(v)
+			if err == nil && !out.Activity.Empty() && strings.TrimSpace(out.Activity.ID) == "" {
+				return nodeValueError(v, fmt.Errorf("rule activity.id is required; declare an explicit activity.id"))
+			}
+			return err
+		}},
 		{"data_accumulation", func(v yamlsource.Value) error {
 			out.DataAccumulation, err = projectNodeDataAccumulationValue(v)
 			return err
