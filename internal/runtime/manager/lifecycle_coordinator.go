@@ -360,6 +360,7 @@ type agentLifecycleCoordinator struct {
 	runOwner            *worklifetime.ManagerRunOccurrence
 	transitionExecutor  *worklifetime.Lease
 	runGeneration       uint64
+	resetOccurrence     uint64
 	workRetiring        bool
 	watcherExpected     bool
 	transition          *runtimeLifecycleTransition
@@ -959,7 +960,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	}
 	// Keep publication serialization, but let candidate factories inspect the
 	// manager without holding its cell-map mutex.
-	preparedPhase, preparedRun := c.phase, c.runGeneration
+	preparedPhase, preparedRun, preparedReset := c.phase, c.runGeneration, c.resetOccurrence
 	c.mu.Unlock()
 	var agent Agent
 	var buildErr error
@@ -973,7 +974,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c.phase != preparedPhase || c.runGeneration != preparedRun || c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	if c.phase != preparedPhase || c.runGeneration != preparedRun || c.resetOccurrence != preparedReset || c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
 	current, currentFound, err := c.loadAgentView(ctx, identity)
@@ -1317,6 +1318,7 @@ func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleT
 		c.retireWorkAdmission()
 		shutdown = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 		reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+		c.resetOccurrence++
 		c.transition = shutdown
 		c.pendingReset = reset
 		c.phase = runtimeLifecycleShuttingDown
@@ -1325,11 +1327,13 @@ func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleT
 		shutdown = c.transition
 		if c.pendingReset == nil {
 			c.pendingReset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+			c.resetOccurrence++
 		}
 		reset = c.pendingReset
 	case runtimeLifecycleResetting:
 		reset = c.transition
 	case runtimeLifecycleStopped:
+		c.resetOccurrence++
 		if c.retireWorkAdmission() {
 			shutdown = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 			reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)

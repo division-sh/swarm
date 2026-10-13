@@ -25,7 +25,7 @@ import (
 
 func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"replacement", "lost_ack", "cancel_after_commit", "read_after_commit", "historical", "retired_process", "rollback", "shutdown_during_factory", "reintroduction_lost_ack", "reintroduction_cancel_after_commit", "reintroduction_read_after_commit"} {
+		for _, cut := range []string{"replacement", "lost_ack", "cancel_after_commit", "read_after_commit", "historical", "retired_process", "rollback", "shutdown_during_factory", "reset_during_stopped_factory", "reintroduction_lost_ack", "reintroduction_cancel_after_commit", "reintroduction_read_after_commit"} {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				var selected storetest.AgentFixtureStore
 				var reopen func() manager.AgentLifecycleStateReader

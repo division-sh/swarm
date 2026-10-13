@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,8 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersiste
 	binding := store.(processExecutionBindingProvider)
 	fault := &spawnCommitFault{agentRowResponseLoss: &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: store.(RunExecutionOwner)}}
 	readback := &spawnReadbackFault{AgentLifecycleStateReader: reader}
-	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), nil, AgentManagerOptions{LLMBackend: rec.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: readback, LifecycleOutcome: outcomes}})
+	bus := newProjectionTestBus()
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LLMBackend: rec.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: readback, LifecycleOutcome: outcomes}})
 	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancel()
 	builds := 0
@@ -102,6 +104,45 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersiste
 		if fault.commits != 0 || len(am.lifecycle.cells) != 0 || !reflect.DeepEqual(before, snapshot()) {
 			t.Fatal("rejected factory cut created a row, outcome or execution")
 		}
+		return
+	}
+	if cut == "reset_during_stopped_factory" {
+		held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		build = func() (Agent, error) {
+			builds++
+			close(held)
+			<-release
+			return reconfigureTestAgent{id: rec.Config.ID}, nil
+		}
+		before := snapshot()
+		preparedRun, preparedReset := am.lifecycle.runGeneration, am.lifecycle.resetOccurrence
+		go func() { done <- register(ctx, rec) }()
+		<-held
+		resetErr := am.ResetRuntimeState()
+		resetPhase, resetRun := am.lifecycle.phaseSnapshot(), am.lifecycle.runGeneration
+		close(release)
+		registrationErr := <-done
+		if resetErr != nil || resetPhase != runtimeLifecycleStopped || resetRun != preparedRun || am.lifecycle.resetOccurrence != preparedReset+1 || ctx.Err() != nil {
+			t.Fatalf("stopped reset cut: reset=%v phase=%s run=%d/%d caller=%v", resetErr, resetPhase, resetRun, preparedRun, ctx.Err())
+		}
+		var refusal *runtimefailures.Error
+		if !errors.As(registrationErr, &refusal) || refusal.Failure.Class != runtimefailures.ClassLifecycleConflict || refusal.Failure.Detail.Code != "lifecycle_transition_conflict" {
+			t.Fatalf("registration crossed completed stopped reset: %v", registrationErr)
+		}
+		if fault.commits != 0 || len(am.lifecycle.cells) != 0 || len(am.lifecycle.registrations) != 0 || !reflect.DeepEqual(before, snapshot()) {
+			t.Fatal("stale stopped factory created a row, outcome, cell or execution")
+		}
+		if len(bus.routes) != 0 || len(bus.history) != 0 {
+			t.Fatal("stale stopped factory published a route")
+		}
+		build = func() (Agent, error) {
+			builds++
+			return reconfigureTestAgent{id: rec.Config.ID}, nil
+		}
+		if err := register(ctx, rec); err != nil || fault.commits != 1 || builds != 2 {
+			t.Fatalf("fresh post-reset registration: commits=%d builds=%d error=%v", fault.commits, builds, err)
+		}
+		proveSpawnAdoptionJoinedExecution(t, am)
 		return
 	}
 	switch cut {
