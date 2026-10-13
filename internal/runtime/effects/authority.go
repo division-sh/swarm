@@ -331,6 +331,7 @@ func ChannelDeliveryOperationID(deliveryID, renderID string) (string, error) {
 }
 
 type Authority struct {
+	CompletionRequest    CompletionRequest
 	Kind                 AuthorityKind
 	ID                   string
 	Normal               LifecycleToken
@@ -496,6 +497,9 @@ func (a Authority) Evidence() map[string]any {
 		"execution_owner":  strings.TrimSpace(a.ExecutionOwner),
 		"fence_generation": a.FenceGeneration,
 		"execution_mode":   a.ExecutionMode,
+	}
+	if a.CompletionRequest != (CompletionRequest{}) {
+		evidence["provider_request"] = a.CompletionRequest
 	}
 	if a.Target.Valid() {
 		evidence["usage_target"] = map[string]any{

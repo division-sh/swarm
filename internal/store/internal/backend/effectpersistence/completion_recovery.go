@@ -68,15 +68,16 @@ type completionRecoveryAttempt struct {
 type CompletionRecoveryAttempt = completionRecoveryAttempt
 
 type completionRecoveryAuthorityEvidence struct {
-	ExecutionID                string `json:"execution_id"`
-	ForkRunID                  string `json:"fork_run_id"`
-	Generation                 uint64 `json:"generation"`
-	AdmissionFingerprint       string `json:"admission_fingerprint"`
-	ContainerPlanFingerprint   string `json:"container_plan_fingerprint"`
-	ActorCensusFingerprint     string `json:"actor_census_fingerprint"`
-	EffectiveConfigFingerprint string `json:"effective_config_fingerprint"`
-	ActorTokenID               string `json:"actor_token_id"`
-	ExecutionMode              string `json:"execution_mode"`
+	ProviderRequest            runtimeeffects.CompletionRequest `json:"provider_request"`
+	ExecutionID                string                           `json:"execution_id"`
+	ForkRunID                  string                           `json:"fork_run_id"`
+	Generation                 uint64                           `json:"generation"`
+	AdmissionFingerprint       string                           `json:"admission_fingerprint"`
+	ContainerPlanFingerprint   string                           `json:"container_plan_fingerprint"`
+	ActorCensusFingerprint     string                           `json:"actor_census_fingerprint"`
+	EffectiveConfigFingerprint string                           `json:"effective_config_fingerprint"`
+	ActorTokenID               string                           `json:"actor_token_id"`
+	ExecutionMode              string                           `json:"execution_mode"`
 	UsageTarget                struct {
 		Kind          string                 `json:"kind"`
 		ID            string                 `json:"id"`
@@ -348,6 +349,9 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if err := json.Unmarshal([]byte(recovered.AuthorityEvidence), &evidence); err != nil {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("decode completion recovery authority evidence for %s: %w", recovered.AttemptID, err)
 	}
+	if err := evidence.ProviderRequest.Validate(); err != nil {
+		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
+	}
 	mode, ok := executionmode.Parse(recovered.OperationMode)
 	if !ok || recovered.AttemptMode != recovered.OperationMode || evidence.ExecutionMode != recovered.OperationMode {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery execution mode conflicts for attempt %s", recovered.AttemptID)
@@ -368,7 +372,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if !target.Valid() {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery target for attempt %s is invalid", recovered.AttemptID)
 	}
-	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode}
+	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode, CompletionRequest: evidence.ProviderRequest}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
 		runID := strings.TrimSpace(target.RunID)
 		for _, axis := range []struct {
@@ -452,11 +456,12 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			OperationID: recovered.OperationID, AttemptID: recovered.AttemptID, Authority: authority,
 			State: state, Failure: failure, Evidence: map[string]any{"recovered": true}, Now: now,
 		},
-		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "unknown", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage: runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable,
+			Evidence: runtimeeffects.CompletionEvidence{Request: evidence.ProviderRequest, Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}},
 		Spend: runtimeeffects.CompletionSpend{
-			EntityID: target.EntityID, FlowInstance: flowInstance, AgentID: agentID, Model: "unknown", ModelAlias: "unknown",
-			BackendProfile: "unknown", Provider: recovered.Adapter, Transport: recovered.Transport,
-			ResolvedModel: "unknown", InvocationType: coalesce(recovered.Adapter, "completion_recovery"),
+			EntityID: target.EntityID, FlowInstance: flowInstance, AgentID: agentID, Model: evidence.ProviderRequest.RequestedModel, ModelAlias: evidence.ProviderRequest.ModelAlias,
+			BackendProfile: evidence.ProviderRequest.BackendProfile, Provider: evidence.ProviderRequest.Provider, Transport: evidence.ProviderRequest.Transport,
+			InvocationType: coalesce(recovered.Adapter, "completion_recovery"),
 		},
 		Now: now,
 	}

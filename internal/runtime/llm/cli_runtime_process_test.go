@@ -53,7 +53,7 @@ func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness
 	if !ok || state == runtimeeffects.StateSettled || state == runtimeeffects.StateTerminalFailure || state == runtimeeffects.StateOutcomeUncertain {
 		t.Fatalf("low-level completion primitive settled independently: state=%q present=%t", state, ok)
 	}
-	profile, model := testClaudeProviderSelection(t)
+	profile, _ := testClaudeProviderSelection(t)
 	failure := runtimefailures.FromError(err, "claude-cli-test", "settle_completion")
 	target := dispatch.handle.Attempt().Authority.Target
 	surface, ok := managedcapabilities.FromContext(ctx)
@@ -67,7 +67,7 @@ func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness
 	}
 	settlementCtx := harness.CompletionContext("claude-shared-settlement")
 	if _, settleErr := settleCompletionTurn(
-		settlementCtx, dispatch, target.ID, turn, nil, profile, unavailableCompletionUsage(model.ConcreteModel),
+		settlementCtx, dispatch, target.ID, turn, nil, profile, unavailableCompletionUsage(),
 		claudeCompletionFailureState(err), &failure.Failure, nil,
 	); settleErr != nil {
 		settlementFailure, _ := runtimefailures.As(settleErr)

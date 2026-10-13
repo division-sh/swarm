@@ -1644,6 +1644,24 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 	settlement.AgentTurn.TriggerEventID = event.ID()
 	settlement.AgentTurn.TriggerEventType = string(event.Type())
 	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
+	frame := managedCompletionTestFrame(t, authority, adapter)
+	bound, err := runtimeeffects.BindCompletionRequest(authority, runtimeeffects.AuthorizeRequest{AgentFrame: &frame})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := bound.CompletionRequest
+	source := runtimeeffects.CompletionModelResponse
+	if adapter == "claude_cli" {
+		source = runtimeeffects.CompletionModelCLITerminal
+	}
+	settlement.Usage.Evidence = runtimeeffects.CompletionEvidence{Request: request,
+		Models: []runtimeeffects.CompletionModelObservation{{Model: settlement.Usage.ResolvedModel, Source: source}}, CostProvenance: runtimeeffects.CompletionCostEstimated}
+	if adapter == "mock_python" {
+		settlement.Usage.Evidence.Models = []runtimeeffects.CompletionModelObservation{}
+		settlement.Usage.ResolvedModel, settlement.Spend.ResolvedModel = "", ""
+	}
+	settlement.Spend.Model, settlement.Spend.ModelAlias = request.RequestedModel, request.ModelAlias
+	settlement.Spend.BackendProfile, settlement.Spend.Provider, settlement.Spend.Transport = request.BackendProfile, request.Provider, request.Transport
 	return settlement
 }
 

@@ -133,7 +133,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	if conv.Session == nil || conv.Session.ID == "" || conv.Session.MemoryIdentity != testMemoryIdentity("agent-1", "support/inst-1") || conv.Session.TurnCount != 2 {
 		t.Fatalf("projected session = %#v, want exact reusable-memory snapshot", conv.Session)
 	}
-	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "test-model" {
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-compatible-mini" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
 }
@@ -203,8 +203,8 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	}
 	settlements := harness.CompletionSettlementsForAdapter("anthropic_api")
 	requireManagedSettlementProviderSelection(t, settlements)
-	if len(settlements) != 2 || settlements[0].Usage.ResolvedModel != "test-model" || settlements[1].Usage.ResolvedModel != "test-model" {
-		t.Fatalf("completion settlements = %#v, want sealed frame model on both turns", settlements)
+	if len(settlements) != 2 || settlements[0].Usage.ResolvedModel != "claude-test" || settlements[1].Usage.ResolvedModel != "claude-test" {
+		t.Fatalf("completion settlements = %#v, want reported model on both turns", settlements)
 	}
 }
 

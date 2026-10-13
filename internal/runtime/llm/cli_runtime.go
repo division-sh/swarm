@@ -340,6 +340,7 @@ func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, m
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,
 	})
+	ctx = withCompletionRequest(ctx, profile, providerModel)
 	attempt, err := beginProviderCompletion(ctx, claudeCLICompletionAdapter, requestFingerprintInput, managed)
 	if err != nil {
 		return nil, err
@@ -466,7 +467,7 @@ func (r *ClaudeCLIRuntime) failClaudeContinuation(ctx context.Context, s *Sessio
 			evidence[key] = value
 		}
 	}
-	if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, evidence); settleErr != nil {
+	if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(), state, turn.Failure, evidence); settleErr != nil {
 		return errors.Join(err, settleErr)
 	}
 	projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
@@ -498,12 +499,7 @@ type claudeContinuationReply struct {
 
 func (r *ClaudeCLIRuntime) acceptClaudeContinuation(ctx context.Context, s *Session, message Message, managed *managedProviderCall, actor runtimeactors.AgentConfig, resolved resolvedMemoryExecution, lease *sessions.Lease, prepared claudePreparedContinuation, reply claudeContinuationReply) (*Response, error) {
 	resp := reply.response
-	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, prepared.usageModel)
-	if usageErr != nil {
-		usage = unavailableCompletionUsage(prepared.usageModel)
-	} else {
-		usage.ResolvedModel = prepared.usageModel
-	}
+	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw)
 	reply.usage = usage
 	var err error
 	ctx, err = validateClaudeContinuationCapabilities(ctx, s, prepared.tools, reply)
@@ -594,7 +590,7 @@ func (r *ClaudeCLIRuntime) settleClaudeContinuation(ctx context.Context, s *Sess
 	dispatch, completionTargetID, profile, usage := reply.dispatch, reply.targetID, reply.profile, reply.usage
 	settlementEvidence := map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw), "provider_session_id": childSessionID}
 	if usageErr != nil {
-		settlementEvidence["usage_exactness"] = string(runtimeeffects.CompletionUsageUnavailable)
+		settlementEvidence["usage_exactness"] = string(usage.Exactness)
 	}
 	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, nil), resp)
 	if err := bindCompletionProjection(dispatch, s, message, managed); err != nil {

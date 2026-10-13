@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -54,40 +55,44 @@ type OperatorConversationActivityCounts struct {
 }
 
 type OperatorConversationTurnListItem struct {
-	TurnID           string                             `json:"turn_id"`
-	ExecutionMode    string                             `json:"execution_mode"`
-	Ordinal          int                                `json:"ordinal"`
-	CompletedAt      time.Time                          `json:"completed_at"`
-	DurationMS       int                                `json:"duration_ms"`
-	TriggerEventID   string                             `json:"trigger_event_id,omitempty"`
-	TriggerEventType string                             `json:"trigger_event_type,omitempty"`
-	ActivityCounts   OperatorConversationActivityCounts `json:"activity_counts"`
-	Tokens           *OperatorConversationTokenUsage    `json:"tokens,omitempty"`
-	Outcome          string                             `json:"outcome,omitempty"`
-	ParseOK          bool                               `json:"parse_ok"`
-	Failure          *runtimefailures.Envelope          `json:"failure,omitempty"`
+	CompletionEvidence runtimeeffects.CompletionEvidence  `json:"completion_evidence"`
+	ResolvedModel      string                             `json:"resolved_model,omitempty"`
+	TurnID             string                             `json:"turn_id"`
+	ExecutionMode      string                             `json:"execution_mode"`
+	Ordinal            int                                `json:"ordinal"`
+	CompletedAt        time.Time                          `json:"completed_at"`
+	DurationMS         int                                `json:"duration_ms"`
+	TriggerEventID     string                             `json:"trigger_event_id,omitempty"`
+	TriggerEventType   string                             `json:"trigger_event_type,omitempty"`
+	ActivityCounts     OperatorConversationActivityCounts `json:"activity_counts"`
+	Tokens             *OperatorConversationTokenUsage    `json:"tokens,omitempty"`
+	Outcome            string                             `json:"outcome,omitempty"`
+	ParseOK            bool                               `json:"parse_ok"`
+	Failure            *runtimefailures.Envelope          `json:"failure,omitempty"`
 }
 
 type OperatorPublicConversationTurn struct {
-	TurnID                 string                          `json:"turn_id"`
-	ExecutionMode          string                          `json:"execution_mode"`
-	Ordinal                int                             `json:"ordinal"`
-	CompletedAt            time.Time                       `json:"completed_at"`
-	DurationMS             int                             `json:"duration_ms"`
-	TriggerEventID         string                          `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string                          `json:"trigger_event_type,omitempty"`
-	EntityID               string                          `json:"entity_id,omitempty"`
-	TaskID                 string                          `json:"task_id,omitempty"`
-	Activity               []OperatorConversationActivity  `json:"activity"`
-	Tokens                 *OperatorConversationTokenUsage `json:"tokens,omitempty"`
-	Outcome                string                          `json:"outcome,omitempty"`
-	ParseOK                bool                            `json:"parse_ok"`
-	Failure                *runtimefailures.Envelope       `json:"failure,omitempty"`
-	AssistantVisibleOutput string                          `json:"assistant_visible_output,omitempty"`
-	RetryCount             int                             `json:"retry_count,omitempty"`
-	AgentID                string                          `json:"-"`
-	SessionID              string                          `json:"-"`
-	RunID                  string                          `json:"-"`
+	CompletionEvidence     runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel          string                            `json:"resolved_model,omitempty"`
+	TurnID                 string                            `json:"turn_id"`
+	ExecutionMode          string                            `json:"execution_mode"`
+	Ordinal                int                               `json:"ordinal"`
+	CompletedAt            time.Time                         `json:"completed_at"`
+	DurationMS             int                               `json:"duration_ms"`
+	TriggerEventID         string                            `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string                            `json:"trigger_event_type,omitempty"`
+	EntityID               string                            `json:"entity_id,omitempty"`
+	TaskID                 string                            `json:"task_id,omitempty"`
+	Activity               []OperatorConversationActivity    `json:"activity"`
+	Tokens                 *OperatorConversationTokenUsage   `json:"tokens,omitempty"`
+	Outcome                string                            `json:"outcome,omitempty"`
+	ParseOK                bool                              `json:"parse_ok"`
+	Failure                *runtimefailures.Envelope         `json:"failure,omitempty"`
+	AssistantVisibleOutput string                            `json:"assistant_visible_output,omitempty"`
+	RetryCount             int                               `json:"retry_count,omitempty"`
+	AgentID                string                            `json:"-"`
+	SessionID              string                            `json:"-"`
+	RunID                  string                            `json:"-"`
 }
 
 type OperatorPublicConversationTurnDetail struct {
@@ -403,10 +408,12 @@ type OperatorSessionRef struct {
 }
 
 type OperatorTurnRef struct {
-	TurnID      string                    `json:"turn_id"`
-	CompletedAt time.Time                 `json:"completed_at"`
-	ParseOK     bool                      `json:"parse_ok"`
-	Failure     *runtimefailures.Envelope `json:"failure,omitempty"`
+	CompletionEvidence runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel      string                            `json:"resolved_model,omitempty"`
+	TurnID             string                            `json:"turn_id"`
+	CompletedAt        time.Time                         `json:"completed_at"`
+	ParseOK            bool                              `json:"parse_ok"`
+	Failure            *runtimefailures.Envelope         `json:"failure,omitempty"`
 }
 
 type OperatorAgentDetail struct {
@@ -485,12 +492,14 @@ type OperatorAgentTool struct {
 }
 
 type OperatorLiveTurn struct {
-	TurnID                 string             `json:"turn_id,omitempty"`
-	TaskID                 string             `json:"task_id,omitempty"`
-	ParseOK                bool               `json:"parse_ok"`
-	AssistantVisibleOutput string             `json:"assistant_visible_output,omitempty"`
-	Outcome                string             `json:"outcome,omitempty"`
-	LastTool               *OperatorAgentTool `json:"last_tool,omitempty"`
+	CompletionEvidence     runtimeeffects.CompletionEvidence `json:"completion_evidence"`
+	ResolvedModel          string                            `json:"resolved_model,omitempty"`
+	TurnID                 string                            `json:"turn_id,omitempty"`
+	TaskID                 string                            `json:"task_id,omitempty"`
+	ParseOK                bool                              `json:"parse_ok"`
+	AssistantVisibleOutput string                            `json:"assistant_visible_output,omitempty"`
+	Outcome                string                            `json:"outcome,omitempty"`
+	LastTool               *OperatorAgentTool                `json:"last_tool,omitempty"`
 }
 
 type OperatorConversationListOptions struct {
@@ -543,18 +552,19 @@ type OperatorConversationWatchdog struct {
 }
 
 type OperatorConversationTurn struct {
-	TurnIndex        int                             `json:"turn_index"`
-	TurnID           string                          `json:"turn_id"`
-	ExecutionMode    string                          `json:"execution_mode"`
-	TriggerEventID   string                          `json:"trigger_event_id"`
-	TriggerEventType string                          `json:"trigger_event_type"`
-	RequestPayload   json.RawMessage                 `json:"request_payload,omitempty"`
-	ResponsePayload  json.RawMessage                 `json:"response_payload,omitempty"`
-	ToolCalls        []OperatorConversationToolCall  `json:"tool_calls,omitempty"`
-	TurnBlocks       []OperatorConversationTurnBlock `json:"turn_blocks,omitempty"`
-	ParseOK          bool                            `json:"parse_ok"`
-	LatencyMS        int                             `json:"latency_ms"`
-	Failure          *runtimefailures.Envelope       `json:"failure,omitempty"`
+	Completions      []OperatorConversationCompletion `json:"completions,omitempty"`
+	TurnIndex        int                              `json:"turn_index"`
+	TurnID           string                           `json:"turn_id"`
+	ExecutionMode    string                           `json:"execution_mode"`
+	TriggerEventID   string                           `json:"trigger_event_id"`
+	TriggerEventType string                           `json:"trigger_event_type"`
+	RequestPayload   json.RawMessage                  `json:"request_payload,omitempty"`
+	ResponsePayload  json.RawMessage                  `json:"response_payload,omitempty"`
+	ToolCalls        []OperatorConversationToolCall   `json:"tool_calls,omitempty"`
+	TurnBlocks       []OperatorConversationTurnBlock  `json:"turn_blocks,omitempty"`
+	ParseOK          bool                             `json:"parse_ok"`
+	LatencyMS        int                              `json:"latency_ms"`
+	Failure          *runtimefailures.Envelope        `json:"failure,omitempty"`
 
 	AgentID                string                           `json:"-"`
 	SessionID              string                           `json:"-"`
@@ -570,6 +580,13 @@ type OperatorConversationTurn struct {
 	ToolResults            []OperatorConversationToolResult `json:"-"`
 	RetryCount             int                              `json:"-"`
 	CreatedAt              time.Time                        `json:"-"`
+}
+
+type OperatorConversationCompletion struct {
+	AttemptID     string                         `json:"attempt_id"`
+	Ordinal       int                            `json:"ordinal"`
+	ExecutionMode string                         `json:"execution_mode"`
+	Usage         runtimeeffects.CompletionUsage `json:"usage"`
 }
 
 type OperatorConversationToolCall struct {
@@ -704,24 +721,30 @@ type OperatorAgentUsageByAccounting struct {
 }
 
 type OperatorAgentUsageTotals struct {
-	LedgerEntries    int     `json:"ledger_entries"`
-	InputTokens      int64   `json:"input_tokens"`
-	OutputTokens     int64   `json:"output_tokens"`
-	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	LedgerEntries            int     `json:"ledger_entries"`
+	InputTokens              int64   `json:"input_tokens"`
+	OutputTokens             int64   `json:"output_tokens"`
+	CostUSD                  float64 `json:"cost_usd"`
+	EstimatedCostUSD         float64 `json:"estimated_cost_usd"`
+	ProviderReportedCostUSD  float64 `json:"provider_reported_cost_usd"`
+	ReservationExhaustionUSD float64 `json:"reservation_exhaustion_usd"`
+	UnattributedCostUSD      float64 `json:"unattributed_cost_usd"`
 }
 
 type OperatorAgentUsageBreakdown struct {
-	ExecutionMode   string                   `json:"execution_mode"`
-	UsageAccounting string                   `json:"usage_accounting"`
-	InvocationType  string                   `json:"invocation_type"`
-	Model           string                   `json:"model"`
-	ModelAlias      string                   `json:"model_alias"`
-	BackendProfile  string                   `json:"backend_profile"`
-	Provider        string                   `json:"provider"`
-	Transport       string                   `json:"transport"`
-	ResolvedModel   string                   `json:"resolved_model"`
-	CostDisplay     string                   `json:"cost_display"`
-	Totals          OperatorAgentUsageTotals `json:"totals"`
+	ExecutionMode      string                             `json:"execution_mode"`
+	UsageAccounting    string                             `json:"usage_accounting"`
+	InvocationType     string                             `json:"invocation_type"`
+	Model              string                             `json:"model"`
+	ModelAlias         string                             `json:"model_alias"`
+	BackendProfile     string                             `json:"backend_profile"`
+	Provider           string                             `json:"provider"`
+	Transport          string                             `json:"transport"`
+	ResolvedModel      string                             `json:"resolved_model,omitempty"`
+	CompletionEvidence *runtimeeffects.CompletionEvidence `json:"completion_evidence,omitempty"`
+	CostProvenance     string                             `json:"cost_provenance"`
+	CostDisplay        string                             `json:"cost_display"`
+	Totals             OperatorAgentUsageTotals           `json:"totals"`
 }
 
 type PendingAgentDeliveryFacts struct {

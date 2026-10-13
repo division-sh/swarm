@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 func unmanagedLLMTestContext() context.Context {
@@ -154,10 +155,14 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx); found {
 		bundleHash = fact.BundleHash()
 	}
+	alias, model := "regular", "effect-test-model"
+	if request, ok := ctx.Value(effectTestRequestKey{}).(llmselection.ResolvedModel); ok {
+		alias, model = request.ModelAlias, request.ConcreteModel
+	}
 	frame, err := agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: surface.ActorIdentity, Role: "effect-test", Intent: intent, ProviderPrompt: providerPrompt,
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
-		ModelAlias: "regular", Model: "effect-test-model",
+		ModelAlias: alias, Model: model,
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
 		BundleHash: bundleHash, Surface: surface,
 	})
@@ -165,6 +170,28 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 		t.Fatalf("complete effect-test frame: %v", err)
 	}
 	return &managedProviderCall{frame: frame, provider: frame.Session.Provider}
+}
+
+type effectTestRequestKey struct{}
+
+func withEffectTestRequest(t testing.TB, ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel) context.Context {
+	t.Helper()
+	old, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("effect request fixture requires its existing capability surface")
+	}
+	tools := make([]managedcapabilities.PlannedTool, 0, len(old.Tools))
+	for _, tool := range old.Tools {
+		tools = append(tools, managedcapabilities.PlannedTool{Name: tool.Name, DefinitionHash: tool.DefinitionHash, Capability: tool.Capability, Bindings: tool.Bindings})
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: old.ActorIdentity, ActorPlan: old.ActorPlan,
+		RuntimeMode: profile.RuntimeMode, Provider: profile.Provider, Transport: profile.Transport, ProviderContract: old.ProviderContract,
+		Authority: old.Authority, Tools: tools, CreatedAt: old.CreatedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	return context.WithValue(ctx, effectTestRequestKey{}, model)
 }
 
 func beginManagedTestCompletion(t testing.TB, ctx context.Context, adapter string, request []byte) (*runtimeeffects.Handle, error) {

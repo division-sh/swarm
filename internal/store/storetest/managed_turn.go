@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -213,6 +214,11 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		},
 		Now: now,
 	}
+	request := handle.Attempt().Authority.CompletionRequest
+	settlement.Usage.ResolvedModel = ""
+	settlement.Usage.Evidence = runtimeeffects.CompletionEvidence{Request: request, Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}
+	settlement.Spend.Model, settlement.Spend.ModelAlias, settlement.Spend.ResolvedModel = request.RequestedModel, request.ModelAlias, ""
+	settlement.Spend.BackendProfile, settlement.Spend.Provider, settlement.Spend.Transport = request.BackendProfile, request.Provider, request.Transport
 	result, err := handle.SettleCompletion(executionCtx, settlement)
 	if err != nil || !result.Committed {
 		t.Fatalf("settle managed turn fixture: committed=%v err=%v", result.Committed, err)
@@ -248,17 +254,10 @@ func managedTurnFixtureContext(ctx context.Context) (context.Context, runtimecor
 
 func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority, adapter string) managedcapabilities.Surface {
 	t.Helper()
-	runtimeMode := "task"
-	if authority.Target.Memory.Enabled {
-		runtimeMode = "session"
-	}
-	transport := "api"
-	if adapter == "mock_python" {
-		transport = "cli"
-	}
+	profile := completionFixtureProfile(t, adapter)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: runtimeMode,
-		Provider: adapter, Transport: transport, ProviderContract: "storetest-provider-contract",
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: profile.RuntimeMode,
+		Provider: profile.Provider, Transport: profile.Transport, ProviderContract: "storetest-provider-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
 			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: authority.ID,
@@ -270,6 +269,20 @@ func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority,
 		t.Fatalf("build managed turn fixture capability: %v", err)
 	}
 	return surface
+}
+
+func completionFixtureProfile(t testing.TB, adapter string) llmselection.Profile {
+	t.Helper()
+	backend := map[string]string{
+		"anthropic_api": llmselection.BackendAnthropic, "claude_cli": llmselection.BackendClaudeCLI,
+		"openai_responses": llmselection.BackendOpenAIResponses, "openai_compatible": llmselection.BackendOpenAICompatible,
+		"mock_python": llmselection.BackendMock,
+	}[adapter]
+	profile, err := llmselection.ResolveActiveBackend(backend)
+	if backend == "" || err != nil {
+		t.Fatalf("completion fixture adapter %q: %v", adapter, err)
+	}
+	return profile
 }
 
 func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.SourceArtifactFact) agentframe.Frame {

@@ -459,6 +459,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 				ctx = llmTestWorkContext(t, ctx)
 				profile := mustAdmissionProfile(t, transport.backend)
 				model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+				ctx = withEffectTestRequest(t, ctx, profile, model)
 				var calls atomic.Int32
 				dispatch, invokeErr := transport.invoke(ctx, profile, model, &calls)
 				if invokeErr == nil {
@@ -473,7 +474,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 				failure := runtimefailures.FromError(invokeErr, "managed-provider-test", "launch_boundary")
 				if _, err := settleCompletionTurn(
 					ctx, dispatch, dispatch.handle.Attempt().Authority.Target.ID, AgentTurnRecord{}, nil, profile,
-					unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateTerminalFailure, &failure.Failure,
+					unavailableCompletionUsage(), runtimeeffects.StateTerminalFailure, &failure.Failure,
 					map[string]any{"stage": "launch_boundary"},
 				); err != nil {
 					t.Fatalf("settle no-invocation attempt: %v", err)
@@ -629,7 +630,8 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 	}
 	_, err = dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: state, Failure: &failure.Failure},
-		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage: runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable,
+			Evidence: runtimeeffects.CompletionEvidence{Request: dispatch.handle.Attempt().Authority.CompletionRequest, Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
 			Identity: target.AgentIdentity,
@@ -637,9 +639,11 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 			CapabilitySurface: surfaceJSON, Failure: &failure.Failure,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity, Model: "test-model",
-			BackendProfile: "test", Provider: "test", Transport: "test",
-			ResolvedModel: "test-model", InvocationType: "test",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: dispatch.handle.Attempt().Authority.CompletionRequest.RequestedModel, ModelAlias: dispatch.handle.Attempt().Authority.CompletionRequest.ModelAlias,
+			BackendProfile: dispatch.handle.Attempt().Authority.CompletionRequest.BackendProfile,
+			Provider:       dispatch.handle.Attempt().Authority.CompletionRequest.Provider, Transport: dispatch.handle.Attempt().Authority.CompletionRequest.Transport,
+			InvocationType: "test",
 		},
 		Now: time.Now().UTC(),
 	})
