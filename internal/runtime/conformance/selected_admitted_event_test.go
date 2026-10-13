@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -115,12 +116,48 @@ func issue2655EventSource(t *testing.T, backend string) (*deploymentResourceFixt
 	if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
 		t.Fatalf("create the real event-origin source: code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	waitNotifyAllChildrenRuntime(t, f.runtime, sourceRun)
+	issue2655WaitEventSource(t, f, sourceRun)
 	page := deploymentResourcePublicEventsByName(t, f.ctx, server, sourceRun, selectedDeploymentEvent, "")
 	if len(page.Events) != 1 {
 		t.Fatalf("initial source event count=%d want one", len(page.Events))
 	}
+	dialect := authoractivityfixture.DialectSQLite
+	if backend == "postgres" {
+		dialect = authoractivityfixture.DialectPostgres
+	}
+	// The latest cut must follow initial delivery settlement, not select the
+	// runtime log emitted while that node was still executing. Explicit cuts
+	// continue to use the original creating event returned below.
+	storetest.InsertExistingRunRootEventRecord(t, f.ctx, f.db, dialect, uuid.NewString(), sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "supported-at-cut-anchor"), []byte(`{"account_id":"at-cut-anchor","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 	return f, sourceRun, page.Events[0].EventID
+}
+
+func issue2655WaitEventSource(t *testing.T, f *deploymentResourceFixture, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(f.ctx, 30*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := f.runtime.bus.WaitForQuiescence(ctx); err != nil {
+			t.Fatal(err)
+		}
+		summary, err := storetest.ReadServedRunDeliverySummary(ctx, f.selected, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.Settled() {
+			if summary.Total == 0 || summary.Delivered != summary.Total {
+				t.Fatalf("initial event did not complete its ordinary deliveries: %+v", summary)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("initial event delivery did not settle: %+v cause=%v", summary, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
