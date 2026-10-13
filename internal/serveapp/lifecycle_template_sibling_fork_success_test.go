@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -104,7 +105,18 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			cut := requireLifecycleTemplatePendingCut(t, rt, selected, runID, frontier.EventID)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
+			firstResponseTimeout := 5 * time.Second
+			if backend == servedparity.BackendDefaultSQLite && lifecycleTemplateRaceBuild {
+				// User ruling6152173732 changes this one race-harness check, not a product SLA.
+				firstResponseTimeout = 10 * time.Second
+			}
+			firstResponse := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, firstResponseTimeout)
+			if firstResponse.Error != nil {
+				t.Fatalf("run.fork error = %#v", firstResponse.Error)
+			}
+			if err := json.Unmarshal(firstResponse.Result, &fork); err != nil {
+				t.Fatalf("decode run.fork result: %v\n%s", err, string(firstResponse.Result))
+			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
 			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 0 ||
 				fork.ForkRunStatus != runfork.RunForkActivatedStatus || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
