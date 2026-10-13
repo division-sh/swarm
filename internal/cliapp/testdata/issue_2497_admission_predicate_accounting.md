@@ -81,3 +81,52 @@ readers, write-shaped currentness checks and session projection declaration are
 deleted. The normal registry and effective-method guards verify14842 exact
 findings at the rebased source. The authority-debt ratchet is a separate complete
 scan; registry success alone is not its verdict.
+
+## Cycle-3 Partial Attachment And Absence
+
+`static_topology.go::finalizeAbsentCommittedAgentReadiness` remains a consumer of
+the same A11/A24 (P09/P20/P21) attachment/agent-generation boundary. Its sole
+caller is `FinalizeCommittedAgentReadiness`, after same-run identity validation
+and `committedRouteAbsent` classification. The renamed private
+`observeCommittedAgentAttachment` keeps the original selected-store readiness
+row/attempt verification and post-read executor recheck, and separately reports
+positive membership/exclusion in that verified complete hashed census.
+Only positive exclusion returns the existing typed `ErrAgentNotFound` without
+entering replacement serialization. Missing workflow ownership, stopped/canceled
+Manager, no active executor and an unobserved static registration retain the
+prior executable-readiness path; none is evidence of unrelated identity. Every
+native inspection error still propagates. Exact planned membership keeps the
+existing agent-route transition, never a new admission or constructor.
+The positively closed ShuttingDown/Resetting phases instead return the existing
+lifecycle shutdown refusal before entering replacement serialization. Stopped
+pre-Run preparation is not classified as shutdown or unrelated identity.
+
+Execution witnesses are the original eight native
+`TestCommittedAgentReadinessPartialAttachmentBothStores` cells (same source or
+sibling missing actor, SQLite/PostgreSQL, with/without shutdown/restart), the
+held publication-lock accepted/unrelated controls in
+`TestCommittedAgentAttachmentRequiresExactAcceptedOwner`, and the held static
+factory in `TestFreshSpawnDuringLiveManagerReturnsRunnableProjection`. The latter
+proves no lifecycle route, process configuration or durable row exists before
+registration and that the released candidate becomes runnable through the
+unchanged owner. Original foreign-ID, immutable readiness, final absence,
+independent-failure, terminal/retired and exact-wake assertions remain. The
+held-lock Manager controls also execute both closed phases separately from
+unobserved/stopped cases, without changing the publication lock or cleanup joins.
+The complete pipeline/Manager/root Runtime packages and actual final preflight must
+be reported in the audit; this accounting and generator alone supply no credit.
+
+The partial-attachment fixture now supplies the same selected-store state and
+immutable-outcome roles that both production assemblies supply. Its live grant
+remains the lifecycle mutation/process-generation owner. This changes no boot
+ordering or provider admission. The census generator must change only this
+one finalized-absence body hash in the cycle-3 delta, with A/P labels retained.
+
+The held shutdown cells also exercise canceled readiness ownership after the
+factory returns. Before any native creator commit, registration propagates that
+actual context cancellation before checking changed Manager phase. Independent
+factory errors still propagate first, and uncanceled phase/run changes still
+fail closed. Known native COMMIT adoption remains independent of caller
+cancellation. Original `TestAgentRowNativeLostAckCacheAdoptionBothStores`
+shutdown-during-factory, canceled-after-COMMIT, lost-ACK, rollback and historical
+outcome controls preserve that distinction and all exact current-row fences.

@@ -481,7 +481,15 @@ func TestExecutablePreparationAcceptsTakenOverRunningDurableState(t *testing.T) 
 func TestFreshSpawnDuringLiveManagerReturnsRunnableProjection(t *testing.T) {
 	bus := newProjectionTestBus()
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
-	am := newProjectionTestManager(t, bus, factory.Build)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unhold := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unhold()
+	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		close(entered)
+		<-release
+		return factory.Build(cfg)
+	})
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -499,12 +507,34 @@ func TestFreshSpawnDuringLiveManagerReturnsRunnableProjection(t *testing.T) {
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "fresh-live-test"),
 		Subscriptions: []string{"test.old"},
 	})
-	if err := spawnManagerTestAgent(am, cfg); err != nil {
-		t.Fatalf("spawn during run: %v", err)
+	finished := make(chan error, 1)
+	go func() { finished <- spawnManagerTestAgent(am, cfg) }()
+	select {
+	case <-entered:
+	case err := <-finished:
+		t.Fatalf("spawn did not reach candidate factory: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("spawn did not reach candidate factory")
 	}
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if state, _, err := am.lifecycle.committedRouteStateByIdentity(identity); err != nil || state != committedRouteAbsent {
+		t.Fatalf("held uncommitted candidate route=%v err=%v", state, err)
+	}
+	if len(bus.routeHistory(agentID)) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatal("static candidate exposed its route or process projection before installation")
+	}
+	if _, found, err := am.lifecycle.loadAgentView(runCtx, identity); err != nil || found {
+		t.Fatalf("static candidate exposed a durable row before registration: found=%t err=%v", found, err)
+	}
+	if observed, planned, err := am.observeCommittedAgentAttachment(runCtx, identity); err != nil || observed || planned {
+		t.Fatalf("unobserved static candidate became proven absence: observed=%t planned=%t err=%v", observed, planned, err)
+	}
+	unhold()
+	if err := <-finished; err != nil {
+		t.Fatalf("spawn during run: %v", err)
 	}
 	readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
 	if err != nil || readiness.Kind != executableAgentRunnableCurrentOccurrence || len(bus.routeHistory(agentID)) != 1 {

@@ -970,6 +970,9 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if buildErr != nil {
 		return buildErr
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.phase != preparedPhase || c.runGeneration != preparedRun || c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}

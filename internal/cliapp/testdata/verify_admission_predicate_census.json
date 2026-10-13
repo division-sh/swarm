@@ -1425,7 +1425,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.finalizeAbsentCommittedAgentReadiness",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "c72108f45f91f59ee330d2354239b9e64808daa1855d5c1fc9eaf6f1d1dea9ce"
+    "body_sha256": "9f156d30055481f42dd9ae44cb04a742d02c47d251f5ad45708c73f3dea146a9"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.hydratePersistedAgentExecutions",
