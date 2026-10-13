@@ -197,7 +197,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				{"keys: map[numeric]text", "map keys must be text, enum or uuid"},
 				{"keys: map[boolean]text", "map keys must be text, enum or uuid"},
 				{"items: text[]", "is retired; use [text]"},
-				{"items: '[]text'", "is retired; use [text]"},
+				{"items: {type: '[]text'}", "is retired; use [text]"},
 			} {
 				bad := filepath.Join(base, "refusal-"+string(rune('a'+index)))
 				copyReleaseTree(t, source, bad)
