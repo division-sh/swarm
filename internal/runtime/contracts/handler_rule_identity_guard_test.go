@@ -92,10 +92,7 @@ func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling Handl
 }
 
 func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
-	return map[string]handlerRuleDisplayLabelAllowance{
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue": {Count: 2, Reason: "keyed-map presentation projection"},
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":  {Count: 1, Reason: "authored rule presentation label projection"},
-	}
+	return map[string]handlerRuleDisplayLabelAllowance{}
 }
 
 func loadHandlerRuleDisplayLabelReaders(t *testing.T, overlay map[string][]byte) []handlerRuleDisplayLabelReader {
