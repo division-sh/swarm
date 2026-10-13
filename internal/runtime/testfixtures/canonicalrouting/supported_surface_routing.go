@@ -31,29 +31,22 @@ direct:
   event_handlers:
     rules.selected:
       rules:
-        selected:
-          id: rules-label
-          else: true
+        - else: true
     rules.fallback:
       rules:
-        - id: never-rules
-          when: |-
+        - when: |-
                   false
-        - id: unmatched-rules
-          else: true
+        - else: true
     rules.evaluation_failed:
       rules:
-        - id: failed-rules
-          when: payload.proof > 0
-        - id: unmatched-evaluation
-          else: true
+        - when: payload.proof > 0
+        - else: true
     complete.selected:
       on_complete:
-        - id: complete-label
+        - condition: true
     complete.no_match:
       on_complete:
-        - id: never-complete
-          condition: |-
+        - condition: |-
                        false
     direct: {}
 `)
