@@ -6,12 +6,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -111,6 +116,7 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 		}
 		return
 	}
+	t.Run("unsupported-platform-refuses-before-launch", checkPreflightUnsupportedPlatform)
 	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +209,75 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 			t.Fatalf("unresolved inherited lifetime became success: %v", err)
 		}
 	})
+}
+
+func checkPreflightUnsupportedPlatform(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	common, err := os.ReadFile("preflight_process.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compile the actual common owner with the actual unsupported capability.
+	// Remove only build-selection comments from that constant-only source file.
+	fset := token.NewFileSet()
+	platform, err := parser.ParseFile(fset, "preflight_process_other.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(platform.Decls) != 1 {
+		t.Fatal("unsupported platform must declare only its literal capability")
+	}
+	decl, ok := platform.Decls[0].(*ast.GenDecl)
+	if !ok || decl.Tok != token.CONST || len(decl.Specs) != 1 {
+		t.Fatal("unsupported platform has executable or opaque declarations")
+	}
+	spec, ok := decl.Specs[0].(*ast.ValueSpec)
+	if !ok || spec.Type != nil || len(spec.Names) != 1 || spec.Names[0].Name != "preflightDescendantJoinMode" || len(spec.Values) != 1 {
+		t.Fatal("unsupported capability declaration changed")
+	}
+	literal, ok := spec.Values[0].(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		t.Fatal("unsupported capability must be a literal, not executable initialization")
+	}
+	mode, err := strconv.Unquote(literal.Value)
+	if err != nil || mode != "unsupported" {
+		t.Fatal("unsupported platform must fail closed")
+	}
+	var capability bytes.Buffer
+	if err := format.Node(&capability, fset, platform); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{
+		"go.mod":      []byte("module preflight.platform.probe\n\ngo 1.26.0\n"),
+		"process.go":  common,
+		"platform.go": capability.Bytes(),
+		"process_test.go": []byte(`package main
+import("context";"io";"os";"os/exec";"strings";"testing";"time")
+const authoritySettlementTimeout = time.Second
+func prepareChildProcessTree(*exec.Cmd)error{panic("unsupported platform reached process preparation")}
+func signalChildProcessTree(*exec.Cmd,os.Signal)error{panic("unsupported platform reached process signaling")}
+func TestUnsupported(t *testing.T){
+ for _,args:=range [][]string{nil,{"must-not-launch"}}{
+  timing,err:=runPreflightProcess(context.Background(),args,io.Discard,io.Discard)
+  if err==nil||!strings.Contains(err.Error(),"descendant ownership is unsupported")||timing!=(preflightProcessTiming{}){t.Fatalf("unsupported execution: %+v / %v",timing,err)}
+ }
+}
+`),
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(root, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "go", "test", "-count=1", "-run", "^TestUnsupported$", ".")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOWORK=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("actual unsupported owner: %v\n%s", err, output)
+	}
 }
 
 func provePreflightDoesNotAcquireNativeSlot(t *testing.T, repo string) {
