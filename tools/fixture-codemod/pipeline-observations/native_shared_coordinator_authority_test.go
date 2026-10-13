@@ -49,6 +49,7 @@ func nativeSharedCoordinatorSource(t *testing.T, source string) string {
 }
 
 func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *testing.T) {
+	packet := loadReviewedSuccessors2617(t)
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
@@ -64,9 +65,9 @@ func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *t
 		want, err := canonicalFunction(nativeSharedCoordinatorSource(t, row.Before))
 		got, afterErr := canonicalFunction(row.After)
 		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		currentSource := current.After
-		if current.Successor != "" {
-			currentSource = current.Successor
+		currentSource, reviewedErr := reviewedSharedCoordinatorBody2617(current, packet)
+		if reviewedErr != nil {
+			t.Fatal(reviewedErr)
 		}
 		currentAfter, currentErr := canonicalFunction(currentSource)
 		if err != nil || afterErr != nil || sourceErr != nil || currentErr != nil || want != got || actual != currentAfter {

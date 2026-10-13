@@ -58,7 +58,7 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
 	digest, err := mechanicalReceiptDigest(rows)
-	if err != nil || digest != "11bebbe0f17822991b23ab0cb56bd4a8390af5306a918ee83abb8e3c10680d84" {
+	if err != nil || digest != "aae9a0dcda84126747e934655ec699a38304a2775798afdd933cedd792b2b344" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 }
