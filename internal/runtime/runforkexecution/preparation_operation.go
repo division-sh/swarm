@@ -26,15 +26,12 @@ func bindPreparedSelectedForkOperation(operation *runfork.ForkOperationRequest, 
 	if err != nil || operation == nil {
 		return operation, err
 	}
-	point := plan.ForkPoint
-	if err := point.Validate(); err != nil {
-		return nil, err
-	}
-	if operation.SourceRunID != plan.SourceRunID ||
-		(operation.ForkEventID != "" && operation.ForkEventID != point.EventID) ||
-		(operation.ResolvedPoint != nil && *operation.ResolvedPoint != point) {
+	if operation.SourceRunID != plan.SourceRunID {
 		return nil, fmt.Errorf("fork operation differs from prepared source revision")
 	}
-	operation.ResolvedPoint = &point
-	return operation, nil
+	bound, err := operation.BindResolvedPoint(plan.ForkPoint)
+	if err != nil {
+		return nil, err
+	}
+	return &bound, nil
 }
