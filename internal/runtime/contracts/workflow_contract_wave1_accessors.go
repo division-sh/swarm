@@ -481,7 +481,7 @@ func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
 		if err != nil {
 			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
 		}
-		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved, TypeRef: decl.Type, IsOptional: decl.IsOptional, Refinements: decl.Refinements})
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved, TypeRef: decl.Type, IsOptional: decl.IsOptional, Refinements: decl.Refinements.Clone()})
 	}
 	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: p.FlowID + "." + p.EntityType, Fields: fields}, nil
 }
@@ -614,6 +614,7 @@ func (b *WorkflowContractBundle) ResolvedEntityContractsForFlow(flowID string) E
 
 func mergeTypeCatalogDocuments(base, incoming TypeCatalogDocument) TypeCatalogDocument {
 	out := cloneTypeCatalogDocument(base)
+	incoming = cloneTypeCatalogDocument(incoming)
 	if out.Scalars == nil {
 		out.Scalars = map[string]ScalarTypeDecl{}
 	}
@@ -676,6 +677,7 @@ func cloneNamedTypeDecl(in NamedTypeDecl) NamedTypeDecl {
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]TypeFieldSpec, len(in.Fields))
 		for key, value := range in.Fields {
+			value.Refinements = value.Refinements.Clone()
 			out.Fields[key] = value
 		}
 	}
@@ -701,6 +703,7 @@ func cloneEntityContract(in EntityContract) EntityContract {
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]EntityFieldDecl, len(in.Fields))
 		for key, value := range in.Fields {
+			value.Refinements = value.Refinements.Clone()
 			if len(value.Project) > 0 {
 				project := make(map[string]any, len(value.Project))
 				for projectKey, projectValue := range value.Project {

@@ -543,10 +543,7 @@ func cloneProviderTriggerEventCatalogEntry(in runtimecontracts.EventCatalogEntry
 	out.Payload.Properties = make(map[string]runtimecontracts.EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {
 		field.Citation.AllowedClasses = append([]string(nil), field.Citation.AllowedClasses...)
-		field.Refinements.Length.Min = cloneProviderTriggerInt(field.Refinements.Length.Min)
-		field.Refinements.Length.Max = cloneProviderTriggerInt(field.Refinements.Length.Max)
-		field.Refinements.Range.Min = cloneProviderTriggerFloat(field.Refinements.Range.Min)
-		field.Refinements.Range.Max = cloneProviderTriggerFloat(field.Refinements.Range.Max)
+		field.Refinements = field.Refinements.Clone()
 		if field.ExactSchema != nil {
 			schema := *field.ExactSchema
 			field.ExactSchema = &schema
@@ -554,20 +551,4 @@ func cloneProviderTriggerEventCatalogEntry(in runtimecontracts.EventCatalogEntry
 		out.Payload.Properties[name] = field
 	}
 	return out
-}
-
-func cloneProviderTriggerInt(value *int) *int {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
-}
-
-func cloneProviderTriggerFloat(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }

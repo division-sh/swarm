@@ -220,10 +220,7 @@ func cloneEventCatalogEntry(in EventCatalogEntry) EventCatalogEntry {
 	out.Payload.Properties = make(map[string]EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {
 		field.Citation.AllowedClasses = append([]string(nil), field.Citation.AllowedClasses...)
-		field.Refinements.Length.Min = cloneToolSchemaInt(field.Refinements.Length.Min)
-		field.Refinements.Length.Max = cloneToolSchemaInt(field.Refinements.Length.Max)
-		field.Refinements.Range.Min = cloneToolSchemaFloat(field.Refinements.Range.Min)
-		field.Refinements.Range.Max = cloneToolSchemaFloat(field.Refinements.Range.Max)
+		field.Refinements = field.Refinements.Clone()
 		if field.ExactSchema != nil {
 			schema := *field.ExactSchema
 			field.ExactSchema = &schema
@@ -239,20 +236,4 @@ func cloneEventCatalogEntries(in map[string]EventCatalogEntry) map[string]EventC
 		out[name] = cloneEventCatalogEntry(entry)
 	}
 	return out
-}
-
-func cloneToolSchemaInt(value *int) *int {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
-}
-
-func cloneToolSchemaFloat(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }
