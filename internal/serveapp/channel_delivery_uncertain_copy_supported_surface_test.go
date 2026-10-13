@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
@@ -63,7 +65,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901040)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901050, withSummary)
 				postUncertainCopyText(t, h, fresh, "fresh-copy-private-reason", 901060)
-				waitUncertainCopyDecision(t, db, cardID)
+				waitUncertainCopyDecision(t, channelAnchorStorageObservation(t, h), cardID)
 				waitChannelReceiptText(t, h, fresh, "Decision: reject", true)
 				if apply != nil {
 					apply()
@@ -275,14 +277,15 @@ func waitUncertainCopyDelivery(t *testing.T, h *channelOnboardingE2EHarness, aft
 	}
 }
 
-func waitUncertainCopyDecision(t *testing.T, db *sql.DB, cardID string) {
+func waitUncertainCopyDecision(t *testing.T, reader storetest.ChannelAnchorObservation, cardID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var status, verdict string
-		if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, cardID).Scan(&status, &verdict); err != nil {
+		observed, err := reader.ReadChannelAnchorDecisionStorage(context.Background(), cardID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		status, verdict := observed.Status, observed.Verdict
 		if status == "decided" && verdict == "reject" {
 			return
 		}

@@ -7070,7 +7070,9 @@ engine:
                 through the existing decision-card, channel-delivery and standing-disposition row owners. Card observations
                 retain exact run/kind equality and the optional stored-status filter, native anchor bytes and every row;
                 canonical anchor decoding, exact flow scope and duplicate-card refusal remain consumer assertions. Decision
-                observation retains stored status and the original empty verdict default. The historical source receipt
+                observation retains stored status and the original empty verdict default. Uncertain-copy decision polling
+                and source-lifecycle diagnostic/replay witnesses consume this same exact row owner without changing card
+                identity, independent read cuts, polling deadlines or status/verdict assertions. The historical source receipt
                 witness retains source-ID equality alone, sent receipt state, ascending settlement order and LIMIT 1;
                 it must not substitute current-plan, source-kind or render eligibility. Standing flow observation retains
                 the exact service/current-run/generation tuple without interpreting restart disposition. Independent reads

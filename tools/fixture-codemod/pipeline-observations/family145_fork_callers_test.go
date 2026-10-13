@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 799 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d58dae4c293f6ce31bdce828ceaec7119142e6dc0c8c5314058c99787ae59a39" {
+	if err != nil || len(rows) != 800 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "821011b8e1f651a8cc619fed73a78d2bbc2dc715c8e1cab99a9ba21d6c9b615c" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -53,7 +53,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), finite); err == nil {
 			t.Fatalf("changed binding/workload accepted: %s", row.Function)
 		}
-		if family145CheckWorkflowStateWholeRule(t, row.File, row.Function, row.After) || family145CheckChannelAnchorWholeRule(t, row.File, row.Function, row.After) || family145CheckEventNameWholeRule(t, row.File, row.Function, row.After) || family145CheckDeliveryStatusWholeRule(t, row.File, row.Function, row.After) || family145CheckRunScalarWholeRule(t, row.File, row.Function, row.After) || family145CheckRequestKeyWholeRule(t, row.File, row.Function, row.After) || family145CheckChannelIntentWholeRule(t, row.File, row.Function, row.After) || family145CheckServedDebugWholeRule(t, row.File, row.Function, row.After) || family145CheckForkCompletionWholeRule(t, row.File, row.Function, row.After) || family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, row.After) || family145CheckWriterStageWholeRule(t, row.File, row.Function, row.After) || row.Function == "requireServedEventPublishEntityState" || row.Function == "requireLifecycleEventCount" || row.Function == "readLifecycleLoop" {
+		if family145CheckChannelDecisionWholeRule(t, row.File, row.Function, row.After) || family145CheckWorkflowStateWholeRule(t, row.File, row.Function, row.After) || family145CheckChannelAnchorWholeRule(t, row.File, row.Function, row.After) || family145CheckEventNameWholeRule(t, row.File, row.Function, row.After) || family145CheckDeliveryStatusWholeRule(t, row.File, row.Function, row.After) || family145CheckRunScalarWholeRule(t, row.File, row.Function, row.After) || family145CheckRequestKeyWholeRule(t, row.File, row.Function, row.After) || family145CheckChannelIntentWholeRule(t, row.File, row.Function, row.After) || family145CheckServedDebugWholeRule(t, row.File, row.Function, row.After) || family145CheckForkCompletionWholeRule(t, row.File, row.Function, row.After) || family145CheckLifecycleReaderWholeRule(t, row.File, row.Function, row.After) || family145CheckWriterStageWholeRule(t, row.File, row.Function, row.After) || row.Function == "requireServedEventPublishEntityState" || row.Function == "requireLifecycleEventCount" || row.Function == "readLifecycleLoop" {
 			continue
 		}
 		if family145CheckPublicA2EndpointWholeRule(t, row.File, row.Function, row.After) {

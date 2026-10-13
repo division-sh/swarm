@@ -322,8 +322,8 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							break
 						}
 						if time.Now().After(deadline) {
-							var status, verdict string
-							cardErr := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict)
+							observed, cardErr := channelAnchorStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), child)
+							status, verdict := observed.Status, observed.Verdict
 							var decisions int
 							eventErr := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&decisions)
 							t.Fatalf("selected-fork callback %+v lacks terminal unsupported disposition: observation=%+v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", childIntent, result, status, verdict, cardErr, decisions, eventErr)
@@ -354,7 +354,9 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
 					var verdict string
 					var events, drafts int
-					if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict); err != nil || status != "pending" || verdict != "" {
+					replayedDecision, decisionErr := channelAnchorStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), child)
+					status, verdict = replayedDecision.Status, replayedDecision.Verdict
+					if err := decisionErr; err != nil || status != "pending" || verdict != "" {
 						t.Fatalf("fork replay/restart changed child: %s/%s %v", status, verdict, err)
 					}
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&events); err != nil || events != 0 {

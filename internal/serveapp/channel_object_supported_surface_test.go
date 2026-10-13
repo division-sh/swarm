@@ -155,7 +155,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				callback, signing = provider.callback, provider.signing
 				provider.mu.Unlock()
 				objectChannelIngress(t, callback, signing, "answer-1", map[string]any{"text": "private-object-reason", "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "answer-1"}, "reply": map[string]any{"id": message}})
-				waitUncertainCopyDecision(t, db, card)
+				waitUncertainCopyDecision(t, channelAnchorStorageObservation(t, h), card)
 				waitObjectMessageText(t, provider, message, "Decision: reject")
 				for _, restart := range []bool{false, true} {
 					if restart {

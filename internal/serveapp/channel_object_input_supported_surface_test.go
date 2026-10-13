@@ -395,7 +395,7 @@ func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, 
 	}
 	waitObjectMessageText(t, p, fresh, "Input: reason (text) required")
 	postObjectChannelFact(t, p, "fresh-prompt-answer", map[string]any{"text": "object-private-fresh-answer", "reply": map[string]any{"id": fresh}})
-	waitUncertainCopyDecision(t, db, card)
+	waitUncertainCopyDecision(t, channelAnchorStorageObservation(t, h), card)
 	waitObjectMessageText(t, p, fresh, "Decision: reject")
 	var copies, uncertain, decisions int
 	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {
