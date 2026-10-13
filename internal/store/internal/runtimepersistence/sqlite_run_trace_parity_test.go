@@ -202,10 +202,10 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			entity_id, memory_enabled,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
+			turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0,
-			'[]', 0, '{}', 'active', ?, ?
+			0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,

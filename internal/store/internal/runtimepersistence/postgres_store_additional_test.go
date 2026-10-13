@@ -2113,16 +2113,16 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	}
 
 	var memoryEnabled bool
-	var conversation string
+	var transcriptTurns int
 	if err := db.QueryRowContext(ctx, `
-		SELECT memory_enabled, conversation::text
+		SELECT memory_enabled, (SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid)
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&memoryEnabled, &conversation); err != nil {
+	`, sessionID).Scan(&memoryEnabled, &transcriptTurns); err != nil {
 		t.Fatalf("load stateless audit: %v", err)
 	}
-	if memoryEnabled || conversation != "[]" {
-		t.Fatalf("stateless audit memory=%v conversation=%s", memoryEnabled, conversation)
+	if memoryEnabled || transcriptTurns != 1 {
+		t.Fatalf("stateless audit memory=%v transcript_turns=%d, want false/1", memoryEnabled, transcriptTurns)
 	}
 
 	var turnCount, liveCount int
@@ -2210,16 +2210,18 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 		t.Fatalf("ManagedTurnReadbackFixture(stateless missing audit): %v", err)
 	}
 
-	var gotRunID, flowInstance, conversation string
+	var gotRunID, flowInstance string
+	var transcriptTurns int
 	var enabled bool
 	if err := db.QueryRowContext(ctx, `
-		SELECT run_id::text, COALESCE(flow_instance,''), memory_enabled, conversation::text
+		SELECT run_id::text, COALESCE(flow_instance,''), memory_enabled,
+		       (SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid)
 		FROM agent_conversation_audits WHERE session_id = $1::uuid
-	`, sessionID).Scan(&gotRunID, &flowInstance, &enabled, &conversation); err != nil {
+	`, sessionID).Scan(&gotRunID, &flowInstance, &enabled, &transcriptTurns); err != nil {
 		t.Fatalf("load canonical stateless audit row: %v", err)
 	}
-	if gotRunID != runID || flowInstance != "global" || enabled || conversation != "[]" {
-		t.Fatalf("audit run=%q flow=%q enabled=%v conversation=%s", gotRunID, flowInstance, enabled, conversation)
+	if gotRunID != runID || flowInstance != "global" || enabled || transcriptTurns != 1 {
+		t.Fatalf("audit run=%q flow=%q enabled=%v transcript_turns=%d", gotRunID, flowInstance, enabled, transcriptTurns)
 	}
 	var turns int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id=$1::uuid AND memory_enabled=FALSE`, sessionID).Scan(&turns); err != nil || turns != 1 {
@@ -2254,20 +2256,21 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	}
 
 	var count, turns int
-	var gotEntityID, flowInstance, conversation, persistedRunID string
+	var gotEntityID, flowInstance, persistedRunID string
+	var transcriptTurns int
 	var memoryEnabled bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
 			COALESCE(MAX(entity_id::text), ''),
 			COALESCE(MAX(flow_instance), ''),
-			COALESCE(MAX(conversation::text), ''),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid),
 			COALESCE(MAX(run_id::text), ''),
 			BOOL_OR(memory_enabled),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND memory_enabled = FALSE AND entity_id = $2::uuid)
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID, entityID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &persistedRunID, &memoryEnabled, &turns); err != nil {
+	`, sessionID, entityID).Scan(&count, &gotEntityID, &flowInstance, &transcriptTurns, &persistedRunID, &memoryEnabled, &turns); err != nil {
 		t.Fatalf("read stateless entity audit row: %v", err)
 	}
 	if count != 1 {
@@ -2279,8 +2282,8 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	if persistedRunID != runID {
 		t.Fatalf("audit run_id = %q, want %q", persistedRunID, runID)
 	}
-	if conversation != "[]" {
-		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
+	if transcriptTurns != 1 {
+		t.Fatalf("transcript turns = %d, want one persisted stateless turn", transcriptTurns)
 	}
 	if turns != 1 {
 		t.Fatalf("linked task turn count = %d, want 1", turns)
@@ -2325,20 +2328,21 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	}
 
 	var count, turns int
-	var entityID, gotFlowInstance, conversation, persistedRunID string
+	var entityID, gotFlowInstance, persistedRunID string
+	var transcriptTurns int
 	var memoryEnabled bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
 			COALESCE(MAX(entity_id::text), ''),
 			COALESCE(MAX(flow_instance), ''),
-			COALESCE(MAX(conversation::text), ''),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid),
 			COALESCE(MAX(run_id::text), ''),
 			BOOL_OR(memory_enabled),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND memory_enabled = FALSE)
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &persistedRunID, &memoryEnabled, &turns); err != nil {
+	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &transcriptTurns, &persistedRunID, &memoryEnabled, &turns); err != nil {
 		t.Fatalf("read stateless flow audit row: %v", err)
 	}
 	if count != 1 {
@@ -2350,8 +2354,8 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	if persistedRunID != runID {
 		t.Fatalf("audit run_id = %q, want %q", persistedRunID, runID)
 	}
-	if conversation != "[]" {
-		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
+	if transcriptTurns != 1 {
+		t.Fatalf("transcript turns = %d, want one persisted stateless turn", transcriptTurns)
 	}
 	if turns != 1 {
 		t.Fatalf("linked task turn count = %d, want 1", turns)
