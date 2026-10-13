@@ -115,7 +115,8 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 					}
 					var out, errOut bytes.Buffer
 					code := executeCLIFrom(context.Background(), root, args, &out, &errOut, nil)
-					if (code == 0) != form.admit || (!form.admit && !strings.Contains(out.String()+errOut.String(), "[T]")) {
+					diagnostic := out.String() + errOut.String()
+					if (code == 0) != form.admit || (!form.admit && (!strings.Contains(diagnostic, "[T]") || !strings.Contains(diagnostic, field.file))) {
 						t.Fatalf("%s admission=%d want admit=%v and canonical teaching: %s / %s", command, code, form.admit, &out, &errOut)
 					}
 				}
