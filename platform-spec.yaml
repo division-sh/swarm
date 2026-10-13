@@ -3054,9 +3054,9 @@ type_system:
       with timestamptz, and exactly timestamp with time zone[] with timestamptz[].
       It does not equate scalar with array, different timezone/base types, or
       unsupported/multidimensional forms through a suffix-normalizing fallback.
-      Retirement of the separate list<T> and long type:list/of:T forms belongs
-      to the independently governed duplicate-form census, not a compatibility
-      path or new support in this admission repair.
+      The separate list<T> and long type:list/of:T forms likewise fail on
+      authored presence and teach [T]. No compatibility reader or migration
+      surface is supported.
     map_key_domains: |
       Map keys are text-family: text, a declared closed enum, or uuid. Integer,
       numeric, boolean, timestamp, opaque and compound key declarations fail
