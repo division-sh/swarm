@@ -850,21 +850,87 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation, TargetPhase: before.Phase,
 		ConfigRevision: before.ConfigRevision, RunMode: before.RunMode, Topology: before.Topology, Now: now.Add(time.Second),
 	}
-	result, err := agentfixture.CommitExact(t, ctx, store, request)
+	if _, err := agentfixture.CommitExact(t, ctx, store, request); err == nil {
+		t.Fatal("same-grant no-op was accepted as a source-set survivor rebind")
+	}
+	unchanged, found, err := store.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || !reflect.DeepEqual(before, unchanged) {
+		t.Fatalf("refused no-op changed lifecycle: before=%#v after=%#v found=%v err=%v", before, unchanged, found, err)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := process.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("current source set: found=%v err=%v", found, err)
+	}
+	sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
+	sources = append(sources, runtimeagenttopology.SourceCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64)})
+	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, current.Agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := process.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: before.ProcessBinding.BundleHash, RuntimeInstanceID: before.ProcessBinding.RuntimeInstanceID,
+		RuntimeGeneration: before.ProcessBinding.RuntimeGeneration + 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+	request.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, before.ProcessBinding.BundleHash, before.Topology.Lifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []struct {
+		name   string
+		mutate func(*runtimemanager.AgentLifecycleTransition)
+	}{
+		{name: "phase", mutate: func(r *runtimemanager.AgentLifecycleTransition) {
+			r.TargetPhase = runtimemanager.AgentLifecycleRegistered
+		}},
+		{name: "mode", mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.RunMode = runtimemanager.AgentRunModeStopped }},
+		{name: "config", mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.ConfigRevision = "changed" }},
+		{name: "subordinate", mutate: func(r *runtimemanager.AgentLifecycleTransition) {
+			r.Subordinate.Action = runtimesessions.LifecycleMutationRotateCurrentSet
+		}},
+		{name: "agent", mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.Agent = &record; r.Agent.Topology = r.Topology }},
+		{name: "reused_restart", mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.OperationKind = "restart" }},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			bad := request
+			bad.OperationID, bad.RequestHash = uuid.NewString(), invalid.name
+			invalid.mutate(&bad)
+			if _, err := grant.CommitAgentLifecycleTransition(ctx, bad); err == nil {
+				t.Fatal("non-survivor mutation admitted at the same generation")
+			}
+			actual, found, err := store.LoadAgentLifecycleState(ctx, identity)
+			if err != nil || !found || !reflect.DeepEqual(before, actual) {
+				t.Fatalf("refusal changed current row: before=%#v after=%#v found=%v err=%v", before, actual, found, err)
+			}
+		})
+	}
+	result, err := grant.CommitAgentLifecycleTransition(ctx, request)
 	if err != nil {
 		t.Fatalf("commit source-set rebind: %v", err)
 	}
 	if result.RuntimeEpoch != before.RuntimeEpoch || result.Generation != before.Generation || result.Phase != before.Phase ||
-		result.ConfigRevision != before.ConfigRevision || result.RunMode != before.RunMode || !result.Topology.Equal(before.Topology) {
+		result.ConfigRevision != before.ConfigRevision || result.RunMode != before.RunMode || !result.Topology.Equal(request.Topology) {
 		t.Fatalf("source-set rebind result = %#v, want unchanged lifecycle with exact topology", result)
 	}
-	replayed, err := agentfixture.CommitExact(t, ctx, store, request)
+	replayed, err := grant.CommitAgentLifecycleTransition(ctx, request)
 	if err != nil || !replayed.Replayed || replayed.TransitionID != result.TransitionID {
 		t.Fatalf("exact source-set rebind replay = %#v err=%v, want transition %s", replayed, err, result.TransitionID)
 	}
 	changed := request
 	changed.RequestHash = "source-set-rebind-conflict"
-	if _, err := agentfixture.CommitExact(t, ctx, store, changed); err == nil {
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, changed); err == nil {
 		t.Fatal("changed source-set rebind duplicate was accepted")
 	} else {
 		var failure *runtimefailures.Error
@@ -877,7 +943,14 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		t.Fatalf("load lifecycle cell after rebind: exists=%v err=%v", exists, err)
 	}
 	if after.RuntimeEpoch != before.RuntimeEpoch || after.Generation != before.Generation || after.Phase != before.Phase ||
-		after.ConfigRevision != before.ConfigRevision || after.RunMode != before.RunMode || !after.Topology.Equal(before.Topology) {
+		after.ConfigRevision != before.ConfigRevision || after.RunMode != before.RunMode || !after.Topology.Equal(request.Topology) || !after.ProcessBinding.Equal(result.ProcessBinding) {
 		t.Fatalf("lifecycle readback after source-set rebind = %#v, want %#v", after, before)
+	}
+	replacement := request
+	replacement.OperationID, replacement.RequestHash = uuid.NewString(), "individual-replacement"
+	replacement.TargetGeneration++
+	advanced, err := grant.CommitAgentLifecycleTransition(ctx, replacement)
+	if err != nil || advanced.Generation != before.Generation+1 {
+		t.Fatalf("same-named individual replacement: result=%#v err=%v", advanced, err)
 	}
 }
