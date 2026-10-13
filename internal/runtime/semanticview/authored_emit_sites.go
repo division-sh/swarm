@@ -23,7 +23,7 @@ type AuthoredEmitSite struct {
 	HandlerEvent   string
 	Site           string
 	SiteKey        string
-	RuleID         string
+	RuleDisplay    string
 	RuleRef        runtimeidentity.DeclarationIdentity
 	Spec           runtimecontracts.EmitSpec
 	Handler        runtimecontracts.SystemNodeEventHandler
@@ -79,7 +79,7 @@ type authoredEmitSiteBuilder struct {
 }
 
 func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSourceKind, scopeKey, flowPath string, node runtimeidentity.ExecutableNode, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) {
-	add := func(site, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, spec runtimecontracts.EmitSpec) {
+	add := func(site, siteKey, ruleDisplay string, ruleRef runtimeidentity.DeclarationIdentity, spec runtimecontracts.EmitSpec) {
 		if spec.Empty() {
 			return
 		}
@@ -107,18 +107,18 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			HandlerEvent:   strings.TrimSpace(handlerEvent),
 			Site:           site,
 			SiteKey:        siteKey,
-			RuleID:         strings.TrimSpace(ruleID),
+			RuleDisplay:    ruleDisplay,
 			RuleRef:        ruleRef,
 			Spec:           spec,
 			Handler:        handler,
 		})
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, b.source.FanOutPlansForHandler(node, handlerEvent)) {
-		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec)
+		add(site.Source, site.SiteKey, site.RuleDisplay, site.RuleRef, site.Spec)
 	}
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, emitSpec)
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", "", runtimeidentity.DeclarationIdentity{}, emitSpec)
 		}
 	}
 }
