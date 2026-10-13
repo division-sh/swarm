@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -517,7 +518,20 @@ func roleScopedCurrentEntityID(ctx context.Context) string {
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(inbound.EntityID())
+	entityID := strings.TrimSpace(inbound.EntityID())
+	if entityID == "" {
+		// An entityless actor projection does not erase the concrete message
+		// producer. Construction dependencies are not current-entity authority.
+		source := inbound.RoutingSource()
+		switch source.Kind() {
+		case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+			entityID = strings.TrimSpace(source.Route().EntityID)
+		}
+	}
+	if entityID == strings.TrimSpace(inbound.RunID()) {
+		return ""
+	}
+	return entityID
 }
 
 func roleScopedEntityMatchesContract(source semanticview.Source, row map[string]any, contract entityruntime.Contract) error {

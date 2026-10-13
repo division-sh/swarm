@@ -575,6 +575,79 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 }
 
+func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *testing.T) {
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	currentID := uuid.NewString()
+	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status": "open", "business_brief": map[string]any{"summary": "trigger-owned", "confidence": 1},
+	}, time.Now().UTC())
+	currentActor, found := runtimetools.ActorFromContext(ctx)
+	if !found || currentActor.EffectiveEntityID() != "" {
+		t.Fatal("eligibility proof requires an exactly entityless actor")
+	}
+	routing := eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", currentID)
+	publication := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "validation.started", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", []byte(`{}`), 1,
+		events.EventLineage{RunID: entityToolTestRunID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, routing.Route()), routing, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(currentActor.ID), AgentIdentity: currentActor.Identity,
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/inst-1"})}
+	delivery, err := events.NewDeliveryEvent(publication, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := delivery.Event()
+	if view.EntityID() != "" || view.SourceRoute() != publication.SourceRoute() || delivery.JournalEvent().EntityID() != currentID {
+		t.Fatal("delivery proof changed actor ownership or lost its immutable trigger")
+	}
+	for _, event := range []events.Event{publication, view} {
+		t.Run(fmt.Sprintf("entityless=%t", event.EntityID() == ""), func(t *testing.T) {
+			turn := runtimebus.WithInboundEvent(ctx, event)
+			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, currentActor))
+			for _, name := range []string{"read_validation_case", "read_validation_case_status"} {
+				if _, visible := definitions[name]; !visible {
+					t.Fatalf("receiver projection dropped an eligible triggering entity: tool=%s actor_entity=%q event_entity=%q source=%+v", name, currentActor.EffectiveEntityID(), event.EntityID(), event.SourceRoute())
+				}
+			}
+		})
+	}
+	foreignID := uuid.NewString()
+	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{"status": "foreign"}, time.Now().UTC())
+	for _, denied := range []struct {
+		name   string
+		source events.RoutingSource
+	}{
+		{"no_current", events.NoRoutingSource()},
+		{"root_current", eventtest.RootRoutingSource(entityToolTestRunID)},
+		{"missing_current", eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", uuid.NewString())},
+		{"foreign_contract", eventtest.StaticFlowRoutingSource("run-root", "run-root", foreignID)},
+	} {
+		t.Run(denied.name, func(t *testing.T) {
+			event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "validation.started", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", []byte(`{}`), 1,
+				events.EventLineage{RunID: entityToolTestRunID, ParentEventID: uuid.NewString(), ExecutionMode: "live"}, events.EventEnvelope{}, denied.source, time.Now().UTC())
+			projected, err := events.NewDeliveryEvent(event, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn := runtimebus.WithInboundEvent(ctx, projected.Event())
+			// Even an independently configured entity cannot fill absent or
+			// contradictory message context.
+			configured := currentActor
+			configured.EntityID = currentID
+			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, configured))
+			if _, visible := definitions["read_validation_case"]; visible {
+				t.Fatalf("ineligible message borrowed actor/construction entity: %s", denied.name)
+			}
+			caps := exec.ToolCapabilitiesForActorInContext(turn, configured, []string{"read_validation_case"}, nil)
+			capability, present := caps.Capability("read_validation_case")
+			if !present || capability.Visible || capability.Callable || capability.DenialReason != "current_entity_contract_unavailable" {
+				t.Fatalf("invalid context was callable: %+v", capability)
+			}
+		})
+	}
+}
+
 func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)

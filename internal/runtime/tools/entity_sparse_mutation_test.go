@@ -163,13 +163,19 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	if err != nil {
 		t.Fatal(err)
 	}
+	constructEntityToolParentFixture(t, ctx, selected, pc, source, parent, at)
 	constructed, err := flowidentity.KeyedChild(source, parent, flowID, owner.Route.InstanceID)
 	if err != nil || constructed.InstancePath != flowInstance {
 		t.Fatalf("entity fixture constructor path: constructed=%+v err=%v", constructed, err)
 	}
+	instanceKey, err := pipeline.AdmitFlowInstanceKey(source, flowID, owner.Route.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
+		Mode: view.Schema.EffectiveMode(), InstanceKey: instanceKey,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
 		CurrentState: stage, StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
@@ -191,6 +197,68 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 		}
 	}
 	return owner
+}
+
+func constructEntityToolParentFixture(t *testing.T, ctx context.Context, selected any, pc *pipeline.PipelineCoordinator, source semanticview.Source, parent flowidentity.Instance, at time.Time) {
+	t.Helper()
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		t.Fatal("entity tool parent requires its admitted source")
+	}
+	owner := flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(ctx), Route: parent.Route()}
+	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistence := pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner))
+	observed, found, err := persistence.LookupFlowInstance(ctx, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		if err := observed.ValidateSelection(lookup); err != nil || observed.Identity() != parent {
+			t.Fatalf("entity tool parent contradicts its construction: %+v %v", observed.Identity(), err)
+		}
+		return
+	}
+	schema, found := source.FlowSchemaByID(parent.TemplateID)
+	if !found || !schema.Instance.Empty() {
+		t.Fatal("entity tool parent fixture requires its compiled keyless declaration")
+	}
+	if _, declared := entityruntime.ResolveForFlow(source, parent.TemplateID); declared {
+		t.Fatal("entity tool parent fixture requires a fieldless parent")
+	}
+	graph, found := semanticview.WorkflowStageTopology(source, parent.TemplateID)
+	if !found {
+		t.Fatal("entity tool parent fixture requires its compiled stage catalog")
+	}
+	stage, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
+		WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(),
+		StorageRef: parent.InstancePath, InstanceID: parent.InstanceID, EntityID: parent.EntityID,
+		Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0,
+		CreatedAt: at, EnteredStageAt: at,
+	}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := flowactivationfixture.Command(ctx, initial, lifecycle, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("construct entity tool parent: acknowledged=%v err=%v", committed.Acknowledged, err)
+	}
+	if committed.Created {
+		if err := pc.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.WorkflowContractBundle) context.Context {

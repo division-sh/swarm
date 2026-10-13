@@ -2693,7 +2693,10 @@ contract_formats:
         Authored schema.tool_surface is retired and rejected on every presence.'
       no_contract_surface: Normal agents that do not resolve to a flow-owned entity contract receive no entity tools.
       current_entity_binding: 'Generated role-scoped entity tools operate on the current entity resolved from the triggering
-        event/session context. Agent-supplied entity_id, entity_type, or flow_instance arguments are not accepted.'
+        event/session context. An entityless delivery projection retains its concrete static/template message producer
+        as current-entity context when no receiver entity is present; the same-flow/entity-contract and non-root eligibility
+        checks still apply. Agent configuration and independent construction dependencies never supply a missing current
+        entity. Agent-supplied entity_id, entity_type, or flow_instance arguments are not accepted.'
       turn_eligibility: 'A generated current-entity tool is provider-visible and callable for a concrete turn only when
         the turn current entity resolves to the same flow-owned entity contract as the actor. If the current entity is absent,
         root/run-owned, missing, or belongs to another flow/entity contract, generated current-entity read/save/update tools
