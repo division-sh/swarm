@@ -100,7 +100,10 @@ func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Co
 		return nil, err
 	}
 	occurrence, present := worklifetime.OccurrenceFromContext(owned)
-	if !present {
+	selectedOccurrence, selected := occurrence.(*worklifetime.SelectedForkOccurrence)
+	if !present || !selected || selectedOccurrence.Identity() != (worklifetime.SelectedForkIdentity{
+		ExecutionID: admission.ExecutionAuthorityID, RunID: admission.RunID, Generation: admission.Generation,
+	}) {
 		return nil, fmt.Errorf("selected decision control lacks its existing work occurrence")
 	}
 	ctx, releaseCaller := bindSelectedDecisionCaller(caller, owned)
