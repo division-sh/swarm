@@ -19,6 +19,7 @@ type completion2270ReadStore interface {
 	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 	LoadLatestPublicConversationTurn(context.Context, string) (*operatorread.OperatorPublicConversationTurn, error)
 	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error)
+	LoadOperatorAgent(context.Context, agentidentity.Identity) (operatorread.OperatorAgentDetail, error)
 }
 
 func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
@@ -179,6 +180,19 @@ func proveCompletion2270Readback(t *testing.T, ctx context.Context, reads comple
 	}
 	if want.CostProvenance == runtimeeffects.CompletionCostReported && row.Totals.EstimatedCostUSD != 0 {
 		t.Fatal("provider-reported zero was classified as a local estimate")
+	}
+	if fixture.authority.Target.Memory.Enabled {
+		first, err := reads.LoadOperatorAgent(ctx, fixture.authority.Target.AgentIdentity)
+		if err != nil || first.LastTurnRef == nil || !reflect.DeepEqual(first.LastTurnRef.CompletionEvidence, want) {
+			t.Fatalf("stateful last-turn evidence: %+v, %v", first, err)
+		}
+		if len(first.LastTurnRef.CompletionEvidence.Models) > 0 {
+			first.LastTurnRef.CompletionEvidence.Models[0].Model = "mutable-readback"
+		}
+		again, err := reads.LoadOperatorAgent(ctx, fixture.authority.Target.AgentIdentity)
+		if err != nil || again.LastTurnRef == nil || !reflect.DeepEqual(again.LastTurnRef.CompletionEvidence, want) {
+			t.Fatalf("stateful last-turn evidence aliased: %+v, %v", again, err)
+		}
 	}
 }
 
