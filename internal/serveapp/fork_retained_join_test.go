@@ -23,14 +23,22 @@ import (
 // is preserved verbatim in testdata/future_capabilities; these tests prove current
 // source completion and the exact fail-closed policy without mutation.
 func TestServedJoinWriterCompletedHistoryRefusalBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, false)
+	testServedJoinWriterCompletedHistoryRefusal(t, false, false)
 }
 
 func TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, true)
+	testServedJoinWriterCompletedHistoryRefusal(t, true, false)
 }
 
-func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint bool) {
+func TestServedJoinWriterForkRetainedGenerationsBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, false, true)
+}
+
+func TestServedJoinWriterForkRetainedGenerationsSeparateCheckpointBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, true, true)
+}
+
+func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint, success bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			var selected *selectedStoreOwner
@@ -188,6 +196,10 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatal("missing fork owner")
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
+			if success {
+				requireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins, before)
+				return
+			}
 			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
@@ -217,6 +229,57 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				}
 			}
 		})
+	}
+}
+
+func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, request runfork.RunForkMaterializeRequest,
+	current loopruntime.Activation, sourceJoins []joinruntime.Activation, before map[string][]string) {
+	t.Helper()
+	owner, ok := selected.RunFork()
+	if !ok {
+		t.Fatal("retained join success requires the original selected store owner")
+	}
+	sourceBefore := readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)
+	child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
+	if err != nil {
+		if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+			t.Fatal("failed join-history materialization changed application state")
+		}
+		t.Fatalf("materialize the original completed join success: %v", err)
+	}
+	childLoop, childJoins := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	wantLoop, err := loopruntime.Fork(current, child.ForkRunID, child.ForkRunID)
+	if err != nil || !reflect.DeepEqual(childLoop, wantLoop) || childLoop.Attempt != 2 || len(childJoins) != len(sourceJoins) {
+		t.Fatalf("materialized join/loop ownership: loop=%+v joins=%+v error=%v", childLoop, childJoins, err)
+	}
+	for _, source := range sourceJoins {
+		want, err := loopruntime.ForkGeneration(source.JoinRef().Generation(), child.ForkRunID, child.ForkRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		matches := 0
+		for _, projected := range childJoins {
+			if projected.JoinRef().Generation() != want {
+				continue
+			}
+			matches++
+			if projected.JoinRef().Node() != source.JoinRef().Node() || projected.Key() == source.Key() ||
+				!reflect.DeepEqual(projected.Members, source.Members) || !reflect.DeepEqual(projected.Outputs, source.Outputs) ||
+				projected.Status != source.Status || projected.CloseReason != source.CloseReason || projected.TimerCancelled != source.TimerCancelled ||
+				projected.OutcomePending != source.OutcomePending || projected.OutcomeFired != source.OutcomeFired ||
+				projected.CompletionEvent != source.CompletionEvent || !projected.ArmedAt.Equal(source.ArmedAt) || !projected.FireAt.Equal(source.FireAt) {
+				t.Fatalf("retained join evidence changed: source=%+v child=%+v", source, projected)
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("expected exactly one historical child generation %+v, got%d", want, matches)
+		}
+	}
+	again, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
+	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) ||
+		!reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)) {
+		t.Fatalf("repeated materialization changed child/source history: %v", err)
 	}
 }
 
