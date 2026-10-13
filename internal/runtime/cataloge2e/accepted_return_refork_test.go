@@ -73,6 +73,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	if err != nil || !found || publication.Event.Event().RunID() != sourceRun || len(publication.DeliveryRoutes) != 2 {
 		t.Fatalf("refork cut is not the actual complete return: %+v found=%t error=%v", publication, found, err)
 	}
+	waitReplyReforkQuiescence(t, ctx, selected, sourceRun)
 	sourceDomain, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +181,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	waitReplyReforkQuiescence(t, wait, selected, staged.ForkRunID)
 	afterRow, err := selected.LoadReplyContext(wait, row.ID)
 	if err != nil || !reflect.DeepEqual(afterRow, row) {
 		t.Fatalf("return rewrote or reopened terminal evidence: %+v error=%v", afterRow, err)

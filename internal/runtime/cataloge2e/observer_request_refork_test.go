@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -32,6 +33,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 	if err != nil || len(beforeRows) != 1 || beforeRows[0].State != replycontext.StateTerminal {
 		t.Fatalf("observer-only source lacks its own terminal context: rows=%+v error=%v", beforeRows, err)
 	}
+	waitReplyReforkQuiescence(t, ctx, selected, sourceRun)
 	before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +122,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 			t.Fatalf("observer-only continuation recreated settled work %s: count=%d error=%v", name, count, err)
 		}
 	}
+	waitReplyReforkQuiescence(t, ctx, selected, staged.ForkRunID)
 	afterRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || !reflect.DeepEqual(afterRows, rows) {
 		t.Fatalf("observer-only execution reopened or rewrote the terminal context: rows=%+v error=%v", afterRows, err)
@@ -134,4 +137,30 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 		t.Fatalf("observer-only child changed its immediate source: %v", err)
 	}
 	return staged.ForkRunID, inputID
+}
+
+func waitReplyReforkQuiescence(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	reader, ok := selected.(interface {
+		LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
+	})
+	if !ok {
+		t.Fatal("reply refork requires the canonical run-quiescence reader")
+	}
+	// The delivery handoff witness excludes events with no recipients. Their
+	// pipeline receipts must also settle before measuring source immutability.
+	for {
+		state, err := reader.LoadRunTestQuiescence(ctx, runID, time.Now().UTC())
+		if err != nil {
+			t.Fatalf("read exact reply-refork quiescence: state=%+v error=%v", state, err)
+		}
+		if state.Ready {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("reply refork did not complete all publication work: state=%+v cause=%v", state, context.Cause(ctx))
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
