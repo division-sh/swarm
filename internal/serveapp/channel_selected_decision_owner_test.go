@@ -20,7 +20,6 @@ import (
 
 type selectedChannelDecisionFixture struct {
 	decisioncard.Store
-	channeldelivery.Store
 	card      decisioncard.Card
 	refusal   error
 	acquired  int
@@ -28,12 +27,17 @@ type selectedChannelDecisionFixture struct {
 	request   apiidempotency.Request
 }
 
+type selectedChannelInputFixture struct {
+	channeldelivery.Store
+	cardID string
+}
+
 func (f *selectedChannelDecisionFixture) GetDecisionCard(context.Context, string) (decisioncard.Card, error) {
 	return f.card, nil
 }
 
-func (f *selectedChannelDecisionFixture) ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]channeldelivery.InputDraftCandidate, string, error) {
-	return []channeldelivery.InputDraftCandidate{{CardID: f.card.CardID, DraftID: uuid.NewString()}}, "", nil
+func (f *selectedChannelInputFixture) ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]channeldelivery.InputDraftCandidate, string, error) {
+	return []channeldelivery.InputDraftCandidate{{CardID: f.cardID, DraftID: uuid.NewString()}}, "", nil
 }
 
 func (f *selectedChannelDecisionFixture) AcquireSelectedDecisionCardControl(_ context.Context, runID string, operation runfork.SelectedControl) (*runforkexecution.SelectedDecisionCardControl, bool, error) {
@@ -96,7 +100,7 @@ func TestChannelSelectedForkInputAcquiresOwnTurnBeforePreviewOrWrite(t *testing.
 	for _, input := range []string{"skip", "chosen", "plain_or_quoted"} {
 		t.Run(input, func(t *testing.T) {
 			f := &selectedChannelDecisionFixture{card: decisioncard.Card{CardID: uuid.NewString(), RunID: uuid.NewString()}, refusal: errors.New("selected turn is not current")}
-			d := &serveChannelDeliveryDispatcher{store: f, cards: f, selectedDecisions: f}
+			d := &serveChannelDeliveryDispatcher{store: &selectedChannelInputFixture{cardID: f.card.CardID}, cards: f, selectedDecisions: f}
 			resolved := channeldelivery.ResolvedAction{Action: channeldelivery.Action{CardID: f.card.CardID}}
 			var err error
 			switch input {
