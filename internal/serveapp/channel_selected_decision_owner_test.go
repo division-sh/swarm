@@ -59,7 +59,7 @@ func (f *selectedChannelDecisionFixture) CommitSelectedDecisionCardMutation(_ co
 	return json.RawMessage(`{"ok":true}`), true, true, nil
 }
 
-func TestChannelSelectedDecisionUsesOwnOwnerWithoutOrdinaryRuntime(t *testing.T) {
+func TestChannelSelectedForkDecisionUsesOwnOwnerWithoutOrdinaryRuntime(t *testing.T) {
 	principal, at := uuid.NewString(), time.Now().UTC()
 	f := &selectedChannelDecisionFixture{card: decisioncard.Card{CardID: uuid.NewString(), RunID: uuid.NewString()}}
 	d := &serveChannelDeliveryDispatcher{selectedDecisions: f}
@@ -92,7 +92,7 @@ func TestChannelSelectedDecisionUsesOwnOwnerWithoutOrdinaryRuntime(t *testing.T)
 	}
 }
 
-func TestChannelSelectedInputAcquiresOwnTurnBeforePreviewOrWrite(t *testing.T) {
+func TestChannelSelectedForkInputAcquiresOwnTurnBeforePreviewOrWrite(t *testing.T) {
 	for _, input := range []string{"skip", "chosen", "plain_or_quoted"} {
 		t.Run(input, func(t *testing.T) {
 			f := &selectedChannelDecisionFixture{card: decisioncard.Card{CardID: uuid.NewString(), RunID: uuid.NewString()}, refusal: errors.New("selected turn is not current")}
