@@ -18,6 +18,16 @@ the population after a green resample. Cancellation and unstarted work are
 separate from test failures; downstream timing/summary REDs do not duplicate a
 primary failure. Non-PR-only RED share is a reviewed lower bound with unknown
 and mixed outcomes shown, not a waiver or a successful-subset estimate.
+Job logs use a private byte-preserving HTTPS reader, with credentials supplied by
+`gh auth token --hostname github.com`. Metadata and ZIP artifacts still use
+`gh api`. The API redirect and download share the original 30-second context;
+neither follows automatic redirects. Download requests receive no API credentials
+or cookies, including same-host destinations. Failed or incomplete downloads
+supply no log evidence. Transport diagnostics omit credentials and signed URLs.
+Human-readable failure fields and final diagnostics visibly escape control
+characters; native parsing, matching and requested JSON retain accepted evidence.
+Terminal escape sequences in logs therefore cannot block machine-byte ingestion
+or execute when the failure report is printed.
 The summary counts incompletely observed runs explicitly. Per-phenomenon run
 counts can overlap and are not additive; an unavailable plan or log does not
 prove that a canceled run had no assertion failure.

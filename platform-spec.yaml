@@ -24144,8 +24144,16 @@ test_specification:
         text and requested JSON report, then exits unsuccessfully when any run is incompletely observed. Per-run
         observation integrity applies to every event independently of the PR-only population statistics and
         denominator; complete observed non-PR failures remain successfully inspectable. Raw job
-        logs use the shared gh api reader without version-specific flags; transport errors retain endpoint and
-        stderr diagnostics separately from log bytes, and failed transport output cannot become native evidence.
+        logs use one private byte-preserving HTTPS reader with credentials resolved by explicit github.com
+        gh authentication; metadata and ZIP artifacts retain the shared gh api reader. The authenticated API302
+        and unauthenticated HTTPS download share the existing30s read context, follow no automatic redirects,
+        and never forward API credentials or cookies to the download, even on same-host destinations.
+        Invalid redirects, unsuccessful status, cancellation, partial reads and body-close failures supply no
+        adopted log bytes. Transport problems persist only safe job/phase/status or cause classification, never
+        credentials, auth stderr, response bodies or signed URL query material. Failure-report human fields,
+        attempt problems, rate/tracking/repair fields, phenomenon labels and final CLI diagnostics visibly escape
+        untrusted control and display-direction characters; trusted layout remains separate. Raw accepted bytes,
+        native parsing, signature matching and JSON evidence never consume that display projection.
         Rejected plan validation supplies no authority to any failure. Exact source and
         platform come from each job's validated command or native analyzer artifact, never the global planner OS,
         a job-name guess or an author-head alias for a merge checkout. Missing or contradictory job evidence stays
