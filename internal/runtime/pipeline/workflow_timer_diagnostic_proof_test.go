@@ -133,7 +133,7 @@ func VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest(t *testin
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := FlowInstanceEntityID(runID)
 			at := time.Now().UTC()
-			instance := workflowTimerMaterializedInstance(ctx, entityID, runID, WorkflowInstance{
+			instance := workflowTimerMaterializedInstance(t, pc.SemanticSource(), ctx, entityID, runID, WorkflowInstance{
 				WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: "ready", CreatedAt: at, EnteredStageAt: at,
 			})
 			identity := testRunScopedWorkflowInstanceFromContext(ctx, runID)
@@ -205,7 +205,7 @@ func VerifyWorkflowTimerFailureDiagnosticsPersistOnBothStoresForTest(t *testing.
 					}
 					lifecycle.workOwner = owner
 					createdAt := canonicalWorkflowTimerTime(time.Now().UTC().Add(-2 * time.Hour))
-					instance := workflowTimerMaterializedInstance(ctx, entityID, path, WorkflowInstance{
+					instance := workflowTimerMaterializedInstance(t, pc.SemanticSource(), ctx, entityID, path, WorkflowInstance{
 						WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: "waiting",
 						CreatedAt: createdAt, EnteredStageAt: createdAt,
 					})

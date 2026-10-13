@@ -15,13 +15,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -73,16 +71,13 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 	default:
 		t.Fatalf("unknown diagnostic backend %q", backend)
 	}
-	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
-	runOwner := selected.(interface {
-		runtimerunlifecycle.OperationOwner
-		runtimerunlifecycle.CandidateStore
-	})
-	storetest.RequireRunningRun(t, ctx, runOwner, runID, time.Now().UTC())
-	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	source := semanticview.Wrap(bundle)
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer", "platform.join_timeout", "platform.join_complete")
+	ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
+	work := pipelineExternalTestWorkOwnerForSource(t, fact)
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work,
+	}, "platform.stage_timer", "platform.join_timeout", "platform.join_complete")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +92,8 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 	}
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
-		Module: proposedEffectProofModule{source: source, nodes: nodes}, WorkOwner: pipelineExternalTestWorkOwner(t),
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		Module: proposedEffectProofModule{source: source, nodes: nodes}, WorkOwner: work,
+		SourceArtifactFact: fact,
 		Persistence:        persistence, DeliveryStore: selected, DeadLetters: selected,
 		DecisionCards: cards, ProposedEffects: cards, HumanTasks: cards,
 		DecisionCardDraftExpiry: cards, HumanTaskExpiry: cards,

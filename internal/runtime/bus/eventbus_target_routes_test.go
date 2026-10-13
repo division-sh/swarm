@@ -569,10 +569,13 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 		FlowID: "review", FlowInstance: "review/inst-1", EntityID: runtimeflowidentity.EntityID("review/inst-1"),
 	}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent("task.started")}
 	store.setTargetOwnerRoutes(wantBlueprint.Target)
+	identity := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", busInternalTestRunID, wantBlueprint.Target.EntityID)
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, identity, "inst-1"))
 	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustExistingEntityTarget(wantBlueprint.Target)}
 	guardSawMaterializedRoute := false
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -606,7 +609,7 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if err := eb.Publish(context.Background(), eventtest.RuntimeControl(eventID,
-		events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		events.EventType("review/inst-1/task.started"), "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if !guardSawMaterializedRoute {
@@ -652,6 +655,7 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler))
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
+				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 					return []DeliveryRouteBlueprint{{
 						Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")),
@@ -687,8 +691,11 @@ func TestEventBusPreservesSelectedEntityForEntityOptionalHandler(t *testing.T) {
 	source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
 		"review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{},
 	))
+	identity := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", busInternalTestRunID, eventtest.UUID("selected-entityless-owner"))
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, identity, "inst-1"))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
 				Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")),
@@ -702,7 +709,7 @@ func TestEventBusPreservesSelectedEntityForEntityOptionalHandler(t *testing.T) {
 	}
 	eventID := uuid.NewString()
 	evt := eventtest.RuntimeControl(
-		eventID, "review/inst-1/"+eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+		eventID, "review/inst-1/"+eventType, "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1208,6 +1215,8 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustExistingEntityTarget(wantBlueprint.Target)}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(wantBlueprint.Target)
+	identity := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", busInternalTestRunID, wantBlueprint.Target.EntityID)
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, identity, "inst-1"))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
@@ -1229,7 +1238,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
 	}
 
-	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, emptyAgentPolicyPlan)
+	plan, err := eb.materializePublishRecipientPlan(constructionIndexContext(t, source), evt, emptyAgentPolicyPlan)
 	if err != nil {
 		t.Fatalf("materializePublishRecipientPlan: %v", err)
 	}

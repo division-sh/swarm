@@ -2299,11 +2299,14 @@ func workflowTimerRootRoute(ctx context.Context) runtimeflowidentity.Route {
 }
 
 func workflowTimerMaterializedInstance(
+	t testing.TB,
+	source semanticview.Source,
 	ctx context.Context,
 	entityID string,
 	instancePath string,
 	instance WorkflowInstance,
 ) WorkflowInstance {
+	t.Helper()
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	instance.InstanceID = runtimeflowidentity.LogicalInstanceID(instancePath)
 	instance.StorageRef = instancePath
@@ -2315,7 +2318,7 @@ func workflowTimerMaterializedInstance(
 	if instance.Fields == nil {
 		instance.Fields = map[string]any{}
 	}
-	return materializedWorkflowInstanceForTest(instance)
+	return materializedWorkflowInstanceForSource(t, source, ctx, instance)
 }
 
 func newWorkflowTimerTestScheduler(t *testing.T, owner worklifetime.Occurrence) *Scheduler {
