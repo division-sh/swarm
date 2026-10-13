@@ -146,7 +146,7 @@ func commitDeploymentRunCreationTx(
 }
 
 type deploymentFeedFactRecorder interface {
-	AddFacts(string, ...runforkrevision.FactRef) error
+	AddRunStartFacts(context.Context, string, ...runforkrevision.FactRef) error
 }
 
 func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder deploymentFeedFactRecorder, feeds []runtimedata.DeploymentFeed) error {
@@ -207,7 +207,7 @@ func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder de
 		}
 		refs = append(refs, ref)
 	}
-	return recorder.AddFacts(runID, refs...)
+	return recorder.AddRunStartFacts(ctx, runID, refs...)
 }
 
 func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (apiidempotency.Completion, error) {

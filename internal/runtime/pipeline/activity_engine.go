@@ -277,6 +277,22 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		mockResponse = &admitted
 	}
 	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		// Accounting for a captured result is not fresh execution in the current loop.
+		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
+			return err
+		}
+		if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
+			return err
+		} else if ok {
+			d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+				"activity_id":       intent.ActivityID,
+				"tool":              intent.Tool,
+				"effect_class":      string(intent.EffectClass),
+				"result_event_id":   recorded.EventID,
+				"result_event_type": recorded.EventType,
+			})
+			return nil
+		}
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
@@ -287,18 +303,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
 	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error
@@ -668,6 +672,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 	if err != nil {
 		return true, runtimepipelineobligation.Continue(), err
 	}
+	intent.Context = events.DeliveryContextFromContext(ctx).ReplyOnly()
 	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
@@ -1572,7 +1577,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		return fmt.Errorf("construct activity result event: %w", err)
 	}
 	if d.emissions != nil {
-		d.emissions.appendEvent(evt)
+		d.emissions.appendIntents([]runtimeengine.EmitIntent{{Event: evt, Context: intent.Context.ReplyOnly()}})
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,
@@ -1613,12 +1618,18 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	if rec.CompletedAt == nil || rec.CompletedAt.IsZero() {
 		return fmt.Errorf("activity attempt %s has no valid terminal completion timestamp", rec.RequestEventID)
 	}
+	if owned, err := selectedActivityPublicationOwnsResult(ctx, intent, rec); err != nil || owned {
+		// Its exact publication is continuing independently. The input still
+		// completes through the normal pipeline settlement owner.
+		return err
+	}
 	intent.Attempt = rec.Attempt
 	intent.Generation = rec.Generation
+	intent.Context = events.DeliveryContext{}
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}
-	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
+	return d.publishActivityResultWithID(events.WithoutDeliveryContext(ctx), intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
 }
 
 func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash string) ActivityAttemptRecord {

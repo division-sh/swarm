@@ -91,6 +91,48 @@ func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	}
 }
 
+func TestEmptyCompletionAdmissionEvidenceIsIndependentOfLifecycle(t *testing.T) {
+	at := time.Now().UTC()
+	ref := testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{})
+	activation, err := NewActivation(ref, nil, nil, at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activation.EmptyCompletionWasArmed() {
+		t.Fatal("timeout admission was reinterpreted as an empty completion")
+	}
+	activation.Close(CloseReasonComplete, true, false)
+	handle, err := timeridentity.JoinCompleteHandle(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err = activation.WithTimerHandle(handle, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activation.EmptyCompletionWasArmed() || !activation.CloseForStageExit() {
+		t.Fatal("fixture lacks its original completion or stage-exit cancellation")
+	}
+	activation.TimerCancelled = true
+	if !activation.EmptyCompletionWasArmed() || activation.Validate() != nil {
+		t.Fatal("legal cancellation changed original admission membership")
+	}
+	invalid := activation
+	invalid.OutcomePending = true
+	if !invalid.EmptyCompletionWasArmed() || invalid.Validate() == nil {
+		t.Fatal("admission evidence bypassed current lifecycle validation")
+	}
+	later, err := activation.WithTimerHandle(handle, at.Add(time.Second))
+	if err != nil || later.EmptyCompletionWasArmed() {
+		t.Fatalf("later completion erased original timeout membership: %v", err)
+	}
+	nonempty := activation
+	nonempty.Members = []string{"member"}
+	if nonempty.Validate() != nil || nonempty.EmptyCompletionWasArmed() {
+		t.Fatal("nonempty completion lost its original timeout membership")
+	}
+}
+
 func TestA2JoinOutputRoundTripPreservesAdmittedNumberKinds(t *testing.T) {
 	now := time.Now().UTC()
 	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, now, time.Time{})

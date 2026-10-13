@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 // FanOutCapacity is a selected-backend observation, not operator authority to
@@ -65,27 +66,28 @@ type fanOutCapacityState struct {
 }
 
 type FanOutServingRegistration struct {
-	grant            *generationGrant
-	occurrence       *worklifetime.RuntimeOccurrence
-	ctx              context.Context
-	cancel           context.CancelFunc
-	done             chan struct{}
-	closeOnce        sync.Once
-	turns            sync.WaitGroup // Add is fenced by registration removal under the process mutex.
-	turnsClosing     bool           // protected by the process mutex
-	executor         FanOutExecutor // protected by the process mutex
-	testScanObserver func(FanOutCandidate, bool, error)
-	lastCommit       *fanOutCommitTiming
+	grant             *generationGrant
+	occurrence        worklifetime.Occurrence
+	ctx               context.Context
+	cancel            context.CancelFunc
+	done              chan struct{}
+	closeOnce         sync.Once
+	turns             sync.WaitGroup // Add is fenced by registration removal under the process mutex.
+	turnsClosing      bool           // protected by the process mutex
+	executor          FanOutExecutor // protected by the process mutex
+	testScanObserver  func(FanOutCandidate, bool, error)
+	testChunkObserver func(context.Context, pipeline.FanOutChunkCommand)
+	lastCommit        *fanOutCommitTiming
 }
 
-// RegisterFanOutServing accepts only grants minted by the retained process
-// owner. Selected-fork deferred fan-out remains unsupported under its policy.
-func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurrence *worklifetime.RuntimeOccurrence, requestedWorkers *int) (*FanOutServingRegistration, error) {
-	live, ok := grant.(*liveGenerationGrant)
-	if !ok || live == nil || live.generationGrant == nil || live.owner == nil || occurrence == nil {
-		return nil, errors.New("fan-out registration requires a retained live grant and runtime occurrence")
+// RegisterFanOutServing consumes only process-minted authority and its exact
+// ordinary runtime or selected execution occurrence. Both share one budget.
+func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, requestedWorkers *int) (*FanOutServingRegistration, error) {
+	g, err := fanOutGenerationGrant(grant)
+	if err != nil {
+		return nil, err
 	}
-	g, p := live.generationGrant, live.owner
+	p := g.owner
 	p.opMu.Lock()
 	defer p.opMu.Unlock()
 	if err := p.proveCurrent(ctx); err != nil {
@@ -95,11 +97,10 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 	if err != nil {
 		return nil, err
 	}
-	identity := occurrence.Identity()
-	if evidence.State != GrantAdmitted || evidence.SelectedFork != nil || identity.RuntimeInstanceID != evidence.RuntimeInstanceID || identity.BundleHash != evidence.BundleHash {
+	if evidence.State != GrantAdmitted || !fanOutOccurrenceMatches(occurrence, evidence) {
 		return nil, errors.New("fan-out registration differs from the admitted runtime generation")
 	}
-	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
+	if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
 		return nil, err
 	}
 	reader, ok := p.session.(fanOutCapacityReader)
@@ -109,6 +110,16 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 	capacity, err := reader.FanOutServingCapacity()
 	if err != nil {
 		return nil, err
+	}
+	// Selected work joins the process's existing configured capacity; it does
+	// not reinterpret a loaded runtime's worker options or acquire another pool.
+	if evidence.SelectedFork != nil && requestedWorkers == nil {
+		p.mu.Lock()
+		if p.fanOutCapacity != nil {
+			limit := p.fanOutCapacity.limit
+			requestedWorkers = &limit
+		}
+		p.mu.Unlock()
 	}
 	limit, err := capacity.resolve(requestedWorkers)
 	if err != nil {
@@ -126,6 +137,7 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 		return nil, errors.New("fan-out runtime occurrence has no process work owner")
 	}
 	r := &FanOutServingRegistration{grant: g, occurrence: occurrence, ctx: registrationCtx, cancel: cancel, done: make(chan struct{})}
+	r.testChunkObserver, _ = ctx.Value(fanOutChunkObserverContextKey{}).(func(context.Context, pipeline.FanOutChunkCommand))
 	p.mu.Lock()
 	if p.fanOutCapacity == nil {
 		p.fanOutCapacity = &fanOutCapacityState{limit: limit, workProcess: workProcess, registrations: make(map[string]*FanOutServingRegistration)}
@@ -156,13 +168,66 @@ func RegisterFanOutServing(ctx context.Context, grant LiveGenerationGrant, occur
 		if budget.registrations[evidence.GrantID] == r && (r.executor == nil || p.requireLive() != nil || grantRetired(g)) {
 			delete(budget.registrations, evidence.GrantID)
 		}
+		idleService := p.retireIdleFanOutServiceLocked()
 		p.mu.Unlock()
 		r.Wake()
 		// Cancellation precedes the locked removal, so no BeginTurn can Add
 		// after this point. Join only this registration's admitted finite work.
 		r.turns.Wait()
+		if idleService != nil {
+			<-idleService.done
+			p.mu.Lock()
+			if budget.service == idleService {
+				budget.service = nil
+			}
+			p.mu.Unlock()
+		}
 	}()
 	return r, nil
+}
+
+// The process owns the shared observer, but its last registered occurrence
+// must join it. Durable closing-grant census entries are not live observers.
+func (p *processCapability) retireIdleFanOutServiceLocked() *fanOutServingService {
+	if p.fanOutCapacity == nil || p.fanOutCapacity.service == nil {
+		return nil
+	}
+	for _, r := range p.fanOutCapacity.registrations {
+		if !r.turnsClosing && r.ctx.Err() == nil {
+			return nil
+		}
+	}
+	service := p.fanOutCapacity.service
+	service.cancel()
+	return service
+}
+
+func fanOutGenerationGrant(grant GenerationGrant) (*generationGrant, error) {
+	var g *generationGrant
+	switch grant := grant.(type) {
+	case *liveGenerationGrant:
+		if grant != nil {
+			g = grant.generationGrant
+		}
+	case *generationGrant:
+		g = grant
+	}
+	if g == nil || g.owner == nil {
+		return nil, errors.New("fan-out serving requires a process-minted generation grant")
+	}
+	return g, nil
+}
+
+func fanOutOccurrenceMatches(occurrence worklifetime.Occurrence, evidence GrantEvidence) bool {
+	if evidence.SelectedFork != nil {
+		selected, ok := occurrence.(*worklifetime.SelectedForkOccurrence)
+		return ok && selected != nil && selected.Identity() == (worklifetime.SelectedForkIdentity{
+			ExecutionID: evidence.SelectedFork.ExecutionID, RunID: evidence.SelectedFork.ForkRunID,
+			Generation: evidence.SelectedFork.ExecutionGeneration,
+		})
+	}
+	runtime, ok := occurrence.(*worklifetime.RuntimeOccurrence)
+	return ok && runtime != nil && runtime.Identity().RuntimeInstanceID == evidence.RuntimeInstanceID && runtime.Identity().BundleHash == evidence.BundleHash
 }
 
 func grantRetired(g *generationGrant) bool {

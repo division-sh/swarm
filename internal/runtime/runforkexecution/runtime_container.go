@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -27,11 +28,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
@@ -79,6 +82,19 @@ type selectedContractForkLocalRuntimeContainer struct {
 	admission         managedexecution.Admission
 	runtimeInstanceID string
 	diagnostics       *selectedForkCommitDiagnostics
+	attachment        *selectedContractRuntimeAttachment
+}
+
+type selectedContractRuntimeAttachment struct {
+	runtime           *selectedContractAgentRuntime
+	pipeline          *runtimepipeline.PipelineCoordinator
+	scheduler         *runtimepipeline.Scheduler
+	ctx               context.Context
+	cancel            context.CancelCauseFunc
+	sourceEvents      []runfork.RunForkSelectedContractSourceEvent
+	guard             *selectedContractRecipientPlanPublishGuard
+	deliveryAuthority runtimedelivery.ExecutionAuthority
+	payloadAdmitter   runtimebus.PayloadAdmitter
 }
 
 func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (out selectedContractForkLocalRuntimeContainer, finalErr error) {
@@ -169,7 +185,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		EventBusRecipientPlanGuard:                     true,
 		RuntimeActiveAgentDescriptorsEphemeral:         true,
 		EphemeralAgentRuntime:                          true,
-		QuiescenceRequired:                             true,
+		QuiescenceRequired:                             false,
 		CleanupRequired:                                true,
 		InvalidPaths:                                   selectedContractRuntimeContainerInvalidPaths(),
 		SplitSiblings:                                  selectedContractRuntimeContainerSplitSiblings(),
@@ -215,6 +231,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+		InheritedSchedules:      req.Prepared.readiness,
 		Preparation:             preparation,
 		RecoveryFromExecutionID: req.Prepared.recoveryFromExecutionID,
 		DeclarationPlan:         req.AgentRuntime.Declarations,
@@ -238,9 +255,9 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	container.proof.AuthorityExecutionOwner = authority.ExecutionOwner
 	defer func() {
 		if finalErr != nil && out.authority.Valid() {
-			if cleanupErr := out.Fail(ctx, finalErr); cleanupErr != nil {
-				finalErr = errors.Join(finalErr, cleanupErr)
-			} else {
+			acknowledged, cleanupErr := out.Fail(ctx, finalErr)
+			finalErr = errors.Join(finalErr, cleanupErr)
+			if acknowledged {
 				out.authority = runtimeeffects.Authority{}
 			}
 		}
@@ -281,7 +298,7 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 	return c.proof
 }
 
-func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) (published []SelectedContractExecutionForkEvent, finalErr error) {
+func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx context.Context) (result error) {
 	req := c.req
 	req.RuntimeInstanceID = c.runtimeInstanceID
 	forkOwner := req.Operation.selected
@@ -289,50 +306,43 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if !ok || forkOwner == nil || owner != forkOwner || forkOwner.Identity() != (worklifetime.SelectedForkIdentity{
 		ExecutionID: c.proof.RuntimeExecutionID, RunID: req.ForkRunID, Generation: c.proof.RuntimeGeneration,
 	}) {
-		return nil, errors.New("selected-contract publication requires its exact bound operation context")
+		return errors.New("selected-contract attachment requires its exact bound operation context")
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
-	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
-		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("construct selected-contract receiver execution: %w", err)
-	}
-	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
-	if req.SourcePlan.ForkPoint.Kind == runfork.RunForkPointEvent {
-		if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.SourcePlan.ForkPoint.EventID); err != nil {
-			return nil, err
-		}
-	}
 	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
 		if !ok {
-			return nil, err
+			return err
 		}
 		if sourceRunID != req.SourceRunID || forkRunID != req.ForkRunID {
-			return nil, errors.Join(err, errors.New("selected-contract source event commit scope differs from admitted fork"))
+			return errors.Join(err, errors.New("selected-contract source event commit scope differs from admitted fork"))
 		}
 		sourceEvents = committed
 	}
 	if scopeErr := requireExactSelectedForkSourceEvents(req.SourceEvents, sourceEvents); scopeErr != nil {
-		return nil, errors.Join(err, scopeErr)
+		return errors.Join(err, scopeErr)
 	}
 	if err != nil {
 		c.diagnostics.add(err)
 	}
 	root, err := semanticview.AdmitRootExecutionCoordinate(req.LoadedSource.Source, req.ForkRunID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	sourceEvents, workflowProjection, err := projectSelectedContractSourceEvents(req.SourceRunID, root, sourceEvents)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	receiverExecution, err := c.prepareReceiverExecution(controller, sourceEvents)
+	if err != nil {
+		return err
+	}
+	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, workflowProjection, c.proof.ExecutionOwner)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var lifecycleManager *runtimemanager.AgentManager
 	deliveryAuthority, err := runtimedelivery.NewSelectedExecutionAuthority(
@@ -342,12 +352,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		c.authority.SelectedFork.Generation,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
-	}
-	if req.Prepared.recoveryFromExecutionID != "" {
-		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(ctx, req.Prepared.recoveryFromExecutionID, deliveryAuthority); err != nil {
-			return nil, fmt.Errorf("reconcile selected successor deliveries: %w", err)
-		}
+		return fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
 	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.SourceArtifactFact)
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
@@ -379,137 +384,385 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		}),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
+		return fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options)
+	if err := admitPreparedSourcePublications(ctx, bus, req.Prepared, sourceEvents, req.SourceRunID, req.ForkRunID, c.proof.ExecutionOwner); err != nil {
+		return err
+	}
+	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(forkOwner)
+	if err := scheduler.PrepareStartup(); err != nil {
+		return err
+	}
+	schedules, err := genericschedule.NewLifecycle(c.ports.genericSchedules, scheduler, bus, bus.EngineDispatcher(),
+		runtimepkg.NewGenericScheduleRuntimeLogger(runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter)), req.AgentRuntime.Options.ExecutionPosture)
+	if err != nil {
+		return err
+	}
+	attached := false
+	defer func() {
+		if !attached {
+			result = errors.Join(result, schedules.Stop(context.Background()))
+		}
+	}()
+	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, scheduler, schedules)
 	bus.SetInterceptors(pipeline)
 
-	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
+	lease, err := req.Operation.beginRetainedExecution()
+	if err != nil {
+		return err
+	}
+	runCtx := selectedContractRuntimeContainerLineageContext(lease.Context(), c.proof)
+	runCtx = runtimecorrelation.WithRunID(runCtx, req.ForkRunID)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
-	runCtx, cancelRuntime := context.WithCancel(runCtx)
-	defer cancelRuntime()
-	heartbeatErr := make(chan error, 1)
-	stopHeartbeat := make(chan struct{})
-	heartbeatDone := make(chan error, 1)
-	var stopHeartbeatOnce sync.Once
-	var heartbeatJoinErr error
-	stopHeartbeatWork := func() {
-		stopHeartbeatOnce.Do(func() {
-			close(stopHeartbeat)
-			heartbeatJoinErr = <-heartbeatDone
-		})
-	}
-	heartbeatLease, err := forkOwner.BeginStanding(runCtx)
+	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
+	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, bus, pipeline)
 	if err != nil {
-		return nil, fmt.Errorf("admit selected-fork heartbeat: %w", err)
-	}
-	defer func() {
-		stopHeartbeatWork()
-		finalErr = errors.Join(finalErr, heartbeatJoinErr)
-	}()
-	go func() {
-		defer func() { heartbeatDone <- heartbeatLease.Done() }()
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopHeartbeat:
-				return
-			case <-heartbeatLease.Context().Done():
-				return
-			case <-ticker.C:
-				if err := c.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(heartbeatLease.Context()), c.authority, 2*time.Minute); err != nil {
-					heartbeatErr <- err
-					cancelRuntime()
-					return
-				}
-			}
-		}
-	}()
-	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, pipeline, c.diagnostics)
-	if err != nil {
-		return nil, err
+		cancelRuntime(err)
+		return errors.Join(err, lease.Done())
 	}
 	runCtx = managedexecution.WithAdmission(runCtx, admission)
 	if agentRuntime == nil || agentRuntime.manager == nil {
-		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
+		cancelRuntime(errors.New("selected lifecycle manager missing"))
+		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())
 	}
 	lifecycleManager = agentRuntime.manager
+	agentRuntime.executionLease, agentRuntime.cancelExecution = lease, cancelRuntime
+	agentRuntime.scheduler, agentRuntime.timerLifecycle = scheduler, pipeline
+	agentRuntime.genericSchedules = schedules
 	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
-		return nil, err
+		return errors.Join(err, agentRuntime.Shutdown())
 	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
+	if err := c.prepareCompletionOwner(runCtx, forkOwner, agentRuntime); err != nil {
+		return errors.Join(err, agentRuntime.Shutdown())
+	}
+	c.attachment = &selectedContractRuntimeAttachment{
+		runtime: agentRuntime, pipeline: pipeline, scheduler: scheduler, ctx: runCtx, cancel: cancelRuntime, sourceEvents: sourceEvents, guard: guard,
+		deliveryAuthority: deliveryAuthority, payloadAdmitter: payloadAdmitter,
+	}
+	attached = true
+	return nil
+}
+
+// Bind fixed-cut accounting before preparing actors, so every initial and
+// recovered pipeline turn inherits the same decision without authorizing work.
+func (c selectedContractForkLocalRuntimeContainer) prepareServingScope(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (context.Context, *selectedContractAgentRuntime, managedexecution.Admission, error) {
+	bound, err := req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution.Bind(ctx, c.authority.ExecutionMode)
+	if err != nil {
+		return ctx, nil, managedexecution.Admission{}, err
+	}
+	runtime, admission, err := prepareSelectedContractAgentRuntime(bound, req, bus, pipeline, c.diagnostics)
+	return bound, runtime, admission, err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) prepareReceiverExecution(controller *runtimeeffects.Controller, sources []runfork.RunForkSelectedContractSourceEvent) (eventreceiver.ExecutionVariant, error) {
+	receiver, err := eventreceiver.SelectedContractForkExecution(
+		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
+	)
+	if err != nil {
+		return eventreceiver.ExecutionVariant{}, fmt.Errorf("construct selected-contract receiver execution: %w", err)
+	}
+	receiver, err = receiver.WithSelectedActivityPublications(selectedActivityPublications(sources))
+	if err != nil {
+		return eventreceiver.ExecutionVariant{}, fmt.Errorf("retain selected activity accounting in receiver execution: %w", err)
+	}
+	return receiver, nil
+}
+
+func selectedActivityPublications(sources []runfork.RunForkSelectedContractSourceEvent) []activityresult.PublishedContinuation {
+	publications := make([]activityresult.PublishedContinuation, 0)
+	for _, source := range sources {
+		if source.PublishedActivityResult.Present() {
+			publications = append(publications, source.PublishedActivityResult)
+		}
+	}
+	return publications
+}
+
+func (c selectedContractForkLocalRuntimeContainer) RetainActivated(prepared *PreparedSelectedFork, diagnostic error) {
+	c.diagnostics.add(diagnostic)
+	if err := c.req.Owner.retainPrepared(prepared); err != nil {
+		c.diagnostics.add(err)
+		c.retainHandoffFailure(err)
+		return
+	}
+	if err := c.Serve(); err != nil {
+		c.diagnostics.add(err)
+		c.retainHandoffFailure(err)
+	}
+}
+
+func (c selectedContractForkLocalRuntimeContainer) retainHandoffFailure(err error) {
+	if selectedStopOwnsDisposition(c.attachment.ctx) {
+		c.req.Prepared.retainExecutionFailure(c, context.Canceled)
+	} else if !errors.Is(context.Cause(c.attachment.ctx), worklifetime.ErrRetired) {
+		c.req.Prepared.retainExecutionFailure(c, err)
+	}
+	c.retireServedPreparation()
+}
+
+func (c selectedContractForkLocalRuntimeContainer) Serve() error {
+	if c.attachment == nil {
+		return errors.New("selected execution requires its prepared attachment")
+	}
+	runtime := c.attachment.runtime
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.cancelExecution == nil || runtime.executionDone != nil || c.attachment.ctx.Err() != nil {
+		return errors.New("selected execution attachment is retired or already serving")
+	}
+	runtime.executionDone = make(chan error, 1)
+	go c.serveRetained(runtime.executionDone)
+	return nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) serveRetained(done chan<- error) {
+	var err error
+	defer func() {
+		if panicked := recover(); panicked != nil {
+			err = errors.Join(err, fmt.Errorf("selected execution panicked: %v", panicked))
+		}
+		cause := context.Cause(c.attachment.ctx)
+		if cause != nil && !errors.Is(cause, worklifetime.ErrRetired) {
+			err = errors.Join(err, cause)
+		}
+		if errors.Is(cause, worklifetime.ErrRetired) {
+			err = nil
+			if selectedStopOwnsDisposition(c.attachment.ctx) {
+				c.req.Prepared.retainExecutionFailure(c, context.Canceled)
+			}
+		} else if err != nil {
+			c.req.Prepared.retainExecutionFailure(c, err)
+			c.diagnostics.add(err)
+		}
+		c.attachment.cancel(err)
+		done <- err
+		// Publish the serving join before cleanup; Shutdown must never join its
+		// own caller. Failed releases remain owned by the exact preparation.
+		c.retireServedPreparation()
+	}()
+	stopHeartbeat, heartbeatDone := make(chan struct{}), make(chan error, 1)
+	go c.heartbeatRetained(stopHeartbeat, heartbeatDone)
+	defer func() {
+		close(stopHeartbeat)
+		err = errors.Join(err, <-heartbeatDone)
+	}()
+	err = c.serveCommittedAttachment()
+}
+
+func (c selectedContractForkLocalRuntimeContainer) retireServedPreparation() {
+	defer func() {
+		if panicked := recover(); panicked != nil {
+			// Close has already retained the exact unfinished resources. Report
+			// its panic without abandoning retry ownership or crashing the daemon.
+			c.diagnostics.add(fmt.Errorf("retained selected cleanup panicked: %v", panicked))
+		}
+	}()
+	c.diagnostics.add(c.req.Owner.disposePreparation(c.req.Prepared))
+}
+
+func (c selectedContractForkLocalRuntimeContainer) heartbeatRetained(stop <-chan struct{}, done chan<- error) {
+	var err error
+	defer func() {
+		if panicked := recover(); panicked != nil {
+			err = fmt.Errorf("selected heartbeat panicked: %v", panicked)
+		}
+		if err != nil {
+			c.attachment.cancel(err)
+		}
+		done <- err
+	}()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-c.attachment.ctx.Done():
+			return
+		case <-ticker.C:
+			availability, readErr := c.ports.fork.LoadRunBundleAvailability(c.attachment.ctx, c.req.ForkRunID)
+			if readErr != nil {
+				err = readErr
+				return
+			}
+			state, stateErr := runlifecycle.ParseState(availability.Status)
+			if stateErr != nil {
+				err = stateErr
+				return
+			}
+			if state.Terminal() {
+				return
+			}
+			err = c.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(c.attachment.ctx, c.authority, 2*time.Minute)
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (finalErr error) {
+	req, attachment := c.req, c.attachment
+	runCtx, agentRuntime := attachment.ctx, attachment.runtime
+	if _, err := c.ports.busDurable.RunLifecycle.RequireActiveRunSource(runCtx, req.ForkRunID); err != nil {
+		return fmt.Errorf("admit activated selected execution: %w", err)
+	}
+	if agentRuntime.completionExecutor == nil {
+		return errors.New("selected serving requires its exact completion owner")
+	}
+	if err := agentRuntime.startExecution(runCtx, attachment.pipeline, c.diagnostics, req.Prepared.recoveryFromExecutionID != ""); err != nil {
+		return fmt.Errorf("start activated selected execution: %w", err)
+	}
+	bus, pipeline := agentRuntime.bus, attachment.pipeline
 	continuationFailures := make(chan error, 1)
 	continuations, err := runtimedeliverycontinuation.NewSelected(
-		c.ports.busDurable.DeliveryLifecycle, deliveryAuthority, forkOwner, bus,
+		c.ports.busDurable.DeliveryLifecycle, attachment.deliveryAuthority, req.Operation.selected, bus,
 		func(_ context.Context, cause error) {
 			select {
 			case continuationFailures <- cause:
 			default:
 			}
-			cancelRuntime()
+			attachment.cancel(cause)
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create selected delivery continuation owner: %w", err)
+		return fmt.Errorf("create selected delivery continuation owner: %w", err)
 	}
 	if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
-		return nil, err
+		return err
 	}
 	if err := continuations.Start(runCtx); err != nil {
-		return nil, fmt.Errorf("start selected delivery continuations: %w", err)
+		return fmt.Errorf("start selected delivery continuations: %w", err)
 	}
 	defer func() {
 		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
 	}()
+	if err := pipeline.RestoreWorkflowTimers(runCtx); err != nil {
+		return fmt.Errorf("restore selected child workflow timers: %w", err)
+	}
 	if req.Prepared.recoveryFromExecutionID != "" {
 		if err := bus.RecoverSelectedRunPipelineToExhaustion(runCtx, req.ForkRunID); err != nil {
-			return nil, fmt.Errorf("recover selected child event pipeline: %w", err)
+			return fmt.Errorf("recover selected child event pipeline: %w", err)
 		}
-		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(runCtx, req.Prepared.recoveryFromExecutionID, deliveryAuthority); err != nil {
-			return nil, fmt.Errorf("reconcile recovered selected child deliveries: %w", err)
+		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(runCtx, req.Prepared.recoveryFromExecutionID, attachment.deliveryAuthority); err != nil {
+			return fmt.Errorf("reconcile recovered selected child deliveries: %w", err)
 		}
 		if err := continuations.Synchronize(runCtx); err != nil {
-			return nil, fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
+			return fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
 		}
 	}
-	agentRuntimeStopped := false
-	if agentRuntime != nil {
-		defer func() {
-			if !agentRuntimeStopped {
-				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
-			}
-		}()
+	if err := agentRuntime.genericSchedules.ReconcileRunWakeups(runCtx, req.ForkRunID); err != nil {
+		return fmt.Errorf("restore selected child generic schedule wakeups: %w", err)
 	}
-	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
-	for _, sourceEvent := range sourceEvents {
-		input := req.Prepared.inputs[sourceEvent.SourceEventID]
-		_, hasPublication := sourceEvent.InputPublication.Event()
-		if hasPublication != input.Present() {
-			return out, fmt.Errorf("selected input publication changed after preparation")
+	if err := c.admitSelectedDeploymentFeeds(runCtx); err != nil {
+		return err
+	}
+	// Finish initial serializable commits before autonomous writes. Dispatch
+	// remains separate because it can wait for a handler or an original deadline.
+	inputs, err := c.commitSelectedInputs()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, input := range inputs {
+			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
 		}
-		if hasPublication {
-			fingerprint, err := selectedPreparationFingerprint(sourceEvent.InputPublication.Coordinates())
-			if err != nil || fingerprint != req.Prepared.inputCoordinates[sourceEvent.SourceEventID] {
-				return out, fmt.Errorf("selected input evidence changed after preparation: %v", err)
+	}()
+	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, pipeline)
+	if err != nil {
+		return fmt.Errorf("register selected fan-out serving: %w", err)
+	}
+	pipeline.InstallFanOutWorkNotifier(agentRuntime.fanOutServing)
+	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
+		return fmt.Errorf("release selected child wakeups: %w", err)
+	}
+	for len(inputs) > 0 {
+		input := inputs[0]
+		inputs = inputs[1:]
+		if err := c.dispatchCommittedInput(input); err != nil {
+			return err
+		}
+	}
+	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
+		return fmt.Errorf("start activated selected completion owner: %w", err)
+	}
+	if err := continuations.Synchronize(runCtx); err != nil {
+		return fmt.Errorf("synchronize selected delivery continuations: %w", err)
+	}
+	return c.awaitTerminalSettlement(runCtx, continuationFailures)
+}
+
+type committedSelectedInput struct {
+	ctx           context.Context
+	prepared      runtimebus.PreparedPublish
+	sourceEventID string
+	cleanup       error
+}
+
+func (c selectedContractForkLocalRuntimeContainer) commitSelectedInputs() (inputs []committedSelectedInput, finalErr error) {
+	req, attachment := c.req, c.attachment
+	runCtx, bus := attachment.ctx, attachment.runtime.bus
+	defer func() {
+		if finalErr != nil {
+			for _, input := range inputs {
+				finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
 			}
-			input, err = input.WithStoreProjectedPayload(sourceEvent.Payload)
-			if err != nil {
-				return out, err
-			}
+		}
+	}()
+	for _, sourceEvent := range attachment.sourceEvents {
+		input, err := selectedSourceInput(req.Prepared, sourceEvent)
+		if err != nil {
+			return inputs, err
 		}
 		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
 		if err != nil {
-			return out, err
+			return inputs, err
 		}
-		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
-		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
+		attachment.guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
+		if sourceEvent.JoinContinuation.Present() {
+			if err := attachment.guard.ExpectPublishedJoinDelivery(evt, sourceEvent.JoinRoute); err != nil {
+				return inputs, err
+			}
+		}
+		eventCtx, err := c.selectedSourcePublicationContext(
+			runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName), evt, sourceEvent)
+		if err != nil {
+			return inputs, err
+		}
+		if len(sourceEvent.ContinuedRecipientRoutes) != 0 {
+			eventCtx, err = runtimebus.WithSelectedForkRecipientContexts(eventCtx, evt, sourceEvent.ContinuedRecipientRoutes)
+			if err != nil {
+				return inputs, err
+			}
+		}
+		if req.Prepared.recoveryChildRunID != "" {
+			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
+			if err != nil {
+				return inputs, err
+			}
+			eventCtx, evt = admittedCtx, admitted.Event()
+			payload, bound := evt.PayloadAdmission()
+			if !bound {
+				return inputs, errors.New("selected recovery input lacks admitted schema evidence")
+			}
+			sourceEvent.Payload = evt.Payload()
+			published, err := c.ports.replay.RequireSelectedForkInputPublished(eventCtx, c.authority, sourceEvent, payload.Binding())
+			if err != nil {
+				return inputs, fmt.Errorf("admit committed selected input recovery: %w", err)
+			}
+			if published {
+				// Its committed pipeline and receiver rows have already been handed
+				// to the canonical recovery owners, including unfinished delivery.
+				continue
+			}
+		}
 		prepared, err := bus.PrepareSelectedForkPublish(eventCtx, evt, input)
 		if err != nil {
-			return out, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
+			return inputs, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
 				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
 				forkEventID,
@@ -527,103 +780,140 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		}
 		committed, commitErr := c.ports.replay.CommitSelectedForkEvent(eventCtx, prepared.SelectedForkCommitRequest(lineage))
 		if committed.AppendOutcome == 0 && commitErr != nil {
-			return out, errors.Join(commitErr, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		if err := committed.Validate(); err != nil {
-			return out, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared, err := prepared.WithCommitOutcome(committed.AppendOutcome)
 		if err != nil {
-			return out, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return inputs, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared = committedPrepared.WithCommittedDeliveryHandoffs(committed.DeliveryHandoffs)
-		prepared = committedPrepared
-		// The producer returns this evidence only after acknowledged COMMIT.
-		// Complete its exact handoff once, even if transaction cleanup failed.
-		out = append(out, SelectedContractExecutionForkEvent{
-			SourceEventID: sourceEvent.SourceEventID,
-			ForkEventID:   forkEventID,
-			EventName:     sourceEvent.EventName,
-		})
-		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {
-			return out, errors.Join(commitErr, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
-				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-				sourceEvent.SourceEventID,
-				forkEventID,
-				err,
-			))
-		}
-		if commitErr != nil {
-			return out, commitErr
-		}
-		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter).Log(eventCtx, runtimepkg.RuntimeLogEntry{
-			Level:     diaglog.LevelInfo,
-			Message:   "Selected-contract fork event completed local dispatch",
-			Component: "run_fork",
-			Action:    "selected_contract_event_dispatched",
-			EventID:   prepared.Event.ID(),
-			EventType: string(prepared.Event.Type()),
-			EntityID:  prepared.Event.EntityID(),
-			Detail: map[string]any{
-				"source_run_id":   req.SourceRunID,
-				"source_event_id": sourceEvent.SourceEventID,
-			},
-		}); err != nil {
-			return out, fmt.Errorf("%s persist selected-contract fork event dispatch evidence %s: %w",
-				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-				forkEventID,
-				err,
-			)
-		}
+		c.diagnostics.add(commitErr)
+		inputs = append(inputs, committedSelectedInput{ctx: eventCtx, prepared: committedPrepared, sourceEventID: sourceEvent.SourceEventID, cleanup: commitErr})
 	}
-	if agentRuntime.generationGrant == nil {
-		return out, errors.New("selected deployment serving requires the admitted runtime generation grant")
-	}
-	grant, err := agentRuntime.generationGrant.Evidence()
-	if err != nil {
-		return out, fmt.Errorf("load selected deployment generation grant: %w", err)
-	}
-	if err := c.serveSelectedDeploymentFeeds(runCtx, pipeline, grant); err != nil {
-		return out, err
-	}
-	if req.Prepared.recoveryFromExecutionID != "" {
-		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(runCtx, req.Prepared.recoveryFromExecutionID, deliveryAuthority); err != nil {
-			return out, fmt.Errorf("reconcile newly handed-off selected deliveries: %w", err)
-		}
-	}
-	if err := continuations.Synchronize(runCtx); err != nil {
-		return out, fmt.Errorf("synchronize selected delivery continuations: %w", err)
-	}
-	if agentRuntime != nil {
-		timeout := req.AgentRuntime.Options.QuiescenceTimeout
-		if timeout <= 0 {
-			timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
-		}
-		waitCtx, cancel := context.WithTimeout(runCtx, timeout)
-		defer cancel()
-		if err := agentRuntime.WaitForQuiescence(waitCtx, bus); err != nil {
-			return out, fmt.Errorf("%s wait for selected-fork runtime quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
-		}
-		select {
-		case err := <-continuationFailures:
-			return out, fmt.Errorf("selected delivery continuation: %w", err)
-		default:
-		}
-		stopHeartbeatWork()
-		if err := agentRuntime.Shutdown(); err != nil {
-			return out, fmt.Errorf("%s stop selected-fork runtime after quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
-		}
-		agentRuntimeStopped = true
-	}
-	select {
-	case err := <-heartbeatErr:
-		return out, fmt.Errorf("%s heartbeat selected-fork completion authority: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
-	default:
-	}
-	return out, nil
+	return inputs, nil
 }
 
-func (c selectedContractForkLocalRuntimeContainer) serveSelectedDeploymentFeeds(ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, grant startupownership.GrantEvidence) error {
+func (c selectedContractForkLocalRuntimeContainer) dispatchCommittedInput(input committedSelectedInput) error {
+	// Acknowledged evidence owns this exact handoff despite cleanup errors.
+	if err := c.attachment.runtime.bus.DispatchPreparedPublish(input.ctx, input.prepared); err != nil {
+		return errors.Join(input.cleanup, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, input.sourceEventID, input.prepared.Event.ID(), err))
+	}
+	if err := runtimepkg.NewRuntimeLogger(c.ports.logs, c.req.AgentRuntime.Options.ExecutionPosture, c.attachment.payloadAdmitter).Log(input.ctx, runtimepkg.RuntimeLogEntry{
+		Level:     diaglog.LevelInfo,
+		Message:   "Selected-contract fork event completed local dispatch",
+		Component: "run_fork",
+		Action:    "selected_contract_event_dispatched",
+		EventID:   input.prepared.Event.ID(),
+		EventType: string(input.prepared.Event.Type()),
+		EntityID:  input.prepared.Event.EntityID(),
+		Detail: map[string]any{
+			"source_run_id":   c.req.SourceRunID,
+			"source_event_id": input.sourceEventID,
+		},
+	}); err != nil {
+		return fmt.Errorf("%s persist selected-contract fork event dispatch evidence %s: %w",
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			input.prepared.Event.ID(),
+			err,
+		)
+	}
+	return nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationContext(ctx context.Context, event events.Event, source runfork.RunForkSelectedContractSourceEvent) (context.Context, error) {
+	_, continuing, err := c.req.SourcePlan.FanOutPendingRecipientPartition(source.SourceEventID)
+	if err != nil {
+		return nil, err
+	}
+	_, request, err := c.req.SourcePlan.RequestPendingRecipientPartition(source.SourceEventID)
+	if err != nil {
+		return nil, err
+	}
+	if !continuing && !request && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 && source.ContinuedReplyReturn == nil {
+		return ctx, nil
+	}
+	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {
+		if plan.SourceEventID != source.SourceEventID {
+			continue
+		}
+		ctx, err = runtimebus.WithSelectedForkRecipientPlan(ctx, event, plan.Recipients)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(source.ContinuedReplyRequests) != 0 {
+		return runtimebus.WithSelectedForkRequestReplies(ctx, event, source.ContinuedReplyRequests)
+	}
+	if source.ContinuedReplyReturn != nil {
+		return runtimebus.WithSelectedForkReplyReturn(ctx, event, *source.ContinuedReplyReturn)
+	}
+	return ctx, nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx context.Context, failures <-chan error) error {
+	// Idle is not terminal: a future deadline or reply may still owe work. The
+	// existing execution heartbeat also observes the canonical run disposition.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		availability, err := c.ports.fork.LoadRunBundleAvailability(ctx, c.req.ForkRunID)
+		if err != nil {
+			return err
+		}
+		state, err := runlifecycle.ParseState(availability.Status)
+		if err != nil {
+			return err
+		}
+		if state.Terminal() {
+			timeout := c.req.AgentRuntime.Options.QuiescenceTimeout
+			if timeout <= 0 {
+				timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
+			}
+			waitCtx, cancel := context.WithTimeout(ctx, timeout)
+			err := c.attachment.runtime.WaitForQuiescence(waitCtx, c.attachment.runtime.bus)
+			cancel()
+			if err != nil {
+				return err
+			}
+			if err := c.ports.runtimeExecution.RequireRunForkSelectedContractExecutionSettlement(ctx, c.authority, c.req.SourceEvents, c.req.LoadedSource.Source); err != nil {
+				return err
+			}
+			// Manager self-release needs the still-current selected grant. The
+			// other serving owners are joined after this serving goroutine exits.
+			if manager := c.attachment.runtime.manager; manager != nil {
+				if err := manager.Shutdown(); err != nil {
+					return err
+				}
+				c.attachment.runtime.manager = nil
+			}
+			if err := c.Quiesce(ctx); err != nil {
+				return err
+			}
+			return c.Close(ctx)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case cause := <-failures:
+			return fmt.Errorf("selected delivery continuation: %w", cause)
+		case <-c.attachment.runtime.completionExecutor.CompletionWakeups():
+		case <-ticker.C:
+		}
+	}
+}
+
+func (c selectedContractForkLocalRuntimeContainer) admitSelectedDeploymentFeeds(ctx context.Context) error {
+	if c.attachment.runtime.generationGrant == nil {
+		return errors.New("selected serving requires the admitted runtime generation grant")
+	}
+	grant, err := c.attachment.runtime.generationGrant.Evidence()
+	if err != nil {
+		return fmt.Errorf("load selected generation grant: %w", err)
+	}
 	if err := grant.Validate(); err != nil {
 		return fmt.Errorf("selected deployment grant: %w", err)
 	}
@@ -637,72 +927,7 @@ func (c selectedContractForkLocalRuntimeContainer) serveSelectedDeploymentFeeds(
 	if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(feeds), c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
 		return err
 	}
-	if len(feeds) == 0 {
-		return nil
-	}
-	owner, err := c.ports.deploymentFanOut.BindSelectedDeploymentFanOutGrant(grant)
-	if err != nil {
-		return fmt.Errorf("bind selected deployment feed owner: %w", err)
-	}
-	for _, feed := range feeds {
-		for {
-			if feed.Status == fanoutobligation.StatusClosed {
-				break
-			}
-			if feed.Status != fanoutobligation.StatusOpen {
-				return fmt.Errorf("selected deployment feed %s is %s before serving", feed.Request.Key.DeploymentFeedID, feed.Status)
-			}
-			turn, err := coordinator.ServeFanOutCandidate(ctx, owner, feed.Request.Key)
-			if err != nil {
-				return fmt.Errorf("serve selected deployment feed: %w", err)
-			}
-			observed, err := c.ports.deploymentFanOut.ListSelectedDeploymentFeeds(ctx, grant)
-			if err != nil {
-				return fmt.Errorf("observe selected deployment feed after serving: %w", err)
-			}
-			if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(observed), c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
-				return err
-			}
-			current, err := exactSelectedDeploymentFeed(observed, feed)
-			if err != nil {
-				return err
-			}
-			complete, err := selectedDeploymentTurnComplete(feed, current, turn.Refill)
-			if err != nil {
-				return err
-			}
-			if complete {
-				break
-			}
-			feed = current
-		}
-	}
 	return nil
-}
-
-func selectedDeploymentTurnComplete(previous, current fanoutobligation.Intent, refill bool) (bool, error) {
-	if current.Status == fanoutobligation.StatusClosed {
-		return true, nil
-	}
-	if current.Status != fanoutobligation.StatusOpen || !refill || current.Cursor <= previous.Cursor {
-		return false, fmt.Errorf("selected deployment feed %s remains %s at %d/%d after serving", current.Request.Key.DeploymentFeedID, current.Status, current.Cursor, current.Request.Cardinality)
-	}
-	return false, nil
-}
-
-func exactSelectedDeploymentFeed(feeds []fanoutobligation.Intent, expected fanoutobligation.Intent) (fanoutobligation.Intent, error) {
-	for _, feed := range feeds {
-		if feed.Request.Key != expected.Request.Key {
-			continue
-		}
-		if feed.Request.Deployment == nil || expected.Request.Deployment == nil ||
-			*feed.Request.Deployment != *expected.Request.Deployment ||
-			feed.Request.Source != expected.Request.Source || feed.Request.Cardinality != expected.Request.Cardinality {
-			return fanoutobligation.Intent{}, errors.New("selected deployment feed changed its immutable source while serving")
-		}
-		return feed, nil
-	}
-	return fanoutobligation.Intent{}, errors.New("selected deployment feed disappeared while serving")
 }
 
 func selectedDeploymentFeedRequests(feeds []fanoutobligation.Intent) []fanoutobligation.IntentRequest {
@@ -799,25 +1024,56 @@ func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) 
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) error {
-	return c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	acknowledged, err := c.closeAcknowledged(ctx)
+	if acknowledged {
+		return nil
+	}
+	return err
 }
 
-func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
-	if c.proof.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision &&
-		(errors.Is(cause, worklifetime.ErrRetired) || errors.Is(context.Cause(ctx), worklifetime.ErrRetired)) {
+func (c selectedContractForkLocalRuntimeContainer) closeAcknowledged(ctx context.Context) (bool, error) {
+	acknowledged, err := c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	if !acknowledged {
+		return false, errors.Join(errors.New("selected execution close remains unacknowledged"), err)
+	}
+	c.diagnostics.add(err)
+	return true, err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) (bool, error) {
+	if errors.Is(cause, worklifetime.ErrRetired) || errors.Is(context.Cause(ctx), worklifetime.ErrRetired) {
 		// The process owner already withdrew execution. Startup recovery must
 		// fence this generation and its open claims before issuing a successor.
-		return fmt.Errorf("selected finite-feed predecessor awaits fenced recovery: %w", worklifetime.ErrRetired)
+		return false, fmt.Errorf("selected predecessor awaits fenced recovery: %w", worklifetime.ErrRetired)
 	}
 	failure := runtimefailures.FromError(cause, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
 	raw, err := json.Marshal(failure.Failure)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := c.ports.runtimeExecution.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
-		return err
+		return false, err
 	}
-	return c.Close(ctx)
+	return c.closeAcknowledged(ctx)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Context, cause error) (bool, error) {
+	failure := runtimefailures.FromError(cause, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
+	raw, err := json.Marshal(failure.Failure)
+	if err != nil {
+		return false, err
+	}
+	return c.ports.runtimeExecution.FailActivatedRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) failureDispositionContext(ctx context.Context) context.Context {
+	// Disposition retains preparation's process work, not the retired serving
+	// occurrence. Semantic attribution still belongs to the exact selected child.
+	fact := c.req.LoadedSource.SourceArtifactFact
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(c.runtimeInstanceID, fact.BundleHash()))
+	ctx = selectedContractRuntimeContainerLineageContext(ctx, c.proof)
+	return runtimeeffects.WithAuthority(ctx, c.authority)
 }
 
 type selectedContractRuntimeContainerLoggerHook struct {
