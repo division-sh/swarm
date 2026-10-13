@@ -32,6 +32,13 @@ func TestOrderedRuleCollectionsRejectAlternateShapes(t *testing.T) {
 						t.Fatalf("collection %s: %v, want %q", tc.value, err, want)
 					}
 				}
+				if context == "rules" {
+					for _, want := range []string{"evaluated top to bottom", "    - when: payload.kind == 'a'", "      emit: routed.a", "    - else: true", "rows are identified by position"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("collection teaching lost the ruled ordered example %q: %v", want, err)
+						}
+					}
+				}
 			})
 		}
 	}
