@@ -24,13 +24,23 @@ var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
 	{"native-shared-coordinator-authority", "TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute", "ce067ed1f6dc41eaaf9a816097443abcf8262ed8ecf18f42eea8c22243becbbd", "8a64abfc56dda32c5468cfc5d02992ce8b324905948a815fa8c7691d1d8cefc0", "66132e2a5a7e9084c31ae79d98f9463de8b8e7dae13f0f4439a21c5769355077"},
 	{"native-shared-coordinator-authority", "TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect", "6058228764f30bcca2ad50e0c5d98ef6f5f064216f7baedf04edfb1e95810462", "e367e1c62e38d10214ecb1f8340543bb00479219c4f8661b6f82e052e89d4bf5", "197c62cf40ee26c8b06a36733f440803672bc6d54c7e8a75b90e8ff203a225a1"},
 	{"native-shared-coordinator-authority", "TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect", "a207e449344318c6595e45192410bcb5772f8e475c0003311f18e01353fe82fd", "99025c4eeadc090a6c162b2ac0ac1c7cb249c59c5225993ca46a07dab7aa7687", "db0d0d87613c3518a43ca82c37c0c0704e22726ed7d01df69b6fa547656c064d"},
+	{"native-run-setup-family144", "TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain", "b7f8482e0e4859be436d92868a54508a0d98a0b935b97d5690d83daf0fa3f962", "46d2f1303db218bb9b8b1fde3aff6fe64bda642ab6c35cf82714cebb1c760337", "97e8e4fc60d7166b1a55137c401f728aa70f6f0b35096ce7b3a6b8f09cd06a3c"},
+	{"native-run-setup-family144", "TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress", "9d38fa158ef1f8a90d96635bae68b2bed0f74fd2970d06bf9ba3f8d5b34688d8", "19643b91c17b4d38799b05bbdad02cdbd6e2480e4e334438a56389d69e90a86d", "4bac50377a6731e7c2e3b1647c3c43bbdf7a9bf35642a10a6ab054f2432023fb"},
+	{"native-run-setup-family144", "TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive", "b55ec843499608332eee94465a98fd277ba83910d51b4b9b89c25a86cb614444", "0463a4018e692254aea945f97420d5d8930df6c821e251690f7e24d14d42a4f7", "01589fdfd342ba7d6f303b8c2b515d73c2c3b5b48b7d322085765faf561bd4f7"},
 }
 
-// Only the seven complete endpoints authorized by reviewer-b6145065880/6145833450 reverse.
+// Finite endpoints authorized by reviewer-b6145065880/6145833450/6146134392.
 func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
 	wantFile := "internal/apiv1/operator_agent_control_test.go"
 	if pin.family == "native-shared-coordinator-authority" {
 		wantFile = "internal/runtime/template_instance_delivery_test.go"
+	}
+	shutdown := strings.HasPrefix(pin.function, "TestRuntimeShutdown")
+	if shutdown {
+		wantFile = "internal/runtime/runtime_shutdown_admission_test.go"
+		if pin.function == "TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive" {
+			wantFile = "internal/runtime/runtime_shutdown_fan_out_test.go"
+		}
 	}
 	if row.Family != pin.family || row.Function != pin.function || row.File != wantFile {
 		return fmt.Errorf("foreign directive recipe")
@@ -50,7 +60,15 @@ func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuc
 		return fmt.Errorf("directive source differs from its successor")
 	}
 	var reversed string
-	if pin.family == "native-shared-coordinator-authority" {
+	if shutdown {
+		block := "lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)\n\tbusRoles := runtimeTestManagerBusRoles(bus)\n\tbusRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome\n\t"
+		if strings.Count(current, block) != 1 || strings.Count(current, "LifecycleStore: lifecycle, ") != 1 || strings.Count(current, "PersistenceRoles: busRoles") != 1 {
+			return fmt.Errorf("shutdown lifecycle wiring cardinality changed")
+		}
+		reversed = strings.Replace(current, block, "", 1)
+		reversed = strings.Replace(reversed, "LifecycleStore: lifecycle, ", "", 1)
+		reversed = strings.Replace(reversed, "PersistenceRoles: busRoles", "PersistenceRoles: runtimeTestManagerBusRoles(bus)", 1)
+	} else if pin.family == "native-shared-coordinator-authority" {
 		call := "externalRuntimeTestManagerLifecycleRoles(bus, pg)"
 		if strings.Count(current, call) != 1 {
 			return fmt.Errorf("template role cardinality changed")
@@ -70,6 +88,21 @@ func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuc
 		return fmt.Errorf("directive reversal changed other setup or assertions")
 	}
 	return nil
+}
+
+func r52SharedCoordinatorCurrentBody(row recipe, actual string) (string, error) {
+	if row.Successor == "" {
+		return row.After, nil
+	}
+	for _, pin := range r52DirectiveSuccessorPins {
+		if pin.family == "native-shared-coordinator-authority" && row.Family == pin.family && row.Function == pin.function {
+			if err := reverseR52DirectiveSuccessor(row, actual, pin); err != nil {
+				return "", err
+			}
+			return row.Successor, nil
+		}
+	}
+	return "", fmt.Errorf("unlisted shared-coordinator successor")
 }
 
 func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing.T) {
@@ -108,6 +141,25 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 		} {
 			if mutant == actual || valid(mutant) {
 				t.Fatal("hostile role composer accepted")
+			}
+		}
+	})
+	t.Run("same_session_lifecycle_composer", func(t *testing.T) {
+		actual := selectedCausalObservationBody(t, "internal/runtime/author_activity_test_context_test.go", "runtimeTestEphemeralManagerLifecycle")
+		valid := func(body string) bool {
+			canonical, err := canonicalFunction(body)
+			return err == nil && fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) == "7c0cf92f29945884fb8226b5f0905926dea2be1eae8a73a6d165dee494162eb4"
+		}
+		if !valid(actual) {
+			t.Fatal("unit lifecycle composer changed exact session/grant ownership")
+		}
+		for _, mutant := range []string{
+			strings.Replace(actual, "LifecycleOutcome: session", "LifecycleOutcome: foreign", 1),
+			strings.Replace(actual, ", LifecycleOutcome: session", "", 1),
+			strings.Replace(actual, "authorActivityTestRuntimeInstanceID, session)", "authorActivityTestRuntimeInstanceID, foreign)", 1),
+		} {
+			if mutant == actual || valid(mutant) {
+				t.Fatal("hostile unit lifecycle composer accepted")
 			}
 		}
 	})
@@ -153,6 +205,15 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 				mutants = map[string]string{
 					"foreign_store":  strings.Replace(actual, "externalRuntimeTestManagerLifecycleRoles(bus, pg)", "externalRuntimeTestManagerLifecycleRoles(bus, foreign)", 1),
 					"missing_roles":  strings.Replace(actual, "externalRuntimeTestManagerLifecycleRoles(bus, pg)", "externalRuntimeTestManagerBusRoles(bus)", 1),
+					"assertion":      strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
+					"unrelated_body": strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
+				}
+			}
+			if strings.HasPrefix(pin.function, "TestRuntimeShutdown") {
+				mutants = map[string]string{
+					"foreign_store":  strings.Replace(actual, "LifecycleStore:", "ForeignStore:", 1),
+					"missing_roles":  strings.Replace(actual, "busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome", "busRoles.LifecycleState = roles.LifecycleState", 1),
+					"delivery_owner": strings.Replace(actual, "DeliveryStore:", "ForeignDeliveryStore:", 1),
 					"assertion":      strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
 					"unrelated_body": strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
 				}

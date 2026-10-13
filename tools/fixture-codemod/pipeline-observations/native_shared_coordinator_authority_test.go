@@ -63,14 +63,19 @@ func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *t
 		row = historicalMechanicalRecipe(t, row)
 		want, err := canonicalFunction(nativeSharedCoordinatorSource(t, row.Before))
 		got, afterErr := canonicalFunction(row.After)
-		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		currentBody := current.After
-		if current.Successor != "" {
-			currentBody = current.Successor
-		}
+		body := selectedCausalObservationBody(t, row.File, row.Function)
+		actual, sourceErr := canonicalFunction(body)
+		currentBody, successorErr := r52SharedCoordinatorCurrentBody(current, body)
 		currentAfter, currentErr := canonicalFunction(currentBody)
-		if err != nil || afterErr != nil || sourceErr != nil || currentErr != nil || want != got || actual != currentAfter {
+		if err != nil || afterErr != nil || sourceErr != nil || successorErr != nil || currentErr != nil || want != got || actual != currentAfter {
 			t.Fatalf("%s changed outside unused authority propagation", row.Function)
+		}
+		if current.Successor == "" {
+			unlisted := current
+			unlisted.Successor = strings.Replace(body, "{", "{ unreviewedSetup();", 1)
+			if _, err := r52SharedCoordinatorCurrentBody(unlisted, unlisted.Successor); err == nil {
+				t.Fatal("unlisted source plus Successor pair accepted")
+			}
 		}
 		fn := projectionShapeFunction(t, row.After)
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
