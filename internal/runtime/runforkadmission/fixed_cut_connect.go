@@ -198,21 +198,8 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		if !found || receipt.CreatingInput.Input == "" {
 			continue
 		}
-		admission, _ := selector.PayloadAdmission()
-		if receipt.BundleHash != admission.Binding().BundleHash() {
-			return nil, fmt.Errorf("fixed constructor and selector have foreign source bundles")
-		}
-		sourceEvent, err := pinrouting.AdmitSourceEvent(selector.Type(), selector.RoutingSource())
-		if err != nil {
+		if err := requireFixedCutConstructorSelector(graph, receipt, selector); err != nil {
 			return nil, err
-		}
-		constructorMatched := false
-		for _, receiver := range graph.MatchingSourceEvent(sourceEvent) {
-			endpoint := receiver.ReceiverEndpoint().Readback()
-			constructorMatched = constructorMatched || endpoint.FlowID == receipt.Identity.TemplateID && endpoint.LocalEvent == receipt.CreatingInput.Input
-		}
-		if !constructorMatched {
-			return nil, fmt.Errorf("fixed constructor input differs from selected receiver")
 		}
 		event, found := eventsByID[selector.ID()]
 		if !found || event.Disposition == runfork.RunForkSelectedContractDispositionFailClosed {
@@ -234,4 +221,22 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		out = append(out, bound)
 	}
 	return out, nil
+}
+
+func requireFixedCutConstructorSelector(graph pinrouting.CompiledConnectGraph, receipt pipeline.FlowConstructionReceipt, selector events.Event) error {
+	admission, _ := selector.PayloadAdmission()
+	if receipt.BundleHash != admission.Binding().BundleHash() {
+		return fmt.Errorf("fixed constructor and selector have foreign source bundles")
+	}
+	sourceEvent, err := pinrouting.AdmitSourceEvent(selector.Type(), selector.RoutingSource())
+	if err != nil {
+		return err
+	}
+	for _, receiver := range graph.MatchingSourceEvent(sourceEvent) {
+		endpoint := receiver.ReceiverEndpoint().Readback()
+		if endpoint.FlowID == receipt.Identity.TemplateID && endpoint.LocalEvent == receipt.CreatingInput.Input {
+			return nil
+		}
+	}
+	return fmt.Errorf("fixed constructor input differs from selected receiver")
 }
