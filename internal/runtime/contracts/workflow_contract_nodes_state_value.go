@@ -100,39 +100,11 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 		}
 		field.Type = typeRef
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		entries, err := value.Mapping()
+		mapped, err := projectNodeStateFieldMappingValue(name, value)
 		if err != nil {
 			return NodeStateField{}, err
 		}
-		if err := rejectLongListField(entries, "state field"); err != nil {
-			return NodeStateField{}, err
-		}
-		fields, err := nodeValueFields(value, "state field", map[string]struct{}{
-			"name": {}, "type": {}, "default": {},
-		})
-		if err != nil {
-			return NodeStateField{}, err
-		}
-		if named, present := fields["name"]; present && name == "" {
-			field.Name, err = nodeValueText(named, "state field name")
-			if err != nil {
-				return NodeStateField{}, err
-			}
-			field.Name = strings.TrimSpace(field.Name)
-		} else if present && name != "" {
-			return NodeStateField{}, fmt.Errorf("state field %q at %s cannot reauthor its map-key name", name, named.Location())
-		}
-		if typed, present := fields["type"]; present {
-			field.Type, err = listDeclarationScalar(typed, "state field", true)
-			if err != nil {
-				return NodeStateField{}, err
-			}
-		}
-		if initial, present := fields["default"]; present {
-			if err := initial.Project(&field.Default); err != nil {
-				return NodeStateField{}, fmt.Errorf("state field default at %s: %w", initial.Location(), err)
-			}
-		}
+		field = mapped
 	default:
 		return NodeStateField{}, fmt.Errorf("state field at %s must be a scalar or mapping, got %s", value.Location(), value.Presence())
 	}
@@ -147,6 +119,44 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 		return NodeStateField{}, fmt.Errorf("node state field %s at %s: %w", field.Name, value.Location(), err)
 	}
 	field.Type = normalized
+	return field, nil
+}
+
+func projectNodeStateFieldMappingValue(name string, value yamlsource.Value) (NodeStateField, error) {
+	entries, err := value.Mapping()
+	if err != nil {
+		return NodeStateField{}, err
+	}
+	if err := rejectLongListField(entries, "state field"); err != nil {
+		return NodeStateField{}, err
+	}
+	fields, err := nodeValueFields(value, "state field", map[string]struct{}{
+		"name": {}, "type": {}, "default": {},
+	})
+	if err != nil {
+		return NodeStateField{}, err
+	}
+	field := NodeStateField{Name: strings.TrimSpace(name)}
+	if named, present := fields["name"]; present && name == "" {
+		field.Name, err = nodeValueText(named, "state field name")
+		if err != nil {
+			return NodeStateField{}, err
+		}
+		field.Name = strings.TrimSpace(field.Name)
+	} else if present && name != "" {
+		return NodeStateField{}, fmt.Errorf("state field %q at %s cannot reauthor its map-key name", name, named.Location())
+	}
+	if typed, present := fields["type"]; present {
+		field.Type, err = listDeclarationScalar(typed, "state field", true)
+		if err != nil {
+			return NodeStateField{}, err
+		}
+	}
+	if initial, present := fields["default"]; present {
+		if err := initial.Project(&field.Default); err != nil {
+			return NodeStateField{}, fmt.Errorf("state field default at %s: %w", initial.Location(), err)
+		}
+	}
 	return field, nil
 }
 
