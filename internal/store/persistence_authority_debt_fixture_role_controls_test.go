@@ -75,8 +75,8 @@ func TestPersistenceAuthorityDebtFixtureRoleTransitionIsExactAndMetadataOnly(t *
 func TestPersistenceAuthorityDebtFixtureRoleFingerprintIsRequired(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtStageCompletionCollectorTo {
-		t.Fatalf("source-pinned role-preserving successor=%s actual=%s error=%v", debtStageCompletionCollectorTo, digest, err)
+	if err != nil || digest != debtWriterStageCollectorTo {
+		t.Fatalf("source-pinned role-preserving successor=%s actual=%s error=%v", debtWriterStageCollectorTo, digest, err)
 	}
 	copy := t.TempDir()
 	for _, path := range []string{
