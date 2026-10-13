@@ -60,6 +60,9 @@ func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPreflightFrozenSelectionRefusals(t, plan, structural)
+	if err := validatePreflightSchedule(plan, preflightPhases(plan)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Independent frozen oracle: package discovery does not admit new candidates.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -39,13 +40,15 @@ type preflightReceipt struct {
 }
 
 type preflightPhaseReceipt struct {
-	Name             string   `json:"name"`
-	Args             []string `json:"args"`
-	Seconds          float64  `json:"seconds"`
-	SetupSeconds     float64  `json:"setup_seconds"`
-	ExecutionSeconds float64  `json:"execution_seconds"`
-	CleanupSeconds   float64  `json:"cleanup_seconds"`
-	Passed           bool     `json:"passed"`
+	Name             string    `json:"name"`
+	Args             []string  `json:"args"`
+	Started          time.Time `json:"started"`
+	Completed        time.Time `json:"completed"`
+	Seconds          float64   `json:"seconds"`
+	SetupSeconds     float64   `json:"setup_seconds"`
+	ExecutionSeconds float64   `json:"execution_seconds"`
+	CleanupSeconds   float64   `json:"cleanup_seconds"`
+	Passed           bool      `json:"passed"`
 }
 
 func runPreflight(ctx context.Context) int {
@@ -152,21 +155,48 @@ func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.Pre
 func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
 	phases := []preflightPhase{
 		{Name: "format", Args: []string{"gofmt", "-l", "."}},
-		{Name: "complexity", Args: []string{"go", "run", "./cmd/swarm-complexity", "-head", plan.HeadSHA, "-base", plan.BaseSHA}},
 		{Name: "openrpc", Args: []string{"go", "run", "./cmd/swarm-openrpc-gen", "--check"}},
-		{Name: "vet", Args: []string{"go", "vet", "./..."}},
 	}
+	cheap := []string{
+		"github.com/division-sh/swarm/internal/runtime/core/worklifetime",
+		"github.com/division-sh/swarm/internal/runtime/effects",
+		"github.com/division-sh/swarm/internal/runtime/deliverycontinuation",
+		"github.com/division-sh/swarm/internal/runtime/manager",
+		"github.com/division-sh/swarm/internal/testutil",
+		"github.com/division-sh/swarm/scripts/rewrite-stages-2566",
+		"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
+		"github.com/division-sh/swarm/cmd/swarm-test-timing",
+		"github.com/division-sh/swarm/internal/testtiming",
+	}
+	for _, name := range cheap {
+		for _, pkg := range plan.Packages {
+			if pkg.Package == name {
+				phases = append(phases, preflightPackagePhase(pkg))
+			}
+		}
+	}
+	phases = append(phases, preflightPhase{Name: "complexity", Args: []string{"go", "run", "./cmd/swarm-complexity", "-head", plan.HeadSHA, "-base", plan.BaseSHA}})
 	for _, pkg := range plan.Packages {
-		phases = append(phases, preflightPhase{Name: pkg.Package, Package: &pkg, Args: []string{"go", "test", "-json", "-count=1", "-run", pkg.Run, pkg.Package}})
+		if !slices.Contains(cheap, pkg.Package) {
+			phases = append(phases, preflightPackagePhase(pkg))
+		}
 	}
-	return phases
+	return append(phases, preflightPhase{Name: "vet", Args: []string{"go", "vet", "./..."}})
+}
+
+func preflightPackagePhase(pkg testplanning.PreflightPackage) preflightPhase {
+	return preflightPhase{Name: pkg.Package, Package: &pkg, Args: []string{"go", "test", "-json", "-count=1", "-run", pkg.Run, pkg.Package}}
 }
 
 func executePreflight(ctx context.Context, directory string, receipt *preflightReceipt) error {
-	for _, phase := range preflightPhases(receipt.Plan) {
+	return executePreflightPhases(ctx, directory, receipt, preflightPhases(receipt.Plan))
+}
+
+func executePreflightPhases(ctx context.Context, directory string, receipt *preflightReceipt, phases []preflightPhase) error {
+	for _, phase := range phases {
 		receipt.Unstarted = append(receipt.Unstarted, phase.Name)
 	}
-	for _, phase := range preflightPhases(receipt.Plan) {
+	for _, phase := range phases {
 		if err := checkPreflightSource(ctx, receipt.Plan); err != nil {
 			return err
 		}
@@ -174,8 +204,9 @@ func executePreflight(ctx context.Context, directory string, receipt *preflightR
 		timing, err := executePreflightPhase(ctx, directory, phase)
 		err = errors.Join(err, checkPreflightSource(ctx, receipt.Plan))
 		receipt.Unstarted = receipt.Unstarted[1:]
-		seconds := time.Since(started).Seconds()
-		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Seconds: seconds, SetupSeconds: seconds - timing.ExecutionSeconds - timing.CleanupSeconds, ExecutionSeconds: timing.ExecutionSeconds, CleanupSeconds: timing.CleanupSeconds, Passed: err == nil})
+		completed := time.Now()
+		seconds := completed.Sub(started).Seconds()
+		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Started: started.UTC(), Completed: completed.UTC(), Seconds: seconds, SetupSeconds: seconds - timing.ExecutionSeconds - timing.CleanupSeconds, ExecutionSeconds: timing.ExecutionSeconds, CleanupSeconds: timing.CleanupSeconds, Passed: err == nil})
 		receipt.ExecutionSeconds += timing.ExecutionSeconds
 		receipt.CleanupSeconds += timing.CleanupSeconds
 		fmt.Fprintf(os.Stderr, "preflight %s: passed=%t %.3fs\n", phase.Name, err == nil, time.Since(started).Seconds())
