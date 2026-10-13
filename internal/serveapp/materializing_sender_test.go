@@ -52,7 +52,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 				}
 				if rejectMissingHeader {
 					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID)
-					companions := readForkReceiverCompanions(t, rt, seed.RunID, instance)
+					companions := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, instance)
 					_, err := rt.DB.Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, seed.RunID, instance)
 					if backend == servedparity.BackendExplicitPostgres {
 						var constraint *pq.Error
@@ -68,7 +68,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatal("refused header removal changed state, publications or receiver delivery")
 					}
-					if after := readForkReceiverCompanions(t, rt, seed.RunID, instance); !reflect.DeepEqual(companions, after) {
+					if after := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, instance); !reflect.DeepEqual(companions, after) {
 						t.Fatal("refused header removal changed construction or attachment evidence")
 					}
 				}

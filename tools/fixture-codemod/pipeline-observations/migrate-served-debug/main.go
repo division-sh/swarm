@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/receiverreadback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
@@ -190,7 +191,12 @@ func currentOutput(r result) []byte {
 		must(err)
 		pins, err := receiverreadback.Decode(manifest)
 		must(err)
-		previous := receiverreadback.Previous(pins, key, actual)
+		companionManifest, err := os.ReadFile(forkcompanion.Path)
+		must(err)
+		companionPins, err := forkcompanion.Decode(companionManifest)
+		must(err)
+		previous := forkcompanion.Previous(companionPins, r.path, key, actual)
+		previous = receiverreadback.Previous(pins, key, previous)
 		previous = publicendpoint.Previous(r.path, key, previous)
 		if actual != p.Before && previous != p.After {
 			panic("current declaration differs from exact predecessor/successor: " + r.path + "/" + key)

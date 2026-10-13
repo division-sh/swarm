@@ -204,8 +204,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 			siblingBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)
-			sourceCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
-			siblingCompanions := readForkReceiverCompanions(t, rt, sibling.RunID)
+			sourceCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
+			siblingCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
 			siblingNotices := readForkReceiverNoticeDomain(t, rt, sibling.RunID)
 			var result apiv1.RunForkExecutionResult
@@ -221,7 +221,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")
 			}
 			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)) ||
-				!reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt, sibling.RunID)) ||
+				!reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)) ||
 				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")
 			}

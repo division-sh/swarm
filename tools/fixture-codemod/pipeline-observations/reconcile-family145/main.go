@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 )
@@ -21,7 +22,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "f68465d634ce5baa3f1d9eb6ba6ab7a11f2f46a2681951caea5aad48cbe9309b"
+const targetDigest = "88e7d64b63cd2f99e76f6855c84b6b1f588f55ebb189342cbe4b966281b7dd2b"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -271,6 +272,7 @@ func main() {
 	includePublicA2EndpointTargets()
 	includeReceiverPublicReadbackTargets()
 	includePublicJoinTargets()
+	includeForkCompanionTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -331,6 +333,26 @@ func includePublicA2EndpointTargets() {
 		}
 		if targets, limited := gateRecoveryTargets[pin.File]; limited {
 			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeForkCompanionTargets() {
+	raw, err := os.ReadFile(forkcompanion.Path)
+	must(err)
+	rows, err := forkcompanion.Decode(raw)
+	must(err)
+	for _, row := range rows {
+		found := false
+		for _, path := range files {
+			found = found || path == row.File
+		}
+		if !found {
+			files = append(files, row.File)
+			gateRecoveryTargets[row.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[row.File]; limited {
+			targets[row.Function] = true
 		}
 	}
 }

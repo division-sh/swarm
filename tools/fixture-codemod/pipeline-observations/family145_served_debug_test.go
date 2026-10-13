@@ -38,6 +38,7 @@ var family145ServedDebugRows = func() []servedDebugPreimage {
 // Only the exact reviewed current body composes back to the signed predecessor.
 // Mutated arguments, assertions, captures or control flow never enter this path.
 func family145ServedDebugCallerInverse(function, after string) string {
+	after = family145ForkCompanionCallerInverse(function, after)
 	after = family145PublicJoinCallerInverse(function, after)
 	after = family145ReceiverReadbackCallerInverse(function, after)
 	after = family145PublicA2EndpointCallerInverse(function, after)
@@ -51,6 +52,7 @@ func family145ServedDebugCallerInverse(function, after string) string {
 
 func family145CheckServedDebugWholeRule(t *testing.T, file, function, after string) bool {
 	t.Helper()
+	after = family145ForkCompanionCallerInverse(function, after)
 	after = family145ReceiverReadbackCallerInverse(function, after)
 	after = publicendpoint.Previous(file, function, after)
 	for _, row := range family145ServedDebugRows {
@@ -133,7 +135,8 @@ func family145ServedDebugCurrentDeclaration(t *testing.T, row servedDebugPreimag
 	}
 	for _, declaration := range file.Decls {
 		if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Name.Name == row.Function {
-			current := family145ReceiverReadbackCallerInverse(row.Function, family145NodeString(function))
+			current := family145ForkCompanionCallerInverse(row.Function, family145NodeString(function))
+			current = family145ReceiverReadbackCallerInverse(row.Function, current)
 			return publicendpoint.Previous(row.File, row.Function, current)
 		}
 		if group, ok := declaration.(*ast.GenDecl); ok && group.Tok == token.TYPE && len(group.Specs) == 1 && "type/"+group.Specs[0].(*ast.TypeSpec).Name.Name == row.Function {

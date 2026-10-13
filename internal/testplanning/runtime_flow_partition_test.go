@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 )
 
@@ -30,6 +31,9 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 			children[root] = cells
 		}
 	}
+	if err := separateNewCompanionEvidence(children); err != nil {
+		return err
+	}
 	// This source-pinned digest preserves every original named backend/fault
 	// cell and its order without maintaining another execution inventory.
 	data, err := json.Marshal(children)
@@ -39,6 +43,21 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 	actual := fmt.Sprintf("%x", sha256.Sum256(data))
 	if actual != originalRuntime02RequiredEvidence {
 		return fmt.Errorf("original full-02 required evidence changed: %s", actual)
+	}
+	return nil
+}
+
+// New owner proofs add obligations without changing the original split's
+// immutable evidence digest. Only these exact cells leave that comparison.
+func separateNewCompanionEvidence(children map[string][]string) error {
+	for _, root := range []string{
+		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
+		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+	} {
+		if !slices.Equal(children[root], []string{"sqlite", "postgres"}) {
+			return fmt.Errorf("new companion proof lost exact both-store evidence: %s", root)
+		}
+		delete(children, root)
 	}
 	return nil
 }
@@ -97,5 +116,19 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 				t.Fatal("changed backend/fault execution obligations were accepted")
 			}
 		})
+	}
+	for _, root := range []string{
+		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
+		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+	} {
+		for _, cells := range [][]string{nil, {"sqlite"}, {"postgres"}, {"sqlite", "postgres", "foreign"}} {
+			policy := loadPersistenceDebtPolicy(t)
+			unit := policy.Units["store-runtime-full-02"]
+			unit.RequiredChildren[root] = cells
+			policy.Units["store-runtime-full-02"] = unit
+			if validateRuntime02RequiredEvidence(policy) == nil {
+				t.Fatal("new companion obligation lost or broadened backend evidence:", root, cells)
+			}
+		}
 	}
 }

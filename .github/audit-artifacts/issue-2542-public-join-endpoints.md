@@ -30,7 +30,7 @@ Receipts: /home/youmew/.cache/swarm-2542-family145/public-join-*.
 
 | Manifestation / invariant | Status | Exact proof |
 | --- | --- | --- |
-| Seven helper definitions and all31 caller projections, foreign/raw/alias hostiles | reproduced and fixed | finite-collection.jsonl:172 parent roots +one generator root,197 passes; packages32.076s /0.015s; final-new-controls.jsonl after bounded inventory factoring,0.565s /0.022s |
+| Seven helper definitions and all31 caller projections, foreign/raw/alias hostiles | reproduced and fixed | finite-collection.jsonl:172 parent roots +one generator root,196 passes; packages32.076s /0.015s; final-new-controls.jsonl after bounded inventory factoring,0.565s /0.022s |
 | Complete current candidate source in all four compiled packages | execution-proven through the same corrected path | candidate-overlay.jsonl:PASS42.719s |
 | Actual pending continuation, generation/entry/result identity, exact stale-arrival refusal, final join firing, list/get/CLI/graph/trace agreement | execution-proven through the same corrected path | consumers-race.jsonl:TestA2JoinPublicProjectionAgreementBothStores PASS27.697s, both stores |
 | Map values and empty map, typed public delivery/readback, independent arrival admission and rejected-arrival no mutation/replay | execution-proven through the same corrected path | map-arrival-consumers-race.jsonl:two roots PASS64.814s, both stores |

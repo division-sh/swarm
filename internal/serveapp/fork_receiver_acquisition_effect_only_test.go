@@ -155,9 +155,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producer.ID}) {
 					t.Fatalf("immutable source producer: %+v", sourceEvidence)
 				}
-				before, companions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
+				before, companions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
 				defer func() {
-					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
+					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) {
 						t.Error("supplemental acquisition changed settled source domain or companions")
 					}
 				}()
@@ -181,9 +181,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if root.ID != fork.ForkRunID || root.Type != "root" || root.State != "active" || root.Fields["marker"] != "root-owned" {
 					t.Fatalf("fork canonical root remapping: %+v", childRows)
 				}
-				childBefore, childCompanions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID), readForkReceiverCompanions(t, rt, fork.ForkRunID)
+				childBefore, childCompanions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt, fork.ForkRunID)) {
+				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)) {
 					t.Fatal("same-key fork retry repeated acquisition/effects or changed response")
 				}
 			})
