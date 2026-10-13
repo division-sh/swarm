@@ -57,14 +57,11 @@ collector:
           - target_field: result
             value: payload.result
       rules:
-        enter_review:
-          when: payload.result == 'ready'
+        - when: payload.result == 'ready'
           advances_to: review
-        finish:
-          when: payload.result in ['approved', 'rejected']
+        - when: payload.result in ['approved', 'rejected']
           advances_to: done
-        unmatched:
-          else: true
+        - else: true
 `)
 	return root
 }

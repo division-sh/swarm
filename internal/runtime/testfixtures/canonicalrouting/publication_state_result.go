@@ -76,18 +76,15 @@ result.rejected:
           - {source_field: content, target_field: content}
           - {source_field: result_kind, target_field: result_kind}
       rules:
-        accepted:
-          when: payload.result_kind == 'accepted'
+        - when: payload.result_kind == 'accepted'
           emit:
             event: result.accepted
             fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
-        rejected:
-          when: payload.result_kind == 'rejected'
+        - when: payload.result_kind == 'rejected'
           emit:
             event: result.rejected
             fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
-        unmatched:
-          else: true
+        - else: true
 `+local)
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
