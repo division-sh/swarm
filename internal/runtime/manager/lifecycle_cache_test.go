@@ -17,6 +17,29 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
+	unit := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{})
+	model, ok := unit.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe)
+	if !ok || unit.lifecycle.stateReader != model || unit.lifecycle.outcomeReader != model {
+		t.Fatal("storeless unit fixture did not select its explicit typed row/outcome model")
+	}
+	owner := newLifecyclePersistenceProbe()
+	supplied := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LifecycleStore: owner, PersistenceRoles: PersistenceRoles{LifecycleState: owner, LifecycleOutcome: owner}})
+	if supplied.lifecycle.persistence() != owner || supplied.lifecycle.stateReader != owner || supplied.lifecycle.outcomeReader != owner {
+		t.Fatal("fixture constructor replaced the supplied row/outcome roles")
+	}
+	roles := PersistenceRoles{LifecycleOutcome: owner}
+	projectManagerTestPersistenceRoles(&roles, model)
+	if roles.LifecycleOutcome != owner {
+		t.Fatal("role projection overwrote the supplied immutable-outcome reader")
+	}
+	roles.LifecycleOutcome = nil
+	projectManagerTestPersistenceRoles(&roles, owner)
+	if roles.LifecycleOutcome != owner {
+		t.Fatal("missing outcome role did not consume its exact supplied candidate")
+	}
+}
+
 func TestAgentCurrentnessHasOneMutationAndReadOwner(t *testing.T) {
 	cell := reflect.TypeOf(agentLifecycleCell{})
 	view, found := cell.FieldByName("view")

@@ -56,6 +56,12 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	}
 	fault := &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: runOwner}
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), nil, AgentManagerOptions{LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: reader, LifecycleOutcome: outcomes}})
+	if am.lifecycle.persistence() != fault || am.lifecycle.stateReader != reader || am.lifecycle.outcomeReader != outcomes {
+		t.Fatal("fixture constructor replaced an explicitly supplied native row/outcome owner")
+	}
+	if _, unit := am.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe); unit {
+		t.Fatal("supplied native authority selected the unit-only row model")
+	}
 	ctx := testAuthorActivityContext(context.Background())
 	if err := am.lifecycle.registerExecution(ctx, record, false, reconfigureTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
