@@ -52,6 +52,9 @@ func TestAuthoredEmitSites_GuardEscalationObjectCarriesFields(t *testing.T) {
 	if matches[0].Site != "handler.guard.on_fail.escalate" {
 		t.Fatalf("site = %q, want handler.guard.on_fail.escalate", matches[0].Site)
 	}
+	if matches[0].Handler.Guard == nil || matches[0].Handler.Guard.ID != "guard-escalate" || matches[0].RuleDisplay != "" {
+		t.Fatalf("guard identity was lost or projected as a rule label: %#v", matches[0])
+	}
 	if expr := matches[0].Spec.Fields["score"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "payload.score" {
 		t.Fatalf("score field = %#v, want CEL payload.score", expr)
 	}
@@ -101,8 +104,20 @@ func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
 		}
 		for _, field := range []string{"shared", "bucket"} {
 			if _, ok := match.Spec.Fields[field]; !ok {
-				t.Fatalf("site %s missing merged field %s: %#v", match.RuleID, field, match.Spec.Fields)
+				t.Fatalf("site %s missing merged field %s: %#v", match.RuleDisplay, field, match.Spec.Fields)
 			}
+		}
+		wantDisplay, wantPath := "", ""
+		switch match.SiteKey {
+		case "handler.rules[0].emit_template":
+			wantDisplay, wantPath = "rules[0]: when payload.score >= 80", `nodes["root-node"].handlers["root.start"].rules[0]`
+		case "handler.rules[1].emit_template":
+			wantDisplay, wantPath = "rules[1]: else", `nodes["root-node"].handlers["root.start"].rules[1]`
+		default:
+			t.Fatalf("template site lost its exact position: %#v", match)
+		}
+		if match.RuleDisplay != wantDisplay || match.RuleRef.SemanticPath() != wantPath || match.RuleRef.Flow().String() != "." {
+			t.Fatalf("template projection lost presentation/identity separation: %#v", match)
 		}
 	}
 	if countAuthoredSitesWithSite(sites, "handler.emit") != 0 {

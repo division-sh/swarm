@@ -3282,7 +3282,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[0]: else.emit_template") {
 		t.Fatalf("unexpected template payload completeness error after emit.from lowering, got %#v", report.Errors())
 	}
 	if reportContains(report.Errors(), "emit_field_expression_validation", "payload.geography") {
@@ -3437,13 +3437,13 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]: when payload.mode == 'partial'.emit") {
 		t.Fatalf("expected site-specific payload completeness error for partial rule, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected missing scan_id error for underspecified rule, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[complete].emit") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[0]: when payload.mode == 'full'.emit") {
 		t.Fatalf("unexpected payload completeness error for fully specified rule, got %#v", report.Errors())
 	}
 }
@@ -3532,13 +3532,13 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit_template") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]: else.emit_template") {
 		t.Fatalf("expected template branch payload completeness error for partial rule, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "geography is not statically provable") {
 		t.Fatalf("expected missing geography error for partial rule, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[0]: when payload.mode == 'full'.emit_template") {
 		t.Fatalf("unexpected payload completeness error for full rule, got %#v", report.Errors())
 	}
 }
