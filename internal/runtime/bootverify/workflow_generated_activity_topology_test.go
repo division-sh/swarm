@@ -67,11 +67,13 @@ func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
 
 func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 	handlers := map[string]runtimecontracts.SystemNodeEventHandler{
-		"request": {
+		"direct.request": {
 			Activity: runtimecontracts.ActivitySpec{ID: "direct", Tool: "send"},
+		},
+		"request": {
 			Rules: []runtimecontracts.HandlerRuleEntry{{
 				ID:       "fallback",
-				Activity: runtimecontracts.ActivitySpec{Tool: "send"},
+				Activity: runtimecontracts.ActivitySpec{ID: "activity_node_request_fallback_send", Tool: "send"},
 			}},
 		},
 	}

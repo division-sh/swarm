@@ -763,7 +763,7 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 			Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"},
 		}}},
 		{name: "nested approval activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-			Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
+			Activity: runtimecontracts.ActivitySpec{ID: "target_node_task_started_rule_0_review", Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
 		}}}},
 		{name: "guard kill", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"}}},
 		{name: "accumulator clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}}}},

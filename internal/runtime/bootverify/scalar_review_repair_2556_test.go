@@ -94,7 +94,7 @@ func TestScalar2556RuleDiagnosticCoordinatesUsePositions(t *testing.T) {
 
 func TestScalar2556NestedDiagnosticSourceOwnership(t *testing.T) {
 	for _, tc := range []struct{ name, handler string }{
-		{"rule activity escaped key", "      rules:\n        - id: '1'\n          else: true\n          activity:\n            tool: send\n            input:\n              'value.part': missing_root\n"},
+		{"rule activity escaped key", "      rules:\n        - id: '1'\n          else: true\n          activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              'value.part': missing_root\n"},
 		{"rule write", "      rules:\n        - id: named\n          else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
 		{"completion write", "      on_complete:\n        - id: '1'\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
 		{"rule emit escaped key", "      rules:\n        - id: '1'\n          else: true\n          emit:\n            event: proof.done\n            fields:\n              'value.part': missing_root\n"},
@@ -127,7 +127,7 @@ func TestScalar2556DiagnosticPreservesAuthoredFieldNames(t *testing.T) {
 	for _, owner := range []string{"activity", "emit"} {
 		for _, key := range []string{"ref", "cel", "condition", `value"[part]`} {
 			t.Run(owner+"/"+key, func(t *testing.T) {
-				body := "          activity:\n            tool: send\n            input:\n              '" + key + "': missing_root\n"
+				body := "          activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              '" + key + "': missing_root\n"
 				if owner == "emit" {
 					body = "          emit:\n            event: proof.done\n            fields:\n              '" + key + "': missing_root\n"
 				}
