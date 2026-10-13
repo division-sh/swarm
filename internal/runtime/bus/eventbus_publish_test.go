@@ -2595,20 +2595,30 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 
 func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopySelectedForkRollback(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	forkRunID := uuid.NewString()
 	providerReached := make(chan struct{}, 1)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{providerReachabilityInterceptor{reached: providerReached}},
+		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture()},
+		Interceptors:   []runtimebus.EventInterceptor{providerReachabilityInterceptor{reached: providerReached}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	deliveries := runtimebustest.Subscribe(t, eb, "selected-worker", events.EventType("item.received"))
-	defer runtimebustest.Unsubscribe(eb, "selected-worker")
+	identity := runtimebustest.IdentityForRun(t, forkRunID, "selected-worker", "")
+	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{Identity: identity})
+	deliveries := runtimebustest.SubscribeForRun(t, eb, forkRunID, "selected-worker", events.EventType("item.received"))
+	defer runtimebustest.UnsubscribeIdentity(eb, identity)
 
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	forkRunID := uuid.NewString()
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEventID, "selection:pre-dispatch-proof", "fork-task", "live")
 	if err != nil {
 		t.Fatal(err)
@@ -2620,6 +2630,10 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	prepared, err := eb.PrepareSelectedForkPublish(ctx, event, runtimebus.SelectedInputValidation{})
 	if err != nil {
 		t.Fatalf("PrepareSelectedForkPublish: %v", err)
+	}
+	routes := prepared.CommitRequest().DeliveryRoutes
+	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() || !event.RoutingSource().Empty() {
+		t.Fatalf("selected rollback fixture lost its independent targetless recipient or invented a source: routes=%+v source=%+v", routes, event.RoutingSource())
 	}
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
 
@@ -3337,45 +3351,20 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 }
 
 func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *testing.T) {
-	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path: "producer",
-	}
-	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path:   "discovery",
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				SubscribesTo: []string{"scan.requested"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, discovery}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"producer":  &root.Children[0],
-				"discovery": &root.Children[1],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyRetiredSiblingAutowire(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
 		t.Fatal(err)
 	}
+	source := semanticview.Wrap(bundle)
+	var observations []runtimepipeline.FlowInstanceObservation
+	for _, flowID := range []string{".", "producer", "discovery"} {
+		identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", eventBusTestRunID)
+		observations = append(observations, runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, identity, ""))
+	}
 	eb, err := newScopedTestEventBus(newRouteSetEventStore(), runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(observations...)},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3383,10 +3372,12 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 	runtimebustest.Subscribe(t, eb, "scan-orchestrator")
 	defer runtimebustest.Unsubscribe(eb, "scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	producerSource := eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("ent-1"))
-	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource("", "producer/scan.requested", "", "", nil, 0, eventBusTestRunID,
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, producerSource.Route()), producerSource, time.Time{})); err != nil {
+	ctx := testAuthorActivityContextForSource(runtimebus.WithEmittedEventsRecorder(context.Background(), recorder), source)
+	producer := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "producer", "", eventBusTestRunID)
+	producerSource := eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID)
+	if err := eb.Publish(ctx, eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "producer/scan.requested", eventtest.Producer(events.EventProducerNode, "producer-node"), "", []byte(`{}`), 0,
+		events.EventLineage{RunID: eventBusTestRunID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, producerSource.Route()), producerSource, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
