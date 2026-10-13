@@ -121,7 +121,14 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if req.Preparation.SourceRunID != plan.SourceRunID || req.Preparation.ForkPoint != plan.ForkPoint ||
 			req.Preparation.ForkEventID != plan.ForkPoint.EventID ||
 			req.Preparation.Coordinates.BundleHash != req.SourceArtifactFact.BundleHash() || fingerprint != req.Preparation.Coordinates.AdmittedPlanFingerprint {
-			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan")
+			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan [source_run_equal=%t fork_point_equal=%t timestamp_representation_equal=%t timestamp_instant_equal=%t fork_event_equal=%t bundle_equal=%t plan_fingerprint_equal=%t]",
+				req.Preparation.SourceRunID == plan.SourceRunID,
+				req.Preparation.ForkPoint == plan.ForkPoint,
+				req.Preparation.ForkPoint.Timestamp == plan.ForkPoint.Timestamp,
+				req.Preparation.ForkPoint.Timestamp.Equal(plan.ForkPoint.Timestamp),
+				req.Preparation.ForkEventID == plan.ForkPoint.EventID,
+				req.Preparation.Coordinates.BundleHash == req.SourceArtifactFact.BundleHash(),
+				fingerprint == req.Preparation.Coordinates.AdmittedPlanFingerprint)
 		}
 		sourceFingerprint, err := runfork.SelectedPreparationSourceFingerprint(req.EffectiveSourceIdentity)
 		if err != nil || sourceFingerprint != req.Preparation.Coordinates.SourceFingerprint {
