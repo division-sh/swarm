@@ -123,6 +123,26 @@ func TestOriginalLoopCarriageDeclaration(t *testing.T) {
 	}
 }
 
+func TestOriginalLoopCarriageAdmittedTextAlias(t *testing.T) {
+	bundle, node := loopCarriageBundle(t)
+	bundle.RootTypes = contracts.TypeCatalogDocument{Scalars: map[string]contracts.ScalarTypeDecl{"Revision": {Base: "text"}}}
+	for _, event := range []string{"review.requested", "review.passed"} {
+		field := bundle.Events[event].Payload.Properties["revision_id"]
+		field.Type = "Revision"
+		bundle.Events[event].Payload.Properties["revision_id"] = field
+	}
+	compileLoopCarriageFixtureSchemas(t, bundle)
+	owner, err := compileLoopCarriage(Wrap(bundle))
+	if err != nil {
+		t.Fatalf("admitted text alias lost original carriage: %v", err)
+	}
+	for _, scope := range []LoopEventScope{{FlowID: ".", EventType: "review.passed"}, {FlowID: ".", EventType: "review.requested", Producer: node, HandlerEvent: "start"}} {
+		if role, found, err := owner.resolve(scope); err != nil || !found || role.RevisionField() != "revision_id" {
+			t.Fatalf("alias role: %+v %v %v", role, found, err)
+		}
+	}
+}
+
 func TestOriginalLoopCarriageRejectsDeclarationContradictions(t *testing.T) {
 	for _, name := range []string{"optional_input", "numeric_input", "business_emit", "duplicate_operation", "foreign_operation", "different_loop", "missing_output_schema"} {
 		t.Run(name, func(t *testing.T) {

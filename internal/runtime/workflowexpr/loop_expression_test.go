@@ -3,7 +3,39 @@ package workflowexpr
 import (
 	"reflect"
 	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
+
+func TestJoinOptionalResultSchemaAdmission(t *testing.T) {
+	opts := ValueExpressionOptions{AllowJoin: true}
+	ctx := ValueContext{Join: map[string]any{"completed": int64(1), "results": []any{map[string]any{"label": "ready"}}}}
+	for _, expression := range []string{"join.completed", "join.results"} {
+		if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
+			t.Fatalf("unspecified result schema: %v", err)
+		}
+		if _, err := EvalValueExpressionWithOptions(expression, ctx, opts); err != nil {
+			t.Fatalf("dynamic result read: %v", err)
+		}
+	}
+	if err := ValidateValueExpressionWithOptions("join.results[0].label", opts); err == nil {
+		t.Fatal("unspecified result schema granted closed-record field evidence")
+	}
+	for _, ref := range []string{" ", "Missing", "text[]", "Cycle"} {
+		opts.JoinResultType = runtimecontracts.CatalogTypeReference{Type: ref, Catalog: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{"Cycle": {Fields: map[string]runtimecontracts.TypeFieldSpec{"child": {Type: "Cycle"}}}},
+		}}
+		if err := ValidateValueExpressionWithOptions("join.completed", opts); err == nil {
+			t.Fatalf("supplied invalid reference %q accepted", ref)
+		}
+		if _, err := EvalValueExpressionWithOptions("join.completed", ctx, opts); err == nil {
+			t.Fatalf("supplied invalid reference %q executed", ref)
+		}
+	}
+	if _, err := (runtimecontracts.CatalogTypeReference{}).Resolve(); err == nil {
+		t.Fatal("optional join boundary weakened authored empty-reference refusal")
+	}
+}
 
 func TestJoinCapturedLoopExpressionMembers(t *testing.T) {
 	context := ValueContext{Loop: map[string]any{

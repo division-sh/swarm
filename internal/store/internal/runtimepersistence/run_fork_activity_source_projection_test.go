@@ -648,8 +648,9 @@ telegram.send_message:
 `
 	}
 	if ordinaryRootLoop {
+		files["types.yaml"] = "scalars: {RevisionText: text}\n"
 		files["schema.yaml"] += "  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
-		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start:\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
+		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: RevisionText\nordinary.start:\nordinary.retry:\n  opaque_revision: RevisionText\nordinary.close:\n  opaque_revision: RevisionText\n"
 		files["nodes.yaml"] = `reader:
   execution_type: system_node
   subscribes_to: [ordinary.start, ordinary.ready, ordinary.retry, ordinary.close]

@@ -186,6 +186,9 @@ func validatePolicySheetLookupKeyTypes(source semanticview.Source, ref policyShe
 	kinds := make([]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
 		kind, _ := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
+		if kind == "" {
+			findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.on %q has no admitted scalar literal domain", path.String())))
+		}
 		kinds = append(kinds, kind)
 	}
 	for entryIdx, entry := range spec.Entries {
@@ -220,25 +223,25 @@ func policySheetLookupLiteralMatchesKind(got, want string) bool {
 }
 
 func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType string, path runtimepaths.Path) (kind string, closed bool) {
-	if path.Root != runtimepaths.RootPayload || len(path.Segments) != 1 {
+	if source == nil || path.Root != runtimepaths.RootPayload || len(path.Segments) != 1 {
 		return "", false
 	}
-	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	if !proof.HasSchema {
-		return "", false
-	}
-	field, ok := proof.Entry.Payload.Properties[strings.TrimSpace(path.Segments[0])]
+	resolved, ok := source.ResolveFlowEventStructuralType(flowID, eventType)
 	if !ok {
 		return "", false
 	}
-	switch strings.TrimSpace(strings.ToLower(field.Type)) {
-	case "bool", "boolean":
+	field, ok := resolved.Field(strings.TrimSpace(path.Segments[0]))
+	if !ok {
+		return "", false
+	}
+	switch field.Type.Kind {
+	case runtimecontracts.CatalogTypeBoolean:
 		return "bool", true
-	case "int", "integer":
+	case runtimecontracts.CatalogTypeInteger:
 		return "int", false
-	case "number", "numeric", "float", "double":
+	case runtimecontracts.CatalogTypeNumber:
 		return "number", false
-	case "string", "text", "uuid", "timestamp", "datetime", "date":
+	case runtimecontracts.CatalogTypeText:
 		return "string", false
 	default:
 		return "", false
