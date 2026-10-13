@@ -355,25 +355,12 @@ func completionObservedCost(raw []byte) (*float64, error) {
 }
 
 func observeClaudeTokens(usage *runtimeeffects.CompletionUsage, raw []byte) error {
-	var tokens struct {
-		Input    *int64 `json:"input_tokens"`
-		Output   *int64 `json:"output_tokens"`
-		Read     *int64 `json:"cache_read_input_tokens"`
-		Creation *int64 `json:"cache_creation_input_tokens"`
-		Cache    struct {
-			FiveMinutes *int64 `json:"ephemeral_5m_input_tokens"`
-			OneHour     *int64 `json:"ephemeral_1h_input_tokens"`
-		} `json:"cache_creation"`
-	}
-	err := completionObservationDecode(raw, &tokens)
+	candidate, err := decodeClaudeCompletionTokens(raw)
 	code := "invalid"
-	if err == nil && (tokens.Input == nil || tokens.Output == nil) {
+	if err == nil && (candidate.InputTokens == nil || candidate.OutputTokens == nil) {
 		err, code = fmt.Errorf("claude ResultMessage missing exact usage"), "absent"
 	}
 	if err == nil {
-		candidate := runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageExact,
-			InputTokens: tokens.Input, OutputTokens: tokens.Output, CacheReadInputTokens: tokens.Read, CacheCreationInputTokens: tokens.Creation,
-			CacheCreation5mInputTokens: tokens.Cache.FiveMinutes, CacheCreation1hInputTokens: tokens.Cache.OneHour}
 		if err = candidate.Validate(); err == nil {
 			candidate.Evidence = usage.Evidence
 			*usage = candidate
@@ -382,4 +369,36 @@ func observeClaudeTokens(usage *runtimeeffects.CompletionUsage, raw []byte) erro
 	}
 	completionObservationProblem(&usage.Evidence, "claude.result.usage", "tokens", code)
 	return err
+}
+
+func decodeClaudeCompletionTokens(raw []byte) (runtimeeffects.CompletionUsage, error) {
+	candidate := runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageExact}
+	var fields, cache map[string]json.RawMessage
+	if err := completionObservationDecode(raw, &fields); err != nil {
+		return candidate, err
+	}
+	if value := fields["cache_creation"]; len(value) != 0 {
+		if err := completionObservationDecode(value, &cache); err != nil {
+			return candidate, err
+		}
+	}
+	for _, field := range []struct {
+		value  json.RawMessage
+		target **int64
+	}{
+		{fields["input_tokens"], &candidate.InputTokens},
+		{fields["output_tokens"], &candidate.OutputTokens},
+		{fields["cache_read_input_tokens"], &candidate.CacheReadInputTokens},
+		{fields["cache_creation_input_tokens"], &candidate.CacheCreationInputTokens},
+		{cache["ephemeral_5m_input_tokens"], &candidate.CacheCreation5mInputTokens},
+		{cache["ephemeral_1h_input_tokens"], &candidate.CacheCreation1hInputTokens},
+	} {
+		if len(field.value) == 0 {
+			continue
+		}
+		if err := completionObservationDecode(field.value, field.target); err != nil {
+			return candidate, err
+		}
+	}
+	return candidate, nil
 }

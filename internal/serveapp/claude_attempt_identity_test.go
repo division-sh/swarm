@@ -1062,6 +1062,9 @@ func runClaudeAttemptProofProcessHelper() int {
 	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "invalid_final_result" {
 		fmt.Fprintln(os.Stdout, `{"type":"result","type":"result","model":"invalid-final","usage":{"input_tokens":99,"output_tokens":99},"total_cost_usd":99}`)
 	}
+	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "case_variant_usage" {
+		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q,\"model\":\"exact-terminal\",\"total_cost_usd\":0.3,\"usage\":{\"input_tokens\":12,\"INPUT_TOKENS\":false,\"output_tokens\":3,\"cache_creation_input_tokens\":5,\"cache_creation\":{\"ephemeral_5m_input_tokens\":2,\"EPHEMERAL_5M_INPUT_TOKENS\":false,\"ephemeral_1h_input_tokens\":3}}}\n", providerSessionID)
+	}
 	return 0
 }
 
