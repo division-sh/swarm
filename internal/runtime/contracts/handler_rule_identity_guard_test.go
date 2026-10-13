@@ -95,7 +95,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 	return map[string]handlerRuleDisplayLabelAllowance{
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue": {Count: 2, Reason: "keyed-map presentation projection"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":  {Count: 1, Reason: "authored rule presentation label projection"},
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRulePolicyValue": {Count: 1, Reason: "policy value-row diagnostic label; relocated from projectNodeRuleEntryValue"},
 	}
 }
 
