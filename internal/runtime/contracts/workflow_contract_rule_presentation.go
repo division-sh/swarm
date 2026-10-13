@@ -41,8 +41,8 @@ func (r HandlerRuleEntry) DisplayLabel(context string, index int) string {
 	return position + ": " + predicate
 }
 
-// Capture the already-admitted case/range spelling once, before it is lowered
-// to CEL. Renderers consume this text, not YAML or the lowered expression.
+// Capture the already-admitted case/range spelling once from its source value,
+// never from lowered CEL. Renderers consume this text, not YAML.
 func admittedRulePredicateDisplay(kind string, value yamlsource.Value) (string, error) {
 	fields, err := value.Mapping()
 	if err != nil {
