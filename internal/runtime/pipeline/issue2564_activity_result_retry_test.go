@@ -202,7 +202,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				if got := loadActivityResultForProof(t, ctx, retained, eventID); !reflect.DeepEqual(got, result) {
 					t.Fatal("retained rule-owned callback changed its complete publication")
 				}
-				state, found, err := retained.persistence.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+				state, found, err := retained.events.(pipeline.WorkflowEntityStatePersistenceReader).LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
 				if err != nil || !found || !reflect.DeepEqual(state, after) {
 					t.Fatalf("retained rule-owned callback changed full business state: found=%t state=%+v want=%+v err=%v", found, state, after, err)
 				}
