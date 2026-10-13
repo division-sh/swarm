@@ -217,6 +217,7 @@ type selectedContractAgentRuntime struct {
 	pipeline               selectedFlowActivationRetirementStore
 	pendingActivations     []selectedFlowActivation
 	executionLease         *worklifetime.Lease
+	controlContext         context.Context
 	cancelExecution        context.CancelCauseFunc
 	executionDone          chan error
 	scheduler              *runtimepipeline.Scheduler

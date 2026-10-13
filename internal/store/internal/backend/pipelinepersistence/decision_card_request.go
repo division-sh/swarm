@@ -63,7 +63,7 @@ func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSour
 }
 
 func requireChannelCardMutationTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
-	if err := storedecision.RequireNormalCardControlTx(ctx, tx, req.ResourceID, runfork.SelectedControl(req.Method), postgres); err != nil {
+	if err := storedecision.RequireCardControlTx(ctx, tx, req.ResourceID, runfork.SelectedControl(req.Method), postgres, lock); err != nil {
 		return err
 	}
 	if err := requireChannelCardActionTx(ctx, tx, req, mutation, postgres, lock); err != nil {

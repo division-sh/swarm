@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
 type preparedInputDraftText struct {
@@ -49,7 +48,7 @@ func prepareInputDraftProgressTx(ctx context.Context, tx *sql.Tx, draftID, princ
 	if draft.PrincipalID != principalID || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
 		return preparedInputDraftText{}, decisioncard.ErrDraftNotAuthority
 	}
-	if err := runstate.RequireNormalControlTx(ctx, tx, draft.RunID, runfork.ControlMailboxDecide); err != nil {
+	if err := RequireCardRunControl(ctx, tx, draft.RunID, runfork.ControlMailboxDecide, postgres, lock); err != nil {
 		return preparedInputDraftText{}, err
 	}
 	var card decisioncard.Card

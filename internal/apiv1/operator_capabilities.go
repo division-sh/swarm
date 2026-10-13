@@ -132,15 +132,16 @@ type ConversationForkHandlerOptions struct {
 }
 
 type DecisionCardHandlerOptions struct {
-	SelectedForkControls SelectedForkControlAdmission
-	Now                  func() time.Time
-	Cards                decisioncard.Store
-	ProposedEffects      decisioncard.ProposedEffectStore
-	Mailbox              MailboxAPIStore
-	NoticeAcknowledgment MailboxNoticeAcknowledgmentStore
-	Authority            DecisionCardAuthority
-	SourceArtifact       SourceArtifactAdmitter
-	RuntimeContexts      *runtime.RuntimeContextManager
+	SelectedForkControls  SelectedForkControlAdmission
+	SelectedForkDecisions SelectedForkDecisionControlOwner
+	Now                   func() time.Time
+	Cards                 decisioncard.Store
+	ProposedEffects       decisioncard.ProposedEffectStore
+	Mailbox               MailboxAPIStore
+	NoticeAcknowledgment  MailboxNoticeAcknowledgmentStore
+	Authority             DecisionCardAuthority
+	SourceArtifact        SourceArtifactAdmitter
+	RuntimeContexts       *runtime.RuntimeContextManager
 }
 
 type AgentControlHandlerOptions struct {

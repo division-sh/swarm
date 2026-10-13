@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -15,6 +16,49 @@ type selectedControlBindingFixture struct {
 	exists  bool
 	err     error
 	calls   int
+}
+
+func TestSelectedForkDecisionControlRequiresOwnExecutionAdmission(t *testing.T) {
+	runID := uuid.NewString()
+	binding := testSelectedContractBinding(runID)
+	binding.BindingID = uuid.NewString()
+	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, uuid.NewString(), 1,
+		runID, "card-control-census", runForkTestBundleHash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []runfork.SelectedControl{runfork.ControlMailboxDecide, runfork.ControlMailboxDefer,
+		runfork.ControlMailboxBeginInput, runfork.ControlMailboxCancelInput} {
+		t.Run(string(operation), func(t *testing.T) {
+			if err := runfork.RequireDecisionControlForBinding(runID, operation, binding, true, admission); err != nil {
+				t.Fatalf("own selected decision context refused: %v", err)
+			}
+			for _, other := range []managedexecution.Admission{{}, func() managedexecution.Admission {
+				next := admission
+				next.RunID = binding.SourceRunID
+				return next
+			}()} {
+				if err := runfork.RequireDecisionControlForBinding(runID, operation, binding, true, other); err == nil {
+					t.Fatal("a binding or another run's admission authorized the card")
+				}
+			}
+			if err := runfork.RequireDecisionControlForBinding(binding.SourceRunID, operation, runfork.RunForkSelectedContractBinding{}, false, admission); err == nil {
+				t.Fatal("selected child admission authorized its ordinary source card")
+			}
+			if err := runfork.RequireDecisionControlForBinding(runID, operation, binding, false, admission); err == nil {
+				t.Fatal("selected decision context accepted a missing durable binding")
+			}
+			if err := runfork.RequireDecisionControlForBinding(binding.SourceRunID, operation, runfork.RunForkSelectedContractBinding{}, false, managedexecution.Admission{}); err != nil {
+				t.Fatalf("ordinary card control changed: %v", err)
+			}
+		})
+	}
+	for _, operation := range []runfork.SelectedControl{runfork.ControlRunContinue, runfork.ControlEventPublish,
+		runfork.ControlAgentReplay, runfork.ControlEventReplay} {
+		if err := runfork.RequireDecisionControlForBinding(runID, operation, binding, true, admission); err == nil {
+			t.Fatalf("decision authority admitted unrelated %s", operation)
+		}
+	}
 }
 
 func (s *selectedControlBindingFixture) LoadRunForkSelectedContractBinding(_ context.Context, runID string) (runfork.RunForkSelectedContractBinding, bool, error) {

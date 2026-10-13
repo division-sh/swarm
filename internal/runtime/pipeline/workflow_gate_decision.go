@@ -107,7 +107,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 		var activityIntent runtimeengine.ActivityIntent
 		activityIntent, err = activityIntentFromProposedEffect(continuation, executionSource)
 		if err == nil {
-			intent, err = activityRequestEmitIntentFromAdmittedSource(activityIntent)
+			intent, err = activityRequestEmitIntentWithParent(activityIntent, evt.ID())
 		}
 	case "revise", "reject":
 		var product events.Event

@@ -113,7 +113,7 @@ func planInputPromptTx(ctx context.Context, tx *sql.Tx, publicationID, cardID, d
 	if err != nil {
 		return err
 	}
-	if err := runstate.RequireNormalControlTx(ctx, tx, card.RunID, runfork.ControlMailboxDecide); err != nil {
+	if err := decisionpersistence.RequireCardRunControl(ctx, tx, card.RunID, runfork.ControlMailboxDecide, postgres, true); err != nil {
 		return err
 	}
 	query := `SELECT draft.delivery_receipt_id, receipt.delivery_id FROM decision_card_input_drafts draft
@@ -196,11 +196,7 @@ func inputPromptCurrent(ctx context.Context, q intentQueryer, frozen render.Froz
 		!expiresAt.Equal(frozen.Prompt.ExpiresAt) || !expiresAt.After(time.Now()) {
 		return false, nil
 	}
-	binding, err := runstate.LoadSelectedContractBinding(ctx, q, runID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if err := runfork.RequireNormalControlForBinding(runID, runfork.ControlMailboxDecide, binding, err == nil); err != nil {
+	if err := decisionpersistence.RequireCardRunControl(ctx, q, runID, runfork.ControlMailboxDecide, postgres, lock); err != nil {
 		return false, err
 	}
 	return true, nil

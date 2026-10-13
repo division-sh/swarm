@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -187,7 +188,7 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			if childPipeline == nil {
 				t.Fatal("pending child lacks its actual retained pipeline")
 			}
-			approvePendingReplyCard(t, serving, store, childPipeline, projected)
+			approvePendingReplyCard(t, serving, store, owner, projected)
 			waitPendingReplyReturn(t, serving, selected, store, child, childRows)
 			if calls.Load() != 1 {
 				t.Fatalf("fresh child approval provider calls=%d, want1", calls.Load())
@@ -233,7 +234,7 @@ func requirePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 	return card
 }
 
-func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingReplyExecutionStore, coordinator *pipeline.PipelineCoordinator, card decisioncard.Card) {
+func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingReplyExecutionStore, owner SelectedContractExecutionOwner, card decisioncard.Card) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -246,9 +247,45 @@ func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 		RequestHash: "pending-reply-" + decisionID, IdempotencyKey: uuid.NewString(), Now: at, TTL: time.Hour}
 	mutation := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal.ID,
 		ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: decisionID, Now: at})
-	if _, replayed, err := coordinator.CommitDecisionCardMutation(ctx, request, mutation); err != nil || replayed {
-		t.Fatalf("approve only the fresh child effect: replay=%t error=%v", replayed, err)
+	if _, replayed, selected, err := owner.CommitSelectedDecisionCardMutation(ctx, card.RunID, request, mutation); err != nil || replayed || !selected {
+		t.Fatalf("approve only the fresh child effect: selected=%t replay=%t error=%v causes=%v execution_causes=%v", selected, replayed, err,
+			pendingReplyDecisionCauses(err), pendingReplyExecutionCauses(owner, card.RunID))
 	}
+}
+
+func pendingReplyExecutionCauses(owner SelectedContractExecutionOwner, runID string) []string {
+	owner.ports.contexts.mu.Lock()
+	var preparations []*PreparedSelectedFork
+	for _, entry := range owner.ports.contexts.entries {
+		if entry.binding.ForkRunID == runID && entry.retained != nil {
+			preparations = append(preparations, entry.retained)
+		}
+	}
+	owner.ports.contexts.mu.Unlock()
+	var causes []string
+	for _, preparation := range preparations {
+		preparation.failureMu.Lock()
+		if failure := preparation.pendingExecutionFailure; failure != nil {
+			causes = append(causes, pendingReplyDecisionCauses(failure.cause)...)
+		}
+		preparation.failureMu.Unlock()
+	}
+	return causes
+}
+
+func pendingReplyDecisionCauses(err error) []string {
+	if err == nil {
+		return nil
+	}
+	causes := []string{err.Error()}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			causes = append(causes, pendingReplyDecisionCauses(cause)...)
+		}
+	} else {
+		causes = append(causes, pendingReplyDecisionCauses(errors.Unwrap(err))...)
+	}
+	return causes
 }
 
 func waitPendingReplyReturn(t *testing.T, ctx context.Context, selected any, store pendingReplyExecutionStore, child string, rows []replycontext.Record) {
