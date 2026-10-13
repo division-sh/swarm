@@ -1071,7 +1071,7 @@
     "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.ProveUnpublishedActivation",
     "audit_rows": "A11,A18",
     "proof_families": "P09,P15",
-    "body_sha256": "b023e2807ca53144ca544fbdab1785383c54bc4d2a00599866a86d394779cea0"
+    "body_sha256": "43ef3dcd3da44271e53df58a20af49f860804b88ee835ad2f9337ff0ce0e5bf0"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.InstallStartupTopology",
@@ -1113,7 +1113,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.adoptPersistedAgentForLifecycle",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "20185117755b1effc715588a8488a976207cb3d251be663c198138f284796493"
+    "body_sha256": "2e3f33fbbda60cd941ff638487dc896d3f4610a0765e0ed12fc4ef3a347a66b2"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.adoptPersistedAgentLifecycleOnly",
@@ -1161,7 +1161,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.registerExecutableAgentLifecycle",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "d314e6bdd863df612ddcbb4ea8a18679c8f161f9a899d515199b7f397bcdbf58"
+    "body_sha256": "c4e76133768d85c35342b7dd96ed3cbadcd6502469191e0cdd9f4f0ad291e85c"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.resolveAgentModel",
@@ -1197,7 +1197,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.spawnAgentInternalForSourceWithTopology",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "706378143b4e3fbbe259baa6c688ad52b7a950286a15233d302c0d9cc87bb88a"
+    "body_sha256": "614ca45a3e8ff16f0e1d2942e842b191f564584e0aa3d8ecaf7e9559238dec81"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.staticTopologyAdmission",
@@ -1239,7 +1239,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "eed12efb7cd0ac43e3a9013522c82b2bdf2404de01c1f31558bf351f439e24a8"
+    "body_sha256": "2510823a6615331108f16496a868769b795934f42b39cd306dde77b0e66cef71"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
@@ -1395,7 +1395,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareDurableTopologySourceSetRebind",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "8e2f667f7990858ff2a70279a74102f0a47c411ba6c2135d2699bc0b549ddee7"
+    "body_sha256": "c513a7d5ad98f433ced3f6e8edafd6f57ec760b435d02edb876c3ddfd90619f9"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareStaticTopologyForStartup",
@@ -1455,7 +1455,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.Commit",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "a390447e2c3c1ffaace39fd4c40668d77e74d00ef23be1d267e4605dc7dc7cca"
+    "body_sha256": "683f85347168bfb54bee02e93cb88e83f1d0d77304b1be9dbdd6be83e653b5e2"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.RetainForRetry",
@@ -1497,7 +1497,7 @@
     "owner": "internal/runtime/manager/static_topology.go::lifecycleStateMatchesCell",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "5f473327cb95773c2c915c512c66a4c8cc3a88b7be5c2ba9c6dfb4934c014494"
+    "body_sha256": "c00414dfb9b82473a9d84efeaed84f4dbdba7b79e01fdf8f726b28e6704655b3"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::projectStaticTopologyActor",

@@ -42,3 +42,27 @@ The normal guard run leaves `SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS` unset. Its
 existing update mode is used only after this owner/caller accounting and the named
 witnesses are checked. The final proof audit must list the actual rerun receipts;
 neither this mapping nor a generated hash supplies qualification by itself.
+
+## Exact Characterization Delta
+
+The native generator changes eight body hashes and no A/P labels: unpublished
+activation; executable registration; persisted lifecycle adoption; source-bound
+spawn; the Manager constructor; source-set preparation; source-set commit; and
+`lifecycleStateMatchesCell`. These are the three owner/consumer families above.
+No root Runtime boot predicate or boot-order body changes. The completed Manager
+packet at pre-rebase checkpoint9b16764ff exercised all349 roots and571 child
+passes without failure/skip; its source provenance is retained rather than
+relabeled as post-rebase qualification.
+
+The persistence authority generator retires73 stale findings and classifies66
+replacement findings. Two typed process-local declarations are the serialized
+Agent candidate callback and immutable-outcome reader. Two typed public-facade
+methods forward that existing native outcome owner. The other62 findings are
+private native SQL/transaction capability uses: the agent row decoder/CAS and
+the effect, provider-drain/provider-head and live-session consumers delegating
+to it. No test SQL port, raw public method, new transaction owner or baseline
+exception is introduced. The obsolete per-backend lifecycle UPSERT/partial-cell
+readers, write-shaped currentness checks and session projection declaration are
+deleted. The normal registry and effective-method guards verify14842 exact
+findings at the rebased source. The authority-debt ratchet is a separate complete
+scan; registry success alone is not its verdict.
