@@ -20660,6 +20660,12 @@ run_model:
         uncertain or nonterminal evidence remains refused; human-task authority is not copied and fresh pending
         proposed effects retain their captured incoming reference through the child's own reply row and consume the
         existing fork-generation correspondence. That reference grants neither a new decision nor provider dispatch.
+        A typed run-start cut has no event timestamp. Pending proposed-effect materialization uses the captured
+        source run's canonical creation time for both creation eligibility and pending-at-cut lifecycle checks.
+        Initial projected cards born with that run remain eligible; cards created after that coordinate stay outside
+        the start cut. Missing creation evidence or event metadata on a start point refuses before writes. Event-cut
+        eligibility retains its exact event timestamp. This reconstruction rule does not authorize selected mailbox
+        mutation or provider execution and does not change their existing control refusals.
     selected_contract_readiness_classifier: 'Selected-contract fixed-event revision readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected

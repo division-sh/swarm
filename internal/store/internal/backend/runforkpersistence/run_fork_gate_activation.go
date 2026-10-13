@@ -196,10 +196,14 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
 		return err
 	}
+	cutoff, err := runForkProposedEffectCutoff(plan)
+	if err != nil {
+		return err
+	}
 	var cardIDs []string
 	var forkActivations []loopruntime.Activation
-	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, cardIDsQuery, plan.SourceRunID, projection.Source.EntityID, plan.ForkPoint.Timestamp.UTC())
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, cardIDsQuery, plan.SourceRunID, projection.Source.EntityID, cutoff)
 		if err != nil {
 			return fmt.Errorf("load source proposed effects for fork: %w", err)
 		}
@@ -235,9 +239,9 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		}
 		pendingAtFork := sourceCard.Status == decisioncard.StatusPending
 		if !sourceCard.DecidedAt.IsZero() {
-			pendingAtFork = sourceCard.DecidedAt.After(plan.ForkPoint.Timestamp)
+			pendingAtFork = sourceCard.DecidedAt.After(cutoff)
 		} else if sourceCard.Status == decisioncard.StatusSuperseded {
-			pendingAtFork = sourceCard.UpdatedAt.After(plan.ForkPoint.Timestamp)
+			pendingAtFork = sourceCard.UpdatedAt.After(cutoff)
 		}
 		if !pendingAtFork {
 			continue
@@ -268,6 +272,21 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		}
 	}
 	return nil
+}
+
+func runForkProposedEffectCutoff(plan runfork.RunForkPlan) (time.Time, error) {
+	if plan.ForkPoint.Kind != runfork.RunForkPointRunStart {
+		return plan.ForkPoint.Timestamp.UTC(), nil
+	}
+	// Run-start is a typed creation cut, not an event at the zero timestamp.
+	// Initial projected cards are born with the run; later cards remain outside it.
+	if err := plan.ForkPoint.Validate(); err != nil {
+		return time.Time{}, err
+	}
+	if plan.SourceRunStartedAt == nil || plan.SourceRunStartedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("start-cut proposed effects require source run creation time")
+	}
+	return plan.SourceRunStartedAt.UTC(), nil
 }
 
 func (s *RunForkPostgresOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, correspondence *loopruntime.ForkCorrespondence, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
