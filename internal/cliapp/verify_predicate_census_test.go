@@ -53,6 +53,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/runtime_activation_gateway.go", "A11,A18,A25", "P09,P15,P21"},
 	// #2497's native-row/cache migration preserves these observations; exact
 	// owners, callers and execution witnesses are in testdata/issue_2497_admission_predicate_accounting.md.
+	// #642's current actor observation, continuation recovery and C4 composition
+	// owner/caller/proof map is in testdata/issue_642_admission_predicate_accounting.md.
 	{"internal/runtime/manager/activation_gateway.go", "A11,A18", "P09,P15"},
 	{"internal/runtime/llm/mock_startup_probe.go", "A11,A18", "P09,P15"},
 	{"internal/runtime/llm/workspace_mcp_admission.go", "A11,A18,A25", "P09,P15,P21"},
