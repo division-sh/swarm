@@ -277,13 +277,8 @@ func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.Wo
 }
 
 func loopRequiredTextField(source semanticview.Source, flowID, eventType, fieldName string) bool {
-	bundle, ok := semanticview.Bundle(source)
-	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	if !ok || !proof.HasSchema {
-		return false
-	}
-	ref, found := runtimecontracts.ResolveEventFieldType(bundle, flowID, eventType, fieldName)
-	return found && runtimecontracts.RequiresLoopRevision(proof.Entry.Payload, fieldName, ref)
+	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
+	return resolution.HasSchema && runtimecontracts.RequiresLoopRevision(resolution.Schema, fieldName)
 }
 
 func validateLoopRecurringTimers(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, region map[string]struct{}) []Finding {
