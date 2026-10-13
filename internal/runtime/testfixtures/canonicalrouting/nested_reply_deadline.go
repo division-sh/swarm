@@ -91,6 +91,42 @@ u.replied:
 	return root
 }
 
+// Two open reply levels retain the same stage-entry deadlines as the depth-three
+// fixture. The inner request is executable through the existing fan-out owner.
+func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
+	t.Helper()
+	root := CopyNestedFanOutReply(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  waiting: {}\n", "  waiting: {}\n  ready: {}\n  attention: {}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "inputs: [request.started, request.stop]", "inputs: [request.started, request.stop, provider.replied]")
+	writeClosedVariantFile(t, root, "entities.yaml", `request_state:
+  expected:
+    type: "[text]"
+    initial: [same-business-key]
+`)
+	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
+	writeClosedVariantFile(t, root, "provider/entities.yaml", `request_state:
+  expected:
+    type: "[text]"
+    initial: [same-business-key]
+`)
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
+      emit:
+        event: request.finished
+        fields:
+          request_id: payload.request_id
+          result: payload.result
+`, nestedDeadlineReturn("provider.replied", "request.finished", false))
+	applyClosedReplacement(t, filepath.Join(root, "provider/nodes.yaml"), `    t.replied:
+      emit:
+        event: provider.replied
+        fields:
+          account_id: payload.account_id
+          request_id: payload.request_id
+          result: payload.result
+`, nestedDeadlineReturn("t.replied", "provider.replied", true))
+	return root
+}
+
 func nestedDeadlineReturn(input, output string, account bool) string {
 	fields := "              request_id: \"same-business-key\"\n              result: \"approved\"\n"
 	if account {

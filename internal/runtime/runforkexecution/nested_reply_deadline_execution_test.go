@@ -38,7 +38,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -80,7 +79,7 @@ func (p *nestedDeadlineWorkerHold) NotifyLifecycle(ctx context.Context, signal l
 
 // The source uses the normal runtime wiring but holds timer startup, so the
 // selected child alone can fire the original, overdue deadlines.
-func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) *rootruntime.Runtime {
+func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) (*rootruntime.Runtime, func()) {
 	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
@@ -158,7 +157,7 @@ func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any
 	}
 	rt.Pipeline.InstallFanOutWorkNotifier(serving)
 	t.Cleanup(serving.Close)
-	return rt
+	return rt, serving.Close
 }
 
 func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, row replycontext.Record) joinruntime.Activation {
@@ -180,29 +179,46 @@ func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContract
 }
 
 func TestIssue642SelectedDepthThreeOriginalDeadlinesBothStores(t *testing.T) {
-	proveSelectedDepthThreeDeadlines(t, false)
+	proveSelectedNestedDeadlines(t, false, "")
 }
 
 func TestIssue642SelectedDepthThreeReplyRefusalsBothStores(t *testing.T) {
-	proveSelectedDepthThreeDeadlines(t, true)
+	proveSelectedNestedDeadlines(t, true, "")
 }
 
-func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
+func TestIssue642TwoOpenOriginalDeadlinesRestartBothStores(t *testing.T) {
+	for _, variant := range []string{"context_only", "unclaimed_inner"} {
+		t.Run(variant, func(t *testing.T) { proveSelectedNestedDeadlines(t, false, variant) })
+	}
+}
+
+func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant string) {
 	t.Helper()
+	levels, innerFlow, innerNode := 3, "u", "u-node"
+	if restartVariant != "" {
+		levels, innerFlow, innerNode = 2, "t", "provider-node"
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
 			var owner SelectedContractExecutionOwner
+			var reopen func() startupownership.Store
 			if backend == "sqlite" {
-				s := storetest.StartSQLiteRuntimeStore(t)
+				s, again := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+				reopen = func() startupownership.Store { return again() }
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s, again := storetest.StartPostgresRuntimeStoreWithReopen(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+				reopen = func() startupownership.Store { return again() }
 			}
 			ctx := runForkTestContext(t)
-			root := canonicalrouting.CopyNestedFanOutReplyDeadlines(t)
+			var root string
+			if restartVariant == "" {
+				root = canonicalrouting.CopyNestedFanOutReplyDeadlines(t)
+			} else {
+				root = canonicalrouting.CopyTwoOpenFanOutReplyDeadlines(t)
+			}
 			repo := runForkExecutionRepoRoot(t)
 			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
@@ -219,14 +235,14 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
-			rt := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
+			rt, stopSourceServing := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
 				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct source requester tree: created=%t error=%v", created, err)
 			}
-			node, err := identity.AdmitExecutableNodeDeclaration("u", "u-node")
+			node, err := identity.AdmitExecutableNodeDeclaration(innerFlow, innerNode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,8 +251,12 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 			var release sync.Once
 			resume := func() { release.Do(func() { close(hold.release) }) }
 			t.Cleanup(resume)
+			payload := []byte(`{"account_id":"same-account","request_id":"same-business-key"}`)
+			if restartVariant != "" {
+				payload = []byte(`{"account_id":"same-account","request_id":"same-business-key","items":["same-business-key"]}`)
+			}
 			input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "request.started", "nested-deadline-proof", "",
-				[]byte(`{"account_id":"same-account","request_id":"same-business-key"}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
+				payload, 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
 			publishCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
 			published := make(chan error, 1)
@@ -249,7 +269,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 				t.Fatal(publishCtx.Err())
 			}
 			rows, err := storetest.ReadReplyContextRecords(ctx, selected, runID)
-			if err != nil || len(rows) != 3 {
+			if err != nil || len(rows) != levels {
 				t.Fatalf("actual open source chain: %+v error=%v", rows, err)
 			}
 			cut := ""
@@ -258,7 +278,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 				if row.State != replycontext.StateOpen || arm.Status != joinruntime.StatusOpen || !arm.ArmedAt.Equal(at) || !arm.DeadlineAt.Equal(at.Add(time.Hour)) {
 					t.Fatalf("source lost its original open due: row=%+v arm=%+v", row, arm)
 				}
-				if row.ProviderFlowID == "u" {
+				if row.ProviderFlowID == innerFlow {
 					cut = row.RequestEventID
 				}
 			}
@@ -286,7 +306,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 				}
 				innerReturned := false
 				for _, row := range current {
-					if row.ProviderFlowID == "u" && row.State == replycontext.StateTerminal {
+					if row.ProviderFlowID == innerFlow && row.State == replycontext.StateTerminal {
 						innerReturned = true
 					}
 				}
@@ -304,7 +324,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 				}
 			}
 			sourceRows, err := storetest.ReadReplyContextRecords(ctx, selected, runID)
-			if err != nil || len(sourceRows) != 3 {
+			if err != nil || len(sourceRows) != levels {
 				t.Fatalf("settled source inventory: %+v error=%v", sourceRows, err)
 			}
 			sourceArms := map[string]joinruntime.Activation{}
@@ -332,14 +352,29 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
+			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
 				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
+			if restartVariant != "context_only" {
+				request.ForkOperation = operation
+			}
+			var immediateRows []replycontext.Record
+			immediateArms := map[string]joinruntime.Activation{}
 			staged, err := owner.ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			if err != nil {
 				t.Fatal(err)
 			}
+			if restartVariant == "context_only" {
+				immediateRows, err = storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
+				if err != nil || len(immediateRows) != levels {
+					t.Fatalf("context-only immediate source inventory: %+v error=%v", immediateRows, err)
+				}
+				for _, row := range immediateRows {
+					immediateArms[row.ID] = nestedDeadlineArm(t, ctx, owner, row)
+				}
+				staged, operation = stageContextOnlyDeadlineDescendant(t, ctx, selected, owner, loader, selection, options, loaded.SourceArtifactFact.BundleHash(), staged)
+			}
 			childRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
-			if err != nil || len(childRows) != 3 {
+			if err != nil || len(childRows) != levels {
 				t.Fatalf("projected open chain: %+v error=%v", childRows, err)
 			}
 			for _, row := range childRows {
@@ -348,10 +383,18 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 					t.Fatalf("projection moved an original due coordinate: row=%+v arm=%+v", row, arm)
 				}
 			}
-			activated, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
-				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: request.ForkOperation})
-			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID {
-				t.Fatalf("activate exact selected child: %+v error=%v", activated, err)
+			if restartVariant == "" {
+				activated, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
+					AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: operation})
+				if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID {
+					t.Fatalf("activate exact selected child: %+v error=%v", activated, err)
+				}
+			} else {
+				if err := prepared.Close(); err != nil {
+					t.Fatal(err)
+				}
+				stopSourceServing()
+				selected, owner, ctx = restartSelectedDeadlineChild(t, ctx, rt, selected, owner, reopen, loaded, staged, childRows, operation, childHold, servingContexts, runID)
 			}
 			wait, cancelWait := context.WithTimeout(ctx, 20*time.Second)
 			defer cancelWait()
@@ -361,7 +404,9 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 			case <-wait.Done():
 				t.Fatal("selected serving admission was not observed")
 			}
-			for claimed := false; !claimed; {
+			// A context-only start cut owes the retained deadline arms, not a
+			// fabricated inner delivery. The other cut must claim its real input.
+			for claimed := restartVariant == "context_only"; !claimed; {
 				select {
 				case <-childHold.started:
 					claimed = true
@@ -393,7 +438,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 						closed++
 					}
 				}
-				if closed == 3 {
+				if closed == levels {
 					break
 				}
 				select {
@@ -411,6 +456,22 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 					t.Fatalf("selected timeout changed a source arm: before=%+v after=%+v", sourceArms[row.ID], arm)
 				}
 			}
+			if restartVariant == "context_only" {
+				actual, err := storetest.ReadReplyContextRecords(wait, selected, staged.SourceRunID)
+				if err != nil || !reflect.DeepEqual(immediateRows, actual) {
+					t.Fatalf("context-only successor changed its immediate source replies: %+v error=%v", actual, err)
+				}
+				for _, row := range immediateRows {
+					if arm := nestedDeadlineArm(t, wait, owner, row); !reflect.DeepEqual(immediateArms[row.ID], arm) {
+						t.Fatalf("context-only successor changed an immediate-source deadline: before=%+v after=%+v", immediateArms[row.ID], arm)
+					}
+				}
+				for _, row := range childRows {
+					if _, found, err := selected.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(wait, row.RequestEventID); err != nil || found {
+						t.Fatalf("context-only timeout recovery invented a logical request event: found=%t error=%v", found, err)
+					}
+				}
+			}
 			for _, row := range childRows {
 				arm := nestedDeadlineArm(t, wait, owner, row)
 				if !arm.ArmedAt.Equal(at) || !arm.DeadlineAt.Equal(at.Add(time.Hour)) {
@@ -418,7 +479,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 				}
 			}
 			plan, err := owner.ports.fork.PlanRunFork(wait, runfork.RunForkPlanRequest{SourceRunID: staged.ForkRunID})
-			if err != nil || len(plan.JoinSchedules) != 3 {
+			if err != nil || len(plan.JoinSchedules) != levels {
 				t.Fatalf("physical selected timeout inventory: %+v error=%v", plan.JoinSchedules, err)
 			}
 			for _, row := range childRows {
@@ -431,7 +492,9 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 					matched++
 					if err := genericschedule.ValidateWorkflowJoinScheduleRelation(arm, schedule); err != nil || schedule.Status != genericschedule.StatusFired ||
 						!schedule.InitialDueAt.Equal(at.Add(time.Hour)) || !schedule.CurrentDueAt.Equal(at.Add(time.Hour)) ||
-						schedule.ForkJoinOrigin == nil || schedule.ForkJoinOrigin.SourceRunID != runID || schedule.ForkJoinOrigin.PointEventID != cut {
+						schedule.ForkJoinOrigin == nil || schedule.ForkJoinOrigin.SourceRunID != staged.SourceRunID ||
+						schedule.ForkJoinOrigin.PointEventID != staged.ForkPoint.EventID ||
+						schedule.ForkJoinOrigin.PointKind != staged.ForkPoint.Kind || schedule.ForkJoinOrigin.PointRevision != staged.ForkPoint.Revision {
 						t.Fatalf("timeout changed its original schedule or cut: %+v error=%v", schedule, err)
 					}
 					publication, found, err := selected.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(wait, schedule.CurrentEventID)
@@ -445,7 +508,7 @@ func proveSelectedDepthThreeDeadlines(t *testing.T, refusals bool) {
 					t.Fatalf("timeout schedule duplicated or missing: count=%d arm=%+v", matched, arm)
 				}
 			}
-			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, staged.ForkRunID, "platform.join_timeout"); err != nil || count != 3 {
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, staged.ForkRunID, "platform.join_timeout"); err != nil || count != levels {
 				t.Fatalf("selected timeout count changed: count=%d error=%v", count, err)
 			}
 			resumeChild()
