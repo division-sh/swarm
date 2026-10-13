@@ -54,7 +54,8 @@ func (o SelectedContractExecutionOwner) AcquireSelectedDecisionCardControl(ctx c
 		return nil, exists, err
 	}
 	if !exists {
-		return nil, false, runfork.RequireNormalControlForBinding(runID, operation, binding, false)
+		admission, _ := managedexecution.FromContext(ctx)
+		return nil, false, runfork.RequireDecisionControlForBinding(runID, operation, binding, false, admission)
 	}
 	use, err := o.acquireDecisionControl(ctx, binding, operation)
 	return use, true, err
@@ -84,6 +85,9 @@ func (o SelectedContractExecutionOwner) CommitSelectedDecisionCardMutation(ctx c
 
 func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Context, binding runfork.RunForkSelectedContractBinding, operation runfork.SelectedControl) (*SelectedDecisionCardControl, error) {
 	contexts := o.ports.contexts
+	if contexts == nil {
+		return nil, fmt.Errorf("selected decision control lacks its reconciled execution owner")
+	}
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
 	if contexts.retired || !contexts.recovered {
