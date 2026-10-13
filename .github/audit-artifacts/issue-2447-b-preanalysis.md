@@ -1,5 +1,38 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S26 Effective Loop Revision Schema: Binding P2 Repair
+
+Reviewer-g6153582644 confirms inline4262258200 at6d794340d: an effective
+Source can own an imported compiled event absent from the underlying bundle,
+and an admitted ExactSchema field need not have an authored Type. The S15
+bundle-reference lookup therefore falsely refuses lawful required text. The
+same lookup occurs in semanticview.requiresLoopRevision. The existing alias
+controls did not cover these two producers; they do not close this seam.
+
+| Row | Producer, owner and complete consumer set | Counterexample and repair proof |
+|---|---|---|
+| S26a imported effective schema | Provider-trigger source overlay -> ResolveEventSchema -> existing contracts.RequiresLoopRevision -> bootverify input admission (admit/repeat/close), declarative emit (start/admit/repeat), loop-region classification and escape emit | Underlying bundle cannot resolve the field; the admitted imported required string still passes every named consumer. Authored ExactSchema without Type is a separate positive arm. |
+| S26b original carriage | The same effective schema owner -> semanticview.compileLoopCarriage input and addOutput normal/escape output | Compile declaration roles for imported/ExactSchema inputs and outputs; preserve the exact role and loop.revision_id mapping. These unit controls are declaration proof, not storage, fork generation or activation proof. |
+| S26c domain/requiredness conservation | Effective schema's semantic properties and required set, not structural string lowering alone | Enum, UUID, timestamp, integer, oneOf-enum and optional fields refuse in all named verification/carriage positions. Plain text refinements and admitted text aliases remain supported. The real provider-trigger import owner separately proves required text acceptance plus numeric/optional/absent refusal. |
+
+Repair contracts.RequiresLoopRevision to consume the effective admitted event
+schema, preserving requiredness and enum/format evidence. Both callers resolve
+through the semantic Source; no bundle-only fallback, provider special case,
+generic validator, schema owner or grammar change is introduced. The existing
+plain-text role excludes enums and formats even though structural lowering
+uses Kind:text for all of them. The authoritative reference-admission clause
+explicitly records imported/ExactSchema authority. All original mapping and
+generation checks remain unchanged.
+
+Before the single source push: retain the corrected old-head RED controls,
+focused owner/import/domain race x3, complete runtime package, clean no-argument
+preflight and exact-head native Linux swarm-unused. No old macOS receipt is
+credited: run38443161242 attempt2 passed all Go units but macOS possession was
+cancelled without a runner or steps. Fresh whole hosted lifecycle remains
+required at the repaired head. S01-S26/K and2647 ->2648 ->C remain open until
+independent exact-head qualification; #2655 separately owns the deployment
+revision pin defect. No Part C or D decoder production work is included.
+
 ## S25 Shadowed Declaration Admission: Ruled Namespace Repair
 
 Reviewer-g6150314805 and inline4261285982 identify an unvalidated unused
@@ -294,7 +327,7 @@ Lifecycle/no extra units remains binding; C stays frozen until B merges.
 | S12 optional join result | CatalogTypeReference.Resolve still refuses real empty/invalid authored references; workflowexpr.workflowJoinStructuralType owns optional JoinResultType omission | Existing five captured-loop members, literal and pipeline adapter fail on33ab. Explicit omission uses the existing dynamic result; supplied unknown/recursive/retired references refuse. Whole workflowexpr package must pass. |
 | S13 policy lookup aliases | Flow-scoped admitted event structural evidence, consumed by bootverify.policySheetLookupPathDomain and validatePolicySheetLookupKeyTypes | Text/number/bool aliases validate correct literals and reject wrong ones; boolean no-default tables require both values. Unknown/non-scalar domains refuse even with a default. |
 | S14 citation aliases | CatalogTypeReference on the admitted field and exact ResolvedTypeCatalogForFlow plus resolved PlainText role; contracts.validateEventCriteriaCitationFields | Direct and loaded-flow scalar/list text aliases pass; enum/UUID/timestamp/non-text and invalid references refuse without dropping criteria/class checks. Retire raw citation list/spelling helpers. |
-| S15 revision carriage aliases | ResolveEventFieldType retains exact flow-domain evidence plus contracts.RequiresLoopRevision required-field law; semanticview.compileLoopCarriage/addOutput | Text aliases retain original loop roles through verify/fork compilation; non-text, optional, absent property and missing/wrong mapping still refuse. No generation/correlation-law change. |
+| S15 revision carriage aliases | Effective semantic ResolveEventSchema plus contracts.RequiresLoopRevision required-field/domain law; semanticview.compileLoopCarriage/addOutput and bootverify loop consumers; S26 corrects the original bundle-only authority omission | Text aliases retain original loop roles through verify/fork compilation; non-text, optional, absent property and missing/wrong mapping still refuse. No generation/correlation-law change. |
 
 Before editing these consumers, repeat the raw event-field classifier sweep in
 runtime/contracts, bootverify and semanticview and classify presentation-only

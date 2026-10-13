@@ -15,19 +15,20 @@ func CarriesLoopRevision(value ExpressionValue) bool {
 	}
 }
 
-func RequiresLoopRevision(payload EventPayloadSpec, field string, ref CatalogTypeReference) bool {
-	property, ok := payload.Properties[field]
-	if !ok || strings.TrimSpace(property.Type) != strings.TrimSpace(ref.Type) {
+// RequiresLoopRevision consumes the effective admitted schema, including
+// imported/ExactSchema fields. Structural string lowering erases enum/format
+// distinctions, so it cannot establish this domain on its own.
+func RequiresLoopRevision(schema EventSchema, field string) bool {
+	properties, _ := schema.Schema["properties"].(map[string]any)
+	property, ok := properties[field].(map[string]any)
+	if !ok || property["type"] != "string" {
 		return false
 	}
-	resolved, err := ref.Resolve()
-	if err != nil || !resolved.PlainText() {
-		return false
-	}
-	for _, required := range payload.Required {
-		if required == field {
-			return true
+	for _, domain := range []string{"enum", "format", "oneOf"} {
+		if _, present := property[domain]; present {
+			return false
 		}
 	}
-	return false
+	_, required := compiledEventRequiredFields(schema.Schema)[field]
+	return required
 }

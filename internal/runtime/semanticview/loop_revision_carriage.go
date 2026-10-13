@@ -300,10 +300,6 @@ func (c *originalLoopCarriage) addOutput(source Source, node identity.Executable
 }
 
 func requiresLoopRevision(source Source, proof FlowEventProof, field string) bool {
-	bundle, ok := Bundle(source)
-	if !ok || !proof.HasSchema {
-		return false
-	}
-	ref, found := contracts.ResolveEventFieldType(bundle, proof.FlowID, proof.Authored, field)
-	return found && contracts.RequiresLoopRevision(proof.Entry.Payload, field, ref)
+	resolution := ResolveEventSchema(source, proof.FlowID, proof.Authored)
+	return resolution.HasSchema && contracts.RequiresLoopRevision(resolution.Schema, field)
 }

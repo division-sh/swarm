@@ -35,7 +35,7 @@ func TestLoopRevisionCarriageSchema(t *testing.T) {
 		{"accepted_type_normalization", " TEXT ", "revision", true, true},
 		{"optional", "text", "", true, false},
 		{"different_required", "text", "other", true, false},
-		{"required_not_normalized", "text", " revision ", true, false},
+		{"accepted_required_normalization", "text", " revision ", true, true},
 		{"numeric", "integer", "revision", true, false},
 		{"alias", "Revision", "revision", true, true},
 		{"enum", "Status", "revision", true, false},
@@ -50,11 +50,12 @@ func TestLoopRevisionCarriageSchema(t *testing.T) {
 			if tc.present {
 				payload.Properties["revision"] = EventFieldSpec{Type: tc.kind}
 			}
-			ref := CatalogTypeReference{Type: tc.kind, Catalog: TypeCatalogDocument{
+			catalog := TypeCatalogDocument{
 				Scalars: map[string]ScalarTypeDecl{"Revision": {Base: "text"}},
 				Enums:   map[string]EnumTypeDecl{"Status": {Values: []string{"ready"}, Default: "ready"}},
-			}}
-			if got := RequiresLoopRevision(payload, "revision", ref); got != tc.want {
+			}
+			schema := eventSchemaFromCatalogEntry("review.requested", EventCatalogEntry{Payload: payload}, catalog)
+			if got := RequiresLoopRevision(schema, "revision"); got != tc.want {
 				t.Fatalf("RequiresLoopRevision = %v, want %v", got, tc.want)
 			}
 		})
