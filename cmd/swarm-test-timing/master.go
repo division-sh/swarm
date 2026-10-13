@@ -243,28 +243,7 @@ func mergedRunPlan(ctx context.Context, repository string, run testplanning.Qual
 	}
 	root := "repos/" + repository
 	name := fmt.Sprintf("ci-plan-%d-%d", run.ID, run.RunAttempt)
-	raw, err := ghRead(ctx, fmt.Sprintf("%s/actions/runs/%d/artifacts?name=%s&per_page=100", root, run.ID, name))
-	if err != nil {
-		return plan, err
-	}
-	var list struct {
-		Total     int `json:"total_count"`
-		Artifacts []struct {
-			ID      int64  `json:"id"`
-			Name    string `json:"name"`
-			Expired bool   `json:"expired"`
-		} `json:"artifacts"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return plan, err
-	}
-	if list.Total != len(list.Artifacts) {
-		return plan, fmt.Errorf("incomplete artifacts page")
-	}
-	if len(list.Artifacts) != 1 || list.Artifacts[0].ID <= 0 || list.Artifacts[0].Name != name || list.Artifacts[0].Expired {
-		return plan, fmt.Errorf("missing, ambiguous, foreign or expired current-attempt plan artifact")
-	}
-	raw, err = ghRead(ctx, root+"/actions/artifacts/"+strconv.FormatInt(list.Artifacts[0].ID, 10)+"/zip")
+	raw, err := readFailureArtifact(ctx, root, run.ID, name)
 	if err != nil {
 		return plan, err
 	}
@@ -288,6 +267,31 @@ func mergedRunPlan(ctx context.Context, repository string, run testplanning.Qual
 		return plan, fmt.Errorf("foreign current-attempt CI selection report")
 	}
 	return plan, nil
+}
+
+func readFailureArtifact(ctx context.Context, root string, runID int64, name string) ([]byte, error) {
+	raw, err := ghRead(ctx, fmt.Sprintf("%s/actions/runs/%d/artifacts?name=%s&per_page=100", root, runID, name))
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Total     int `json:"total_count"`
+		Artifacts []struct {
+			ID      int64  `json:"id"`
+			Name    string `json:"name"`
+			Expired bool   `json:"expired"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	if list.Total != len(list.Artifacts) {
+		return nil, fmt.Errorf("incomplete artifacts page")
+	}
+	if len(list.Artifacts) != 1 || list.Artifacts[0].ID <= 0 || list.Artifacts[0].Name != name || list.Artifacts[0].Expired {
+		return nil, fmt.Errorf("missing, ambiguous, foreign or expired current-attempt artifact %s", name)
+	}
+	return ghRead(ctx, root+"/actions/artifacts/"+strconv.FormatInt(list.Artifacts[0].ID, 10)+"/zip")
 }
 
 func mergedPlanArchive(raw []byte) (testplanning.RunPlan, testplanning.CISelectionReport, error) {

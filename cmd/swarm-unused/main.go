@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/testtiming"
 )
 
 const (
@@ -105,9 +107,7 @@ func (g guard) command(args ...string) *exec.Cmd {
 	return c
 }
 
-type native struct {
-	GOOS, GOARCH, CGO_ENABLED, GOHOSTOS, GOHOSTARCH, GOVERSION, GOEXPERIMENT string
-}
+type native = testtiming.UnusedNative
 
 func (g guard) native() (native, error) {
 	var n native

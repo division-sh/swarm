@@ -24069,7 +24069,10 @@ test_specification:
       selection: >-
         Preflight is local-only informational proof, not a fourth hosted tier or completed core/lifecycle/full.
         Its reviewed finite selection always runs independently of changed paths. The initial thirteen source-guard
-        candidates retain exact package/root identity; the existing eighty-one structural-owner guards are projected
+        candidates retain exact package/root identity; eighteen reviewed escape roots (the effects primitive manifest,
+        delivery-continuation consumer guard, fourteen exact runforkreadiness roots, the runforkexecution receiver
+        compiler guard and the async-site census) join them. With eleven safety roots this is 123 exact roots.
+        The existing eighty-one structural-owner guards are projected
         from their canonical source inventory, not duplicated. Bounded command and ledger safety controls are included.
         Formatting, canonical exact-base/head complexity, OpenRPC check and native vet/type checking execute as real
         commands. Native proof discovery and required child obligations remain authoritative. Missing, foreign,
@@ -24085,6 +24088,9 @@ test_specification:
         A selected whole root containing the known-flaky leaf must be excluded rather than filtered or weakened.
         Debt-ratchet, complete tagged candidate-overlay, redundant test linkage, blocked-SQL/runtime origin and native
         unused analysis are not in the initial selection; their existing affected/hosted proofs remain mandatory.
+        The four stateful runforkexecution behavioral roots remain focused/hosted: they construct, recover and
+        execute fork state and require PostgreSQL. Selecting the service-free receiver/compiler guard gives no
+        coverage credit to those behavioral journeys.
         An eligible hosted escape adds a reviewed candidate or an explicit evidence-backed exclusion; dropping a
         nonfiring candidate also requires review. No filename/suffix or changed-package heuristic owns membership.
       qualification: >-
@@ -24118,9 +24124,18 @@ test_specification:
         corrupt, duplicate, foreign or ambiguous evidence cannot grant attribution. Full-cadence regression/core-escape
         proof retains its existing owner and cannot be created from a ledger lookup.
       observation: >-
-        Run-to-ledger readback preserves all observed attempts and exact executed plan identity, not an author-head
-        alias for a merge checkout. Only outer native Go failure events identify failing tests; expected nested failures
-        and duplicate parent/child reporting earn no extra defect count. Cancellation, unstarted work, API/log/artifact
+        Run-to-ledger readback preserves the declared run_attempt and every attempt from one through that count.
+        Missing first, middle or final attempts, or an absent count, remain incomplete/unknown exposure, not complete
+        green or non-PR-only history. Rejected plan validation supplies no authority to any failure. Exact source and
+        platform come from each job's validated command or native analyzer artifact, never the global planner OS,
+        a job-name guess or an author-head alias for a merge checkout. Missing or contradictory job evidence stays
+        unknown. The native unused identity reader is shared with its qualification owner; identity does not grant
+        analyzer verdict credit. Only outer native Go failure events identify failing tests; expected nested failures
+        earn no credit. A parent/package failure is collapsed only if it has no independently emitted output and a
+        retained failing descendant. Otherwise its exact evidence remains; observations are not independent-bug counts.
+        Every failed aggregate job and its log/error provenance remain visible, even alongside primary failures;
+        no name-based propagation assumption suppresses timing, policy or summary-contract errors.
+        Cancellation, unstarted work, API/log/artifact
         gaps and downstream timing/summary failures are separately visible, never presumed timing or infra causes.
         Comparable executed exposure and evidence are required for an observed rate; otherwise it is unmeasured.
         Population reporting retains every sampled PR run, unknown/mixed outcomes and earlier failed attempts; reviewed

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
@@ -28,15 +29,17 @@ func observeFailureAttempt(ctx context.Context, run failureRunMetadata, number i
 		return attempt
 	}
 	plan, err := mergedRunPlan(ctx, "division-sh/swarm", metadata.QualifiedRun)
+	planProblem := ""
 	if err != nil {
-		attempt.Problems = append(attempt.Problems, "exact execution plan unavailable: "+err.Error())
+		plan = testplanning.RunPlan{}
+		planProblem = "exact execution plan unavailable: " + err.Error()
+		attempt.Problems = append(attempt.Problems, planProblem)
 	}
 	jobs, err := readFailureAttemptJobs(ctx, path)
 	if err != nil {
 		attempt.Problems = append(attempt.Problems, err.Error())
 		return attempt
 	}
-	primary := hasPrimaryFailure(jobs)
 	seen := map[int64]bool{}
 	for _, job := range jobs {
 		if job.RunID != run.ID || job.RunAttempt != number || job.HeadSHA != run.HeadSHA || seen[job.ID] {
@@ -50,30 +53,21 @@ func observeFailureAttempt(ctx context.Context, run failureRunMetadata, number i
 		if job.Conclusion == "cancelled" {
 			attempt.CancelledJobs = append(attempt.CancelledJobs, job.ID)
 		}
-		if (job.Conclusion != "failure" && job.Conclusion != "timed_out" && job.Conclusion != "cancelled") || (primary && failureAggregateJob(job.Name)) {
+		if job.Conclusion != "failure" && job.Conclusion != "timed_out" && job.Conclusion != "cancelled" {
 			continue
 		}
-		failure := testtiming.ObservedFailure{RunID: run.ID, Attempt: number, JobID: job.ID, HeadSHA: run.HeadSHA, Source: plan.HeadSHA, GOOS: plan.BuildContext.GOOS, Job: job.Name, Conclusion: job.Conclusion}
-		if plan.HeadSHA == "" {
-			failure.Problem = "exact executed source unavailable"
+		failure := testtiming.ObservedFailure{RunID: run.ID, Attempt: number, JobID: job.ID, HeadSHA: run.HeadSHA, Job: job.Name, Conclusion: job.Conclusion, Problem: planProblem}
+		if planProblem == "" {
+			bindFailureJobIdentity(ctx, plan, &failure)
 		}
 		if job.Conclusion == "cancelled" && len(job.Steps) == 0 {
-			failure.Problem = "cancelled before execution; no test result"
+			failure.Problem = joinFailureProblem(failure.Problem, "cancelled before execution; no test result")
 			attempt.Failures = append(attempt.Failures, failure)
 			continue
 		}
 		attempt.Failures = append(attempt.Failures, observeFailureJob(ctx, failure)...)
 	}
 	return attempt
-}
-
-func hasPrimaryFailure(jobs []testtiming.ActionJob) bool {
-	for _, job := range jobs {
-		if (job.Conclusion == "failure" || job.Conclusion == "timed_out") && !failureAggregateJob(job.Name) {
-			return true
-		}
-	}
-	return false
 }
 
 func readFailureAttemptJobs(ctx context.Context, path string) ([]testtiming.ActionJob, error) {
@@ -102,19 +96,22 @@ func observeFailureJob(ctx context.Context, failure testtiming.ObservedFailure) 
 	defer cancel()
 	raw, err := exec.CommandContext(readCtx, "gh", "api", "--allow-escape-sequences", fmt.Sprintf("repos/division-sh/swarm/actions/jobs/%d/logs", failure.JobID)).Output()
 	if err != nil {
-		failure.Problem = "log unavailable: " + err.Error()
+		failure.Problem = joinFailureProblem(failure.Problem, "log unavailable: "+err.Error())
 		return []testtiming.ObservedFailure{failure}
 	}
 	failures, err := nativeFailureEvents(raw, failure)
 	if err != nil {
-		failure.Problem = err.Error()
+		failure.Problem = joinFailureProblem(failure.Problem, err.Error())
 		return []testtiming.ObservedFailure{failure}
 	}
 	return failures
 }
 
-func failureAggregateJob(name string) bool {
-	return name == "Required test summary" || name == "CI timing budget" || strings.HasPrefix(name, "CI tier: ")
+func joinFailureProblem(existing, problem string) string {
+	if existing == "" {
+		return problem
+	}
+	return existing + "; " + problem
 }
 
 func nativeFailureEvents(raw []byte, job testtiming.ObservedFailure) ([]testtiming.ObservedFailure, error) {
@@ -148,11 +145,11 @@ func nativeFailureEvents(raw []byte, job testtiming.ObservedFailure) ([]testtimi
 		key := event.Package + "\x00" + event.Test
 		if event.Action == "output" {
 			contextLines[key] = append(contextLines[key], event.Output)
-			if len(contextLines[key]) > 8 {
-				contextLines[key] = contextLines[key][1:]
-			}
 		}
-		if event.Action == "fail" && event.Test != "" {
+		if event.Action == "fail" {
+			if _, duplicate := failed[key]; duplicate {
+				return nil, fmt.Errorf("duplicate native failure event for %s/%s", event.Package, event.Test)
+			}
 			failure := job
 			failure.Package, failure.Test, failure.Detail = event.Package, event.Test, strings.Join(contextLines[key], "")
 			failed[key] = failure
@@ -165,19 +162,21 @@ func nativeFailureEvents(raw []byte, job testtiming.ObservedFailure) ([]testtimi
 		job.Detail = string(raw)
 		return []testtiming.ObservedFailure{job}, nil
 	}
-	return nativeFailureLeaves(failed), nil
+	return retainNativeFailureEvidence(failed), nil
 }
 
-func nativeFailureLeaves(failed map[string]testtiming.ObservedFailure) []testtiming.ObservedFailure {
+func retainNativeFailureEvidence(failed map[string]testtiming.ObservedFailure) []testtiming.ObservedFailure {
 	var failures []testtiming.ObservedFailure
 	for key, failure := range failed {
-		parent := false
+		propagation := false
 		for child := range failed {
-			if strings.HasPrefix(child, key+"/") {
-				parent = true
+			if child != key && (strings.HasPrefix(child, key+"/") || failure.Test == "" && strings.HasPrefix(child, failure.Package+"\x00")) {
+				propagation = true
 			}
 		}
-		if !parent {
+		// No independently emitted output: retain the child evidence once. Any
+		// parent/package output remains a separate observation, not a guessed cause.
+		if !propagation || failure.Detail != "" {
 			failures = append(failures, failure)
 		}
 	}

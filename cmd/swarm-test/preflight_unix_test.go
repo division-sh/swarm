@@ -46,8 +46,48 @@ func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
 	for _, pkg := range plan.Packages {
 		count += len(pkg.Required)
 	}
-	if count != 105 {
+	if count != 123 {
 		t.Fatalf("finite native-owner projection changed: %d roots", count)
+	}
+	assertPreflightEscapeCompleteness(t, repo, plan)
+}
+
+func assertPreflightEscapeCompleteness(t *testing.T, repo string, plan testplanning.PreflightPlan) {
+	t.Helper()
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := make(map[string]testplanning.RequiredTest)
+	for _, pkg := range plan.Packages {
+		for _, root := range pkg.Required {
+			selected[root.Package+"::"+root.Name] = root
+		}
+	}
+	const prefix = "github.com/division-sh/swarm/"
+	for _, name := range inventory.Packages[prefix+"internal/runtime/runforkreadiness"].Roots {
+		if _, ok := selected[prefix+"internal/runtime/runforkreadiness::"+name]; !ok {
+			t.Fatalf("readiness root missing: %s", name)
+		}
+	}
+	for pkg, name := range map[string]string{
+		"internal/runtime/effects":              "TestDirectPrimitiveOwnershipManifestIsTotal",
+		"internal/runtime/deliverycontinuation": "TestExecutableDeliveryContinuationHasClosedProductionConsumers",
+		"internal/runtime/core/worklifetime":    "TestProductionAsyncSitesAreClassified",
+		"internal/runtime/runforkexecution":     "TestSelectedForkReceiverOwnershipBoundary",
+	} {
+		root, ok := selected[prefix+pkg+"::"+name]
+		if !ok {
+			t.Fatalf("escape root missing: %s/%s", pkg, name)
+		}
+		if pkg == "internal/runtime/runforkexecution" && !reflect.DeepEqual(root.Children, []string{"hostile", "production"}) {
+			t.Fatalf("receiver children incomplete: %+v", root)
+		}
+	}
+	for _, name := range []string{"TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMaterializer", "TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime", "TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames", "TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup"} {
+		if _, ok := selected[prefix+"internal/runtime/runforkexecution::"+name]; ok {
+			t.Fatalf("stateful root entered local preflight: %s", name)
+		}
 	}
 }
 

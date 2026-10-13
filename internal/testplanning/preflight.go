@@ -27,6 +27,24 @@ var preflightCandidates = []TestRoot{
 	preflightRoot("internal/store/internal/backend/authoractivity", "TestOrderingScopeConstructorInventoryIsClosed"),
 	preflightRoot("internal/testutil", "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"),
 	preflightRoot("internal/testtiming", "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres"),
+	preflightRoot("internal/runtime/effects", "TestDirectPrimitiveOwnershipManifestIsTotal"),
+	preflightRoot("internal/runtime/deliverycontinuation", "TestExecutableDeliveryContinuationHasClosedProductionConsumers"),
+	preflightRoot("internal/runtime/runforkreadiness", "Test2376AdmissionSealsCompiledExecutionIdentity"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionPreservesLoaderAdmittedEffectiveSourceContext"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionRejectsIncompleteOrForeignBindings"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionRequiresPositiveSealForEmptyProjection"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestAdmissionSealsResolvedModelRevision"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedAgentConstructionUsesExactFixedHeader"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedConstructedActorProjectionCompleteCensus"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedContractAdmissionBindsHistoricalStateKindsAndPresence"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedContractHeaderMissingHistoricalEvidenceFailsClosed"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedContractHeaderRejectsEveryReceiverConfigCopy"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedContractRejectsContradictoryRecordedHeader"),
+	preflightRoot("internal/runtime/runforkreadiness", "TestSelectedReadinessRequiresCompleteConstruction"),
+	preflightRoot("internal/runtime/runforkexecution", "TestSelectedForkReceiverOwnershipBoundary"),
+	preflightRoot("internal/runtime/core/worklifetime", "TestProductionAsyncSitesAreClassified"),
 }
 
 var preflightSafetyRoots = []TestRoot{
@@ -41,6 +59,12 @@ var preflightSafetyRoots = []TestRoot{
 	preflightRoot("cmd/swarm-test", "TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution"),
 	preflightRoot("cmd/swarm-test", "TestPreflightCurrentSourceUsesAllFiniteOwners"),
 	preflightRoot("cmd/swarm-test-timing", "TestFailureObservationRetainsNativeBoundaries"),
+}
+
+// This compiler guard's two obligations are local selection requirements; its
+// native root owner has no declared children. No hosted selection is changed.
+var preflightRequiredChildren = map[TestRoot][]string{
+	preflightRoot("internal/runtime/runforkexecution", "TestSelectedForkReceiverOwnershipBoundary"): {"hostile", "production"},
 }
 
 type PreflightPackage struct {
@@ -86,7 +110,11 @@ func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPl
 		if len(owners[root]) != 1 {
 			return PreflightPlan{}, fmt.Errorf("preflight root %s/%s has %d native owners, want one", root.Package, root.Name, len(owners[root]))
 		}
-		required = append(required, owners[root][0])
+		proof := owners[root][0]
+		proof.Children = append(slices.Clone(proof.Children), preflightRequiredChildren[root]...)
+		sort.Strings(proof.Children)
+		proof.Children = slices.Compact(proof.Children)
+		required = append(required, proof)
 	}
 	return bindPreflightSelection(native.HeadSHA, base, inventory, required)
 }
