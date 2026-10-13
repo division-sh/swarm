@@ -220,7 +220,7 @@ func ProveNativeResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalS
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func ProveNativeAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLoca
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 

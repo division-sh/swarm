@@ -75,7 +75,7 @@ func (s *startupProcessTakeoverStore) CommitAgentLifecycleTransition(_ context.C
 		return AgentLifecycleTransitionResult{}, errors.New("lifecycle state is missing")
 	}
 	result := AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, Identity: req.Identity, AgentID: req.AgentID,
+		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,
 		PreviousEpoch: state.RuntimeEpoch, PreviousGeneration: state.Generation, PreviousPhase: state.Phase,
 		RuntimeEpoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
@@ -85,6 +85,8 @@ func (s *startupProcessTakeoverStore) CommitAgentLifecycleTransition(_ context.C
 	state.Generation = result.Generation
 	state.Phase = result.Phase
 	state.ProcessBinding = result.ProcessBinding
+	state.ConfigRevision, state.RunMode, state.Topology = result.ConfigRevision, result.RunMode, result.Topology
+	state.LastTransitionID = result.TransitionID
 	s.states[key] = state
 	for i := range s.agents {
 		candidate, identityErr := s.agents[i].Config.ConcreteIdentity()

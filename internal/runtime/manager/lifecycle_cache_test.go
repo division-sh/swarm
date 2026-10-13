@@ -3,7 +3,12 @@ package manager
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -11,6 +16,53 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
+
+func TestAgentCurrentnessHasOneMutationAndReadOwner(t *testing.T) {
+	cell := reflect.TypeOf(agentLifecycleCell{})
+	view, found := cell.FieldByName("view")
+	if !found || view.Type != reflect.TypeOf(AgentLifecycleState{}) {
+		t.Fatal("agent cell does not cache the complete typed row")
+	}
+	for _, retired := range []string{"epoch", "generation", "phase", "configRevision", "runMode", "topology", "processBinding"} {
+		if _, found := cell.FieldByName(retired); found {
+			t.Fatalf("agent cell retains independent currentness field %s", retired)
+		}
+	}
+	if _, found := reflect.TypeOf(AgentManagerOptions{}).FieldByName("SessionLifecycle"); found {
+		t.Fatal("Manager exposes the retired optional projection owner")
+	}
+	retired := map[string]bool{"ApplyLifecycleProjection": true, "LifecycleProjectionRequest": true, "LifecycleProjectionRegistry": true}
+	inspect := func(file *ast.File) bool {
+		found := false
+		ast.Inspect(file, func(node ast.Node) bool {
+			if name, ok := node.(*ast.Ident); ok && retired[name.Name] {
+				found = true
+			}
+			return true
+		})
+		return found
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inspect(file) {
+			t.Fatalf("production consumer %s restored a session currentness projection", entry.Name())
+		}
+	}
+	hostile, err := parser.ParseFile(token.NewFileSet(), "hostile.go", "package manager; func f(s owner) { s.ApplyLifecycleProjection() }", 0)
+	if err != nil || !inspect(hostile) {
+		t.Fatalf("projection bypass escaped hostile census: %v", err)
+	}
+}
 
 func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
@@ -45,6 +97,49 @@ func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
 	adopted, found := coordinator.stateByIdentity(record.Config.Identity)
 	if !found || !reflect.DeepEqual(current, adopted) {
 		t.Fatalf("descriptor replaced durable currentness: current=%#v adopted=%#v", current, adopted)
+	}
+}
+
+func TestAgentRegistrationCandidateIsBoundToObservedRow(t *testing.T) {
+	ctx := testAuthorActivityContext(context.Background())
+	record := lifecycleTestPersistedAgent(t)
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
+	builds := 0
+	build := func() (Agent, error) {
+		builds++
+		if _, found := coordinator.stateByIdentity(record.Config.Identity); found {
+			t.Fatal("candidate published before row adoption")
+		}
+		return reconfigureTestAgent{id: record.Config.ID}, nil
+	}
+	register := func(persist bool, candidate func() (Agent, error)) error {
+		return coordinator.registerExecutionCandidate(ctx, record, persist, candidate, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil)
+	}
+	if err := register(false, build); err == nil || builds != 0 {
+		t.Fatalf("missing row reached factory: builds=%d err=%v", builds, err)
+	}
+	if err := register(true, build); err != nil {
+		t.Fatal(err)
+	}
+	if err := register(true, build); !errors.Is(err, ErrAgentAlreadyExists) || builds != 1 {
+		t.Fatalf("existing row reached factory: builds=%d err=%v", builds, err)
+	}
+	coordinator.mu.Lock()
+	delete(coordinator.cells, record.Config.Identity)
+	coordinator.mu.Unlock()
+	err := register(false, func() (Agent, error) {
+		agent, err := build()
+		probe.mu.Lock()
+		view := probe.views[record.Config.Identity]
+		view.Generation++
+		view.LastTransitionID = uuid.NewString()
+		probe.views[record.Config.Identity] = view
+		probe.mu.Unlock()
+		return agent, err
+	})
+	if err == nil || builds != 2 || len(coordinator.cells) != 0 {
+		t.Fatalf("changed row published stale candidate: builds=%d err=%v cells=%d", builds, err, len(coordinator.cells))
 	}
 }
 
@@ -123,7 +218,7 @@ func TestAgentRowCacheLostAckFinalizerCannotMutateSuccessor(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
 	record := lifecycleTestPersistedAgent(t)
-	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err != nil {
+	if err := coordinator.registerExecution(ctx, record, true, reconfigureTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}
 	beginCoordinatorRun(t, coordinator, ctx, AgentRunModeStandard)
@@ -131,6 +226,11 @@ func TestAgentRowCacheLostAckFinalizerCannotMutateSuccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitted, err := coordinator.acquireExecutionIdentity(ctx, record.Config.Identity, "before lost ack", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted.Release()
 	patch := record
 	patch.Config.Tools = []string{"replacement-tool"}
 	probe.failAfter = errors.New("lost native replacement acknowledgement")
@@ -138,6 +238,13 @@ func TestAgentRowCacheLostAckFinalizerCannotMutateSuccessor(t *testing.T) {
 		t.Fatal("lost acknowledgment was reported as success")
 	}
 	committed, _, _ := probe.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	lease, err := coordinator.acquireExecutionIdentity(ctx, record.Config.Identity, "lost-ack admission", true)
+	if err == nil || lease != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatal("acknowledged native successor left predecessor admission open")
+	}
 	if err := releaseCoordinatorLoop(coordinator, old, done); err != nil {
 		t.Fatalf("old physical completion attempted successor mutation: %v", err)
 	}

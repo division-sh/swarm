@@ -40,8 +40,9 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 		}
 	}
 	wantWrites := map[string]int{
-		"lifecycle.go":                       4,
-		"external_effect_authority_store.go": 2,
+		// The original transaction owns absent-row insertion and predecessor CAS.
+		// Lifecycle UPSERTs and effect-fence no-op UPDATEs are retired in R5.2.
+		"lifecycle_cas.go": 2,
 	}
 	if len(agentWrites) != len(wantWrites) {
 		t.Fatalf("production agents-table writers = %#v, want %#v", agentWrites, wantWrites)

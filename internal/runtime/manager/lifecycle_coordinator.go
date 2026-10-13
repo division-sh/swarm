@@ -348,6 +348,7 @@ type agentLifecycleCoordinator struct {
 	sourceSetPublishMu  sync.RWMutex
 	store               AgentLifecyclePersistence
 	stateReader         AgentLifecycleStateReader
+	outcomeReader       AgentLifecycleOutcomeReader
 	effectsStore        runtimeeffects.Store
 	phase               runtimeLifecyclePhase
 	runMode             AgentRunMode
@@ -545,10 +546,12 @@ func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, routes AgentR
 	if stateReader == nil {
 		stateReader, _ = store.(AgentLifecycleStateReader)
 	}
+	outcomeReader, _ := stateReader.(AgentLifecycleOutcomeReader)
 	coordinator := &agentLifecycleCoordinator{
 		store: store, phase: runtimeLifecycleStopped, runMode: AgentRunModeStopped,
 		cells:  map[runtimeagentidentity.Identity]*agentLifecycleCell{},
 		routes: routes, stateReader: stateReader, effectsStore: effectsStore,
+		outcomeReader:    outcomeReader,
 		diagnosticOrigin: LifecycleDiagnosticOrigin{Owner: LifecycleDiagnosticNormal, Causality: LifecycleDiagnosticObservation},
 	}
 	return coordinator
@@ -879,6 +882,18 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	topology runtimeagenttopology.Admission,
 	readinessOwner **agentLifecycleCell,
 ) error {
+	return c.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return agent, nil }, admission, topology, readinessOwner)
+}
+
+func (c *agentLifecycleCoordinator) registerExecutionCandidate(
+	ctx context.Context,
+	rec PersistedAgent,
+	persist bool,
+	build func() (Agent, error),
+	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
+	topology runtimeagenttopology.Admission,
+	readinessOwner **agentLifecycleCell,
+) error {
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
 	}
@@ -925,6 +940,35 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	view, found, err := c.loadAgentView(ctx, identity)
 	if err != nil {
 		return err
+	}
+	if persist {
+		if found && view.Phase != AgentLifecycleTerminated {
+			return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
+		}
+	} else if !found || !lifecycleProjectionEqual(view.ConfigRevision, view.Topology, revision, topology) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_hydration_view_mismatch", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
+	}
+	// Keep publication serialization, but let candidate factories inspect the
+	// manager without holding its cell-map mutex.
+	c.mu.Unlock()
+	var agent Agent
+	var buildErr error
+	func() {
+		defer c.mu.Lock()
+		agent, buildErr = build()
+	}()
+	if buildErr != nil {
+		return buildErr
+	}
+	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
+	}
+	current, currentFound, err := c.loadAgentView(ctx, identity)
+	if err != nil {
+		return err
+	}
+	if currentFound != found || (found && !sameAgentRowObservation(current, view)) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_candidate_view_changed", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
 	}
 	if epoch <= 0 {
 		epoch = runtimebus.CurrentRuntimeEpoch()

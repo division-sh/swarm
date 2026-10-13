@@ -9,6 +9,7 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -104,8 +105,8 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	rec.Topology, err = runtimeagenttopology.StaticAdmission(
 		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
-	if am.lifecycle.persistence() == nil {
-		// Pure execution fixtures have no durable run or retained process.
+	if _, unit := am.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe); unit {
+		// Pure execution fixtures have no native run or retained process.
 		rec.Topology.Lifetime = runtimeagenttopology.LifetimeEphemeral
 	}
 	return rec, err
@@ -117,6 +118,22 @@ func spawnManagerTestAgent(am *AgentManager, cfg runtimeactors.AgentConfig) erro
 		return err
 	}
 	return am.spawnAgentInternal(context.Background(), rec, true)
+}
+
+func seedUnitAgentLifecycle(t testing.TB, am *AgentManager, rec PersistedAgent) {
+	t.Helper()
+	probe, ok := am.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe)
+	if !ok {
+		t.Fatalf("unit row seed requires its explicit lifecycle probe, got %T", am.lifecycle.persistence())
+	}
+	if rec.LifecyclePhase == "" {
+		rec.LifecycleEpoch, rec.LifecycleGeneration = runtimebus.CurrentRuntimeEpoch(), 1
+		rec.LifecyclePhase, rec.LifecycleRunMode = AgentLifecycleRegistered, AgentRunModeStopped
+	}
+	rec.ProcessBinding = lifecycleProbeProcessBinding()
+	if err := probe.seedAgentRow(rec); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func installManagerTestStaticTopology(
@@ -187,7 +204,7 @@ func registerManagerTestEphemeralAgent(ctx context.Context, am *AgentManager, re
 	if err != nil {
 		return err
 	}
-	return am.MaterializeAdmittedAgentForExecution(runtimecorrelation.WithRunID(ctx, identity.RunID), rec)
+	return am.MaterializeAdmittedAgent(runtimecorrelation.WithRunID(ctx, identity.RunID), rec)
 }
 
 func managerTestBindRuntimeCreatedIdentity(cfg runtimeactors.AgentConfig, runID, owner string) (runtimeactors.AgentConfig, error) {

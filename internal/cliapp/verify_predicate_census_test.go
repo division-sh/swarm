@@ -51,6 +51,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/bootverify/admission_store_absence.go", "A19,A28", "2567-P02,P08,P09"},
 	{"internal/runtime/runtime_claude_startup.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/runtime_activation_gateway.go", "A11,A18,A25", "P09,P15,P21"},
+	// #2497's native-row/cache migration preserves these observations; exact
+	// owners, callers and execution witnesses are in testdata/issue_2497_admission_predicate_accounting.md.
 	{"internal/runtime/manager/activation_gateway.go", "A11,A18", "P09,P15"},
 	{"internal/runtime/llm/mock_startup_probe.go", "A11,A18", "P09,P15"},
 	{"internal/runtime/llm/workspace_mcp_admission.go", "A11,A18,A25", "P09,P15,P21"},

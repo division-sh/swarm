@@ -11,6 +11,9 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -172,49 +175,111 @@ func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
 	}
 }
 
-func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testing.T) {
-	registry := sessions.NewInMemoryRegistry(0)
-	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
-		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/inst-1"})
-	if err := spawnManagerTestAgent(am, cfg); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	lease := acquireReconfigureMemory(t, am, registry, cfg)
+type ReconfigureMemoryNativeTestStore interface {
+	AgentLifecycleStateReader
+	sessions.Registry
+	LoadActiveConversation(context.Context, agentmemory.Identity) (llm.ConversationRecord, bool, error)
+}
 
-	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"schedule"}, Permissions: []string{"schedule"}}); err != nil {
+func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
+	t.Helper()
+	rec := lifecycleTestPersistedAgent(t)
+	rec.Config.FlowID, rec.Config.FlowPath = "review", "review/inst-1"
+	rec.Config.Identity = managerRuntimeAgentIdentityForFlowPath(rec.Config.ID, rec.Config.FlowPath)
+	rec.Config.Memory.Enabled = enabled
+	rec.Config.LLMBackend = "anthropic"
+	if err := resolveAgentModel(&rec.Config, executionposture.Live, "anthropic", llmselection.ModelAliases{}, true); err != nil {
+		t.Fatal(err)
+	}
+	rec.Topology = runtimeagenttopology.Admission{}
+	return rec
+}
+
+func newReconfigureMemoryNativeManager(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, rec PersistedAgent) *AgentManager {
+	t.Helper()
+	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected}})
+	ctx := testAuthorActivityContext(context.Background())
+	if err := am.lifecycle.registerExecution(ctx, rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
+		t.Fatal(err)
+	}
+	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+		t.Fatal(err)
+	}
+	return am
+}
+
+func acquireNativeReconfigureMemory(t *testing.T, am *AgentManager, selected ReconfigureMemoryNativeTestStore, cfg models.AgentConfig) *sessions.Lease {
+	t.Helper()
+	execution, err := am.lifecycle.acquireExecutionIdentity(testAuthorActivityContext(context.Background()), cfg.Identity, "native-memory-reconfigure-proof", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer execution.Release()
+	lease, err := selected.Acquire(models.WithActor(execution.Context, cfg), agentmemory.Identity(cfg.Identity), "reconfigure-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return lease
+}
+
+type ReconfigureMemoryNativeAdmission func(models.AgentConfig) (AgentLifecyclePersistence, runtimeagenttopology.Admission)
+
+func reconfigureNativeMemoryCandidate(t *testing.T, am *AgentManager, candidate models.AgentConfig, admit ReconfigureMemoryNativeAdmission) error {
+	t.Helper()
+	if err := am.resolveAgentModel(&candidate); err != nil {
+		return err
+	}
+	owner, topology := admit(candidate)
+	am.lifecycle.replacePersistence(owner)
+	return am.reconfigureAgentIdentityExactWithTopology(am.runtimeContext(), am.semanticSource, candidate.Identity, candidate, &topology)
+}
+
+func ProveReconfigureMemoryEnabledConfigChange(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+	cfg := record.Config
+	lease := acquireNativeReconfigureMemory(t, am, selected, cfg)
+
+	candidate := cfg
+	candidate.Tools, candidate.Permissions = []string{"schedule"}, []string{"schedule"}
+	if err := reconfigureNativeMemoryCandidate(t, am, candidate, admit); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
-	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
-	if !ok || rec.SessionID == lease.SessionID {
-		t.Fatalf("memory session = %#v ok=%v, want rotated successor", rec, ok)
+	rec, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity))
+	if err != nil || !ok || rec.SessionID == lease.SessionID {
+		t.Fatalf("memory session = %#v ok=%v err=%v, want rotated successor", rec, ok, err)
 	}
 	if rec.Identity != reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath) {
 		t.Fatalf("memory identity = %+v, want exact run/agent/flow identity", rec.Identity)
 	}
+	rows := history(agentmemory.Identity(cfg.Identity))
+	if len(rows) != 2 {
+		t.Fatalf("native rotation history = %#v", rows)
+	}
+	for _, prior := range rows {
+		if prior.SessionID == lease.SessionID && (prior.Status != "terminated" || prior.SuccessorSessionID != rec.SessionID) {
+			t.Fatalf("native predecessor lineage = %#v", prior)
+		}
+	}
 }
 
-func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
-	registry := sessions.NewInMemoryRegistry(0)
-	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
-		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Plan{Enabled: true}, FlowPath: "support/inst-1"})
-	if err := spawnManagerTestAgent(am, cfg); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	lease := acquireReconfigureMemory(t, am, registry, cfg)
+func ProveReconfigureExplicitFalse(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+	cfg := record.Config
+	lease := acquireNativeReconfigureMemory(t, am, selected, cfg)
 
-	if err := reconfigureMemoryThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, false); err != nil {
+	candidate := cfg
+	candidate.Memory.Enabled = false
+	if err := reconfigureNativeMemoryCandidate(t, am, candidate, admit); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
-	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
+	if _, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity)); err != nil || ok {
 		t.Fatal("reusable memory survived explicit false")
 	}
-	history := registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
-	if len(history) != 1 || history[0].SessionID != lease.SessionID || history[0].Status != "terminated" || history[0].SuccessorSessionID != "" {
-		t.Fatalf("memory history = %#v, want exact terminated predecessor", history)
+	rows := history(agentmemory.Identity(cfg.Identity))
+	if len(rows) != 1 || rows[0].SessionID != lease.SessionID || rows[0].Status != "terminated" || rows[0].SuccessorSessionID != "" {
+		t.Fatalf("memory history = %#v, want exact terminated predecessor", rows)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
 	if got.Memory != (agentmemory.Plan{Enabled: false}) {
@@ -222,32 +287,34 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	}
 }
 
-func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T) {
-	registry := sessions.NewInMemoryRegistry(0)
-	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
-		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
-	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Plan{Enabled: false}, FlowPath: "support/inst-1"})
-	if err := spawnManagerTestAgent(am, cfg); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	if err := reconfigureMemoryThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, true); err != nil {
+func ProveReconfigureExplicitTrue(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+	cfg := record.Config
+	candidate := cfg
+	candidate.Memory.Enabled = true
+	if err := reconfigureNativeMemoryCandidate(t, am, candidate, admit); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
-	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
+	if _, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity)); err != nil || ok || len(history(agentmemory.Identity(cfg.Identity))) != 0 {
 		t.Fatal("enabling memory revived or synthesized prior state")
 	}
-	lease := acquireReconfigureMemory(t, am, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
-	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
+	currentConfig, err := am.ResolveAgentConfig(cfg.Identity.RunID, cfg.ID, cfg.FlowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := acquireNativeReconfigureMemory(t, am, selected, currentConfig)
+	candidate = currentConfig
+	candidate.Tools = []string{"tool-a"}
+	if err := reconfigureNativeMemoryCandidate(t, am, candidate, admit); err != nil {
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
 	if got.Memory != (agentmemory.Plan{Enabled: true}) {
 		t.Fatalf("omitted memory changed plan to %+v", got.Memory)
 	}
-	current, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
-	if !ok || current.SessionID == lease.SessionID {
-		t.Fatalf("retained enabled memory did not rotate on config change: %#v ok=%v", current, ok)
+	current, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity))
+	if err != nil || !ok || current.SessionID == lease.SessionID {
+		t.Fatalf("retained enabled memory did not rotate on config change: %#v ok=%v err=%v", current, ok, err)
 	}
 }
 

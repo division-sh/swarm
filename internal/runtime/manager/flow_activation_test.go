@@ -234,6 +234,7 @@ func (s flowActivationStandingRestarts) StandingRunRestartDisposition(_ context.
 }
 
 type flowActivationTestStore struct {
+	agentRows    *lifecyclePersistenceProbe
 	upserts      []PersistedAgent
 	bindingHash  string
 	terminated   []string
@@ -272,6 +273,12 @@ func (s *flowActivationTestGenerationStore) CommitAgentLifecycleTransition(ctx c
 		return result, err
 	}
 	result.ProcessBinding = binding
+	s.agentRows.mu.Lock()
+	view := s.agentRows.views[req.Identity]
+	view.ProcessBinding = binding
+	s.agentRows.views[req.Identity] = view
+	s.agentRows.operations[req.OperationID] = result
+	s.agentRows.mu.Unlock()
 	if req.Agent != nil && req.TargetPhase != AgentLifecycleTerminated && len(s.upserts) > 0 {
 		s.upserts[len(s.upserts)-1].ProcessBinding = binding
 	}
@@ -1285,6 +1292,17 @@ func (s *flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent,
 			continue
 		}
 		rec := latest[key]
+		if s.agentRows != nil {
+			view, found, err := s.agentRows.LoadAgentLifecycleState(context.Background(), rec.Config.Identity)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				rec.LifecycleEpoch, rec.LifecycleGeneration = view.RuntimeEpoch, view.Generation
+				rec.LifecyclePhase, rec.LifecycleRunMode = view.Phase, view.RunMode
+				rec.ProcessBinding, rec.Topology = view.ProcessBinding, view.Topology
+			}
+		}
 		out = append(out, rec)
 	}
 	return out, nil
@@ -1306,40 +1324,64 @@ func (*flowActivationTestStore) InspectRunExecutionOwnership(ctx context.Context
 	}
 	return RunExecutionOwned, nil
 }
-func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+func (s *flowActivationTestStore) lifecycleRows() *lifecyclePersistenceProbe {
+	if s.agentRows == nil {
+		s.agentRows = newLifecyclePersistenceProbe()
+	}
+	return s.agentRows
+}
+
+func (s *flowActivationTestStore) LoadAgentLifecycleState(ctx context.Context, identity runtimeagentidentity.Identity) (AgentLifecycleState, bool, error) {
+	return s.lifecycleRows().LoadAgentLifecycleState(ctx, identity)
+}
+
+func (s *flowActivationTestStore) ReadAgentLifecycleOutcome(ctx context.Context, request AgentLifecycleTransition) (AgentLifecycleTransitionResult, bool, error) {
+	return s.lifecycleRows().ReadAgentLifecycleOutcome(ctx, request)
+}
+
+func (s *flowActivationTestStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	lifecycleKey := flowActivationLifecycleKey(req)
+	if req.TargetPhase == AgentLifecycleTerminated && s.terminateErr != nil {
+		return AgentLifecycleTransitionResult{}, s.terminateErr
+	}
+	if req.TargetPhase != AgentLifecycleTerminated && strings.TrimSpace(req.AgentID) == strings.TrimSpace(s.failAgentID) {
+		return AgentLifecycleTransitionResult{}, errors.New("injected agent registration failure")
+	}
+	result, err := s.lifecycleRows().CommitAgentLifecycleTransition(ctx, req)
+	if err != nil || result.Replayed {
+		return result, err
+	}
+	binding, err := s.ProcessExecutionBinding()
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
+	result.ProcessBinding = binding
+	s.agentRows.mu.Lock()
+	view := s.agentRows.views[req.Identity]
+	view.ProcessBinding = binding
+	s.agentRows.views[req.Identity] = view
+	s.agentRows.operations[req.OperationID] = result
+	s.agentRows.mu.Unlock()
 	if req.TargetPhase == AgentLifecycleTerminated {
-		if s.terminateErr != nil {
-			return AgentLifecycleTransitionResult{}, s.terminateErr
-		}
 		s.terminated = append(s.terminated, strings.TrimSpace(req.AgentID))
 		if s.terminal == nil {
 			s.terminal = map[string]bool{}
 		}
 		s.terminal[lifecycleKey] = true
-	} else if strings.TrimSpace(req.AgentID) == strings.TrimSpace(s.failAgentID) {
-		return AgentLifecycleTransitionResult{}, errors.New("injected agent registration failure")
 	} else if req.Agent != nil {
 		rec := *req.Agent
 		rec.LifecycleEpoch = req.TargetEpoch
 		rec.LifecycleGeneration = req.TargetGeneration
 		rec.LifecyclePhase = req.TargetPhase
 		rec.LifecycleRunMode = req.RunMode
-		rec.ProcessBinding = lifecycleProbeProcessBinding()
+		rec.ProcessBinding = binding
 		s.upserts = append(s.upserts, rec)
 		if s.terminal != nil {
 			delete(s.terminal, lifecycleKey)
 		}
 	}
-	return AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: uuid.NewString(), AgentID: req.AgentID,
-		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
-		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
-		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
-		ProcessBinding: lifecycleProbeProcessBinding(),
-		Subordinate:    sessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
-	}, nil
+	result.Subordinate = sessions.LifecycleMutationOutcome{Action: req.Subordinate.Action}
+	return result, nil
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 

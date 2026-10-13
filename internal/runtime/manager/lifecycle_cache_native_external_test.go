@@ -14,6 +14,42 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected storetest.AgentFixtureStore
+			if backend == "postgres" {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+			} else {
+				selected = storetest.StartSQLiteRuntimeStore(t)
+			}
+			ctx := manager.TerminalPanicFixtureContext()
+			record := manager.TerminalPanicFixture(t)
+			record.Config.LLMBackend, record.Config.ResolvedLLMBackend = "anthropic", "anthropic"
+			record.Topology = agenttopology.Admission{}
+			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+			view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
+			if err != nil || !found {
+				t.Fatalf("native row: found=%v err=%v", found, err)
+			}
+			record.Topology = view.Topology
+			outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
+			if !ok {
+				t.Fatal("selected store lacks the native immutable-outcome owner")
+			}
+			manager.ProveAgentRowNativeLostAckCacheAdoption(t, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
+				snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return snapshot
+			})
+		})
+	}
+}
+
 func TestAgentRowIndividualSourceSetReplacementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

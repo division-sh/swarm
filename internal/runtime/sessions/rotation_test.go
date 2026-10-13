@@ -33,7 +33,7 @@ func TestRotationRequestNormalization(t *testing.T) {
 	if err != nil || base.Digest != equivalent.Digest || base.Metadata != equivalent.Metadata || base.LockOwner != equivalent.LockOwner {
 		t.Fatalf("canonical request mismatch: first=%+v second=%+v err=%v", base, equivalent, err)
 	}
-	for _, reason := range []TerminationReason{"unknown", TerminationReasonLegacy} {
+	for _, reason := range []TerminationReason{"unknown", "legacy"} {
 		if _, err := NormalizeRotationRequest(identity, "owner", RotationMetadata{TerminationReason: reason}); err == nil {
 			t.Fatalf("accepted invalid reason %q", reason)
 		}
@@ -108,7 +108,7 @@ func TestInMemoryRotationReceipts(t *testing.T) {
 	requireRotationRefusal(t, err, RotationRequestConflict)
 	for _, invalid := range []RotationMetadata{
 		{OperationID: metadata.OperationID, TerminationReason: "unknown"},
-		{OperationID: metadata.OperationID, TerminationReason: TerminationReasonLegacy},
+		{OperationID: metadata.OperationID, TerminationReason: "legacy"},
 	} {
 		if _, err := registry.Rotate(ctx, predecessor, invalid); err == nil {
 			t.Fatalf("accepted invalid reason %q against committed key", invalid.TerminationReason)

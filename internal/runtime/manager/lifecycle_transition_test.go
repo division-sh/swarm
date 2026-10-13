@@ -94,7 +94,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	}, AgentManagerOptions{DeliveryStore: native})
 	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))

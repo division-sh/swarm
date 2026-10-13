@@ -63,7 +63,7 @@ func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testin
 	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopCo
 	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, ne
 	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
@@ -339,7 +339,7 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 

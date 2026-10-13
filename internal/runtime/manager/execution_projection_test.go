@@ -815,6 +815,10 @@ func ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
 	rec.Topology = managerTestEphemeralTopologyAdmission(t)
+	if err := am.resolveAgentModel(&rec.Config); err != nil {
+		t.Fatal(err)
+	}
+	seedUnitAgentLifecycle(t, am, rec)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 		t.Fatalf("hydrate persisted running agent: %v", err)
 	}
@@ -1104,7 +1108,7 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 				}(), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
 					Identity: route.AgentIdentity, Subscriptions: []string{string(eventType)},
-				})}, false); err != nil {
+				})}, true); err != nil {
 					t.Fatalf("SpawnAgent: %v", err)
 				}
 				runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))

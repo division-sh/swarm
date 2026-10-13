@@ -218,6 +218,9 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		opts.PersistenceRoles.LifecycleEffects,
 	)
 	lifecycle.baseContext = opts.BaseContext
+	if opts.PersistenceRoles.LifecycleOutcome != nil {
+		lifecycle.outcomeReader = opts.PersistenceRoles.LifecycleOutcome
+	}
 	if opts.LifecycleDiagnosticOrigin != (LifecycleDiagnosticOrigin{}) {
 		lifecycle.diagnosticOrigin = opts.LifecycleDiagnosticOrigin
 	}
@@ -433,7 +436,7 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 		return fmt.Errorf("agent lifecycle topology admission: %w", err)
 	}
 	rec.Topology = *topology
-	identity, err := rec.Config.ConcreteIdentity()
+	_, err := rec.Config.ConcreteIdentity()
 	if err != nil {
 		return fmt.Errorf("agent %q requires a concrete identity: %w", strings.TrimSpace(rec.Config.ID), err)
 	}
@@ -456,15 +459,7 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if err := agentmemory.ValidateFlowOwnership(rec.Config.Memory, rec.Config.CanonicalFlowPath()); err != nil {
 		return fmt.Errorf("invalid agent memory plan: %w", err)
 	}
-	a, err := am.buildAgent(rec.Config)
-	if err != nil {
-		return err
-	}
-
-	if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
-		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
-	}
-	_, err = am.registerExecutableAgentLifecycle(ctx, rec, persist, a, subscriptionAdmission, *topology)
+	_, err = am.registerExecutableAgentLifecycle(ctx, rec, persist, subscriptionAdmission, *topology)
 	return err
 }
 
@@ -472,7 +467,6 @@ func (am *AgentManager) registerExecutableAgentLifecycle(
 	ctx context.Context,
 	rec PersistedAgent,
 	persist bool,
-	agent Agent,
 	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
 	topology runtimeagenttopology.Admission,
 ) (executableAgentReadiness, error) {
@@ -481,7 +475,7 @@ func (am *AgentManager) registerExecutableAgentLifecycle(
 		return executableAgentReadiness{}, err
 	}
 	var transitionCell *agentLifecycleCell
-	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, agent, admission, topology, &transitionCell); err != nil {
+	if err := am.lifecycle.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return am.buildAgent(rec.Config) }, admission, topology, &transitionCell); err != nil {
 		return executableAgentReadiness{}, err
 	}
 	defer am.completeCommittedRouteTransition(transitionCell)
@@ -551,11 +545,7 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	if err := am.validateNativeToolAdmission(ctx, rec.Config); err != nil {
 		return err
 	}
-	agent, err := am.buildAgent(rec.Config)
-	if err != nil {
-		return err
-	}
-	_, err = am.registerExecutableAgentLifecycle(ctx, rec, false, agent, subscriptionAdmission, rec.Topology)
+	_, err = am.registerExecutableAgentLifecycle(ctx, rec, false, subscriptionAdmission, rec.Topology)
 	return err
 }
 

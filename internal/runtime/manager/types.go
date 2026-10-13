@@ -259,6 +259,7 @@ type PersistenceRoles struct {
 	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
 	LifecycleCensus      AgentLifecycleCellCensus
 	LifecycleState       AgentLifecycleStateReader
+	LifecycleOutcome     AgentLifecycleOutcomeReader
 	LifecycleEffects     runtimeeffects.Store
 	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence
 	EffectsRecovery      runtimeeffects.RecoveryStore

@@ -468,7 +468,7 @@ func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.
 	} else {
 		cfg.Identity = managerRuntimeAgentIdentityForFlowPath(cfg.ID, cfg.FlowPath)
 	}
-	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmission(t)}, false, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
+	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmission(t)}, true, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
 		t.Fatalf("register receipt test agent: %v", err)
 	}
 }
@@ -1189,7 +1189,7 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 		ID:            agent.ID(),
 		Identity:      managerAgentIdentity(agent.ID()),
 		Subscriptions: []string{"test.lane.root", "test.lane.child"},
-	})}, false); err != nil {
+	})}, true); err != nil {
 		t.Fatalf("spawn lane test agent: %v", err)
 	}
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {

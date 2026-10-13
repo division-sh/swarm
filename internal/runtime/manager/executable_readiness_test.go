@@ -318,6 +318,7 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 			if err != nil {
 				t.Fatalf("construct persisted agent: %v", err)
 			}
+			seedUnitAgentLifecycle(t, am, rec)
 			if err := am.adoptPersistedAgentForLifecycle(testAuthorActivityContext(context.Background()), am.semanticSource, rec); err != nil {
 				t.Fatalf("adopt persisted agent: %v", err)
 			}
@@ -590,6 +591,7 @@ func TestLifecycleOnlyAdoptionNeverStartsObsoleteAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedUnitAgentLifecycle(t, am, rec)
 	if err := am.adoptPersistedAgentLifecycleOnly(testAuthorActivityContext(context.Background()), rec); err != nil {
 		t.Fatalf("lifecycle-only adoption: %v", err)
 	}
@@ -645,6 +647,7 @@ func TestPersistedAdoptionOwnerFenceCompensatesWithoutRouteOrLoop(t *testing.T) 
 		t.Fatal(err)
 	}
 	bus.beforePublish = func() { am.lifecycle.requestShutdownTransition() }
+	seedUnitAgentLifecycle(t, am, rec)
 	if err := am.adoptPersistedAgentForLifecycle(testAuthorActivityContext(context.Background()), am.semanticSource, rec); err == nil {
 		t.Fatal("persisted adoption succeeded after manager owner fence")
 	}
