@@ -193,7 +193,7 @@ func declarativeEmitContractSourceForTest(t *testing.T, emittedEvents string) *r
 		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity:\n  legacy_entity: text?\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   emittedEvents + "custom.trigger:\n  reason: text\n  score: float\nbatch.submitted:\n  items: '[json]?'\n",
+		"events.yaml":   emittedEvents + "custom.trigger:\n  reason: text\n  score: float\nbatch.submitted:\n  items: {type: \"[json]?\"}\n",
 	})
 }
 

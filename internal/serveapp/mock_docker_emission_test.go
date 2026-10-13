@@ -36,7 +36,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: native-docker-emission\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs: [items.ready, proof.finished]\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("items.ready:\n  items: '[text]'\nitems.child:\n  value: text\nitems.processed:\n  value: text\n  request_event_id: text\nproof.finished:\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("items.ready:\n  items: [text]\nitems.child:\n  value: text\nitems.processed:\n  value: text\n  request_event_id: text\nproof.finished:\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			nodesPath := filepath.Join(root, "nodes.yaml")

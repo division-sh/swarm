@@ -15,7 +15,7 @@ types:
     note: text?
   Metadata:
     region: text?
-    notes: list<Note>
+    notes: [Note]
     by_name: map[text]Note
 `, `
 accounts:

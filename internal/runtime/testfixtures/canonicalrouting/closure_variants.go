@@ -369,9 +369,9 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {}\n  complete: {final: true}\npins:\n  inputs:\n    - score.dimension_complete\n  outputs:\n    - score.completed\n")
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: \"[DimensionScore]\"\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed:\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: [DimensionScore]\n")
 	return root
 }
 

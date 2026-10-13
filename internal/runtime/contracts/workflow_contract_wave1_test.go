@@ -811,7 +811,7 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 	for _, typeRef := range []string{"text??", "text? ", "[text?]"} {
 		t.Run(typeRef, func(t *testing.T) {
 			var doc TypeCatalogDocument
-			err := decodeNodeTestYAML([]byte("types:\n  Item:\n    value: '"+typeRef+"'\n"), &doc)
+			err := decodeNodeTestYAML([]byte("types:\n  Item:\n    value: {type: '"+typeRef+"'}\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "optional") {
 				t.Fatalf("yaml.Unmarshal error = %v, want optional-marker rejection", err)
 			}

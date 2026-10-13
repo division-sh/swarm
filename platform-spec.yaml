@@ -1117,8 +1117,8 @@ contract_formats:
       All other outputs need a real consuming relation; a complete destination address alone is insufficient.
       Payload fields are required by default. Exactly one trailing field-level
       `?` on the complete authored type marks a field optional and is removed
-      before scalar, named, list, or map type semantics are admitted. Mapping
-      list form may write `type: list?` with `of: T`; a `?` inside a list
+      before scalar, named, list, or map type semantics are admitted. Optional
+      lists use the explicit scalar metadata slot `type: '[T]?'`; a `?` inside a list
       element, map key/value, named type, or any other non-trailing position is
       invalid. The retired event-level `required:` list fails closed on
       presence, including through a YAML merge. Optional `key:` names one
@@ -2846,7 +2846,19 @@ type_system:
       Closed named sets of values. Each enum declares its members and an explicit default member: the canonical
       mapping form is `enums: {name: {values: [...], default: <member>}}`. Enum defaults are explicit, never implied
       by member order; non-mapping declarations and omitted/non-member defaults are ordinary contract-load errors.
-    lists: Ordered collections of a declared element type.
+    lists: |
+      Ordered collections of a declared element type. The sole authored list
+      declaration is a sequence with exactly one plain, unquoted type token:
+      `items: [T]`. A block sequence preserves a parameterized token containing
+      a comma, such as `amounts:` followed by `- numeric(5,2)`; the flow sequence
+      `[numeric(5,2)]` contains two YAML items and is invalid.
+      Bare quoted bracket references and quoted singleton elements are not
+      declarations and cannot become implicit initial values. Real metadata
+      mappings retain their explicit scalar type-reference slot, such as
+      `type: '[T]'` or `type: '[T]?'`; initial/default data remains separate.
+      `list<T>` and `type: list` with `of: T` fail on presence and teach `[T]`,
+      including nested references, null/empty values, aliases and YAML merges.
+      No compatibility reader or old-source/store migration is supported.
     opaque_json: |
       The supported json field type is an opaque JSON value: string, boolean,
       supported number, array or object. It does not establish a named-record
@@ -3165,7 +3177,7 @@ entity_contracts:
       handler accumulator must be declared with `accumulate.into:
       <accumulator_name>`.
     target_type: |
-      The target field must be `list<NamedType>` or `[NamedType]`. The source
+      The target field must be `[NamedType]`. The source
       accumulator state_schema field named by `accumulate.into` must also be a
       named-type list. `jsonb`, `[text]`, and untyped structural targets are
       invalid for projection.
@@ -3337,7 +3349,7 @@ criteria_contracts:
       Event payload fields may declare citation metadata:
 
       cites:
-        type: text       # or [text] / list<text>
+        type: text       # or an explicit scalar type reference '[text]'
         citation:
           criteria: feasibility_exclusions
           allowed_classes: [hard]
@@ -4057,7 +4069,7 @@ handler_specification:
       sub_fields:
         into: 'string — optional explicit accumulator buffer name. Required when any entity field declares
           materialize_from: <this_node>.<into>. Must resolve to a state_schema field on this node typed as
-          list<NamedType> or [NamedType]. Within one node, a given into value may be declared by at most one handler.'
+          [NamedType]. Within one node, a given into value may be declared by at most one handler.'
         from: string — optional sender path filter
         description: string — human-readable note
         key: >-

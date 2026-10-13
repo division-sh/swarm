@@ -184,7 +184,7 @@ pins:
     ok: boolean
 `,
 		"events.yaml": `order.started:
-  expected: "[text]"
+  expected: [text]
   dispatch_id: text
 order.dispatched:
 item.completed:
@@ -264,7 +264,7 @@ stages:
   note: text
   review_score: integer
   business_brief: Brief
-  feature_list: list<Feature>
+  feature_list: [Feature]
   review_scores: map[text]integer
 `,
 		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
