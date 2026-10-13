@@ -219,13 +219,15 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ProviderCredentials: credentialStore,
 				ChannelActivations:  activationOwner,
 			})
+			constructionOwner := any(eventStore).(runtimebus.FlowInstanceActivationCommitOwner)
+			parent := seedRuntimeTestKeylessSource(t, ctx, constructionOwner, coordinator, semanticview.RootExecutionFlowID(source))
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowInstance)}
 			{
 				construction224Ctx := testLiveExecutionContext(ctx)
 				construction224At := time.Now().UTC()
 				construction224Instance, construction224Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction224Ctx, owner, runtimepipeline.WorkflowInstance{
 					InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
-					ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
+					ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
 					EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
 					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Fields: map[string]any{},
 				}, construction224At)
@@ -236,7 +238,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				if err != nil {
 					t.Fatalf("prepare fixture activation command: %v", err)
 				}
-				construction224Committed, err := any(eventStore).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction224Ctx, construction224Command)
+				construction224Committed, err := constructionOwner.CommitFlowInstanceActivation(construction224Ctx, construction224Command)
 				if err != nil {
 					t.Fatalf("materialize configured channel flow instance: %v", err)
 				}
