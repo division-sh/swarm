@@ -359,7 +359,10 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 		bindings[view.Paths.FlowPath] = scope
 	}
 	records := b.canonicalCurrentEventDeclarationRecords()
-	generated := b.generatedActivityDeclarationRecords()
+	generated, err := b.generatedActivityDeclarationRecords()
+	if err != nil {
+		return err
+	}
 	authoredCount := len(records)
 	records = append(records, generated...)
 	for i, record := range records {

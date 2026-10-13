@@ -140,7 +140,10 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 			continue
 		}
 		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
-			results := runtimecontracts.ActivityResultEventsForSite(site)
+			results, err := runtimecontracts.ActivityResultEventsForSite(site)
+			if err != nil {
+				continue
+			}
 			eventTypes := []string{results.SuccessEvent, results.FailureEvent}
 			if site.Spec.Approval != nil {
 				eventTypes = append(eventTypes, results.RevisionRequested, results.Rejected)
