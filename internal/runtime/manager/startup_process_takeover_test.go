@@ -160,7 +160,7 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	}
 	manager := &AgentManager{
 		store:     store,
-		lifecycle: newAgentLifecycleCoordinator(store, nil, nil, store, nil),
+		lifecycle: newAgentLifecycleCoordinator(store, nil, store, nil),
 		roles:     PersistenceRoles{LifecycleCensus: store, LifecycleState: store},
 	}
 

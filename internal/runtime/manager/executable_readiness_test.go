@@ -58,14 +58,13 @@ func TestCommittedReadinessCannotConstructMissingStaticDeclaration(t *testing.T)
 
 func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-state")
-	c := newAgentLifecycleCoordinator(nil, nil, newProjectionTestBus(), nil, nil)
+	c := newAgentLifecycleCoordinator(nil, newProjectionTestBus(), nil, nil)
 	c.phase = runtimeLifecycleRunning
 	c.runMode = AgentRunModeStandard
 	c.runCtx = context.Background()
 	token := lifecycleToken(identity, 1, 1)
 	cell := &agentLifecycleCell{
-		identity: identity, epoch: 1, generation: 1,
-		phase: AgentLifecycleRegistered, runMode: AgentRunModeStandard,
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 1, Generation: 1, Phase: AgentLifecycleRegistered, RunMode: AgentRunModeStandard},
 	}
 	c.cells[identity] = cell
 	assertState := func(want committedRouteState) {
@@ -76,7 +75,7 @@ func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 		}
 	}
 	assertState(committedRouteMaterializable)
-	cell.phase = AgentLifecycleRunning
+	cell.view.Phase = AgentLifecycleRunning
 	cell.execution = &agentExecutionProjection{
 		agent: &projectionTestAgent{id: "test-agent"}, token: token,
 		generationCtx: context.Background(), loopDone: make(chan struct{}),
@@ -104,9 +103,9 @@ func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 	cell.terminalSet.completed = true
 	assertState(committedRouteUnavailable)
 	cell.terminalSet = nil
-	cell.phase = AgentLifecycleFailed
+	cell.view.Phase = AgentLifecycleFailed
 	assertState(committedRouteUnavailable)
-	cell.phase = AgentLifecycleTerminated
+	cell.view.Phase = AgentLifecycleTerminated
 	assertState(committedRouteUnavailable)
 	delete(c.cells, identity)
 	assertState(committedRouteAbsent)
@@ -114,9 +113,9 @@ func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 
 func TestCommittedRouteFinalizationPreservesIndependentFailures(t *testing.T) {
 	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-errors")
-	c := newAgentLifecycleCoordinator(nil, nil, newProjectionTestBus(), nil, nil)
+	c := newAgentLifecycleCoordinator(nil, newProjectionTestBus(), nil, nil)
 	c.phase = runtimeLifecycleRunning
-	cell := &agentLifecycleCell{identity: identity, phase: AgentLifecycleRegistered, routeTransitions: 1}
+	cell := &agentLifecycleCell{identity: identity, routeTransitions: 1, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), Phase: AgentLifecycleRegistered}}
 	c.cells[identity] = cell
 	am := &AgentManager{lifecycle: c}
 	retirement := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_retirement_pending", "agent-lifecycle", "lifecycle_mutation", nil)
@@ -152,12 +151,12 @@ func TestCommittedRouteFinalizationPreservesIndependentFailures(t *testing.T) {
 	}
 
 	cell.routeTransitions = 0
-	cell.phase = AgentLifecycleRunning
-	cell.epoch, cell.generation = 1, 1
-	cell.runMode = AgentRunModeStandard
+	cell.view.Phase = AgentLifecycleRunning
+	cell.view.RuntimeEpoch, cell.view.Generation = 1, 1
+	cell.view.RunMode = AgentRunModeStandard
 	c.runMode = AgentRunModeStandard
 	c.runCtx = context.Background()
-	token := lifecycleToken(identity, cell.epoch, cell.generation)
+	token := lifecycleToken(identity, cell.view.RuntimeEpoch, cell.view.Generation)
 	cell.execution = &agentExecutionProjection{
 		agent: &projectionTestAgent{id: "test-agent"}, token: token, routeToken: token,
 		generationCtx: context.Background(), loopDone: make(chan struct{}),
@@ -184,7 +183,7 @@ func TestCommittedRouteFinalizationPreservesIndependentFailures(t *testing.T) {
 		t.Fatalf("retiring route lost independent failure: %v", got)
 	}
 	cell.retirement = nil
-	cell.phase = AgentLifecycleFailed
+	cell.view.Phase = AgentLifecycleFailed
 	if got := am.committedRouteFinalizeError(context.Background(), identity, retirement); errors.Is(got, runtimebus.ErrCommittedAgentRouteTransition) {
 		t.Fatalf("failed agent became transient: %v", got)
 	}
@@ -193,10 +192,10 @@ func TestCommittedRouteFinalizationPreservesIndependentFailures(t *testing.T) {
 func TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor(t *testing.T) {
 	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-successor")
 	bus := newProjectionTestBus()
-	c := newAgentLifecycleCoordinator(nil, nil, bus, nil, nil)
+	c := newAgentLifecycleCoordinator(nil, bus, nil, nil)
 	c.phase = runtimeLifecycleRunning
-	predecessor := &agentLifecycleCell{identity: identity, routeTransitions: 1}
-	successor := &agentLifecycleCell{identity: identity, routeTransitions: 1}
+	predecessor := &agentLifecycleCell{identity: identity, routeTransitions: 1, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID()}}
+	successor := &agentLifecycleCell{identity: identity, routeTransitions: 1, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID()}}
 	c.cells[identity] = successor
 	am := &AgentManager{lifecycle: c}
 	am.completeCommittedRouteTransition(predecessor)
@@ -211,9 +210,9 @@ func TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor(t *testing.T)
 func TestCommittedRouteRetirementCompletionSignalsAfterStateClears(t *testing.T) {
 	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-retirement")
 	bus := newProjectionTestBus()
-	c := newAgentLifecycleCoordinator(nil, nil, bus, nil, nil)
+	c := newAgentLifecycleCoordinator(nil, bus, nil, nil)
 	execution := &agentExecutionProjection{}
-	cell := &agentLifecycleCell{identity: identity, phase: AgentLifecycleTerminated, execution: execution}
+	cell := &agentLifecycleCell{identity: identity, execution: execution, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), Phase: AgentLifecycleTerminated}}
 	retirement := &agentRetirement{cell: cell, execution: execution}
 	cell.retirement = retirement
 	c.cells[identity] = cell
@@ -469,8 +468,8 @@ func TestExecutablePreparationAcceptsTakenOverRunningDurableState(t *testing.T) 
 	}
 	am.lifecycle.mu.Lock()
 	cell := am.lifecycle.cells[identity]
-	cell.phase = AgentLifecycleRunning
-	cell.runMode = AgentRunModeStandard
+	cell.view.Phase = AgentLifecycleRunning
+	cell.view.RunMode = AgentRunModeStandard
 	am.lifecycle.mu.Unlock()
 	readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
 	if err != nil || readiness.Kind != executableAgentPreparedBeforeRun || readiness.State.Phase != AgentLifecycleRunning {
@@ -518,13 +517,13 @@ func TestExecutableReadinessRejectsPartialLiveManagerProjections(t *testing.T) {
 		mutate func(*agentLifecycleCell)
 	}{
 		{name: "registered_stopped", mutate: func(cell *agentLifecycleCell) {
-			cell.phase = AgentLifecycleRegistered
-			cell.runMode = AgentRunModeStopped
+			cell.view.Phase = AgentLifecycleRegistered
+			cell.view.RunMode = AgentRunModeStopped
 		}},
-		{name: "failed", mutate: func(cell *agentLifecycleCell) { cell.phase = AgentLifecycleFailed }},
-		{name: "terminal", mutate: func(cell *agentLifecycleCell) { cell.phase = AgentLifecycleTerminated }},
+		{name: "failed", mutate: func(cell *agentLifecycleCell) { cell.view.Phase = AgentLifecycleFailed }},
+		{name: "terminal", mutate: func(cell *agentLifecycleCell) { cell.view.Phase = AgentLifecycleTerminated }},
 		{name: "fenced", mutate: func(cell *agentLifecycleCell) { cell.execution.fenced = true }},
-		{name: "wrong_mode", mutate: func(cell *agentLifecycleCell) { cell.runMode = AgentRunModeAuthoritativeDeliveryOnly }},
+		{name: "wrong_mode", mutate: func(cell *agentLifecycleCell) { cell.view.RunMode = AgentRunModeAuthoritativeDeliveryOnly }},
 		{name: "missing_route", mutate: func(cell *agentLifecycleCell) {
 			cell.execution.route = nil
 			cell.execution.routeToken = runtimeeffects.LifecycleToken{}
@@ -657,7 +656,7 @@ func TestPersistedAdoptionOwnerFenceCompensatesWithoutRouteOrLoop(t *testing.T) 
 		t.Fatal("compensated adoption lifecycle cell missing")
 	}
 	am.lifecycle.mu.Lock()
-	phase := cell.phase
+	phase := cell.view.Phase
 	loopDone := cell.execution.loopDone
 	route := cell.execution.route
 	routeToken := cell.execution.routeToken

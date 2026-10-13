@@ -41213,6 +41213,19 @@ agent_lifecycle_authority:
       no-op currentness fence. Session/effect mutations consume the same owner in
       their original transaction. Immutable operation outcomes remain historical
       evidence, not a replacement for current-row execution admission.
+    process_cache: >-
+      The coordinator retains one typed committed AgentLifecycleState view plus
+      separately owned executable resources. Mutating entrances observe the current
+      row while holding their exact operation lock; an obsolete physical projection
+      cannot acquire new rights by refreshing only its token. Hydration reads the
+      durable row and requires the admitted config/topology, rather than adopting
+      lifecycle fields supplied by a descriptor. Committed execution adoption reads
+      the current row and its exact last transition; a historical outcome cannot
+      resurrect execution. A lost replacement acknowledgment retains the exact
+      request until the immutable outcome owner resolves it without a new mutation;
+      execution is adopted only after the current row confirms that outcome.
+      No store-less or session-registry lifecycle projection exists. Cleanup failure
+      fences and retains physical responsibility without inventing a durable failed phase.
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
@@ -41313,6 +41326,11 @@ agent_lifecycle_authority:
       complete-instance rebind owner. Individual replacements, including changed-plan
       actors named source_set_rebind, still advance exactly one generation. Operation
       kind alone never admits a same-generation write.
+      A running source_set_rebind replacement carries its exact validated successor Agent
+      projection; a bare running generation advance is forbidden. Registered/stopped
+      non-executable preparation and terminal operations retain their distinct admitted shapes.
+      Self-release changes only running to registered/stopped, preserving epoch, generation,
+      config revision and topology, with no Agent replacement or subordinate mutation.
     runtime_shutdown_reset:
       owner: one retained runtime lifecycle transition in the AgentManager lifecycle coordinator
       shutdown: The watcher claims and executes one shutdown transition, closes admission, cancels the run generation, removes exact routes, joins loop completion, loop settlement, direct execution leases, retry work, and its own watcher lease, then publishes one result. Every explicit caller waits for that same result; its grace budget may add a timeout error but never permits an early return before accepted work settles.
@@ -41322,7 +41340,7 @@ agent_lifecycle_authority:
       rule: A running agent generation is reachable only after its Manager run lease and exact lifecycle route authority are both prepared. The lifecycle transition may then commit the running cell. Route publication revalidates the still-live Manager owner, and the execution loop launches last using the already-admitted lease. Both standard and authoritative-delivery-only startup propagate every preparation, persistence, publication, or owner-fence failure.
       compensation: Any failure or publication panic after durable running-state commit removes or discards the exact prepared route, cancels and settles the unlaunched generation completion authority, conditionally self-releases the same durable generation to registered/stopped, settles the prepared Manager lease, and returns the error. Compensation does not mint another lifecycle operation kind or advance generation. No running durable cell, reachable route, open completion, or detached loop may survive compensation.
     subordinate_resource_transaction:
-      owner: the selected SQLite/Postgres lifecycle transition transaction, or the in-memory lifecycle projection under the coordinator lock
+      owner: the selected SQLite/Postgres lifecycle transition transaction
       plan:
         actions: [none, rotate_current_set, terminate_current_set]
         identity: The normalized subordinate plan is part of the lifecycle request hash. Unknown actions or changed-plan replay under one operation_id fail closed.

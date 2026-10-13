@@ -665,12 +665,17 @@ func validateLifecycleGeneration(req runtimemanager.AgentLifecycleTransition, pr
 	if exists {
 		want = previous.Generation + 1
 		if req.OperationKind == "self_release" {
+			if !selfReleasePhaseOnly(req, previous) {
+				return lifecycleConflict(req, previous, true)
+			}
 			want = previous.Generation
 		} else if instanceRebind || req.TargetGeneration == previous.Generation {
 			if !sourceSetSurvivorRebind(req, previous, instanceRebind) {
 				return lifecycleConflict(req, previous, true)
 			}
 			want = previous.Generation
+		} else if req.OperationKind == "source_set_rebind" && !sourceSetReplacementShape(req) {
+			return lifecycleConflict(req, previous, true)
 		}
 	}
 	if want == 0 || req.TargetGeneration != want {
@@ -983,14 +988,14 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 	return outcome, nil
 }
 
-func loadPostgresLifecycleOperationResult(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+func loadPostgresLifecycleOperationResult(ctx context.Context, tx rowQueryer, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
 	var requestHash string
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT request_hash, result FROM agent_lifecycle_operations WHERE operation_id = $1::uuid`, req.OperationID).Scan(&requestHash, &raw)
 	return decodeLifecycleOperationResult(req, requestHash, raw, err)
 }
 
-func loadSQLiteLifecycleOperationResult(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+func loadSQLiteLifecycleOperationResult(ctx context.Context, tx rowQueryer, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
 	var requestHash string
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT request_hash, result FROM agent_lifecycle_operations WHERE operation_id = ?`, req.OperationID).Scan(&requestHash, &raw)

@@ -928,6 +928,19 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	if err != nil || !replayed.Replayed || replayed.TransitionID != result.TransitionID {
 		t.Fatalf("exact source-set rebind replay = %#v err=%v, want transition %s", replayed, err, result.TransitionID)
 	}
+	outcomeReader, ok := store.(runtimemanager.AgentLifecycleOutcomeReader)
+	if !ok {
+		t.Fatal("native lifecycle outcome reader is missing")
+	}
+	observed, found, err := outcomeReader.ReadAgentLifecycleOutcome(ctx, request)
+	if err != nil || !found || !reflect.DeepEqual(observed, replayed) {
+		t.Fatalf("read exact immutable outcome without another mutation: observed=%#v replay=%#v found=%v err=%v", observed, replayed, found, err)
+	}
+	foreign := request
+	foreign.Identity, foreign.AgentID = testAgentIdentity(t, "foreign-outcome-reader", "global"), "foreign-outcome-reader"
+	if _, _, err := outcomeReader.ReadAgentLifecycleOutcome(ctx, foreign); err == nil {
+		t.Fatal("foreign identity read another agent's outcome")
+	}
 	changed := request
 	changed.RequestHash = "source-set-rebind-conflict"
 	if _, err := grant.CommitAgentLifecycleTransition(ctx, changed); err == nil {
@@ -949,8 +962,11 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	replacement := request
 	replacement.OperationID, replacement.RequestHash = uuid.NewString(), "individual-replacement"
 	replacement.TargetGeneration++
-	advanced, err := grant.CommitAgentLifecycleTransition(ctx, replacement)
-	if err != nil || advanced.Generation != before.Generation+1 {
-		t.Fatalf("same-named individual replacement: result=%#v err=%v", advanced, err)
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, replacement); err == nil {
+		t.Fatal("running source-set rebind advanced generation without replacement execution evidence")
+	}
+	unchanged, found, err = store.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || !reflect.DeepEqual(after, unchanged) {
+		t.Fatalf("bare running replacement changed current row: before=%#v after=%#v found=%v err=%v", after, unchanged, found, err)
 	}
 }

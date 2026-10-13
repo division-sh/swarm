@@ -44,7 +44,13 @@ func TestAgentLifecycleGenerationMutationClassShapes(t *testing.T) {
 		valid  bool
 	}{
 		{name: "static_survivor", valid: true},
-		{name: "same_named_replacement", valid: true, mutate: func(r *manager.AgentLifecycleTransition) { r.TargetGeneration++ }},
+		{name: "bare_running_replacement", mutate: func(r *manager.AgentLifecycleTransition) { r.TargetGeneration++ }},
+		{name: "same_named_replacement", valid: true, mutate: func(r *manager.AgentLifecycleTransition) { r.TargetGeneration++; r.Agent = &manager.PersistedAgent{} }},
+		{name: "non_executable_preparation", valid: true, mutate: func(r *manager.AgentLifecycleTransition) {
+			r.TargetGeneration++
+			r.TargetPhase = manager.AgentLifecycleRegistered
+			r.RunMode = manager.AgentRunModeStopped
+		}},
 		{name: "skipped_generation", mutate: func(r *manager.AgentLifecycleTransition) { r.TargetGeneration += 2 }},
 		{name: "reused_restart_generation", mutate: func(r *manager.AgentLifecycleTransition) { r.OperationKind = "restart" }},
 		{name: "changed_epoch", mutate: func(r *manager.AgentLifecycleTransition) { r.TargetEpoch++ }},

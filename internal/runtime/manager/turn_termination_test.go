@@ -28,7 +28,7 @@ func TestManagerTerminationDispatchIncludesOwnedRetiringExecutions(t *testing.T)
 			defer func() { _, _ = other.Finish() }()
 			lease := &agentExecutionLease{}
 			execution := &agentExecutionProjection{leases: map[*agentExecutionLease]struct{}{lease: {}, {turn: other}: {}}}
-			cell := &agentLifecycleCell{identity: identity, execution: execution}
+			cell := &agentLifecycleCell{identity: identity, execution: execution, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID()}}
 			am.lifecycle.cells[identity] = cell
 			if err := am.attachLogicalTurn(context.WithValue(ctx, agentExecutionLeaseContextKey{}, lease), turn); err != nil {
 				t.Fatal(err)

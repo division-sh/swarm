@@ -60,13 +60,8 @@ func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtime
 type agentLifecycleCell struct {
 	identity         runtimeagentidentity.Identity
 	opMu             sync.Mutex
-	epoch            int64
-	generation       uint64
-	phase            AgentLifecyclePhase
-	configRevision   string
-	runMode          AgentRunMode
-	topology         runtimeagenttopology.Admission
-	processBinding   ProcessExecutionBinding
+	view             AgentLifecycleState
+	unacknowledged   *unacknowledgedAgentReplacement
 	execution        *agentExecutionProjection
 	routeTransitions int
 	retirement       *agentRetirement
@@ -196,7 +191,7 @@ func (c *agentLifecycleCoordinator) committedRouteStateByIdentity(identity runti
 	}
 	state := lifecycleStateFromCell(cell)
 	if cell.routeTransitions > 0 && c.routes != nil &&
-		cell.phase != AgentLifecycleFailed && cell.phase != AgentLifecycleTerminated {
+		cell.view.Phase != AgentLifecycleFailed && cell.view.Phase != AgentLifecycleTerminated {
 		return committedRouteLaunching, executableAgentReadiness{State: state}, nil
 	}
 	if cell.retirement != nil || cell.terminalSet != nil {
@@ -212,11 +207,11 @@ func (c *agentLifecycleCoordinator) committedRouteStateByIdentity(identity runti
 		}
 		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
 	}
-	if cell.phase == AgentLifecycleFailed || cell.phase == AgentLifecycleTerminated {
+	if cell.view.Phase == AgentLifecycleFailed || cell.view.Phase == AgentLifecycleTerminated {
 		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
 	}
 	if cell.execution == nil || cell.execution.agent == nil {
-		if cell.phase == AgentLifecycleRegistered {
+		if cell.view.Phase == AgentLifecycleRegistered {
 			return committedRouteMaterializable, executableAgentReadiness{State: state}, nil
 		}
 		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
@@ -254,11 +249,7 @@ func lifecycleStateFromCell(cell *agentLifecycleCell) AgentLifecycleState {
 	if cell == nil {
 		return AgentLifecycleState{}
 	}
-	return AgentLifecycleState{
-		Identity: cell.identity, AgentID: cell.identity.AgentID(), RuntimeEpoch: cell.epoch,
-		Generation: cell.generation, Phase: cell.phase, ConfigRevision: cell.configRevision,
-		RunMode: cell.runMode, Topology: cell.topology, ProcessBinding: cell.processBinding,
-	}
+	return cell.view
 }
 
 func executionPreparedBeforeRunLocked(cell *agentLifecycleCell) bool {
@@ -266,9 +257,9 @@ func executionPreparedBeforeRunLocked(cell *agentLifecycleCell) bool {
 		return false
 	}
 	execution := cell.execution
-	token := lifecycleToken(cell.identity, cell.epoch, cell.generation)
-	phasePrepared := (cell.phase == AgentLifecycleRegistered && cell.runMode == AgentRunModeStopped) ||
-		cell.phase == AgentLifecycleRunning
+	token := lifecycleToken(cell.identity, cell.view.RuntimeEpoch, cell.view.Generation)
+	phasePrepared := (cell.view.Phase == AgentLifecycleRegistered && cell.view.RunMode == AgentRunModeStopped) ||
+		cell.view.Phase == AgentLifecycleRunning
 	return phasePrepared &&
 		execution.agent != nil && execution.token == token && !execution.fenced &&
 		execution.generationCtx != nil && execution.generationCtx.Err() == nil &&
@@ -282,8 +273,8 @@ func (c *agentLifecycleCoordinator) executionRunnableCurrentOccurrenceLocked(cel
 		return false
 	}
 	execution := cell.execution
-	token := lifecycleToken(cell.identity, cell.epoch, cell.generation)
-	return cell.phase == AgentLifecycleRunning && cell.runMode == c.runMode &&
+	token := lifecycleToken(cell.identity, cell.view.RuntimeEpoch, cell.view.Generation)
+	return cell.view.Phase == AgentLifecycleRunning && cell.view.RunMode == c.runMode &&
 		execution.agent != nil && execution.token == token && execution.routeToken == token &&
 		!execution.fenced && execution.generationCtx != nil && execution.generationCtx.Err() == nil &&
 		execution.loopDone != nil && signalPending(execution.loopDone) &&
@@ -358,7 +349,6 @@ type agentLifecycleCoordinator struct {
 	store               AgentLifecyclePersistence
 	stateReader         AgentLifecycleStateReader
 	effectsStore        runtimeeffects.Store
-	sessions            runtimesessions.LifecycleProjection
 	phase               runtimeLifecyclePhase
 	runMode             AgentRunMode
 	runCtx              context.Context
@@ -551,10 +541,13 @@ func (c *agentLifecycleCoordinator) context() context.Context {
 	return context.Background()
 }
 
-func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, sessionLifecycle runtimesessions.LifecycleProjection, routes AgentRouteBus, stateReader AgentLifecycleStateReader, effectsStore runtimeeffects.Store) *agentLifecycleCoordinator {
+func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, routes AgentRouteBus, stateReader AgentLifecycleStateReader, effectsStore runtimeeffects.Store) *agentLifecycleCoordinator {
+	if stateReader == nil {
+		stateReader, _ = store.(AgentLifecycleStateReader)
+	}
 	coordinator := &agentLifecycleCoordinator{
 		store: store, phase: runtimeLifecycleStopped, runMode: AgentRunModeStopped,
-		cells: map[runtimeagentidentity.Identity]*agentLifecycleCell{}, sessions: sessionLifecycle,
+		cells:  map[runtimeagentidentity.Identity]*agentLifecycleCell{},
 		routes: routes, stateReader: stateReader, effectsStore: effectsStore,
 		diagnosticOrigin: LifecycleDiagnosticOrigin{Owner: LifecycleDiagnosticNormal, Causality: LifecycleDiagnosticObservation},
 	}
@@ -599,7 +592,7 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 		if flowInstance != "" && identity.FlowInstance() != flowInstance {
 			continue
 		}
-		if !includeTerminated && (cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed) {
+		if !includeTerminated && (cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed) {
 			continue
 		}
 		candidates = append(candidates, identity.Normalize())
@@ -923,29 +916,21 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
 	existingCell := c.cells[identity]
-	if existingCell != nil && existingCell.phase != AgentLifecycleTerminated {
+	if existingCell != nil && existingCell.view.Phase != AgentLifecycleTerminated {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
 	}
 	epoch := rec.LifecycleEpoch
 	generation := rec.LifecycleGeneration
-	phase := rec.LifecyclePhase
-	mode := rec.LifecycleRunMode
-	processBinding := rec.ProcessBinding
 	store := c.persistence()
+	view, found, err := c.loadAgentView(ctx, identity)
+	if err != nil {
+		return err
+	}
 	if epoch <= 0 {
 		epoch = runtimebus.CurrentRuntimeEpoch()
 	}
 	if generation == 0 && persist {
 		generation = 1
-	}
-	if generation == 0 && store == nil {
-		generation = 1
-	}
-	if phase == "" {
-		phase = AgentLifecycleRegistered
-	}
-	if mode == "" {
-		mode = AgentRunModeStopped
 	}
 	now := time.Now().UTC()
 	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
@@ -954,10 +939,10 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	}
 	operationID := uuid.NewString()
 	requestHash := lifecycleRequestHashForIdentity(identity, topology, "spawn", revision, planHash)
-	if persist && store != nil {
-		previous, terminated, err := c.terminatedLifecycleState(ctx, identity, existingCell)
-		if err != nil {
-			return err
+	if persist {
+		previous, terminated := view, found && view.Phase == AgentLifecycleTerminated
+		if found && !terminated {
+			return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
 		}
 		transition := AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: "spawn", Identity: identity, AgentID: agentID, Trigger: "spawn",
@@ -1002,17 +987,14 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		if err != nil {
 			return err
 		}
-		epoch, generation, phase, mode = result.RuntimeEpoch, result.Generation, result.Phase, result.RunMode
-		processBinding = result.ProcessBinding
-	} else if c.sessions != nil {
-		if _, _, err := c.sessions.ApplyLifecycleProjection(ctx, runtimesessions.LifecycleProjectionRequest{
-			OperationID: operationID, RequestHash: requestHash,
-			Target:      lifecycleToken(identity, epoch, generation),
-			TargetPhase: string(AgentLifecycleRegistered), Plan: plan, Now: now,
-		}); err != nil {
+		view, err = c.committedAgentView(ctx, result)
+		if err != nil {
 			return err
 		}
+	} else if !found || !lifecycleProjectionEqual(view.ConfigRevision, view.Topology, revision, topology) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_hydration_view_mismatch", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
 	}
+	epoch, generation = view.RuntimeEpoch, view.Generation
 	generationCtx, cancelGeneration := context.WithCancel(c.context())
 	var standingOwner *worklifetime.StandingOccurrence
 	if owner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
@@ -1029,9 +1011,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	}
 	execution.subscriptions = admittedSubscriptionEventTypes(admission)
 	c.cells[identity] = &agentLifecycleCell{
-		identity: identity, epoch: epoch, generation: generation, phase: phase,
-		configRevision: revision, runMode: mode, topology: topology,
-		processBinding: processBinding, execution: execution,
+		identity: identity, view: view, execution: execution,
 	}
 	if readinessOwner != nil {
 		cell := c.cells[identity]
@@ -1039,36 +1019,6 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		*readinessOwner = cell
 	}
 	return nil
-}
-
-func (c *agentLifecycleCoordinator) terminatedLifecycleState(
-	ctx context.Context,
-	identity runtimeagentidentity.Identity,
-	cell *agentLifecycleCell,
-) (AgentLifecycleState, bool, error) {
-	agentID := identity.AgentID()
-	if cell != nil {
-		return AgentLifecycleState{
-			Identity: identity, AgentID: agentID, RuntimeEpoch: cell.epoch, Generation: cell.generation,
-			Phase: cell.phase, ConfigRevision: cell.configRevision, RunMode: cell.runMode, Topology: cell.topology,
-			ProcessBinding: cell.processBinding,
-		}, cell.phase == AgentLifecycleTerminated, nil
-	}
-	reader := c.stateReader
-	if reader == nil {
-		return AgentLifecycleState{}, false, nil
-	}
-	state, found, err := reader.LoadAgentLifecycleState(ctx, identity)
-	if err != nil {
-		return AgentLifecycleState{}, false, err
-	}
-	if !found {
-		return AgentLifecycleState{}, false, nil
-	}
-	if state.Phase != AgentLifecycleTerminated {
-		return AgentLifecycleState{}, false, fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
-	}
-	return state, true, nil
 }
 
 func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {
@@ -1488,10 +1438,10 @@ func (c *agentLifecycleCoordinator) prepareLoopTokenLocked(identity runtimeagent
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell := c.cells[identity]
-	if cell == nil || cell != lockedCell || cell.identity != identity || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell != lockedCell || cell.identity != identity || cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed {
 		return runtimeeffects.LifecycleToken{}, fmt.Errorf("%w: %s", ErrAgentNotFound, identity.Description())
 	}
-	return lifecycleToken(identity, runtimebus.CurrentRuntimeEpoch(), cell.generation+1), nil
+	return lifecycleToken(identity, runtimebus.CurrentRuntimeEpoch(), cell.view.Generation+1), nil
 }
 
 func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
@@ -1531,8 +1481,20 @@ func (c *agentLifecycleCoordinator) lockIdentityOperationMode(
 		cell.opMu.Unlock()
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_retirement_pending", "agent-lifecycle", "lifecycle_mutation", map[string]any{"agent": identity.Description()})
 	}
-	valid := current == cell && current.phase != AgentLifecycleTerminated &&
-		(includeFailed || current.phase != AgentLifecycleFailed)
+	if current == cell {
+		if err := c.refreshAgentViewLocked(c.context(), cell); err != nil {
+			c.mu.Unlock()
+			cell.opMu.Unlock()
+			return nil, err
+		}
+	}
+	valid := current == cell && current.view.Phase != AgentLifecycleTerminated &&
+		(includeFailed || current.view.Phase != AgentLifecycleFailed)
+	if valid && cell.execution != nil && cell.execution.settlementErr != nil {
+		c.mu.Unlock()
+		cell.opMu.Unlock()
+		return nil, cell.execution.settlementErr
+	}
 	if valid && !ignoreSourceSetTransition {
 		if err := c.sourceSetTransitionConflictLocked("lifecycle_mutation", identity); err != nil {
 			c.mu.Unlock()
@@ -1556,7 +1518,7 @@ func (c *agentLifecycleCoordinator) executionSnapshotByIdentity(identity runtime
 	defer c.mu.Unlock()
 	cell := c.cells[identity.Normalize()]
 	if cell == nil || cell.execution == nil || cell.execution.agent == nil ||
-		cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed {
 		return agentExecutionSnapshot{}, false
 	}
 	return snapshotExecution(cell.execution), true
@@ -1570,7 +1532,7 @@ func (c *agentLifecycleCoordinator) executionIdentities() []runtimeagentidentity
 	defer c.mu.Unlock()
 	identities := make([]runtimeagentidentity.Identity, 0, len(c.cells))
 	for identity, cell := range c.cells {
-		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.view.Phase != AgentLifecycleTerminated && cell.view.Phase != AgentLifecycleFailed {
 			identities = append(identities, identity)
 		}
 	}
@@ -1588,7 +1550,7 @@ func (c *agentLifecycleCoordinator) executionConfigs() []models.AgentConfig {
 	defer c.mu.Unlock()
 	configs := make([]models.AgentConfig, 0, len(c.cells))
 	for _, cell := range c.cells {
-		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.view.Phase != AgentLifecycleTerminated && cell.view.Phase != AgentLifecycleFailed {
 			configs = append(configs, cell.execution.config)
 		}
 	}
@@ -1657,7 +1619,7 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 		return nil, err
 	}
 	execution := cell.execution
-	running := cell.phase == AgentLifecycleRunning
+	running := cell.view.Phase == AgentLifecycleRunning
 	exactRoute := !exactRouteToken.Valid() || (execution != nil && execution.token == exactRouteToken && execution.routeToken == exactRouteToken)
 	generationLive := execution != nil && execution.generationCtx != nil && execution.generationCtx.Err() == nil
 	if execution == nil || execution.agent == nil || execution.fenced || !generationLive || (requireRunning && !running) || !exactRoute {
@@ -1722,7 +1684,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	identity := lockedCell.identity
 	c.mu.Lock()
 	cell := c.cells[identity]
-	if cell == nil || cell != lockedCell || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell != lockedCell || cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed {
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
@@ -1730,8 +1692,8 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 	}
-	previousEpoch, previousGeneration, previousPhase := cell.epoch, cell.generation, cell.phase
-	transitionTopology := cell.topology
+	previousEpoch, previousGeneration, previousPhase := cell.view.RuntimeEpoch, cell.view.Generation, cell.view.Phase
+	transitionTopology := cell.view.Topology
 	if topology != nil {
 		transitionTopology = *topology
 	}
@@ -1757,7 +1719,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		}
 		nextEpoch = preparedToken.RuntimeEpoch
 	}
-	revision := cell.configRevision
+	revision := cell.view.ConfigRevision
 	if rec != nil {
 		var err error
 		revision, err = lifecycleConfigRevision(*rec)
@@ -1766,16 +1728,16 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 	}
-	if trigger == "reconfigure" && lifecycleProjectionEqual(revision, transitionTopology, cell.configRevision, cell.topology) {
-		token := lifecycleToken(identity, cell.epoch, cell.generation)
+	if trigger == "reconfigure" && lifecycleProjectionEqual(revision, transitionTopology, cell.view.ConfigRevision, cell.view.Topology) {
+		token := lifecycleToken(identity, cell.view.RuntimeEpoch, cell.view.Generation)
 		c.mu.Unlock()
 		return nil, token, nil, nil
 	}
 	store := c.persistence()
 	operationKind := trigger
-	targetBinding := cell.processBinding
+	targetBinding := cell.view.ProcessBinding
 	if store != nil {
-		operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, trigger, false)
+		operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.view.ProcessBinding, trigger, false)
 		if err != nil {
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -1794,62 +1756,60 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		targetPhase = AgentLifecycleRegistered
 		targetMode = AgentRunModeStopped
 	}
+	if operationKind == "source_set_rebind" && targetPhase == AgentLifecycleRunning && rec == nil {
+		if previousExecution == nil || previousExecution.agent == nil {
+			c.mu.Unlock()
+			return nil, runtimeeffects.LifecycleToken{}, nil, errors.New("running source-set replacement requires its exact executable Agent projection")
+		}
+		rec = &PersistedAgent{Config: previousExecution.config, Topology: transitionTopology, Status: "active", HiredBy: trigger, StartedAt: previousExecution.startedAt}
+	}
 	now := time.Now().UTC()
 	requestHash := lifecycleRequestHashForIdentity(
 		identity, transitionTopology, operationKind, trigger, revision, planHash,
-		cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
+		cell.view.ProcessBinding.ProcessAuthorityID, cell.view.ProcessBinding.ProcessBootID,
 		targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 	)
-	result := AgentLifecycleTransitionResult{
-		OperationID: operationID, Identity: identity, AgentID: agentID,
-		PreviousEpoch: previousEpoch, RuntimeEpoch: nextEpoch,
-		PreviousGeneration: previousGeneration, Generation: nextGeneration,
-		PreviousPhase: previousPhase, Phase: targetPhase, ConfigRevision: revision, RunMode: targetMode,
-		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: plan.Action},
+	if store == nil {
+		c.mu.Unlock()
+		return nil, runtimeeffects.LifecycleToken{}, nil, errors.New("agent lifecycle requires its durable row owner")
 	}
-	if store != nil {
-		var err error
-		result, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
-			AgentID: agentID, Trigger: trigger, ExpectedEpoch: previousEpoch, ExpectedGeneration: previousGeneration,
-			ExpectedPhase: previousPhase, TargetEpoch: nextEpoch, TargetGeneration: nextGeneration,
-			TargetPhase: targetPhase, ConfigRevision: revision, RunMode: targetMode, Agent: rec, Subordinate: plan,
-			Topology: transitionTopology, Now: now,
-		})
+	request, err := c.lifecycleTransitionWithDiagnostic(ctx, AgentLifecycleTransition{
+		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
+		AgentID: agentID, Trigger: trigger, ExpectedEpoch: previousEpoch, ExpectedGeneration: previousGeneration,
+		ExpectedPhase: previousPhase, TargetEpoch: nextEpoch, TargetGeneration: nextGeneration,
+		TargetPhase: targetPhase, ConfigRevision: revision, RunMode: targetMode, Agent: rec, Subordinate: plan,
+		Topology: transitionTopology, Now: now,
+	})
+	if err != nil {
+		c.mu.Unlock()
+		return nil, runtimeeffects.LifecycleToken{}, nil, err
+	}
+	var result AgentLifecycleTransitionResult
+	if pending := cell.unacknowledged; pending != nil {
+		if pending.request.OperationID != request.OperationID || pending.request.RequestHash != request.RequestHash || pending.request.DiagnosticOrigin != request.DiagnosticOrigin {
+			c.mu.Unlock()
+			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_unacknowledged_request_conflict", "agent-lifecycle", trigger, map[string]any{"agent_identity": identity})
+		}
+		result = pending.outcome
+	} else {
+		result, err = store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), request)
 		if err != nil {
+			cell.unacknowledged = &unacknowledgedAgentReplacement{request: request}
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
-	} else if c.sessions != nil {
-		outcome, replayed, err := c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
-			OperationID: operationID, RequestHash: requestHash,
-			Expected:    lifecycleToken(identity, previousEpoch, previousGeneration),
-			Target:      lifecycleToken(identity, nextEpoch, nextGeneration),
-			TargetPhase: string(targetPhase), Plan: plan, Now: now,
-		})
-		if err != nil {
-			c.mu.Unlock()
-			return nil, runtimeeffects.LifecycleToken{}, nil, err
-		}
-		result.Subordinate = outcome
-		result.Replayed = replayed
 	}
-	if result.Replayed {
-		if result.RuntimeEpoch == cell.epoch && result.Generation == cell.generation && result.Phase == cell.phase {
-			token := lifecycleToken(identity, cell.epoch, cell.generation)
-			c.mu.Unlock()
-			return nil, token, nil, nil
-		}
-		if result.OperationID != operationID || result.AgentID != agentID ||
-			result.PreviousEpoch != cell.epoch || result.PreviousGeneration != cell.generation || result.PreviousPhase != cell.phase ||
-			result.RuntimeEpoch != nextEpoch || result.Generation != nextGeneration || result.Phase != targetPhase ||
-			result.ConfigRevision != revision || result.RunMode != targetMode {
-			c.mu.Unlock()
-			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
-		}
+	view, err := c.committedAgentView(context.WithoutCancel(ctx), result)
+	if err != nil {
+		c.mu.Unlock()
+		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
-	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode, cell.topology = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode, transitionTopology
-	cell.processBinding = result.ProcessBinding
+	cell.view = view
+	cell.unacknowledged = nil
+	if result.Replayed && previousExecution != nil && previousExecution.token == lifecycleToken(identity, view.RuntimeEpoch, view.Generation) && !previousExecution.fenced {
+		c.mu.Unlock()
+		return nil, previousExecution.token, nil, nil
+	}
 	if previousExecution != nil {
 		previousExecution.fenced = true
 	}
@@ -1874,7 +1834,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell = c.cells[identity]
-	if cell == nil || cell.epoch != result.RuntimeEpoch || cell.generation != result.Generation || cell.phase != result.Phase || cell.terminalSet != nil {
+	if cell == nil || cell.view.RuntimeEpoch != result.RuntimeEpoch || cell.view.Generation != result.Generation || cell.view.Phase != result.Phase || cell.terminalSet != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 	}
 	cell.retirement = nil
@@ -1961,7 +1921,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
 	cell = c.cells[token.Identity.Normalize()]
-	if cell == nil || cell.epoch != token.RuntimeEpoch || cell.generation != token.Generation || cell.execution == nil || cell.execution.loopDone != done {
+	if cell == nil || cell.view.RuntimeEpoch != token.RuntimeEpoch || cell.view.Generation != token.Generation || cell.execution == nil || cell.execution.loopDone != done {
 		c.mu.Unlock()
 		return nil
 	}
@@ -1983,71 +1943,60 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell = c.cells[token.Identity.Normalize()]
-	if cell == nil || cell.execution != execution || cell.epoch != token.RuntimeEpoch || cell.generation != token.Generation {
+	if cell == nil || cell.execution != execution || cell.view.RuntimeEpoch != token.RuntimeEpoch || cell.view.Generation != token.Generation {
 		return nil
 	}
+	currentView, found, err := c.loadAgentView(c.context(), cell.identity)
+	if err != nil || !found {
+		return errors.Join(err, errors.New("settling agent's durable row is unavailable"))
+	}
+	current := lifecycleToken(cell.identity, currentView.RuntimeEpoch, currentView.Generation) == token
 	store := c.persistence()
 	if execution.deferredTerminal != nil {
+		if !current {
+			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "deferred_terminal_generation_not_current", "agent-lifecycle", "self_settlement", map[string]any{"agent_identity": cell.identity})
+		}
 		pending := *execution.deferredTerminal
 		result, err := c.commitDeferredAgentTerminationLocked(c.context(), cell, pending)
 		if err != nil {
-			cell.phase = AgentLifecycleFailed
-			cell.runMode = AgentRunModeStopped
 			cell.execution.loopCancel = nil
 			cell.execution.loopDone = nil
 			cell.execution.route = nil
 			cell.execution.routeToken = runtimeeffects.LifecycleToken{}
 			return fmt.Errorf("persist deferred agent termination: %w", err)
 		}
-		cell.epoch = result.RuntimeEpoch
-		cell.generation = result.Generation
-		cell.phase = result.Phase
-		cell.runMode = result.RunMode
-		cell.topology = result.Topology
-		cell.processBinding = result.ProcessBinding
+		view, err := c.committedAgentView(c.context(), result)
+		if err != nil {
+			return err
+		}
+		cell.view = view
 		execution.deferredTerminal = nil
 		cell.retirement = nil
-	} else if cell.phase == AgentLifecycleRunning && store != nil {
+	} else if cell.view.Phase == AgentLifecycleRunning && current {
 		plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
 		if err != nil {
 			return err
 		}
-		_, err = c.commitLifecycleTransition(c.context(), store, AgentLifecycleTransition{
+		result, err := c.commitLifecycleTransition(c.context(), store, AgentLifecycleTransition{
 			OperationID: uuid.NewString(), OperationKind: "self_release",
-			RequestHash: lifecycleRequestHashForIdentity(token.Identity, cell.topology, "self_release", cell.configRevision, planHash),
+			RequestHash: lifecycleRequestHashForIdentity(token.Identity, cell.view.Topology, "self_release", cell.view.ConfigRevision, planHash),
 			Identity:    token.Identity,
-			AgentID:     token.AgentID, Trigger: "self_release", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
-			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
-			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped, Subordinate: plan, Topology: cell.topology, Now: time.Now().UTC(),
+			AgentID:     token.AgentID, Trigger: "self_release", ExpectedEpoch: cell.view.RuntimeEpoch, ExpectedGeneration: cell.view.Generation,
+			ExpectedPhase: cell.view.Phase, TargetEpoch: cell.view.RuntimeEpoch, TargetGeneration: cell.view.Generation,
+			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.view.ConfigRevision, RunMode: AgentRunModeStopped, Subordinate: plan, Topology: cell.view.Topology, Now: time.Now().UTC(),
 		})
 		if err != nil {
-			cell.phase = AgentLifecycleFailed
-			cell.runMode = AgentRunModeStopped
 			cell.execution.loopCancel = nil
 			cell.execution.loopDone = nil
 			cell.execution.route = nil
 			cell.execution.routeToken = runtimeeffects.LifecycleToken{}
 			return fmt.Errorf("persist agent loop self-release: %w", err)
 		}
-		cell.phase = AgentLifecycleRegistered
-		cell.runMode = AgentRunModeStopped
-	} else if cell.phase == AgentLifecycleRunning {
-		if c.sessions != nil {
-			plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
-			if err != nil {
-				return err
-			}
-			operationID := uuid.NewString()
-			if _, _, err := c.sessions.ApplyLifecycleProjection(c.context(), runtimesessions.LifecycleProjectionRequest{
-				OperationID: operationID,
-				RequestHash: lifecycleRequestHashForIdentity(token.Identity, cell.topology, "self_release", cell.configRevision, planHash),
-				Expected:    token, Target: token, TargetPhase: string(AgentLifecycleRegistered), Plan: plan, Now: time.Now().UTC(),
-			}); err != nil {
-				return err
-			}
+		view, err := c.committedAgentView(c.context(), result)
+		if err != nil {
+			return err
 		}
-		cell.phase = AgentLifecycleRegistered
-		cell.runMode = AgentRunModeStopped
+		cell.view = view
 	}
 	cell.execution.loopCancel = nil
 	cell.execution.loopDone = nil
@@ -2062,7 +2011,7 @@ func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
 	cell *agentLifecycleCell,
 	pending deferredAgentTermination,
 ) (AgentLifecycleTransitionResult, error) {
-	if cell == nil || cell.phase != AgentLifecycleRunning {
+	if cell == nil || cell.view.Phase != AgentLifecycleRunning {
 		return AgentLifecycleTransitionResult{}, errors.New("deferred agent termination requires the exact running lifecycle cell")
 	}
 	if err := pending.topology.Validate(); err != nil {
@@ -2080,48 +2029,30 @@ func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
 	if err != nil {
 		return AgentLifecycleTransitionResult{}, err
 	}
-	nextEpoch, nextGeneration := runtimebus.CurrentRuntimeEpoch(), cell.generation+1
+	nextEpoch, nextGeneration := runtimebus.CurrentRuntimeEpoch(), cell.view.Generation+1
 	operationID := uuid.NewString()
 	store := c.persistence()
-	if store != nil {
-		targetBinding := cell.processBinding
-		operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, operationKind, true)
-		if err != nil {
-			return AgentLifecycleTransitionResult{}, err
-		}
-		requestHash := lifecycleRequestHashForIdentity(
-			cell.identity, pending.topology, operationKind, pending.trigger, cell.configRevision, planHash,
-			cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
-			targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
-		)
-		return c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
-			Identity: cell.identity, AgentID: cell.identity.AgentID(), Trigger: pending.trigger,
-			ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation, ExpectedPhase: cell.phase,
-			TargetEpoch: nextEpoch, TargetGeneration: nextGeneration, TargetPhase: pending.target,
-			ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped, Subordinate: plan,
-			Topology: pending.topology, Now: time.Now().UTC(),
-		})
+	if store == nil {
+		return AgentLifecycleTransitionResult{}, errors.New("agent lifecycle requires its durable row owner")
 	}
-	if c.sessions != nil {
-		requestHash := lifecycleRequestHashForIdentity(cell.identity, pending.topology, pending.trigger, cell.configRevision, planHash)
-		if _, _, err := c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
-			OperationID: operationID, RequestHash: requestHash,
-			Expected:    lifecycleToken(cell.identity, cell.epoch, cell.generation),
-			Target:      lifecycleToken(cell.identity, nextEpoch, nextGeneration),
-			TargetPhase: string(pending.target), Plan: plan, Now: time.Now().UTC(),
-		}); err != nil {
-			return AgentLifecycleTransitionResult{}, err
-		}
+	targetBinding := cell.view.ProcessBinding
+	operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.view.ProcessBinding, operationKind, true)
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
 	}
-	return AgentLifecycleTransitionResult{
-		OperationID: operationID, Identity: cell.identity, AgentID: cell.identity.AgentID(),
-		PreviousEpoch: cell.epoch, RuntimeEpoch: nextEpoch,
-		PreviousGeneration: cell.generation, Generation: nextGeneration,
-		PreviousPhase: cell.phase, Phase: pending.target,
-		ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,
-		Topology: pending.topology, ProcessBinding: cell.processBinding,
-	}, nil
+	requestHash := lifecycleRequestHashForIdentity(
+		cell.identity, pending.topology, operationKind, pending.trigger, cell.view.ConfigRevision, planHash,
+		cell.view.ProcessBinding.ProcessAuthorityID, cell.view.ProcessBinding.ProcessBootID,
+		targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
+	)
+	return c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
+		Identity: cell.identity, AgentID: cell.identity.AgentID(), Trigger: pending.trigger,
+		ExpectedEpoch: cell.view.RuntimeEpoch, ExpectedGeneration: cell.view.Generation, ExpectedPhase: cell.view.Phase,
+		TargetEpoch: nextEpoch, TargetGeneration: nextGeneration, TargetPhase: pending.target,
+		ConfigRevision: cell.view.ConfigRevision, RunMode: AgentRunModeStopped, Subordinate: plan,
+		Topology: pending.topology, Now: time.Now().UTC(),
+	})
 }
 
 func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Context, identity runtimeagentidentity.Identity, token runtimeeffects.LifecycleToken, done chan struct{}, lockedCell *agentLifecycleCell) error {
@@ -2149,28 +2080,21 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 		return err
 	}
 	operationID := uuid.NewString()
-	requestHash := lifecycleRequestHashForIdentity(cell.identity, cell.topology, "start_failed", cell.configRevision, planHash)
+	requestHash := lifecycleRequestHashForIdentity(cell.identity, cell.view.Topology, "start_failed", cell.view.ConfigRevision, planHash)
 	store := c.persistence()
-	if store != nil {
-		_, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: "self_release", RequestHash: requestHash, Identity: cell.identity,
-			AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
-			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
-			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,
-			Subordinate: plan, Topology: cell.topology, Now: time.Now().UTC(),
-		})
-	} else if c.sessions != nil {
-		_, _, err = c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
-			OperationID: operationID, RequestHash: requestHash,
-			Expected: token, Target: token, TargetPhase: string(AgentLifecycleRegistered), Plan: plan, Now: time.Now().UTC(),
-		})
-	}
-	if err != nil {
-		cell.phase = AgentLifecycleFailed
-		cell.runMode = AgentRunModeStopped
-	} else {
-		cell.phase = AgentLifecycleRegistered
-		cell.runMode = AgentRunModeStopped
+	result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+		OperationID: operationID, OperationKind: "self_release", RequestHash: requestHash, Identity: cell.identity,
+		AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.view.RuntimeEpoch, ExpectedGeneration: cell.view.Generation,
+		ExpectedPhase: cell.view.Phase, TargetEpoch: cell.view.RuntimeEpoch, TargetGeneration: cell.view.Generation,
+		TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.view.ConfigRevision, RunMode: AgentRunModeStopped,
+		Subordinate: plan, Topology: cell.view.Topology, Now: time.Now().UTC(),
+	})
+	if err == nil {
+		view, viewErr := c.committedAgentView(context.WithoutCancel(ctx), result)
+		err = viewErr
+		if err == nil {
+			cell.view = view
+		}
 	}
 	execution.loopCancel = nil
 	execution.loopDone = nil
@@ -2266,8 +2190,8 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 		if cell == nil {
 			return agentTerminalCommit{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 		}
-		epoch, generation, phase, revision := cell.epoch, cell.generation, cell.phase, cell.configRevision
-		transitionTopology := cell.topology
+		epoch, generation, phase, revision := cell.view.RuntimeEpoch, cell.view.Generation, cell.view.Phase, cell.view.ConfigRevision
+		transitionTopology := cell.view.Topology
 		if topology != nil {
 			transitionTopology = *topology
 		}
@@ -2324,17 +2248,15 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 			return agentTerminalCommit{config: previousConfig, retirement: retirement}, nil
 		}
 		store := c.persistence()
-		effectivePhase := target
-		processBinding := cell.processBinding
 		if store != nil {
-			targetBinding := cell.processBinding
-			operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, operationKind, true)
+			targetBinding := cell.view.ProcessBinding
+			operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.view.ProcessBinding, operationKind, true)
 			if err != nil {
 				return agentTerminalCommit{}, err
 			}
 			requestHash := lifecycleRequestHashForIdentity(
 				identity, transitionTopology, operationKind, trigger, revision, planHash,
-				cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
+				cell.view.ProcessBinding.ProcessAuthorityID, cell.view.ProcessBinding.ProcessBootID,
 				targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 			)
 			result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
@@ -2347,22 +2269,14 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 			if err != nil {
 				return agentTerminalCommit{}, err
 			}
-			nextEpoch, nextGeneration = result.RuntimeEpoch, result.Generation
-			effectivePhase = result.Phase
-			processBinding = result.ProcessBinding
-		} else if c.sessions != nil {
-			requestHash := lifecycleRequestHashForIdentity(identity, transitionTopology, trigger, revision, planHash)
-			if _, _, err := c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
-				OperationID: operationID, RequestHash: requestHash,
-				Expected:    lifecycleToken(identity, epoch, generation),
-				Target:      lifecycleToken(identity, nextEpoch, nextGeneration),
-				TargetPhase: string(target), Plan: plan, Now: now,
-			}); err != nil {
+			view, err := c.committedAgentView(context.WithoutCancel(ctx), result)
+			if err != nil {
 				return agentTerminalCommit{}, err
 			}
+			cell.view = view
+		} else {
+			return agentTerminalCommit{}, errors.New("agent lifecycle requires its durable row owner")
 		}
-		cell.epoch, cell.generation, cell.phase, cell.runMode, cell.topology = nextEpoch, nextGeneration, effectivePhase, AgentRunModeStopped, transitionTopology
-		cell.processBinding = processBinding
 		if execution != nil {
 			execution.fenced = true
 		}
@@ -2397,8 +2311,8 @@ func (c *agentLifecycleCoordinator) tokenIdentity(identity runtimeagentidentity.
 	defer c.mu.Unlock()
 	identity = identity.Normalize()
 	cell := c.cells[identity]
-	if cell == nil || cell.phase != AgentLifecycleRunning {
+	if cell == nil || cell.view.Phase != AgentLifecycleRunning || cell.execution == nil || cell.execution.settlementErr != nil {
 		return runtimeeffects.LifecycleToken{}, false
 	}
-	return lifecycleToken(identity, cell.epoch, cell.generation), true
+	return lifecycleToken(identity, cell.view.RuntimeEpoch, cell.view.Generation), true
 }

@@ -58,13 +58,19 @@ func TestW5FreshMemorySchemaHasNoSourceBothStores(t *testing.T) {
 			for _, table := range []string{"agents", "agent_sessions", "agent_turns", "agent_conversation_audits"} {
 				var count int
 				var err error
-				if backend == "postgres" {
-					err = postgresDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='memory_source'`, table).Scan(&count)
-				} else {
-					err = sqliteStore.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name='memory_source'`, table).Scan(&count)
+				retiredColumns := []string{"memory_source"}
+				if table == "agent_conversation_audits" {
+					retiredColumns = append(retiredColumns, "conversation")
 				}
-				if err != nil || count != 0 {
-					t.Fatalf("%s %s retains memory source: %d, %v", backend, table, count, err)
+				for _, column := range retiredColumns {
+					if backend == "postgres" {
+						err = postgresDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2`, table, column).Scan(&count)
+					} else {
+						err = sqliteStore.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, column).Scan(&count)
+					}
+					if err != nil || count != 0 {
+						t.Fatalf("%s %s retains %s: %d, %v", backend, table, column, count, err)
+					}
 				}
 				if backend == "postgres" {
 					err = postgresDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='memory_enabled'`, table).Scan(&count)

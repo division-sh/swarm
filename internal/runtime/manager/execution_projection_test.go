@@ -523,7 +523,7 @@ func TestExecutionPreparationFailuresCompensateBeforeLaunchInBothRunModes(t *tes
 				}
 				cell, _ := testLifecycleCell(t, am.lifecycle, agentID, "")
 				am.lifecycle.mu.Lock()
-				phase := cell.phase
+				phase := cell.view.Phase
 				loopDone := cell.execution.loopDone
 				routeToken := cell.execution.routeToken
 				am.lifecycle.mu.Unlock()
@@ -776,7 +776,7 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	}
 	cell, _ := testLifecycleCell(t, am.lifecycle, agentID, "")
 	am.lifecycle.mu.Lock()
-	phase := cell.phase
+	phase := cell.view.Phase
 	loopDone := cell.execution.loopDone
 	routeToken := cell.execution.routeToken
 	am.lifecycle.mu.Unlock()

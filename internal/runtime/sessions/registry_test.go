@@ -3,14 +3,13 @@ package sessions
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func testIdentity(t testing.TB, agentID, runID, instanceID string) agentmemory.Identity {
@@ -202,42 +201,10 @@ func TestInMemoryRegistryRotateGrant(t *testing.T) {
 	}
 }
 
-func TestInMemoryRegistryLifecycleProjectionOwnsCompleteSet(t *testing.T) {
-	sr := NewInMemoryRegistry(0)
-	active := testIdentity(t, "agent-a", "run-a", "chat-a")
-	suspended := testIdentity(t, "agent-a", "run-a", "chat-b")
-	sr.byKey[registryKey(active)] = &Record{SessionID: "session-a", Identity: active, Status: "active"}
-	sr.byKey[registryKey(suspended)] = &Record{SessionID: "session-b", Identity: suspended, Status: "suspended"}
-	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	initial := runtimeeffects.LifecycleToken{Identity: active, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 1}
-	if _, replayed, err := sr.ApplyLifecycleProjection(context.Background(), LifecycleProjectionRequest{
-		OperationID: "op-register", RequestHash: "register", Target: initial, TargetPhase: "running", Now: now,
-	}); err != nil || replayed {
-		t.Fatalf("register replayed=%v err=%v", replayed, err)
-	}
-	target := runtimeeffects.LifecycleToken{Identity: active, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 2}
-	outcome, replayed, err := sr.ApplyLifecycleProjection(context.Background(), LifecycleProjectionRequest{
-		OperationID: "op-rotate", RequestHash: "rotate", Expected: initial, Target: target,
-		TargetPhase: "running", Plan: LifecycleMutationPlan{Action: LifecycleMutationRotateCurrentSet, TerminationReason: TerminationReasonNormal}, Now: now.Add(time.Second),
-	})
-	if err != nil || replayed || len(outcome.Sessions) != 1 {
-		t.Fatalf("rotate outcome=%#v replayed=%v err=%v", outcome, replayed, err)
-	}
-	if sibling, ok := sr.Snapshot(suspended); !ok || sibling.SessionID != "session-b" || sibling.Status != "suspended" {
-		t.Fatalf("sibling identity changed during exact lifecycle rotation: %#v ok=%v", sibling, ok)
-	}
-	staleCtx := runtimeeffects.WithLifecycleToken(context.Background(), initial)
-	if _, err := sr.Acquire(staleCtx, active, "worker"); err == nil {
-		t.Fatal("stale generation acquired memory")
-	} else {
-		var failure *runtimefailures.Error
-		if !errors.As(err, &failure) || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
-			t.Fatalf("stale error = %v", err)
-		}
-	}
-	currentCtx := runtimeeffects.WithLifecycleToken(context.Background(), target)
-	if _, err := sr.Acquire(currentCtx, active, "worker"); err != nil {
-		t.Fatalf("current generation acquire: %v", err)
+func TestInMemoryRegistryDoesNotOwnAgentLifecycle(t *testing.T) {
+	registry := NewInMemoryRegistry(0)
+	if _, exists := reflect.TypeOf(registry).MethodByName("ApplyLifecycleProjection"); exists {
+		t.Fatal("transient session registry exposes a second agent lifecycle authority")
 	}
 }
 
