@@ -957,7 +957,7 @@ func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testi
 	bundle.FlowTree.Root.Events = bundle.Events
 	semanticviewtest.WrapRootAgents(bundle)
 	err := runtimecontracts.CompileWorkflowSemantics(bundle)
-	if err == nil || !strings.Contains(err.Error(), `compile event .:ready.event: compiled structural schema: structural schema field unsupported: unsupported structural schema type "NotDeclared"`) {
+	if err == nil || err.Error() != `compile event .:ready.event: event ready.event field unsupported: unknown catalog type "NotDeclared"` {
 		t.Fatalf("compiled event admission = %v, want exact invalid-type refusal before boot", err)
 	}
 	if _, ok, err := bundle.ResolveCompiledFlowEventSchema(".", "ready.event"); err != nil || ok {
