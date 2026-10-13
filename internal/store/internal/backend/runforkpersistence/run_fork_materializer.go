@@ -624,7 +624,7 @@ func loadExactRunForkMaterialization(
 			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header); err != nil {
 				return runfork.RunForkMaterialization{}, false, err
 			}
-			receipt, err := projectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
+			receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
 			if err != nil {
 				return runfork.RunForkMaterialization{}, false, err
 			}
@@ -796,7 +796,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 		if header.Identity.RunID != forkRunID || header.Identity.Route.InstancePath != meta.FlowInstance || header.EntityID != entityID || header.EntityType != meta.EntityType {
 			return fmt.Errorf("historical header projection crossed entity ownership")
 		}
-		receipt, err := projectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
+		receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
 		if err != nil {
 			return err
 		}

@@ -642,7 +642,7 @@ func workflowOwnershipMaterializeHistoricalHeader(ctx context.Context, tx *sql.T
 	if err != nil {
 		return err
 	}
-	receipt, err := projectRunForkConstructionReceipt(plan, state.RunID, state.History, header.CreatedAt)
+	receipt, err := ProjectRunForkConstructionReceipt(plan, state.RunID, state.History, header.CreatedAt)
 	if err != nil {
 		return err
 	}

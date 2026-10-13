@@ -216,7 +216,7 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 		}
 		var creation *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
 		if owed {
-			receipt, err := projectRunForkConstructionReceipt(plan, forkRunID, entity, entity.MaterializationMetadata.CreatedAt)
+			receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, entity.MaterializationMetadata.CreatedAt)
 			if err != nil {
 				return nil, err
 			}
