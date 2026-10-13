@@ -78,3 +78,18 @@ func TestHandlerRulePresentationKeepsContextIdentityAndFullTextSeparate(t *testi
 		t.Fatalf("predicate-less typed row invented else semantics: %q", got)
 	}
 }
+
+func TestHandlerRulePresentationPreservesResolvedAliasAndMergeText(t *testing.T) {
+	for _, body := range []string{
+		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: *predicate}, {else: true}]\n",
+		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: {<<: *predicate}}, {else: true}]\n",
+	} {
+		var handler SystemNodeEventHandler
+		if err := decodeNodeTestYAML([]byte(body), &handler); err != nil {
+			t.Fatal(err)
+		}
+		if got := handler.Rules[0].DisplayLabel("rules", 0); got != "rules[0]: case {selector: payload.kind, equals: 'gold'}" {
+			t.Fatalf("resolved predicate lost its admitted text/style: %q", got)
+		}
+	}
+}
