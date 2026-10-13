@@ -1421,6 +1421,21 @@ seam_families:
       ownership classification. Those references guard source admission and
       capability lifetime; they do not produce, infer, or replace route
       authority.
+  - id: r52_native_complete_agent_reconfiguration_controls
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/manager/lifecycle_cache_native_proof_test.go
+    search_dimensions: [live_agent_subscription_route_authority]
+    notes: >
+      TestAgentRowNativeLostAckCacheAdoptionBothStores consumes the existing
+      Manager reconfigureAgentIdentityExactWithTopology entrance and native
+      agentpersistence source/topology/revision validation. Its held candidate,
+      stale-source snapshot conservation, exact receipt/no-op and publication
+      panic controls prove the same canonical lifecycle route owner on both
+      stores. The projection bus observes route installation and cleanup only;
+      it neither reconstructs routing permission nor replaces native mutation
+      authority. No partial configuration merge or new route owner is present.
   - id: admission_predicate_reference_census
     layer: conformance_guardrails
     classification: separate_semantic_concept
