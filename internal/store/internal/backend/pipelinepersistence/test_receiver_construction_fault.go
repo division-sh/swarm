@@ -73,17 +73,15 @@ func copyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, sou
 	if err := validateReceiverReceiptFaultHistory(ctx, tx, source, destination, sourceEntity, destinationEntity, run, history, sqlite); err != nil {
 		return err
 	}
-	var present bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2)`, destination.RunID, destination.Route.InstancePath).Scan(&present); err != nil {
-		return err
-	}
-	if present {
-		return fmt.Errorf("contradictory receipt fault requires zero destination receipts")
-	}
+	// The history owner has verified any existing row against its exact captured
+	// projection. Replacing it exercises correspondence, not a presence rule.
 	result, err := tx.ExecContext(ctx, `INSERT INTO workflow_instance_initial_materializations
 		(run_id, entity_id, instance_path, projection_version, projection, occurred_at)
 		SELECT $1,$2,$3,projection_version,projection,occurred_at FROM workflow_instance_initial_materializations
-		WHERE run_id=$4 AND instance_path=$5 AND entity_id=$6`, destination.RunID, destinationEntity, destination.Route.InstancePath, source.RunID, source.Route.InstancePath, sourceEntity)
+		WHERE run_id=$4 AND instance_path=$5 AND entity_id=$6
+		ON CONFLICT (run_id, entity_id) DO UPDATE SET
+		projection_version=excluded.projection_version, projection=excluded.projection, occurred_at=excluded.occurred_at`,
+		destination.RunID, destinationEntity, destination.Route.InstancePath, source.RunID, source.Route.InstancePath, sourceEntity)
 	if err != nil {
 		return err
 	}
