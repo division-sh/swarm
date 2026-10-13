@@ -1206,10 +1206,10 @@ func containedOperationRefs(flowID, nodeID string, node runtimecontracts.SystemN
 		handler := node.EventHandlers[eventType]
 		out = append(out, writeRefs(flowID, nodeID, eventType, "handler.data_accumulation", handler.DataAccumulation.Writes)...)
 		for idx, rule := range handler.Rules {
-			out = append(out, writeRefs(flowID, nodeID, eventType, ruleScope("handler.rules", idx, rule.ID)+".data_accumulation", rule.DataAccumulation.Writes)...)
+			out = append(out, writeRefs(flowID, nodeID, eventType, "handler."+rule.DisplayLabel("rules", idx)+".data_accumulation", rule.DataAccumulation.Writes)...)
 		}
 		for idx, rule := range handler.OnComplete {
-			out = append(out, writeRefs(flowID, nodeID, eventType, ruleScope("handler.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation.Writes)...)
+			out = append(out, writeRefs(flowID, nodeID, eventType, "handler."+rule.DisplayLabel("on_complete", idx)+".data_accumulation", rule.DataAccumulation.Writes)...)
 		}
 	}
 	return out
@@ -1230,13 +1230,6 @@ func writeRefs(flowID, nodeID, eventType, scope string, writes []runtimecontract
 		})
 	}
 	return out
-}
-
-func ruleScope(prefix string, idx int, id string) string {
-	if id = strings.TrimSpace(id); id != "" {
-		return prefix + "[" + id + "]"
-	}
-	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
 func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) []DiagnosticView {
