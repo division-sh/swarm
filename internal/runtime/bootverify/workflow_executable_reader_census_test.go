@@ -35,7 +35,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "direct write ref value", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.copy", Value: entityRef}}}}},
 		{name: "condition", handler: runtimecontracts.SystemNodeEventHandler{Condition: "size(entity.verticals) > 0"}},
 		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "entity.verticals"}},
-		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
+		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{ID: "executable_reader_probe", Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
 		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.verticals"}}},
 		{name: "accumulate key", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Key: "entity.verticals"}}},
 		{name: "join members by", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{By: "entity.verticals"}}}},
