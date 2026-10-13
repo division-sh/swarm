@@ -331,21 +331,41 @@ func proveAgentRowNativeCompleteReplacements(t *testing.T, ctx context.Context, 
 	if oldErr == nil || newErr != nil || fault.commits != commits+1 {
 		t.Fatalf("concurrent complete candidates: old=%v new=%v native commits=%d want=%d", oldErr, newErr, fault.commits, commits+1)
 	}
+	if oldErr.Error() != "static lifecycle topology authority differs from runtime generation grant" {
+		t.Fatalf("held complete candidate did not reach the existing generation-grant binding refusal: %v", oldErr)
+	}
 	current := prove(second, before.Generation+1)
 	unchanged := snapshot()
 	previousRoutes := bus.routeHistory(record.Config.ID)
 	am.lifecycle.mu.Lock()
 	previousExecution := am.lifecycle.cells[record.Config.Identity].execution
 	am.lifecycle.mu.Unlock()
-	if err := am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, first, &firstTopology); err == nil {
-		t.Fatal("old complete source/config/topology candidate replaced a newer authority")
-	}
-	am.lifecycle.mu.Lock()
-	cell := am.lifecycle.cells[record.Config.Identity]
-	conserved := cell.execution == previousExecution && sameAgentRowObservation(current, cell.view) && !cell.execution.fenced && am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
-	am.lifecycle.mu.Unlock()
-	if !conserved || !reflect.DeepEqual(unchanged, snapshot()) || !reflect.DeepEqual(previousRoutes, bus.routeHistory(record.Config.ID)) {
-		t.Fatal("stale complete candidate changed lifecycle/session/route/cache evidence")
+	for _, stale := range []struct {
+		name         string
+		config       runtimeactors.AgentConfig
+		topology     agenttopology.Admission
+		nativeConfig bool
+	}{
+		{name: "old_config_and_topology", config: first, topology: firstTopology},
+		{name: "old_config_current_topology", config: first, topology: secondTopology, nativeConfig: true},
+		{name: "current_config_old_topology", config: second, topology: firstTopology},
+	} {
+		staleErr := am.reconfigureAgentIdentityExactWithTopology(ctx, am.semanticSource, record.Config.Identity, stale.config, &stale.topology)
+		if stale.nativeConfig {
+			var sourceConflict *runtimefailures.Error
+			if !errors.As(staleErr, &sourceConflict) || sourceConflict.Failure.Detail.Code != "agent_topology_authority_conflict" || !strings.Contains(staleErr.Error(), "static_config_revision_mismatch") {
+				t.Fatalf("%s did not reach native transaction-time declaration refusal: %v", stale.name, staleErr)
+			}
+		} else if staleErr == nil || staleErr.Error() != "static lifecycle topology authority differs from runtime generation grant" {
+			t.Fatalf("%s did not reach generation-grant binding refusal: %v", stale.name, staleErr)
+		}
+		am.lifecycle.mu.Lock()
+		cell := am.lifecycle.cells[record.Config.Identity]
+		conserved := cell.execution == previousExecution && sameAgentRowObservation(current, cell.view) && !cell.execution.fenced && am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
+		am.lifecycle.mu.Unlock()
+		if !conserved || !reflect.DeepEqual(unchanged, snapshot()) || !reflect.DeepEqual(previousRoutes, bus.routeHistory(record.Config.ID)) {
+			t.Fatalf("%s changed lifecycle/session/route/cache evidence", stale.name)
+		}
 	}
 	third := second
 	third.MaxTurnsPerTask++
