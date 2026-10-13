@@ -10,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -164,8 +168,57 @@ func TestStartupRecoveryIdentifiesAsyncPublicationClaimOnBothStores(t *testing.T
 				t.Fatal(err)
 			}
 			assertCompleteLocalDelivery(t, deliveries, fixture.event)
+			runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
+			seen := make(chan events.Event, 2)
+			generation := fixture.newRecordingManager(t, seen)
+			managerCtx := fixture.managedContext(t)
+			if _, err := generation.manager.HydrateForStartup(managerCtx); err != nil {
+				t.Fatal(err)
+			}
+			if err := generation.manager.Run(managerCtx); err != nil {
+				t.Fatal(err)
+			}
+			grant, err := generation.grant.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority, err := runtimedelivery.NewNormalExecutionAuthority(testSourceArtifactFact(fixture.source), grant.GrantID, grant.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.store.ActivateDeliveryAuthority(managerCtx, authority); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.bus.SetDeliveryAuthority(authority); err != nil {
+				t.Fatal(err)
+			}
+			coordinator, err := runtimedeliverycontinuation.New(fixture.store, fixture.store, authority, generation.owner, fixture.bus, func(_ context.Context, err error) {
+				t.Errorf("asynchronous publication continuation failed: %v", err)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			generation.coordinator = coordinator
+			if err := fixture.bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Start(managerCtx); err != nil {
+				t.Fatal(err)
+			}
+			assertCompleteEventDelivery(t, seen, fixture.event)
+			startupCtx, cancelStartup := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelStartup()
+			if err := generation.manager.WaitForQuiescence(startupCtx); err != nil {
+				t.Fatal(err)
+			}
 			diagnostics := captureRecoveryDiagnostics(t)
 			event := newRetryReleaseTestEvent(fixture, time.Now().UTC())
+			root := runtimebus.ConstructedFlowInstanceIdentityFixture(fixture.source, ".", "", event.RunID())
+			target := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath}
+			expected, err := events.ResolveEnvelope(event, events.EnvelopeForTargetRoute(event.Envelope(), target))
+			if err != nil {
+				t.Fatal(err)
+			}
 			started, unblock := make(chan struct{}, 1), make(chan struct{})
 			var once sync.Once
 			release := func() { once.Do(func() { close(unblock) }) }
@@ -191,14 +244,47 @@ func TestStartupRecoveryIdentifiesAsyncPublicationClaimOnBothStores(t *testing.T
 				t.Fatalf("incorrect publication claim evidence: %v", held)
 			}
 			release()
-			assertCompleteLocalDelivery(t, deliveries, event)
+			assertCompleteEventDelivery(t, seen, expected)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := fixture.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			if err := generation.manager.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
 			if err := recovery.RecoverToExhaustion(fixture.ctx); err != nil {
 				t.Fatalf("recovery after exact publication settlement: %v", err)
+			}
+			if err := generation.coordinator.Synchronize(managerCtx); err != nil {
+				t.Fatal(err)
+			}
+			routeReader, ok := fixture.store.(interface {
+				ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+			})
+			if !ok {
+				t.Fatal("asynchronous publication requires its durable route reader")
+			}
+			routes, err := routeReader.ListEventDeliveryRoutes(fixture.ctx, event.ID())
+			if err != nil || len(routes) != 1 || routes[0].AgentIdentity != fixture.identity || routes[0].Target.Route() != target {
+				t.Fatalf("asynchronous publication lost its exact compiled receiver: routes=%+v err=%v", routes, err)
+			}
+			construction := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
+			if routes[0].Initialization.Empty() || routes[0].Initialization.CreatingEventID() != "" || routes[0].Initialization.ConstructionTarget().Route() != construction {
+				t.Fatalf("asynchronous publication changed its independent startup construction: %+v", routes[0])
+			}
+			deliveryID, err := runtimedelivery.DeliveryID(event.ID(), routes[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := fixture.store.Snapshot(fixture.ctx, deliveryID)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered || snapshot.ClaimVersion != 1 || !snapshot.Authority.Equal(authority) {
+				t.Fatalf("asynchronous publication did not settle once under its exact generation: snapshot=%+v err=%v", snapshot, err)
+			}
+			select {
+			case duplicate := <-seen:
+				t.Fatalf("asynchronous publication executed again: %s", duplicate.ID())
+			default:
 			}
 		})
 	}
