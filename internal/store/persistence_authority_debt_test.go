@@ -14,6 +14,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,7 +134,137 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 	return failures
 }
 
-func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite) []string {
+type debtDeliveryRetirementProof struct {
+	Root   string
+	Actual map[string]authorityDebtSite
+}
+
+// Ruling6147242761 authorizes only these seven existing historical pairs.
+func debtDeliveryRetirementPairs() [7][2]authorityDebtSite {
+	declarations := map[string]int{
+		"TestRunServeRuntimeJoinFailureReachesAPIAndCLI":                           2,
+		"TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation": 3,
+		"publishServedLiveAgentHoldEvent":                                          1,
+		"runServedAgentRestartLifecycleProof":                                      2,
+		"runServedLiveAgentEventReplayLifecycleProof":                              2,
+		"runServedRunControlLifecycleProof":                                        2,
+		"startServedSessionCleanupProof":                                           1,
+	}
+	var result [7][2]authorityDebtSite
+	index := 0
+	for _, pair := range debtServedDebugSignatureTransitions() {
+		old := pair[0]
+		if n := declarations[old.Declaration]; n != 0 && old.File == "internal/serveapp/main_runtime_test.go" &&
+			old.Operation == "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun" && old.Multiplicity == n && pair[1].Multiplicity == n {
+			if index == len(result) {
+				panic("duplicate delivery retirement identity")
+			}
+			result[index] = pair
+			index++
+			delete(declarations, old.Declaration)
+		}
+	}
+	if index != len(result) || len(declarations) != 0 {
+		panic("exact seven delivery retirement pairs changed")
+	}
+	return result
+}
+
+func debtDeliveryRetirementComparisons(actual, head, base, source map[string]authorityDebtSite, proofs ...debtDeliveryRetirementProof) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	if len(proofs) == 0 {
+		return head, base, source, nil // Historical pre-retirement comparisons are unchanged.
+	}
+	if len(proofs) != 1 || proofs[0].Root == "" || !debtSitesEqual(actual, proofs[0].Actual) {
+		return head, base, source, []string{"delivery retirement lacks its exact source/census proof"}
+	}
+	pairs := debtDeliveryRetirementPairs()
+	if debtDeliveryRetirementAllAbsent(actual, head, base, source) {
+		return head, base, source, nil // Landed deletion needs no fictitious donor forever.
+	}
+	if err := debtDeliveryStatusSourcePins(proofs[0].Root); err != nil {
+		return head, base, source, []string{err.Error()}
+	}
+	for _, pair := range pairs {
+		if err := debtDeliveryRetirementState(pair, actual, head, base, source); err != nil {
+			return head, base, source, []string{err.Error()}
+		}
+		old, current := pair[0], pair[1]
+		if base[old.identity()] == old {
+			// Comparison copies only. The census, baseline and actual deletion stay intact.
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	return head, base, source, nil
+}
+
+func debtDeliveryRetirementAllAbsent(states ...map[string]authorityDebtSite) bool {
+	for _, pair := range debtDeliveryRetirementPairs() {
+		if !debtDeliveryRetirementPairAbsent(pair, states...) {
+			return false
+		}
+	}
+	return true
+}
+
+func debtDeliveryRetirementPairAbsent(pair [2]authorityDebtSite, states ...map[string]authorityDebtSite) bool {
+	for _, state := range states {
+		if state[pair[0].identity()].Multiplicity != 0 || state[pair[1].identity()].Multiplicity != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func debtDeliveryRetirementState(pair [2]authorityDebtSite, actual, head, base, source map[string]authorityDebtSite) error {
+	old, current := pair[0], pair[1]
+	if actual[old.identity()].Multiplicity != 0 || actual[current.identity()].Multiplicity != 0 ||
+		head[old.identity()].Multiplicity != 0 || head[current.identity()].Multiplicity != 0 && head[current.identity()] != current {
+		return fmt.Errorf("delivery retirement reintroduced raw authority: %s", old.Declaration)
+	}
+	if debtDeliveryRetirementPairAbsent(pair, actual, head, base, source) {
+		return nil
+	}
+	if base[old.identity()] == old && source[old.identity()] == old &&
+		base[current.identity()].Multiplicity == 0 && source[current.identity()].Multiplicity == 0 {
+		return nil
+	}
+	if base[current.identity()] == current && source[current.identity()] == current &&
+		base[old.identity()].Multiplicity == 0 && source[old.identity()].Multiplicity == 0 {
+		return nil
+	}
+	return fmt.Errorf("delivery retirement lacks exact historical donor: %s", old.Declaration)
+}
+
+func debtDeliveryRetirementCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtDeliveryRetirementCollectorTo || head.Collector != current || trusted.Collector != base ||
+		trusted.BootstrapSource != head.BootstrapSource || len(proofs) != 1 {
+		return false
+	}
+	if len(authorityDebtRatchet(proofs[0].Actual, head.Sites, trusted.Sites, trusted.Sites, proofs...)) != 0 {
+		return false
+	}
+	if base == debtDeliveryStatusCollectorTo || base == debtRunScalarCollectorTo {
+		return true
+	}
+	// Validate the old fingerprint chain against its exact pre-retirement receipt.
+	// This is a metadata comparison copy, never an invented actual census site.
+	intermediate := head
+	intermediate.Collector, intermediate.Sites = debtDeliveryStatusCollectorTo, maps.Clone(head.Sites)
+	for _, pair := range debtDeliveryRetirementPairs() {
+		if intermediate.Sites[pair[1].identity()].Multiplicity == 0 && trusted.Sites[pair[0].identity()] == pair[0] {
+			intermediate.Sites[pair[1].identity()] = pair[1]
+		}
+	}
+	return debtDeliveryStatusCollectorTransition(base, intermediate.Collector, trusted, intermediate)
+}
+
+func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite, retirement ...debtDeliveryRetirementProof) []string {
+	var retirementFailures []string
+	head, base, baseActual, retirementFailures = debtDeliveryRetirementComparisons(actual, head, base, baseActual, retirement...)
+	if len(retirementFailures) != 0 {
+		return retirementFailures
+	}
 	head, base, baseActual, failures := debtStageCompletionComparisons(actual, head, base, baseActual)
 	if len(failures) != 0 {
 		return failures
@@ -361,9 +492,15 @@ func debtDeliveryStatusSourcePins(root string) error {
 	if err != nil {
 		return err
 	}
+	files := map[string]map[string]string{}
 	for _, body := range bodies {
-		declarations, err := debtServedDebugDeclarations(filepath.Join(root, body.File))
-		if err != nil || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+		if files[body.File] == nil {
+			files[body.File], err = debtServedDebugDeclarations(filepath.Join(root, body.File))
+			if err != nil {
+				return err
+			}
+		}
+		if files[body.File][body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("delivery status owner/assertion/polling cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
 	}
@@ -1664,7 +1801,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector); err != nil {
+		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector, debtDeliveryRetirementProof{Root: root, Actual: actual}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1692,7 +1829,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if err := debtRequestKeySourceTransition(root, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
-	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
+	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual, debtDeliveryRetirementProof{Root: root, Actual: actual})
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
 	}
@@ -1753,14 +1890,14 @@ func debtSortedKeys(sites map[string]authorityDebtSite) []string {
 	sort.Strings(keys)
 	return keys
 }
-func debtValidateCollectorIdentity(base, current string, trusted, head authorityDebtBaseline, reviewedTransition string) error {
+func debtValidateCollectorIdentity(base, current string, trusted, head authorityDebtBaseline, reviewedTransition string, retirement ...debtDeliveryRetirementProof) error {
 	if head.BootstrapSource != trusted.BootstrapSource {
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtReviewedCollectorTransition(base, current, trusted, head) {
+	if debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

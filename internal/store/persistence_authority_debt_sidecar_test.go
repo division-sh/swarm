@@ -67,13 +67,14 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
-		if collector == debtDeliveryStatusCollectorTo {
+		switch collector {
+		case debtDeliveryRetirementCollectorTo:
+			return debtDeliveryRetirementUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
+		case debtDeliveryStatusCollectorTo:
 			return debtDeliveryStatusUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		}
-		if collector == debtRunScalarCollectorTo {
+		case debtRunScalarCollectorTo:
 			return debtRunScalarUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
-		}
-		if collector == debtRequestKeyCollectorTo {
+		case debtRequestKeyCollectorTo:
 			return debtRequestKeyUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
 		}
 		if collector == debtReceiverReadbackCollectorTo {
@@ -148,6 +149,23 @@ func debtDeliveryStatusUnrefreshedBaseline(root string, metadata, data []byte, b
 		return baseline, err
 	}
 	baseline.Collector = debtDeliveryStatusCollectorTo
+	return baseline, nil
+}
+
+func debtDeliveryRetirementUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtRunScalarCollectorTo); err != nil {
+		return baseline, err // The unqualified delivery wave never refreshed this sidecar.
+	}
+	if baseline.Collector != debtCacheCollectorFrom {
+		return baseline, fmt.Errorf("historical TSV collector header changed")
+	}
+	if err := debtDeliveryStatusSourcePins(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtDeliveryRetirementCollectorTo
 	return baseline, nil
 }
 
