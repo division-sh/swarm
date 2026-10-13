@@ -72,22 +72,25 @@ var eventRecordImportFiles = map[string]struct{}{
 	// readback, not another event decoder or publication admission owner.
 	// Selected publication evidence consumes the same decoder before exact
 	// lineage binding; the immutable revision projection is its source owner.
-	"internal/store/internal/backend/runforkpersistence/run_fork_selected_fan_out_evidence.go":            {},
-	"internal/store/internal/backend/runforkrevision/projection.go":                                       {},
-	"internal/store/internal/backend/runforkpersistence/run_fork_continued_readback.go":                   {},
-	"internal/store/eventfixture/event.go":                                                                {},
-	"internal/store/internal/backend/delivery/lifecycle.go":                                               {},
-	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":                      {},
-	"internal/store/internal/backend/eventpersistence/owner.go":                                           {}, // Owns the named canonical SingleEventReader handle, not another decoder.
-	"internal/store/internal/backend/eventpersistence/runtime_log_persistence.go":                         {}, // Exact named diagnostic replay validation.
-	"internal/store/internal/backend/eventpersistence/event_reference_integrity.go":                       {},
-	"internal/store/internal/backend/eventpersistence/events.go":                                          {},
-	"internal/store/internal/backend/eventpersistence/sqlite_events.go":                                   {},
-	"internal/store/internal/operatorsurface/helpers.go":                                                  {},
-	"internal/store/internal/operatorsurface/pending_delivery_read_surface.go":                            {},
-	"internal/store/internal/backend/pipelinepersistence/helpers.go":                                      {},
-	"internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go":                {},
-	"internal/store/internal/backend/runforkpersistence/run_fork_activity_lineage.go":                     {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_selected_fan_out_evidence.go": {},
+	"internal/store/internal/backend/runforkrevision/projection.go":                            {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_continued_readback.go":        {},
+	"internal/store/eventfixture/event.go":                                                     {},
+	"internal/store/internal/backend/delivery/lifecycle.go":                                    {},
+	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":           {},
+	"internal/store/internal/backend/eventpersistence/owner.go":                                {}, // Owns the named canonical SingleEventReader handle, not another decoder.
+	"internal/store/internal/backend/eventpersistence/runtime_log_persistence.go":              {}, // Exact named diagnostic replay validation.
+	"internal/store/internal/backend/eventpersistence/event_reference_integrity.go":            {},
+	"internal/store/internal/backend/eventpersistence/events.go":                               {},
+	"internal/store/internal/backend/eventpersistence/sqlite_events.go":                        {},
+	"internal/store/internal/operatorsurface/helpers.go":                                       {},
+	"internal/store/internal/operatorsurface/pending_delivery_read_surface.go":                 {},
+	"internal/store/internal/backend/pipelinepersistence/helpers.go":                           {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go":     {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_activity_lineage.go":          {},
+	// Continued activity admission reads the canonical complete publication before
+	// checking fixed-cut input and selected lineage; it does not write event SQL.
+	"internal/store/internal/backend/runforkpersistence/run_fork_activity_source_identity.go":             {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": {},
 	// Fixed-revision input facts consume the same complete Record decoder;
 	// this owner does not gain event SQL or admission-constructor authority.

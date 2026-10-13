@@ -66,7 +66,7 @@ func TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority(t *testing.T)
 				bundle, _ := semanticview.Bundle(req.Source)
 				bundle.Platform = contracts.PlatformSpecDocument{}
 			case "original_modes":
-				req.SourceModes["event-b"] = executionmode.Mock
+				req.SourceModes[req.Plan.ForkPoint.EventID] = executionmode.Mock
 			case "original_metadata":
 				req.Plan.Entities[0].MaterializationMetadata.EntityType = "foreign"
 			case "original_model_aliases":
@@ -137,7 +137,7 @@ func TestAdmissionRejectsIncompleteOrForeignBindings(t *testing.T) {
 			case "duplicate_event":
 				req.RecipientPlanning.RecipientPlanEvents[1] = req.RecipientPlanning.RecipientPlanEvents[0]
 			case "changed_mode":
-				req.SourceModes["event-b"] = executionmode.Mock
+				req.SourceModes[req.Plan.ForkPoint.EventID] = executionmode.Mock
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -407,15 +407,16 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 	}
 	constructed.EntityID = entityID
 	metadata := selectedAgentConstructionMetadata(t, effective.Source(), runID, constructed, "item", entered)
-	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: "event-b", Revision: 7}, Entities: []runfork.RunForkEntityState{{
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: eventIDs[1], Revision: 7}, Entities: []runfork.RunForkEntityState{{
 		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: metadata,
 	}}}
-	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
+	plan = plan.WithHistoricalEvents(7, eventIDs)
 	target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/item", EntityID: entityID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"event-a", "event-b"} {
+	for _, id := range eventIDs {
 		plan.PendingWork = append(plan.PendingWork, runfork.RunForkPendingWork{EventID: id, EventName: "consumer/item/deploy.done", Classification: runfork.RunForkPendingClassificationPending,
 			RoutingSource: eventtest.ConcreteTemplateRoutingSource("consumer", "consumer/item", entityID), FlowInstance: "consumer/item", DeliveryRoute: events.DeliveryRoute{Target: target}})
 	}
@@ -429,7 +430,7 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 		planning.RecipientPlanEvents = append(planning.RecipientPlanEvents, runfork.RunForkSelectedContractRecipientPlanEvent{SourceEventID: event.SourceEventID, EventName: event.EventName, Recipients: event.DerivedRecipients})
 	}
 	req := AdmissionRequest{Binding: Binding{Plan: plan, SourceArtifactFact: fact, EffectiveSourceIdentity: effective.Identity(), ContractSelection: selection,
-		FrontierAdmission: frontier, RecipientPlanning: planning, SourceModes: map[string]executionmode.Mode{"event-a": executionmode.Live, "event-b": executionmode.Live}}, Source: effective.Source()}
+		FrontierAdmission: frontier, RecipientPlanning: planning, SourceModes: map[string]executionmode.Mode{eventIDs[0]: executionmode.Live, eventIDs[1]: executionmode.Live}}, Source: effective.Source()}
 	req.ModelOptions.LLMBackend = "anthropic"
 	req.ModelOptions.ExecutionPosture = executionposture.Live
 	req.ModelOptions.ModelAliases = map[string]map[string]string{"regular": {"anthropic": "model"}}
