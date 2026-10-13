@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/receiverreadback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
 )
 
@@ -215,7 +216,12 @@ func currentOutput(r result) []byte {
 		must(err)
 		requestKeyPins, err := requestkey.Decode(requestKeyManifest)
 		must(err)
-		previous := requestkey.Previous(requestKeyPins, r.path, key, actual)
+		scalarManifest, err := os.ReadFile(runscalar.Path)
+		must(err)
+		scalarPins, err := runscalar.Decode(scalarManifest)
+		must(err)
+		previous := runscalar.Previous(scalarPins, r.path, key, actual)
+		previous = requestkey.Previous(requestKeyPins, r.path, key, previous)
 		previous = channelintent.Previous(intentPins, r.path, key, previous)
 		previous = forknotice.Previous(noticePins, r.path, key, previous)
 		previous = forkcompanion.Previous(companionPins, r.path, key, previous)

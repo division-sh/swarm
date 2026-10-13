@@ -67,15 +67,11 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
+		if collector == debtRunScalarCollectorTo {
+			return debtRunScalarUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
+		}
 		if collector == debtRequestKeyCollectorTo {
-			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
-				return baseline, err
-			}
-			if err := debtRequestKeyUnrefreshedMetadata(root, metadataBytes, data, baseline); err != nil {
-				return baseline, err
-			}
-			baseline.Collector = collector
-			return baseline, nil
+			return debtRequestKeyUnrefreshedBaseline(root, metadataBytes, data, baseline, historical, err)
 		}
 		if collector == debtReceiverReadbackCollectorTo {
 			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
@@ -132,6 +128,34 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("historical TSV collector header changed")
 	}
 	baseline.Collector = collector
+	return baseline, nil
+}
+
+func debtRunScalarUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtRequestKeyCollectorTo); err != nil {
+		return baseline, err
+	}
+	if baseline.Collector != debtCacheCollectorFrom {
+		return baseline, fmt.Errorf("historical TSV collector header changed")
+	}
+	if err := debtRunScalarSourcePins(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtRunScalarCollectorTo
+	return baseline, nil
+}
+
+func debtRequestKeyUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if err := debtRequestKeyUnrefreshedMetadata(root, metadata, data, baseline); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtRequestKeyCollectorTo
 	return baseline, nil
 }
 

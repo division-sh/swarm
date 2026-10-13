@@ -7,6 +7,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -120,7 +121,9 @@ func CountPhysicalRunIdentityForTest(ctx context.Context, selected any, runID st
 	}
 	var count int
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&count)
+		var err error
+		count, err = runlifecycle.CountRunIdentityStorageTx(ctx, tx, runID)
+		return err
 	})
 	if err != nil {
 		return 0, err

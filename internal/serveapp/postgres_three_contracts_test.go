@@ -87,7 +87,9 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = observer.Close() })
+			t.Cleanup(func() {
+				_ = observer.Close()
+			})
 			var reader receiverProofStateReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
@@ -97,7 +99,9 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 				return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: server.dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 			}
-			t.Cleanup(func() { buildStoresForServe = oldBuild })
+			t.Cleanup(func() {
+				buildStoresForServe = oldBuild
+			})
 			root := writeServedEventPublishFollowUpFixture(t)
 			configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 			if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
@@ -165,7 +169,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			if follow.RunID != initial.RunID || follow.NewRunCreated {
 				t.Fatalf("successor lost durable run identity: %#v", follow)
 			}
-			if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", initial.RunID, ""); n != 2 {
+			if n := servedEventPublishScalarCount(t, reader, "postgres", "application_events_by_run", initial.RunID, ""); n != 2 {
 				t.Fatalf("application events=%d want 2, no duplicate processing", n)
 			}
 			if code := restarted.stop(); code != 0 {

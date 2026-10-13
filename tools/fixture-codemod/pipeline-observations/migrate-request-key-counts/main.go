@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 )
 
 const predecessor = "80d42e2aba875393cae592e3b3f7a37f6af3d892"
@@ -98,6 +99,10 @@ func prepare(pins []pin) map[string][]byte {
 		byPath[pin.File] = append(byPath[pin.File], pin)
 	}
 	outputs := map[string][]byte{}
+	rawPins, err := os.ReadFile(runscalar.Path)
+	must(err)
+	scalarPins, err := runscalar.Decode(rawPins)
+	must(err)
 	for path, rows := range byPath {
 		raw, err := os.ReadFile(path)
 		must(err)
@@ -119,10 +124,14 @@ func prepare(pins []pin) map[string][]byte {
 				continue
 			}
 			current := requestkey.Node(fn)
-			if current != row.Before && current != row.After {
+			previous := runscalar.Previous(scalarPins, path, row.Function, current)
+			if previous != row.Before && previous != row.After {
 				panic("request-key source escaped exact predecessor/successor: " + path + "/" + row.Function)
 			}
 			delete(rules, requestkey.Key(fn))
+			if current != previous {
+				row.Source = current
+			}
 			edits = append(edits, edit{fset.Position(fn.Pos()).Offset, fset.Position(fn.End()).Offset, row.Source})
 		}
 		if len(rules) != 0 {
@@ -132,13 +141,13 @@ func prepare(pins []pin) map[string][]byte {
 		for _, e := range edits {
 			raw = append(append(append([]byte(nil), raw[:e.start]...), e.after...), raw[e.end:]...)
 		}
-		verifyOutput(path, raw, rows)
+		verifyOutput(path, raw, rows, scalarPins)
 		outputs[path] = raw
 	}
 	return outputs
 }
 
-func verifyOutput(path string, raw []byte, rows []pin) {
+func verifyOutput(path string, raw []byte, rows []pin, scalarPins []runscalar.Pin) {
 	file, err := parser.ParseFile(token.NewFileSet(), path, raw, parser.AllErrors)
 	must(err)
 	declarations := map[string]string{}
@@ -148,7 +157,7 @@ func verifyOutput(path string, raw []byte, rows []pin) {
 		}
 	}
 	for _, row := range rows {
-		if declarations[row.Function] != row.After {
+		if runscalar.Previous(scalarPins, path, row.Function, declarations[row.Function]) != row.After {
 			panic("request-key candidate output escaped its typed rule: " + path + "/" + row.Function)
 		}
 	}

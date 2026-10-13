@@ -5020,7 +5020,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if initial["new_run_created"] != "true" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
 		t.Fatalf("initial event publish fields = %#v, want new run with delivery", initial)
 	}
-	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
 	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
@@ -5039,13 +5039,13 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if followUp["run_id"] != runID || followUp["new_run_created"] != "false" || followUp["deliveries"] == "0" || followUpEventID == "" {
 		t.Fatalf("follow-up event publish fields = %#v, want selected existing run with delivery", followUp)
 	}
-	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for selected run after follow-up = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "application_events_by_run", runID, ""); got != 2 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "application_events_by_run", runID, ""); got != 2 {
 		t.Fatalf("%s application events for selected run = %d, want 2\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
@@ -5177,7 +5177,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 	if hold.RunID != runID || hold.OperatorReferenceEventID != initialEventID || hold.NewRunCreated || hold.EventID == "" {
 		t.Fatalf("%s agent-hold event.publish result = %#v, want existing run with source lineage", backend, hold)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, hold.EventID); got == 0 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, hold.EventID); got == 0 {
 		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
 	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, hold.EventID, "subscribed")
@@ -5228,7 +5228,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 	if followUp.RunID != runID || followUp.OperatorReferenceEventID != hold.EventID || followUp.NewRunCreated || followUp.EventID == "" {
 		t.Fatalf("%s follow-up event.publish result = %#v, want existing run with hold event source lineage", backend, followUp)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
 	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, followUp.EventID, "subscribed")
@@ -5639,55 +5639,29 @@ func requireServedEventPublishRouteJSON(t *testing.T, backend, field, raw, flowI
 	}
 }
 
-func servedEventPublishRowCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
+func servedEventPublishScalarCount(t *testing.T, reader receiverProofStateReader, backend, scope, runID, eventID string) int {
 	t.Helper()
-	return servedEventPublishScalarCount(t, db, backend, scope, runID, eventID)
-}
-
-func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
-	t.Helper()
-	var sqlText string
-	var args []any
 	switch backend {
-	case "postgres":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`
-			args = []any{runID}
-		case "events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`
-			args = []any{runID}
-		case "application_events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name NOT LIKE 'platform.%'`
-			args = []any{runID}
-		case "event_deliveries":
-			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`
-			args = []any{runID, eventID}
-		default:
-			t.Fatalf("unknown postgres proof count scope %q", scope)
-		}
-	case "sqlite":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = ?`
-			args = []any{runID}
-		case "events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ?`
-			args = []any{runID}
-		case "application_events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name NOT LIKE 'platform.%'`
-			args = []any{runID}
-		case "event_deliveries":
-			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND event_id = ?`
-			args = []any{runID, eventID}
-		default:
-			t.Fatalf("unknown sqlite proof count scope %q", scope)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		switch scope {
+		case "runs":
+			count, err = storetest.CountPhysicalRunIdentity(ctx, reader, runID)
+		case "application_events_by_run":
+			count, err = storetest.CountApplicationRunEvents(ctx, reader, runID)
+		case "event_deliveries":
+			count, err = storetest.CountExactRunEventDeliveries(ctx, reader, runID, eventID)
+		default:
+			return fmt.Errorf("unknown %s proof count scope %q", backend, scope)
+		}
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count %s: %v", backend, scope, err)
 	}
 	return count

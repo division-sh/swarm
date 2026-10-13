@@ -31,6 +31,7 @@ func requestKeyPins(t *testing.T) []requestkey.Pin {
 }
 
 func family145RequestKeyCallerInverse(function, current string) string {
+	current = family145RunScalarCallerInverse(function, current)
 	pins, err := requestkey.Decode(family145RequestKeyBytes)
 	if err != nil {
 		panic(err)
@@ -45,6 +46,7 @@ func family145RequestKeyCallerInverse(function, current string) string {
 
 func family145CheckRequestKeyWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145RunScalarCallerInverse(function, current)
 	for _, pin := range requestKeyPins(t) {
 		if pin.File == file && strings.Split(pin.Function, "/")[0] == function {
 			if current != pin.After {
@@ -70,7 +72,7 @@ func TestFamily145RequestKeyWholeChainRetainsPredicatesAssertionsAndCuts(t *test
 			t.Fatal("request-key source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || family145RunScalarCallerInverse(pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("request-key current source escaped its whole rule:", key, err)
 		}
 		after, count, err := requestkey.Transform(pin.Before)
@@ -183,7 +185,8 @@ func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string
 			if ok && helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				if requestkey.Previous(pins, path, fn.Name.Name, requestkey.Node(fn)) == requestkey.Node(fn) {
+				current := family145RunScalarCallerInverse(fn.Name.Name, requestkey.Node(fn))
+				if requestkey.Previous(pins, path, fn.Name.Name, current) == current {
 					t.Error("request-key caller escaped complete source-pinned owner chain:", path, fn.Name.Name)
 				}
 			}

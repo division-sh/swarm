@@ -573,6 +573,12 @@ func CountRunExactEventStorageForTest(ctx context.Context, selected any, runID, 
 	return out, nil
 }
 
+func CountApplicationRunEventStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountApplicationRunEventStorageTx(ctx, tx, runID)
+	})
+}
+
 func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, eventID, agentID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return 0, err

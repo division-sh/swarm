@@ -144,7 +144,9 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = observer.Close() })
+	t.Cleanup(func() {
+		_ = observer.Close()
+	})
 	var reader receiverProofStateReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
@@ -164,7 +166,9 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 	}
-	t.Cleanup(func() { buildStoresForServe = oldBuild })
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuild
+	})
 	root := writeServedEventPublishFollowUpFixture(t)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
@@ -211,7 +215,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	if replay.RunID != runID || replay.EventID != eventID {
 		t.Fatalf("public idempotency replay lost exact durable identity: %#v", replay)
 	}
-	if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", runID, ""); n != 1 {
+	if n := servedEventPublishScalarCount(t, reader, "postgres", "application_events_by_run", runID, ""); n != 1 {
 		t.Fatalf("durable publication count=%d want 1", n)
 	}
 	var deliveries, outcomes int

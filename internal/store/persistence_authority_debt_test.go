@@ -244,6 +244,11 @@ func debtRequestKeyBodies(root string) ([]debtRequestKeyBody, error) {
 }
 
 func debtRequestKeySourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtRunScalarSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if !debtRequestKeySuccessorCandidate(current) {
 		return current, nil // Earlier immutable fixtures do not require future evidence.
 	}
@@ -257,6 +262,62 @@ func debtRequestKeySourcePrevious(root, file, function, current string) (string,
 		}
 	}
 	return current, nil
+}
+
+func debtRunScalarBodies(root string) ([]debtRequestKeyBody, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/family145-run-scalar-preimages.json"))
+	if err != nil || debtBaselineChecksum(raw) != "441c152d124c3f218fe1577a3962b8b7bc153919bec0121ad89a48a904dfddca" {
+		return nil, fmt.Errorf("exact run scalar source evidence changed: %v", err)
+	}
+	var bodies []debtRequestKeyBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 6 {
+		return nil, fmt.Errorf("invalid run scalar complete source inventory: %v", err)
+	}
+	return bodies, nil
+}
+
+func debtRunScalarSourcePrevious(root, file, function, current string) (string, error) {
+	if !strings.Contains(current, "servedEventPublishScalarCount(t, reader,") {
+		return current, nil // Immutable earlier bodies do not require future manifests.
+	}
+	bodies, err := debtRunScalarBodies(root)
+	if err != nil {
+		return "", err
+	}
+	for _, body := range bodies {
+		if body.File == file && body.Function == function && current == body.After && debtBaselineChecksum([]byte(body.Before)) == body.SHA256 {
+			return body.Before, nil
+		}
+	}
+	return current, nil
+}
+
+func debtRunScalarSourcePins(root string) error {
+	bodies, err := debtRunScalarBodies(root)
+	if err != nil {
+		return err
+	}
+	for _, body := range bodies {
+		declarations, err := debtServedDebugDeclarations(filepath.Join(root, body.File))
+		if err != nil || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+			return fmt.Errorf("run scalar source owner/assertion/cut changed: %s/%s: %v", body.File, body.Function, err)
+		}
+	}
+	return nil
+}
+
+func debtRunScalarCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtRunScalarCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtRequestKeyCollectorTo {
+		intermediate := head
+		intermediate.Collector = debtRequestKeyCollectorTo
+		if !debtRequestKeyCollectorTransition(base, debtRequestKeyCollectorTo, trusted, intermediate) {
+			return false
+		}
+	}
+	return trusted.BootstrapSource == head.BootstrapSource && len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
 }
 
 func debtRequestKeySuccessorCandidate(current string) bool {
@@ -1671,7 +1732,8 @@ func debtReviewedCollectorTransition(base, current string, trusted, head authori
 		debtServedDebugCollectorTransition(base, current, trusted, head) ||
 		debtPublicA2EndpointCollectorTransition(base, current, trusted, head) ||
 		debtReceiverReadbackCollectorTransition(base, current, trusted, head) ||
-		debtRequestKeyCollectorTransition(base, current, trusted, head)
+		debtRequestKeyCollectorTransition(base, current, trusted, head) ||
+		debtRunScalarCollectorTransition(base, current, trusted, head)
 }
 
 func debtRunFixtureCollectorPredecessor(base string, trusted, head authorityDebtBaseline) bool {

@@ -21,6 +21,12 @@ type TemplateReceiptDiagnosticStorage = pipelinepersistence.TemplateReceiptDiagn
 
 type TemplateDeliveryDiagnosticStorage = delivery.TemplateDeliveryDiagnosticStorage
 
+func CountExactRunEventDeliveryStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountExactRunEventDeliveryStorageTx(ctx, tx, runID, eventID)
+	})
+}
+
 func ReadTemplateEventDeliveryDiagnosticsForTest(ctx context.Context, selected any, event string) ([]TemplateDeliveryDiagnosticStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) ([]TemplateDeliveryDiagnosticStorage, error) {
 		return delivery.ReadTemplateEventDeliveryDiagnosticsTx(ctx, tx, event)

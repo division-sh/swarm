@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,12 +21,13 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 )
 
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "54b43fd056fb7f6531b559eb7a7985f08472697c4f26564578f1faea9954eafe"
+const targetDigest = "3c52f0abba6d3172b7d740dc76ba331861bb87a5f783e645b8ed78dd0ae3e6f9"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -279,6 +281,7 @@ func main() {
 	includeForkNoticeTargets()
 	includeChannelIntentTargets()
 	includeRequestKeyTargets()
+	includeRunScalarTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -348,6 +351,30 @@ func includeRequestKeyTargets() {
 }
 
 var channelIntentRetirements = map[string]map[string]bool{}
+
+var runScalarRetirements = map[string]map[string]bool{}
+
+func includeRunScalarTargets() {
+	raw, err := os.ReadFile(runscalar.Path)
+	must(err)
+	pins, err := runscalar.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+		if pin.After == "" {
+			if runScalarRetirements[pin.File] == nil {
+				runScalarRetirements[pin.File] = map[string]bool{}
+			}
+			runScalarRetirements[pin.File][pin.Function] = true
+		}
+	}
+}
 
 func includeChannelIntentTargets() {
 	raw, err := os.ReadFile(channelintent.Path)
@@ -672,7 +699,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 }
 
 func retiredFixtureReplacement(path, key string, after map[string]string) bool {
-	if channelIntentRetirements[path][key] {
+	if channelIntentRetirements[path][key] || runScalarRetirements[path][key] {
 		if after[key] != "" {
 			panic("retired channel-intent interpreter survived: " + path + "/" + key)
 		}

@@ -144,6 +144,12 @@ func CountRunDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (i
 	return count, err
 }
 
+func CountExactRunEventDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&count)
+	return count, err
+}
+
 func CountRunDeliveryAttemptStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`, runID).Scan(&count)
