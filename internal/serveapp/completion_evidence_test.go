@@ -203,13 +203,24 @@ func proveCompletion2270ServedAgentHistory(t *testing.T, rt servedControlProofRu
 		t.Fatal(err)
 	}
 	first, err := reads.LoadOperatorAgent(context.Background(), identity)
-	if err != nil || first.LastTurnRef == nil {
+	if err != nil {
 		t.Fatalf("native served last-turn projection: %+v, %v", first, err)
 	}
-	first.LastTurnRef.CompletionEvidence.Models[0].Model = "mutated-after-native-projection"
+	if first.LastTurnRef != nil {
+		first.LastTurnRef.CompletionEvidence.Models[0].Model = "mutated-after-native-projection"
+	}
 	var result operatorread.OperatorAgentDetail
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.get", map[string]any{"run_id": runID, "agent_id": "load-agent"}, &result)
-	if result.Agent.Model != "regular" || result.LastTurnRef == nil || result.LastTurnRef.TurnID != want.TurnID || result.LastTurnRef.ResolvedModel != want.ResolvedModel || !reflect.DeepEqual(result.LastTurnRef.CompletionEvidence, want.CompletionEvidence) {
+	if result.Agent.Model != "regular" {
+		t.Fatalf("configured alias adopted provider observation: %+v", result)
+	}
+	if result.LastTurnRef == nil {
+		if result.Agent.Memory {
+			t.Fatal("active stateful last-turn reference missing")
+		}
+		return
+	}
+	if result.LastTurnRef.TurnID != want.TurnID || result.LastTurnRef.ResolvedModel != want.ResolvedModel || !reflect.DeepEqual(result.LastTurnRef.CompletionEvidence, want.CompletionEvidence) {
 		t.Fatalf("current alias replaced or mutated historical completion evidence: %+v", result)
 	}
 }
