@@ -72,6 +72,42 @@ selector, excludes all partial recursive selectors, then removes the cycle and
 checks the original exact finite selector pair. No production leaf repair,
 assertion removal, timing change or passing aggregate is claimed.
 
+Final local checkpoint9b65e3a80: the sweep completed all298 packages, with2150
+passing test checks and zero test skips. It remains a RED aggregate solely for
+that stale recursive-selector oracle; receipt SHA256
+`115afbf73bd1a2147dfa6d23b4c3b5e7e63d2af982b9a40e7568924710f1d630`.
+The exact corrected guard now PASSES in its own focused receipt, SHA256
+`9a1e8b4a0eea739c6fe422cb87ccdd78b809d5d0d37cb825bdcbd7927125e9c6`.
+Debt ratchet PASSES at10611 (unchanged exact baseline), no added debt or guard
+exception. The separate leaf counterexamples actually executed and are RED in
+both packages: Label/nested Label are refused, and generated selectors contain
+only identity/status rather than identity/label/nested.label/status. Receipt
+SHA256 `08d8b754b7ff22767f7ed9cf26d5720898eb2e861ed17ca9a42da2576aa2745a`.
+No interrupted/failed aggregate is relabeled green; no B closure or PR.
+
+### Additional Authored/Physical Node-List Boundary
+
+Targeted S03 search and D/reviewer-e6138039454 confirm that
+NormalizeNodeStateFieldType still accepts text[]/numeric(p,s)[] and normalizes
+NamedType[] to [NamedType], while [text] refuses. This is an authored-presence
+producer and also physical DDL normalization, so the same string method cannot
+be blindly given an authored suffix guard. The node vocabulary permits richer
+numeric/jsonb/named-field policy; no primitive-list expansion or unsupported
+replacement hint is assumed. Reviewer-g must explicitly dispose that S08 edge
+under the LEAD rule before B closure. No shared node/DDL production byte changed.
+
+Exact G/D handoff6138075024 and G refinement of D6138071713: D edits
+projectNodeStateFieldValue/admitNodeStateFieldMapping shape/style and angle/long
+retirement, plus only the list<...> branches in NormalizeNodeStateFieldType and
+NodeStateNamedTypeName. G consumes the canonical decoded reference without a
+sequence/style parser and supplies suffix/prefix policy at the AUTHORED boundary,
+before physical normalization. D is the one editor for a shared decoder call;
+G's exact helper is consumed/transferred with attribution if needed. Never put
+authored refusal in NodeStateFieldTypeToDDL or remove physical SQL arrays. The
+actual canonical replacement/primitive-array edge stays frozen for reviewer-g,
+not silently broadened. Shared wave1/event/schema retirement hunks preserve G's
+common reference/map policy and D's angle/long ownership. No blanket wait on B.
+
 Evidence lives in the owned local state directory
 `~/.local/state/agent-g-2447-catalog-type-preaudit/`. Focused commands used the
 swarm-test admission wrapper and PostgreSQL16; no duplicate Local tier or full
