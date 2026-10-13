@@ -249,7 +249,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			// This reduced writer proof admits an exact text-list source witness;
 			// it does not stand in for the authored compiler or public pump proof.
-			collection := runtimecontracts.CatalogTypeReference{Type: "list<text>"}
+			collection := runtimecontracts.CatalogTypeReference{Type: "[text]"}
 			projection, err := runtimecontracts.AdmitCollectionProjection(collection)
 			if err != nil {
 				t.Fatal(err)

@@ -876,13 +876,13 @@ stages:
   ready: {final: true}
   attention: {final: true}
 `,
-		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: list<text>\n",
+		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: [text]\n",
 		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
 		"orders/events.yaml": `item.completed:
   member_id: text
   result: ItemResult
 order.accepted:
-  line_items: list<LineItem>
+  line_items: [LineItem]
 line_item.requested:
   line_item_id: text
 dispatch.completed:

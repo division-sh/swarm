@@ -30,7 +30,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			entity := b.RootEntities["Order"]
 			entity.Fields["expected"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 			b.RootEntities["Order"] = entity
-		}, wantError: "requires list<text> or map[text]T"},
+		}, wantError: "requires [text] or map[text]T"},
 		{name: "deadline requires outcome", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnDeadlineFound = false
 			h.Join.OnDeadline = runtimecontracts.HandlerRuleEntry{}
@@ -309,8 +309,8 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
-			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "list<text>"}}, Required: []string{"results"}}},
-			"join.timed_out": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"missing": {Type: "list<text>"}}, Required: []string{"missing"}}},
+			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "[text]"}}, Required: []string{"results"}}},
+			"join.timed_out": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"missing": {Type: "[text]"}}, Required: []string{"missing"}}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &spec}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{

@@ -1,5 +1,5 @@
 scout.setup:
-  member_ids: "[text]"
+  member_ids: [text]
   batch_id: text
 scout.member.done:
   member_id: text

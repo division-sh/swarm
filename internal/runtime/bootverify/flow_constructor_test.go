@@ -54,7 +54,7 @@ func TestFlowConstructorCatalogSupplyAdmission(t *testing.T) {
 		valid                           bool
 	}{
 		{"map", "", "map[text]text", "map[text]text", true},
-		{"nested map", "", "list<map[text]text>", "list<map[text]text>", true},
+		{"nested map", "", "[map[text]text]", "[map[text]text]", true},
 		{"map value mismatch", "", "map[text]integer", "map[text]text", false},
 		{"enum", "enums:\n  Mode: {values: [low, high], default: low}\n", "Mode", "Mode", true},
 		{"unbounded enum supply", "enums:\n  Mode: {values: [low, high], default: low}\n", "Mode", "text", false},

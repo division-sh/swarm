@@ -106,7 +106,7 @@ item.ready:
   member_id: text
   index: integer
   count: integer
-  result: "[integer]"
+  result: [integer]
 `,
 		"nodes.yaml": `writer:
   execution_type: system_node

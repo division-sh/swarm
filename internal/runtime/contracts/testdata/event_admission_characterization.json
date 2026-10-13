@@ -685,7 +685,7 @@
   "field_unknown": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: events.yaml:$[\"test.event\"][\"id\"][\"typo\"]: event payload field field \"typo\" is not supported. (line 2, column 20) Valid fields: citation, description, equal_to, length, of, pattern, range, type. Did you mean \"type\"? Use one of the supported event payload field fields.",
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: events.yaml:$[\"test.event\"][\"id\"][\"typo\"]: event payload field field \"typo\" is not supported. (line 2, column 20) Valid fields: citation, description, equal_to, length, pattern, range, type. Did you mean \"type\"? Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "first_error_business_key": {
@@ -697,7 +697,7 @@
   "first_error_field_order": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"z\" at events.yaml:2:6: event payload field list declarations require an of: element type",
+    "Error": "event \"test.event\": payload field \"z\" at events.yaml:2:6: $[\"test.event\"][\"z\"][\"type\"] at events.yaml:2:13 (introduced at events.yaml:2:13, resolved at events.yaml:2:13): contracts: invalid field: event payload field list type \"list\" is not supported; use [T]",
     "ErrorType": "*fmt.wrapError"
   },
   "first_error_refinement_order": {
@@ -1078,13 +1078,13 @@
   "mapping_foreign_of": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: events.yaml:$[\"test.event\"][\"id\"][\"of\"]: event payload field field \"of\" is not supported. (line 2, column 20) Valid fields: citation, description, equal_to, length, of, pattern, range, type. Did you mean \"of\"? Use one of the supported event payload field fields.",
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: $[\"test.event\"][\"id\"][\"of\"] at events.yaml:2:24 (introduced at events.yaml:2:24, resolved at events.yaml:2:24): contracts: invalid field: event payload field field \"of\" is not supported; declare the list as [T]",
     "ErrorType": "*fmt.wrapError"
   },
   "mapping_missing_of": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: event payload field list declarations require an of: element type",
+    "Error": "event \"test.event\": payload field \"id\" at events.yaml:2:7: $[\"test.event\"][\"id\"][\"type\"] at events.yaml:2:14 (introduced at events.yaml:2:14, resolved at events.yaml:2:14): contracts: invalid field: event payload field list type \"list\" is not supported; use [T]",
     "ErrorType": "*fmt.wrapError"
   },
   "mapping_missing_type": {
@@ -2231,13 +2231,13 @@
           ],
           "source_file": "events.yaml",
           "source_line": 4,
-          "source_column": 10
+          "source_column": 11
         },
         "fields.array.type": {
           "origin": "authored",
           "source_file": "events.yaml",
           "source_line": 4,
-          "source_column": 10,
+          "source_column": 11,
           "source_presence": "scalar"
         },
         "fields.map.is_optional": {
@@ -2309,19 +2309,19 @@
   "sequence_empty": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field type is required",
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: $[\"test.event\"][\"array\"] at events.yaml:2:10 (introduced at events.yaml:2:10, resolved at events.yaml:2:10): contracts: invalid field: event payload field list declaration requires exactly one plain unquoted element type; use [T]; for numeric(p,s), use a one-item block sequence",
     "ErrorType": "*fmt.wrapError"
   },
   "sequence_multiple": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field list shorthand requires exactly one element type",
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: $[\"test.event\"][\"array\"] at events.yaml:2:10 (introduced at events.yaml:2:10, resolved at events.yaml:2:10): contracts: invalid field: event payload field list declaration requires exactly one plain unquoted element type; use [T]; for numeric(p,s), use a one-item block sequence",
     "ErrorType": "*fmt.wrapError"
   },
   "sequence_optional": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field optional type must use exactly one trailing ?",
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:3:5: event payload field optional type must use exactly one trailing ?",
     "ErrorType": "*fmt.wrapError"
   },
   "sequence_types": {
@@ -2399,7 +2399,7 @@
   "sequence_wrong_kind": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: event payload field element type at events.yaml:2:11 is empty_mapping, want non-empty scalar",
+    "Error": "event \"test.event\": payload field \"array\" at events.yaml:2:10: $[\"test.event\"][\"array\"][0] at events.yaml:2:11 (introduced at events.yaml:2:11, resolved at events.yaml:2:11): contracts: invalid field: event payload field list declaration requires a plain unquoted type token; quoted literals are data, not declarations; use [T]",
     "ErrorType": "*fmt.wrapError"
   },
   "spaced_optionality": {

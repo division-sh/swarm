@@ -352,7 +352,7 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 
 	targetItem, ok := namedListItemType(target.FieldDecl.Type)
 	if !ok {
-		issues = append(issues, scopedIssue(binding, "unsupported_target_type", loc, fmt.Sprintf("materialize_from target %q must be declared list<NamedType>; found %q", target.FieldName, strings.TrimSpace(target.FieldDecl.Type))))
+		issues = append(issues, scopedIssue(binding, "unsupported_target_type", loc, fmt.Sprintf("materialize_from target %q must be declared [NamedType]; found %q", target.FieldName, strings.TrimSpace(target.FieldDecl.Type))))
 	} else if _, declared := target.TypeCatalog.Types[targetItem]; !declared {
 		issues = append(issues, scopedIssue(binding, "undeclared_target_named_type", loc, fmt.Sprintf("materialize_from target %q references undeclared named type %s", target.FieldName, targetItem)))
 	} else {
@@ -502,9 +502,6 @@ func parseMaterializeFrom(raw string) (string, string, bool) {
 func namedListItemType(typeRef string) (string, bool) {
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
-	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
-		item := strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
-		return item, item != "" && isNamedTypeName(item)
 	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
 		item := strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 		return item, item != "" && isNamedTypeName(item)

@@ -85,12 +85,28 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 		if field.Name == "" {
 			return NodeStateField{}, fmt.Errorf("state field at %s requires a name", value.Location())
 		}
-		text, err := nodeValueText(value, "state field type")
+		text, err := listDeclarationScalar(value, "state field", false)
 		if err != nil {
 			return NodeStateField{}, err
 		}
 		field.Type = text
+	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
+		if field.Name == "" {
+			return NodeStateField{}, fmt.Errorf("state field at %s requires a name", value.Location())
+		}
+		typeRef, err := listDeclarationSequence(value, "state field")
+		if err != nil {
+			return NodeStateField{}, err
+		}
+		field.Type = typeRef
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
+		entries, err := value.Mapping()
+		if err != nil {
+			return NodeStateField{}, err
+		}
+		if err := rejectLongListField(entries, "state field"); err != nil {
+			return NodeStateField{}, err
+		}
 		fields, err := nodeValueFields(value, "state field", map[string]struct{}{
 			"name": {}, "type": {}, "default": {},
 		})
@@ -107,7 +123,7 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 			return NodeStateField{}, fmt.Errorf("state field %q at %s cannot reauthor its map-key name", name, named.Location())
 		}
 		if typed, present := fields["type"]; present {
-			field.Type, err = nodeValueText(typed, "state field type")
+			field.Type, err = listDeclarationScalar(typed, "state field", true)
 			if err != nil {
 				return NodeStateField{}, err
 			}
@@ -122,6 +138,9 @@ func projectNodeStateFieldValue(name string, value yamlsource.Value) (NodeStateF
 	}
 	if field.Name == "" {
 		return NodeStateField{}, fmt.Errorf("state field at %s requires a name", value.Location())
+	}
+	if err := retiredCatalogListSpelling(field.Type); err != nil {
+		return NodeStateField{}, nodeValueError(value, err)
 	}
 	normalized, err := NormalizeNodeStateFieldType(field.Type)
 	if err != nil {
