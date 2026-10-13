@@ -132,6 +132,7 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"declarationIdentity": noHandlerRuleExecutableReaders,
 	"authored":            noHandlerRuleExecutableReaders,
 	"admissionProvenance": noHandlerRuleExecutableReaders,
+	"predicateDisplay":    noHandlerRuleExecutableReaders,
 }
 
 func WorkflowHandlerExecutableReaders(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []WorkflowExecutableReader {
@@ -315,10 +316,7 @@ func appendRulesExecutableReaders(out *[]WorkflowExecutableReader, ctx executabl
 		if strings.HasPrefix(kind, "join.") {
 			prefix = kind
 		}
-		label := prefix
-		if id := strings.TrimSpace(rule.ID); id != "" {
-			label = kind + "[" + id + "]"
-		}
+		label := rule.DisplayLabel(kind, i)
 		before := len(*out)
 		for _, field := range sortedExecutableReaderFields(handlerRuleEntryExecutableReaderCensus) {
 			if !handlerRuleExecutableReaderFieldIsActive(kind, field) {

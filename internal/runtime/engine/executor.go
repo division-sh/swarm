@@ -138,6 +138,13 @@ const (
 	handlerRuleSourceJoinTimeout    handlerRuleSource = "handler.join.timeout"
 )
 
+func (source handlerRuleSource) authoredCollection() string {
+	if source == handlerRuleSourceJoinTimeout {
+		return "join.on_deadline"
+	}
+	return strings.TrimPrefix(string(source), "handler.")
+}
+
 func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, error) {
 	if deps.Source == nil {
 		return nil, ErrMissingSemanticSource
@@ -3125,9 +3132,9 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			}
 			ref, qualified := rule.DeclarationIdentity()
 			if !qualified {
-				return nil, -1, fmt.Errorf("handler rule %q evaluation failed without canonical element identity: %w", strings.TrimSpace(rule.ID), err)
+				return nil, -1, fmt.Errorf("handler row %q evaluation failed without canonical element identity: %w", rule.DisplayLabel(source.authoredCollection(), idx), err)
 			}
-			fact, factErr := handlerselection.EvaluationFailed(context, ref, rule.ID)
+			fact, factErr := handlerselection.EvaluationFailed(context, ref, rule.DisplayLabel(source.authoredCollection(), idx))
 			if factErr != nil {
 				return nil, -1, factErr
 			}
@@ -3159,7 +3166,7 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	ref, qualified := rule.DeclarationIdentity()
 	if !qualified {
 		if rule.Authored() {
-			return fmt.Errorf("selected authored handler rule %q lacks its admitted contract element reference", strings.TrimSpace(rule.ID))
+			return fmt.Errorf("selected authored handler row %q lacks its admitted contract element reference", rule.DisplayLabel(frame.ruleSource.authoredCollection(), frame.ruleIndex))
 		}
 		return nil
 	}
@@ -3167,7 +3174,7 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if err != nil {
 		return err
 	}
-	fact, err := handlerselection.Selected(context, ref, rule.ID)
+	fact, err := handlerselection.Selected(context, ref, rule.DisplayLabel(frame.ruleSource.authoredCollection(), frame.ruleIndex))
 	if err != nil {
 		return err
 	}

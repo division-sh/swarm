@@ -98,7 +98,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go::wave1ContainedStateOperations":                  {Count: 2, Reason: "diagnostic operation label"},
 		"internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go::wave1HandlerWriteTargets":                        {Count: 2, Reason: "diagnostic write-site label"},
-		"internal/runtime/pipeline/workflow_executable_readers.go::appendRulesExecutableReaders":                                   {Count: 1, Reason: "executable reader diagnostic label; constructor assignment verification consumes the shared reader census"},
 		"internal/runtime/bootverify/workflow_input_alignment_checks.go::payloadFieldCoverageSites":                                {Count: 2, Reason: "diagnostic payload-site label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::checkPolicySheetLookupValueRows":                      {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::policySheetLookupDuplicateComputedBindings":           {Count: 1, Reason: "diagnostic row label"},
@@ -111,11 +110,8 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue":                            {Count: 2, Reason: "keyed-map presentation projection"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":                             {Count: 1, Reason: "authored rule presentation label projection"},
 		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRulePolicyValue":                            {Count: 1, Reason: "policy value-row diagnostic label; relocated from projectNodeRuleEntryValue"},
-		"internal/runtime/contracts/workflow_contract_rule_identity.go::QualifySystemNodeHandlerRuleRefsForEvent":                  {Count: 1, Reason: "path-derived identity-admission diagnostic label only"},
 		"internal/runtime/contracts/workflow_fan_out_semantics.go::HandlerFanOutSites":                                             {Count: 2, Reason: "fan-out-site presentation label"},
 		"internal/runtime/contracts/workflow_transition_carriers.go::handlerAdvanceCarriers":                                       {Count: 1, Reason: "transition diagnostic carrier label"},
-		"internal/runtime/engine/executor.go::(*Executor).applyRule":                                                               {Count: 2, Reason: "durable fact presentation label"},
-		"internal/runtime/engine/executor.go::(*Executor).selectRule":                                                              {Count: 2, Reason: "failed-evaluation fact and diagnostic presentation label"},
 	}
 }
 

@@ -167,12 +167,12 @@ func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testi
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
 	}
 	want := map[string]runtimepipeline.WorkflowConditionContext{
-		"guard.check":              runtimepipeline.WorkflowConditionContextGuard,
-		"query.filter":             runtimepipeline.WorkflowConditionContextQueryFilter,
-		"filter.condition":         runtimepipeline.WorkflowConditionContextFilter,
-		"count.condition":          runtimepipeline.WorkflowConditionContextCount,
-		"rules[0].condition":       runtimepipeline.WorkflowConditionContextRule,
-		"on_complete[0].condition": runtimepipeline.WorkflowConditionContextOnComplete,
+		"guard.check":                            runtimepipeline.WorkflowConditionContextGuard,
+		"query.filter":                           runtimepipeline.WorkflowConditionContextQueryFilter,
+		"filter.condition":                       runtimepipeline.WorkflowConditionContextFilter,
+		"count.condition":                        runtimepipeline.WorkflowConditionContextCount,
+		"rules[0]: when payload.ready.condition": runtimepipeline.WorkflowConditionContextRule,
+		"on_complete[0]: condition payload.ready.condition": runtimepipeline.WorkflowConditionContextOnComplete,
 	}
 	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
 		context, expected := want[reader.Kind]
@@ -215,12 +215,12 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "entity.status == 'done'"}},
 	}
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
-		"accumulate.from":          runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
-		"accumulate.key":           runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
-		"group_by.items_from":      runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
-		"compute.lookup.on[0]":     runtimepipeline.WorkflowEntityFieldLifecycleCompute,
-		"fan_out.items_from":       runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
-		"on_complete[0].condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
+		"accumulate.from":      runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
+		"accumulate.key":       runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
+		"group_by.items_from":  runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
+		"compute.lookup.on[0]": runtimepipeline.WorkflowEntityFieldLifecycleCompute,
+		"fan_out.items_from":   runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
+		"on_complete[0]: condition entity.status == 'done'.condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 	}
 	for _, reader := range canonicalFanOutExecutableReaders(t, handler) {
 		phase, ok := want[reader.Kind]

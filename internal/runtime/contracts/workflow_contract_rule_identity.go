@@ -25,7 +25,7 @@ func QualifySystemNodeHandlerRuleRefsForEvent(node runtimeidentity.ExecutableNod
 		}
 		identity, err := runtimeidentity.AdmitDeclarationIdentity(node.FlowPath(), "handler_rule", fmt.Sprintf("%s.%s[%d]", base, context, index))
 		if err != nil {
-			return HandlerRuleEntry{}, fmt.Errorf("%s rule %q identity: %w", context, strings.TrimSpace(rule.ID), err)
+			return HandlerRuleEntry{}, fmt.Errorf("%s identity: %w", rule.DisplayLabel(context, index), err)
 		}
 		rule.declarationIdentity = identity
 		return rule, nil
