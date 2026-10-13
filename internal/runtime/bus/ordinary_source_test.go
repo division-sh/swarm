@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -41,6 +42,10 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				{FlowInstance: instance, EntityID: entityID},
 				{FlowInstance: "beta", EntityID: entityID},
 			}}
+			constructed := StoredFlowInstanceIdentityFixture(source, flow, "", runID, entityID)
+			projection.context = withSelectedTargetOwnerLookupScope(constructionIndexContext(t, source), selectedTargetOwnerLookupScope{
+				observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, runID, constructed, "")},
+			})
 			local, err := projection.ordinarySource(evt)
 			if err != nil {
 				t.Fatal(err)
@@ -80,21 +85,25 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 			}
 
 			candidate := deliveryRecipientCandidate{ID: localAgent.AgentID(), AgentIdentity: localAgent, PersistAsDelivery: true}
-			for _, descriptorEntity := range []string{entityID, eventtest.UUID("wrong-agent-entity")} {
+			for _, descriptorEntity := range []string{"", eventtest.UUID("wrong-agent-entity")} {
+				projection.agents = map[agentidentity.Identity]ActiveAgentDescriptor{localAgent: {Identity: localAgent, EntityID: descriptorEntity}}
 				manifest, err := filterDeliveryRecipientCandidates(source, evt, []deliveryRecipientCandidate{candidate},
-					map[agentidentity.Identity]ActiveAgentDescriptor{localAgent: {Identity: localAgent, EntityID: descriptorEntity}},
+					projection.agents,
 					projection.descriptors, projection, local)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if descriptorEntity != entityID {
+				if descriptorEntity != "" {
 					if len(manifest.DeliveryRoutes) != 0 {
-						t.Fatalf("wrong-entity agent acquired provider delivery: %#v", manifest.DeliveryRoutes)
+						t.Fatalf("wrong-entity static agent acquired provider delivery: %#v", manifest.DeliveryRoutes)
 					}
 					continue
 				}
-				if len(manifest.DeliveryRoutes) != 1 || manifest.DeliveryRoutes[0].Target.Route().FlowInstance != instance || manifest.DeliveryRoutes[0].Target.Route().EntityID != entityID {
+				if len(manifest.DeliveryRoutes) != 1 || manifest.DeliveryRoutes[0].Target.Route().FlowInstance != instance || !manifest.DeliveryRoutes[0].Target.EntitylessReceiver() || manifest.DeliveryRoutes[0].Target.Route().EntityID != "" {
 					t.Fatalf("target-free provider agent lost its exact execution owner: %#v", manifest.DeliveryRoutes)
+				}
+				if !manifest.DeliveryRoutes[0].Initialization.FlowLifecycle() || manifest.DeliveryRoutes[0].Initialization.ConstructionTarget().Route().EntityID != entityID {
+					t.Fatalf("entityless actor lost its independent exact construction: %#v", manifest.DeliveryRoutes)
 				}
 			}
 			if evt.RoutingSource() != routing || evt.HasTargetRoute() {

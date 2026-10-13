@@ -284,11 +284,11 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	targetNode := testFlowNode(t, "worker", "target-node")
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(target)
+	source := semanticview.Wrap(materializedTargetBundleWithHandler(
+		t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+	))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
-			t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
-		)),
+		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
 				Recipient: events.MustNodeDeliveryRecipient(targetNode),
@@ -306,6 +306,10 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	installConnectionSourceConstructionForRun(t, eb, source, ".", lineage.DestinationRunID())
+	constructed := StoredFlowInstanceIdentityFixture(source, target.FlowID, "inst-1", lineage.DestinationRunID(), target.EntityID)
+	constructed.InstancePath, constructed.InstanceID = target.FlowInstance, "inst-1"
+	store.installIndexObservation(constructionIndexObservation(t, source, lineage.DestinationRunID(), constructed, "inst-1"))
 	evt, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
 		Facts: events.EventFacts{
 			ID: uuid.NewString(), Type: eventType,
@@ -317,7 +321,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt, SelectedInputValidation{})
+	prepared, err := eb.PrepareSelectedForkPublish(constructionIndexContext(t, source), evt, SelectedInputValidation{})
 	if err != nil {
 		t.Fatalf("prepare selected-fork publication: %v", err)
 	}

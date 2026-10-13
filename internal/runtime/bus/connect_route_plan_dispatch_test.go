@@ -939,6 +939,9 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"ignored":"yes"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())

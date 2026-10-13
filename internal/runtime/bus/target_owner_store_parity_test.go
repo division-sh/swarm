@@ -61,6 +61,13 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 				{InstanceID: runID, StorageRef: runID, EntityID: sourceEntityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at},
 				{InstanceID: "consumer", StorageRef: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"), WorkflowName: "consumer", WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at},
 			} {
+				constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, instance.WorkflowName, "", runID)
+				if constructed.InstancePath != instance.StorageRef {
+					t.Fatalf("target-owner fixture disagrees with its compiled declaration: %+v", constructed)
+				}
+				instance.ParentFlowID = constructed.ParentRoute.FlowID
+				instance.ParentFlowInstance = constructed.ParentRoute.FlowInstance
+				instance.ParentEntityID = constructed.ParentEntityID
 				seedComponentFlowConstruction(t, ctx, selected, source, instance)
 			}
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
