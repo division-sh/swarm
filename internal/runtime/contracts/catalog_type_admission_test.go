@@ -80,12 +80,12 @@ func TestCatalogAdmissionNodeListTeaching(t *testing.T) {
 func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 	for _, tc := range []struct{ name, file, source string }{
 		{"unused_self", "types.yaml", "types:\n  Cycle:\n    child: Cycle\n"},
-		{"unused_mutual", "child/types.yaml", "types:\n  Left:\n    right: '[Right]'\n  Right:\n    left: map[text]Left\n"},
+		{"unused_mutual", "child/types.yaml", "types:\n  Left:\n    right: [Right]\n  Right:\n    left: map[text]Left\n"},
 		{"unused_missing", "types.yaml", "types:\n  Unused:\n    child: Missing\n"},
 		{"unused_entity", "child/entities.yaml", "person:\n  child: Missing\n"},
 		{"unused_event", "child/events.yaml", "test.ready:\n  child: Missing\n"},
 		{"suffix", "types.yaml", "types:\n  Unused:\n    child: text[]\n"},
-		{"prefix", "entities.yaml", "person:\n  child: '[]text'\n"},
+		{"prefix", "entities.yaml", "person:\n  child: {type: '[]text'}\n"},
 		{"integer_key", "events.yaml", "test.ready:\n  child: map[integer]text\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,11 +175,11 @@ func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{
 		"schema.yaml":         "name: dag\nstages: {done: {final: true}}\n",
-		"types.yaml":          "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\ntypes:\n  Leaf:\n    value: Label\n  Pair:\n    first: Leaf\n    second: Leaf?\n  Nested:\n    pairs: '[Pair]'\n    lookup: map[Label]Pair\n",
+		"types.yaml":          "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\ntypes:\n  Leaf:\n    value: Label\n  Pair:\n    first: Leaf\n    second: Leaf?\n  Nested:\n    pairs: [Pair]\n    lookup: map[Label]Pair\n",
 		"entities.yaml":       "person:\n  state: Nested\n",
 		"child/schema.yaml":   "name: child\ninstance: id\nstages: {done: {final: true}}\n",
 		"child/entities.yaml": "person:\n  id: Label\n  items: map[Label]Pair\n",
-		"child/events.yaml":   "test.ready:\n  items: '[Pair]'\n  keys: map[Status]ID\n  stamp: Time\n",
+		"child/events.yaml":   "test.ready:\n  items: [Pair]\n  keys: map[Status]ID\n  stamp: Time\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, name), source)
 	}
@@ -279,7 +279,7 @@ func TestCatalogAdmissionDurableTextPolicy(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-domains\n")
 	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: {type: Label, pattern: '^valid', length: {min: 5}}\n  identity: ID\n  stamp: Time?\n  status: Status\n  labels: '[Label]'\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: {type: Label, pattern: '^valid', length: {min: 5}}\n  identity: ID\n  stamp: Time?\n  status: Status\n  labels: [Label]\n")
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
