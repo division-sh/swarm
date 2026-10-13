@@ -217,6 +217,16 @@ func addDetachedPlanObservations(t *testing.T, out map[string]catalogDetachedObs
 	}
 	out["D08/item"] = catalogDetachedObservation{func() any { return projection }, func() SchemaRefinements { return detachedTypeField(t, projection.ItemType(), name).Refinements }}
 	out["D08/clone"] = catalogDetachedObservation{func() any { return projection }, func() SchemaRefinements { return detachedTypeField(t, projection.Clone().Type, name).Refinements }}
+	mapProjection, err := AdmitCollectionProjection(CatalogTypeReference{Type: "map[text]Probe", Catalog: ref.Catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["D08/map-clone"] = catalogDetachedObservation{func() any { return mapProjection }, func() SchemaRefinements {
+		if mapProjection.ItemType().Kind != CatalogTypeText {
+			t.Fatal("map projection changed its text-key item type")
+		}
+		return detachedTypeField(t, mapProjection.Clone().Type, name).Refinements
+	}}
 	input := CompiledConnectionInput{value: &compiledConnectionInputValue{evidence: FlowInputInstanceSourceTypeEvidence{SourceType: ref, ReceiverType: ref}}}
 	for label, selectType := range map[string]func(FlowInputInstanceSourceTypeEvidence) CatalogTypeReference{
 		"source":   func(e FlowInputInstanceSourceTypeEvidence) CatalogTypeReference { return e.SourceType },
