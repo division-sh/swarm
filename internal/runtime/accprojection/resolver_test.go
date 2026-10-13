@@ -249,7 +249,7 @@ scoring-node:
         into: dimensions_received
   state_schema:
     fields:
-      dimensions_received: "[DimensionScore]"
+      dimensions_received: [DimensionScore]
 `)
 
 	repoRoot := repoRootForProjectionTest(t)

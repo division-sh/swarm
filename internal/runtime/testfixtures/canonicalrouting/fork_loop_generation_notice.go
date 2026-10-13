@@ -12,7 +12,7 @@ func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	root := CopyForkLoopGenerationState(t)
 	nodes := filepath.Join(root, "review", "nodes.yaml")
 	applyClosedReplacement(t, nodes, "    review.requested:\n      loop:", "    review.requested:\n      accumulate:\n        into: reviews\n        from: payload\n        key: payload.token\n      loop:")
-	applyClosedReplacement(t, nodes, "  execution_type: system_node\n", "  execution_type: system_node\n  state_schema:\n    fields:\n      reviews: list<Review>\n")
+	applyClosedReplacement(t, nodes, "  execution_type: system_node\n", "  execution_type: system_node\n  state_schema:\n    fields:\n      reviews: [Review]\n")
 	if clearOnAdmit {
 		applyClosedReplacement(t, nodes, "    review.requested:\n      accumulate:", "    review.requested:\n      clear: {targets: [accumulator_state]}\n      accumulate:")
 	}
