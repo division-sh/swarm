@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -39,6 +40,10 @@ type forkOrdinalUnusedDependencies struct {
 }
 
 func TestSelectedForkFanOutBarrierMaterializationBothStores(t *testing.T) {
+	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
+}
+
+func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
 }
 
@@ -61,7 +66,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 				t.Run(cell.name, func(t *testing.T) {
 					// Each mode owns one complete admitted source set and process grant.
 					fixture := backend.open(t)
-					if store, ok := fixture.store.(*SQLiteRuntimeStore); ok && !selectedExecution {
+					if store, ok := fixture.store.(*SQLiteRuntimeStore); ok {
 						// Actual schedule preparation and acceptance share the live clock.
 						store.nowFn = func() time.Time { return time.Now().UTC() }
 					}
@@ -195,6 +200,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, backend.name == "postgres")
 					forkOwner := fixture.store.(selectedActivityProjectionStore)
 					var materialize func() (runfork.RunForkMaterialization, error)
+					var selectedRequest runforkreadiness.MaterializeRequest
 					if selectedExecution {
 						if _, err := forkOwner.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 							t.Fatal(err)
@@ -213,16 +219,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						if err != nil {
 							t.Fatal(err)
 						}
-						child, err := forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
-						if err != nil || child.ForkRunID == "" || child.ForkRunStatus != "paused" || len(child.UnsupportedBlockers) != 0 {
-							t.Fatalf("exact selected barrier materialization: %+v err=%v", child, err)
+						selectedRequest = request
+						materialize = func() (runfork.RunForkMaterialization, error) {
+							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
 						}
-						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						repeated, err := forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
-						if err != nil || repeated.ForkRunID != child.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
-							t.Fatalf("exact selected barrier reuse changed durable evidence: %+v err=%v", repeated, err)
-						}
-						return
 					} else {
 						request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original}
 						materialize = func() (runfork.RunForkMaterialization, error) {
@@ -232,6 +232,9 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					child, err := materialize()
 					if err != nil {
 						t.Fatalf("fork actual intent/barrier: %v", err)
+					}
+					if selectedExecution && (child.ForkRunID == "" || child.ForkRunStatus != "paused" || len(child.UnsupportedBlockers) != 0) {
+						t.Fatalf("exact selected barrier materialization: %+v", child)
 					}
 					projectedGeneration := generation
 					protectedRuns := []string{runID}
@@ -285,8 +288,12 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatalf("barrier kept source generation: %#v", childJoin.Generation())
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					if _, err := materialize(); err != nil {
+					repeated, err := materialize()
+					if err != nil {
 						t.Fatalf("repeat exact fan-out materialization: %v", err)
+					}
+					if selectedExecution && repeated.ForkRunID != child.ForkRunID {
+						t.Fatalf("exact selected barrier reuse changed child: %+v", repeated)
 					}
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 						t.Fatal("repeated fork mutated durable evidence")
@@ -308,17 +315,23 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 						t.Fatal("paused child claim refusal mutated durable evidence")
 					}
-					// Ordinary materialization is paused; only its canonical activation
-					// may admit the child turn and freeze the immediate source run.
-					forkActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-						ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original,
-						HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-					})
-					if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
-						t.Fatalf("activate ordinary fork before child serving: %+v err=%v", forkActivation, err)
+					var grantedOwner pipeline.FanOutObligationOwner
+					var selectedConsumer selectedForkFanOutConsumer
+					if selectedExecution {
+						ctx, grantedOwner, selectedConsumer = activateSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
+					} else {
+						// Ordinary materialization is paused; only its canonical activation
+						// may admit the child turn and freeze the immediate source run.
+						forkActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+							ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original,
+							HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
+						})
+						if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
+							t.Fatalf("activate ordinary fork before child serving: %+v err=%v", forkActivation, err)
+						}
+						grantSeed := fanOutOwnerFixture{bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
+						grantedOwner, _, _, _ = grantedFanOutOwnerForTest(t, ctx, owner, grantSeed)
 					}
-					grantSeed := fanOutOwnerFixture{bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
-					grantedOwner, _, _, _ := grantedFanOutOwnerForTest(t, ctx, owner, grantSeed)
 					copied, claim, found, err := grantedOwner.ClaimFanOutIntent(ctx, request)
 					if err != nil || !found {
 						t.Fatalf("claim child intent: found=%v %v", found, err)
@@ -370,10 +383,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						emissions = append(emissions, emit)
 					}
 					expectedFailure := ""
-					if !selectedExecution && cell.historical {
-						// The original post-revision positive journey remains above
-						// under selected execution. Ordinary delivery must preserve
-						// the current loop's exact stale-generation refusal.
+					if cell.historical {
 						expectedFailure = "loop_revision_stale"
 					}
 					beforeConsumption := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
@@ -385,7 +395,11 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							}
 						}
 					}()
-					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, expectedFailure, completeBarrier)
+					if selectedExecution {
+						consumeSelectedForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, selectedConsumer, childHandle, expectedFailure)
+					} else {
+						consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, expectedFailure, completeBarrier)
+					}
 				})
 			}
 		})
