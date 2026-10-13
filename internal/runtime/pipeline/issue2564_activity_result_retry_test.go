@@ -34,6 +34,15 @@ import (
 // result consumer loses a real backend CAS, then folds against the fresh state.
 // This is not the boring fixture's unconsumed activity-result publication proof.
 func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
+	verifyActivityResultHandlerNativeCASRetry(t, false)
+}
+
+func TestRuleActivityCallbackJournalAndRestartBothStores(t *testing.T) {
+	verifyActivityResultHandlerNativeCASRetry(t, true)
+}
+
+func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) {
+	t.Helper()
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
@@ -50,11 +59,24 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			site := contracts.ActivitySite{Node: externalPipelineNode(t, ".", "scanner"), HandlerEventKey: "source.requested", Kind: contracts.ActivitySiteHandler, RuleIndex: -1, Spec: contracts.ActivitySpec{Tool: "source_scrape"}}
+			if ruleActivity {
+				site.Kind, site.RuleIndex = contracts.ActivitySiteRule, 0
+				site.Spec.ID = "scanner_source_requested_source_scrape"
+			}
 			resultEvents, err := contracts.ActivityResultEventsForSite(site)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle := issue2564M25Bundle(t, server.URL, resultEvents.SuccessEvent)
+			bundle := issue2564M25Bundle(t, server.URL, resultEvents.SuccessEvent, ruleActivity)
+			if ruleActivity && resultEvents != (contracts.ActivityResultEvents{
+				ActivityID:        "scanner_source_requested_source_scrape",
+				SuccessEvent:      "scanner_source_requested_source_scrape.succeeded",
+				FailureEvent:      "scanner_source_requested_source_scrape.failed",
+				RevisionRequested: "scanner_source_requested_source_scrape.revision_requested",
+				Rejected:          "scanner_source_requested_source_scrape.rejected",
+			}) {
+				t.Fatalf("explicit rule activity changed generated result names: %+v", resultEvents)
+			}
 			source := semanticview.Wrap(bundle)
 			generated := bundle.GeneratedActivityEventSchemas()[resultEvents.SuccessEvent].Schema
 			properties, _ := generated["properties"].(map[string]any)
@@ -69,7 +91,14 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			}
 			runID := uuid.NewString()
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
-			selected := backend.open(t)
+			var selected gateRecoveryStoreCase
+			var closeStore func() error
+			var reopen func() gateRecoveryStoreCase
+			if ruleActivity {
+				selected, closeStore, reopen = openActivityReplayStore(t, backend.name)
+			} else {
+				selected = backend.open(t)
+			}
 			storetest.RequireBundleDataCatalog(t, ctx, selected.events.(storetest.DurableDataCatalogStore), bundle)
 			if _, err := selected.events.CreateRun(ctx, runlifecycle.CreateRequest{RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
@@ -106,6 +135,10 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			defer cancel()
 			if err := bus.WaitForQuiescence(wait); err != nil {
 				t.Fatal(err)
+			}
+			if ruleActivity {
+				assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected,
+					`nodes["scanner"].handlers["source.requested"].rules[0]`, "rules[0]: when payload.url != ''")
 			}
 			owner.mu.Lock()
 			attempts, losses, rival, committed, claim, eventID, drafts := owner.attempts, owner.losses, owner.rival, owner.committed, owner.claim, owner.resultID, append([]float64(nil), owner.drafts...)
@@ -157,6 +190,28 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 				t.Fatalf("M25 duplicate result repeated field fold: %s found=%t err=%v", after.Fields, found, err)
 			}
 			issue2564M25AssertReceipt(t, selected, runID, eventID, claim)
+			if ruleActivity {
+				if err := closeStore(); err != nil {
+					t.Fatal(err)
+				}
+				retained := reopen()
+				loaded, found, err := activityReplayJournal(retained).LoadActivityAttempt(ctx, requestID)
+				if err != nil || !found || !reflect.DeepEqual(loaded, journal) || calls.Load() != 1 {
+					t.Fatalf("fresh native owner changed rule activity journal or repeated HTTP: found=%t journal=%+v calls=%d err=%v", found, loaded, calls.Load(), err)
+				}
+				if got := loadActivityResultForProof(t, ctx, retained, eventID); !reflect.DeepEqual(got, result) {
+					t.Fatal("retained rule-owned callback changed its complete publication")
+				}
+				state, found, err := retained.persistence.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+				if err != nil || !found || !reflect.DeepEqual(state, after) {
+					t.Fatalf("retained rule-owned callback changed full business state: found=%t state=%+v want=%+v err=%v", found, state, after, err)
+				}
+				assertPersistedHandlerRuleSelection(t, retained, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected,
+					`nodes["scanner"].handlers["source.requested"].rules[0]`, "rules[0]: when payload.url != ''")
+				assertTraceHandlerRuleSelection(t, retained, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected,
+					`nodes["scanner"].handlers["source.requested"].rules[0]`, "rules[0]: when payload.url != ''")
+				issue2564M25AssertReceipt(t, retained, runID, eventID, claim)
+			}
 			t.Logf("M25 store=%s HTTP=1 journal=1 result=1 native_CAS_losses=1 result_attempts=2 delivery_claim=%s/%d retry_count=0 folded=41 received=1 source=%s", backend.name, claim.DeliveryID(), claim.Version(), fact.BundleHash())
 		})
 	}
@@ -288,8 +343,12 @@ func issue2564M25AssertReceipt(t *testing.T, selected gateRecoveryStoreCase, run
 	}
 }
 
-func issue2564M25Bundle(t *testing.T, serverURL, success string) *contracts.WorkflowContractBundle {
+func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bool) *contracts.WorkflowContractBundle {
 	t.Helper()
+	activity := "activity:\n        tool: source_scrape\n        input: {url: payload.url}"
+	if ruleActivity {
+		activity = "rules:\n        - when: payload.url != ''\n          activity:\n            id: scanner_source_requested_source_scrape\n            tool: source_scrape\n            input: {url: payload.url}\n        - else: true"
+	}
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {}}\n",
 		"entities.yaml": "test_entity:\n  local: {type: integer, initial: 0}\n  folded: {type: integer, initial: 0}\n  received: {type: integer, initial: 0}\n  title: text\n",
@@ -299,9 +358,7 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string) *contracts.Work
   subscribes_to: [source.requested]
   event_handlers:
     source.requested:
-      activity:
-        tool: source_scrape
-        input: {url: payload.url}
+      %s
 consumer:
   execution_type: system_node
   subscribes_to: [%s]
@@ -318,7 +375,7 @@ consumer:
           data_accumulation:
             writes:
               - {target_field: title, value: 'unexpected result'}
-`, success, success),
+`, activity, success, success),
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   handler_type: http
   effect_class: non_idempotent_write
