@@ -56,7 +56,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		inputPins += "    - " + request + "\n"
 		outputPins += "    - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
-		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
+		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: [%s]\n", request, valueType)
 		eventSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", result, valueType)
 		emit := fmt.Sprintf("{event: %s, fields: {case_id: payload.case_id, value: %s}}", result, valueExpr)
 		body := "      emit: " + emit + "\n"
@@ -132,8 +132,8 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				request, dispatch := family+".requested", family+".dispatch"
 				rootSchema += "    - " + dispatch + "\n"
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s, resolution: select-or-create}\n", dispatch, request)
-				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
-				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", dispatch, valueType)
+				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: [%s]\n", request, valueType)
+				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: [%s]\n", dispatch, valueType)
 				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, choice: payload.choice, items: payload.items}}\n", family, request, request, dispatch)
 			}
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)

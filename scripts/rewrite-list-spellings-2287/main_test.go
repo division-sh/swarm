@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,5 +40,20 @@ func TestListRewriteUsesSourceRoleInGo(t *testing.T) {
 	}
 	if rewriteGo("fixture.go", got) != got {
 		t.Fatal("Go rewrite is not idempotent")
+	}
+}
+
+func TestListRewriteGeneratedFragmentsHaveFiniteSourceScope(t *testing.T) {
+	for path, replacements := range generatedSourceEdits {
+		for _, replacement := range replacements {
+			body := "package fixture\nvar source = " + strconv.Quote(replacement[0]+"\n") + "\n"
+			want := "package fixture\nvar source = " + strconv.Quote(replacement[1]+"\n") + "\n"
+			if got := rewriteGo(path, body); got != want || rewriteGo(path, got) != got {
+				t.Fatalf("generated source %s is not exact/idempotent: %s", path, got)
+			}
+			if got := rewriteGo("data.go", body); got != body {
+				t.Fatalf("unclassified data borrowed a generated source role: %s", got)
+			}
+		}
 	}
 }

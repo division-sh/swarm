@@ -180,8 +180,8 @@ portfolio.notify.completed:
   portfolio_id: text
   threshold: integer
 `)
-		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `  account_ids: "[text]"
-`, `  account_ids: "[NumericAccount]"
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `  account_ids: [text]
+`, `  account_ids: [NumericAccount]
 `)
 		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
 `, `  portfolio_id: text
