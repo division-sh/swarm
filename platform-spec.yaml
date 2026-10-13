@@ -2975,6 +2975,16 @@ type_system:
     list_spelling_presence: |
       T[] and []T are invalid on authored presence, including nested positions;
       the typed verification error names [T] as the supported replacement.
+      Node-state authored types follow the same presence rule before physical
+      normalization. A canonical singleton primitive list such as [text] lowers
+      to the same SQL array as the internal physical text[] representation;
+      physical SQL arrays remain valid implementation types, not authored aliases.
+      Named node-state lists remain JSONB. Scalar numeric(p,s) and jsonb retain
+      their node-state meaning. A parameterized numeric list uses one plain
+      block-sequence field value (amounts followed by an indented - numeric(p,s));
+      YAML [numeric(p,s)] contains two items and is not a valid replacement.
+      Existing metadata type slots remain scalar; this does not add a
+      sequence-valued metadata type slot.
       Retirement of the separate list<T> and long type:list/of:T forms belongs
       to the independently governed duplicate-form census, not a compatibility
       path or new support in this admission repair.

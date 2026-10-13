@@ -506,7 +506,7 @@ func entityToolLeafSelectorNames(contract entityruntime.Contract) []string {
 		if err != nil {
 			continue
 		}
-		collectEntityToolLeafSelectors(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, map[string]struct{}{}, &out)
+		collectEntityToolLeafSelectors(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, &out)
 	}
 	sort.Strings(out)
 	return out
@@ -558,32 +558,26 @@ func collectEntityToolWritablePaths(contract entityruntime.Contract, path, typeR
 	delete(visiting, typeName)
 }
 
-func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, visiting map[string]struct{}, out *[]string) {
-	typeRef = strings.TrimSpace(typeRef)
-	switch {
-	case deliveryListType(typeRef):
+func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, out *[]string) {
+	resolved, err := resolveEntityToolStructuralType(contract, typeRef)
+	if err != nil {
 		return
-	case deliveryTextType(typeRef), deliveryIntegerType(contract, typeRef), deliveryNumericType(contract, typeRef), deliveryBooleanType(contract, typeRef), deliveryTimestampType(contract, typeRef), deliveryUUIDType(contract, typeRef), deliveryEnumType(contract, typeRef):
+	}
+	collectResolvedEntityToolLeafSelectors(path, resolved, seen, out)
+}
+
+func collectResolvedEntityToolLeafSelectors(path string, resolved runtimecontracts.ResolvedCatalogType, seen map[string]struct{}, out *[]string) {
+	switch resolved.Kind {
+	case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
 		if _, ok := seen[path]; ok {
 			return
 		}
 		seen[path] = struct{}{}
 		*out = append(*out, path)
-	case deliveryNamedType(contract, typeRef):
-		typeName := deliveryTypeName(contract, typeRef)
-		if _, ok := visiting[typeName]; ok {
-			return
-		}
-		visiting[typeName] = struct{}{}
-		resolved, err := resolveEntityToolStructuralType(contract, typeRef)
-		if err != nil {
-			delete(visiting, typeName)
-			return
-		}
+	case runtimecontracts.CatalogTypeObject:
 		for _, field := range resolved.Fields {
-			collectEntityToolLeafSelectors(contract, path+"."+field.Name, field.TypeRef, seen, visiting, out)
+			collectResolvedEntityToolLeafSelectors(path+"."+field.Name, field.Type, seen, out)
 		}
-		delete(visiting, typeName)
 	}
 }
 
@@ -709,42 +703,4 @@ func deliveryTypeName(contract entityruntime.Contract, typeRef string) string {
 func deliveryNamedType(contract entityruntime.Contract, typeRef string) bool {
 	_, ok := contract.Types.Types[deliveryTypeName(contract, typeRef)]
 	return ok
-}
-
-func deliveryEnumType(contract entityruntime.Contract, typeRef string) bool {
-	_, ok := contract.Types.Enums[deliveryTypeName(contract, typeRef)]
-	return ok
-}
-
-func deliveryTextType(typeRef string) bool {
-	typeRef = strings.ToLower(strings.TrimSpace(typeRef))
-	return typeRef == "text" || typeRef == "string"
-}
-
-func deliveryIntegerType(contract entityruntime.Contract, typeRef string) bool {
-	return strings.EqualFold(deliveryTypeName(contract, typeRef), "integer")
-}
-
-func deliveryNumericType(contract entityruntime.Contract, typeRef string) bool {
-	raw := strings.ToLower(strings.TrimSpace(deliveryTypeName(contract, typeRef)))
-	return raw == "numeric" || strings.HasPrefix(raw, "numeric(")
-}
-
-func deliveryBooleanType(contract entityruntime.Contract, typeRef string) bool {
-	return strings.EqualFold(deliveryTypeName(contract, typeRef), "boolean")
-}
-
-func deliveryTimestampType(contract entityruntime.Contract, typeRef string) bool {
-	return strings.EqualFold(deliveryTypeName(contract, typeRef), "timestamp")
-}
-
-func deliveryUUIDType(contract entityruntime.Contract, typeRef string) bool {
-	return strings.EqualFold(deliveryTypeName(contract, typeRef), "uuid")
-}
-
-func deliveryListType(typeRef string) bool {
-	typeRef = strings.TrimSpace(typeRef)
-	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
-		strings.HasSuffix(typeRef, "[]") ||
-		strings.HasPrefix(typeRef, "[]")
 }

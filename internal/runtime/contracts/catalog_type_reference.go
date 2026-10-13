@@ -293,26 +293,6 @@ func validateCatalogMapKey(key ResolvedCatalogType, ref string, catalog TypeCata
 	return catalogReferenceError(fmt.Sprintf("map key type %q is unsupported; map keys must be text, enum or uuid", strings.TrimSpace(ref)))
 }
 
-func catalogReferenceError(problem string) error {
-	return NewExpectedShapeDiagnostic("contract_loader.invalid_type_reference", "", problem, "Declare a supported, nonrecursive catalog type.", ErrInvalidField)
-}
-
-func retiredCatalogListSpelling(typeRef string) error {
-	var item string
-	switch {
-	case strings.HasSuffix(typeRef, "[]"):
-		item = strings.TrimSpace(strings.TrimSuffix(typeRef, "[]"))
-	case strings.HasPrefix(typeRef, "[]"):
-		item = strings.TrimSpace(strings.TrimPrefix(typeRef, "[]"))
-	default:
-		return nil
-	}
-	if item == "" {
-		item = "T"
-	}
-	return catalogReferenceError(fmt.Sprintf("type reference %q is retired; use [%s]", typeRef, item))
-}
-
 // PlainText excludes the UUID, timestamp and enum domains despite their string
 // representation. Alias spelling does not change the resolved domain.
 func (t ResolvedCatalogType) PlainText() bool {
