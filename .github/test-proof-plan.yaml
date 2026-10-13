@@ -70,7 +70,8 @@ profiles:
     - conformance-2394-reporter-window
     - catalog-required-inventory
     - catalog-required-verify
-    - catalog-oracle-guards
+    - catalog-runtime
+    - catalog-replay-1
     - catalog-runtime-scatter-safety
     - catalog-runtime-fork-readiness
     - hitl-releasee2e-rest
@@ -124,7 +125,6 @@ profiles:
     - store-runtime-full-07-fork
     - store-runtime-selected
     - store-runtime-s-z-rest
-    - catalog-required-smoke
     - pipeline-activation
     - pipeline-timer-join
     - pipeline-rest
@@ -646,6 +646,20 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
     run: '^Test(CatalogReplayCleanCensus|CatalogReplayProofReferences|StaticDataInvocationGoldenConsumesAdmittedIdentity)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  catalog-replay-oracle-guards:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^Test(CatalogReplayCleanCensus|CatalogReplayProofReferences)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  catalog-runtime-oracle-guard:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^TestStaticDataInvocationGoldenConsumesAdmittedIdentity$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

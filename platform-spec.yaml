@@ -24295,7 +24295,12 @@ test_specification:
         for example 'CI-Units: conformance-soak-sqlite, conformance-soak-postgres'. Absent means no extras;
         empty, malformed, duplicate, unknown, local-only or base-tier no-op units refuse planning. Unit order is canonicalized by sorting.
         The planner augments before package, root, batch, projection and deferral derivation; original unit/backend/count/recipe/child contracts
-        remain exact and overlaps refuse rather than rewriting execution cells. Each supplemental unit retains its full workload_profile
+        remain exact and arbitrary overlaps refuse rather than rewriting execution cells. Finite catalog-canary composition occurs
+        before inventory and batch derivation: catalog-runtime replaces only the static-identity oracle root; catalog-replay-1
+        replaces only the two replay-oracle roots and catalog-required-smoke. When only one whole unit is selected, its complementary
+        canary selection remains required; when both are selected, neither oracle nor smoke is executed a second time.
+        This is explicit catalog policy, not generic deduplication, precedence or a workflow-side selector.
+        Each supplemental unit and each promoted whole catalog unit retains its full workload_profile
         and completion obligations from the canonical native full census, even when the aggregate profile is core or lifecycle;
         it cannot acquire lower-tier skips or lose higher-tier parity children. Receipts bind aggregate profile and per-unit workload separately.
         Lifecycle and full retain every mandatory core guard/census root
@@ -24321,7 +24326,11 @@ test_specification:
         Local --tier/--full requires unchanged HEAD and clean tracked/untracked non-ignored source before planning and after execution, retaining actual HEAD and plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution permits dirty developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
-        both-store restart, recovery and semantic families. Full owns every admitted executable root, both unchanged
+        both-store restart, recovery and semantic families, including the complete original catalog-runtime and catalog-replay-1
+        units with their exact canonical full required roots and children. Core retains its catalog canaries unless explicitly
+        supplemented through the finite composition above; disjoint scatter-safety and fork-readiness coverage is unchanged.
+        catalog-replay-2-3 remains full/nightly and available through CI-Units when the affected proof map requires it;
+        shard 1 does not substitute for the other corpus shards. Full owns every admitted executable root, both unchanged
         900-second soak cells. The hosted native Linux/Darwin unused-check union is additional cadence-only
         qualification: master schedule at03:17Z and explicit full workflow_dispatch, including a candidate branch
         for pre-merge proof. PR and push runs at every tier, including full and verified master replay, require
