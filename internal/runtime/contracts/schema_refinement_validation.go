@@ -185,91 +185,33 @@ func validateSchemaRefinementFields(context string, types TypeCatalogDocument, f
 }
 
 func schemaRefinementKind(types TypeCatalogDocument, typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	if typeRef == "" {
+	ref := CatalogTypeReference{Type: typeRef, Catalog: types}
+	resolved, err := ref.Resolve()
+	if err != nil {
 		return "unknown"
 	}
-	if isEventListType(typeRef) {
-		return "array"
-	}
-	if _, _, ok := parseWave1MapTypeRef(typeRef); ok {
-		return "object"
-	}
-	typeName := eventTypeName(types, typeRef)
-	if _, ok := types.Enums[typeName]; ok {
+	switch resolved.Kind {
+	case CatalogTypeText:
+		if resolved.Format == "date-time" {
+			return "timestamp"
+		}
 		return "string"
-	}
-	if _, ok := types.Types[typeName]; ok {
-		return "object"
-	}
-	normalized, _ := normalizeEventFieldType(typeName)
-	if normalized == "" {
-		normalized = typeName
-	}
-	switch strings.ToLower(strings.TrimSpace(normalized)) {
-	case "text", "string", "uuid":
-		return "string"
-	case "timestamp":
-		return "timestamp"
-	case "integer":
+	case CatalogTypeInteger:
 		return "integer"
-	case "numeric", "number", "float", "double", "real":
+	case CatalogTypeNumber:
 		return "number"
-	case "array":
+	case CatalogTypeList:
 		return "array"
-	case "json", "jsonb":
-		return "json"
-	case "object":
+	case CatalogTypeMap, CatalogTypeObject:
 		return "object"
-	case "boolean":
+	case CatalogTypeBoolean:
 		return "boolean"
-	default:
-		return "unknown"
+	case CatalogTypeDynamic:
+		return ref.ComparableDomain()
 	}
+	return "unknown"
 }
 
 func schemaRefinementComparableType(types TypeCatalogDocument, typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	if typeRef == "" {
-		return ""
-	}
-	if isEventListType(typeRef) {
-		return "list:" + schemaRefinementComparableType(types, eventListItemType(typeRef))
-	}
-	if keyType, valueType, ok := parseWave1MapTypeRef(typeRef); ok {
-		return "map:" + schemaRefinementComparableType(types, keyType) + ":" + schemaRefinementComparableType(types, valueType)
-	}
-	typeName := eventTypeName(types, typeRef)
-	if _, ok := types.Enums[typeName]; ok {
-		return "enum:" + typeName
-	}
-	if _, ok := types.Types[typeName]; ok {
-		return "type:" + typeName
-	}
-	normalized, _ := normalizeEventFieldType(typeName)
-	if normalized == "" {
-		normalized = typeName
-	}
-	switch strings.ToLower(strings.TrimSpace(normalized)) {
-	case "text", "string":
-		return "string"
-	case "integer":
-		return "integer"
-	case "numeric", "number", "float", "double", "real":
-		return "number"
-	case "boolean":
-		return "boolean"
-	case "timestamp":
-		return "timestamp"
-	case "uuid":
-		return "uuid"
-	case "array":
-		return "array"
-	case "json", "jsonb":
-		return "json"
-	case "object":
-		return "object"
-	default:
-		return ""
-	}
+	return (CatalogTypeReference{Type: typeRef, Catalog: types}).ComparableDomain()
 }

@@ -130,3 +130,49 @@ func TestCatalogAdmissionComparableDomainsRequireResolvedEvidence(t *testing.T) 
 		}
 	}
 }
+
+func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
+	root := t.TempDir()
+	for name, source := range map[string]string{
+		"schema.yaml":         "name: dag\nstages: {done: {final: true}}\n",
+		"types.yaml":          "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\ntypes:\n  Leaf:\n    value: Label\n  Pair:\n    first: Leaf\n    second: Leaf?\n  Nested:\n    pairs: '[Pair]'\n    lookup: map[Label]Pair\n",
+		"entities.yaml":       "person:\n  state: Nested\n",
+		"child/schema.yaml":   "name: child\ninstance: id\nstages: {done: {final: true}}\n",
+		"child/entities.yaml": "person:\n  id: Label\n  items: map[Label]Pair\n",
+		"child/events.yaml":   "test.ready:\n  items: '[Pair]'\n  keys: map[Status]ID\n  stamp: Time\n",
+	} {
+		writeFixtureFile(t, filepath.Join(root, name), source)
+	}
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.ResolveFlowTemplateInstance("child"); err != nil {
+		t.Fatal(err)
+	}
+	primary, err := bundle.ResolveFlowPrimaryEntity("child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fields, err := SingletonContainedFields(primary); err != nil || len(fields) != 1 {
+		t.Fatalf("acyclic repeated names or text aliases lost: %v %v", fields, err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  Chain: Label\n")
+	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "supported built-in scalar") {
+		t.Fatalf("authored alias-chain restriction changed: %v", err)
+	}
+}
+
+func TestCatalogAdmissionCompiledEventRefusals(t *testing.T) {
+	for _, ref := range []string{"", "Missing", "[Missing]", "Cycle", "[Left]", "Item[]", "map[numeric]Item"} {
+		entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"value": {Type: ref}}}}
+		compiled, err := newCompiledEventSchema(".", "test.ready", entry, admissionTestCatalog(), "", CompiledEventSchemaSource{})
+		if _, typed := AsLoaderDiagnostic(err); !typed || compiled.value != nil {
+			t.Errorf("invalid compiled reference %q gained authority: empty=%v err=%v", ref, compiled.value == nil, err)
+		}
+		if err := ValidateCatalogFieldSupply("test", map[string]any{}, EntityFieldDecl{Type: ref}, admissionTestCatalog()); err == nil {
+			t.Errorf("invalid result target %q gained field-supply authority", ref)
+		}
+	}
+}
