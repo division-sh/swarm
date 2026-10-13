@@ -6051,7 +6051,13 @@ engine:
           selected-store instance index within that exact run, declaration and coordinate scope, consuming admitted
           native or fixed historical construction evidence. An operation-local R5.1 proposal may supply a not-yet-created
           receiver within its own publication, but never a global route overlay or native existence observation.
-          Source and workflow version require their exact admitted run/readiness evidence; current business fields,
+          Native header version is authenticated against its original immutable constructor receipt, whose source
+          artifact and version remain unchanged across run source revisions. The same singleton and batched receipt
+          projection carries that provenance. Current executable source and desired readiness version instead require
+          their exact admitted run/readiness evidence; historical construction uses its positive fixed cut. A valid
+          admitted lookup whose run selects another artifact returns an exact typed source conflict, not absence or
+          construction corruption. Invalid source, lineage or read ownership and cancellation/storage failures are
+          not source conflicts. Current business fields,
           path shape, process membership or another run's readiness cannot supply a missing coordinate. Missing,
           partial, malformed, foreign or nonmatching evidence fails closed before publication. When an active run's
           source revision changes, the existing run-scoped readiness owner advances each affected desired plan from

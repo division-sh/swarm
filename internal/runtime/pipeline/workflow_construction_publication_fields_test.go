@@ -95,15 +95,17 @@ func TestFlowConstructionPublicationDiscoversDetachedCreatingInput(t *testing.T)
 		t.Fatal(err)
 	}
 	evidence, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
-	if err != nil || evidence.CreatingInput != receipt.CreatingInput || evidence.InstanceKey != receipt.InstanceKey || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
+	if err != nil || evidence.CreatingInput != receipt.CreatingInput || evidence.InstanceKey != receipt.InstanceKey || evidence.WorkflowVersion != receipt.WorkflowVersion || evidence.BundleHash != receipt.BundleHash || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
 		t.Fatalf("receipt discovery changed original provenance or precise fields: %#v %v", evidence, err)
 	}
 	evidence.CreatingInput.EventID = "33333333-3333-4333-8333-333333333333"
 	evidence.CreatingInput.Input = "different.input"
 	evidence.InstanceKey = "foreign-key"
+	evidence.WorkflowVersion = "changed-version"
+	evidence.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	evidence.Fields["nested"].(map[string]any)["values"].([]any)[0] = int64(99)
 	again, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
-	if err != nil || again.CreatingInput != receipt.CreatingInput || again.InstanceKey != receipt.InstanceKey || !reflect.DeepEqual(again.Fields, receipt.Persisted.Fields) {
+	if err != nil || again.CreatingInput != receipt.CreatingInput || again.InstanceKey != receipt.InstanceKey || again.WorkflowVersion != receipt.WorkflowVersion || again.BundleHash != receipt.BundleHash || !reflect.DeepEqual(again.Fields, receipt.Persisted.Fields) {
 		t.Fatalf("caller mutation changed original provenance or fields: %#v %v", again, err)
 	}
 	if err := ValidateFlowConstructionPublication(raw, owner, receipt.EntityID, evidence.CreatingInput.EventID); err == nil {

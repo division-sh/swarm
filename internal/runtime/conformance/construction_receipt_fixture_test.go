@@ -53,7 +53,7 @@ func (r conformanceConstructionReceipts) add(t *testing.T, source semanticview.S
 		header.EntityType = entity.EntityType
 	}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: key}
+	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: key, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{Plan: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: instance, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live}, OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active"}
 	observation, err := pipeline.AdmitNativeFlowInstanceObservation(request, header, run, 1, receipt, readiness)
 	if err != nil {

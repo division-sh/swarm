@@ -62,10 +62,12 @@ func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.R
 }
 
 type FlowConstructionPublicationEvidence struct {
-	Identity      runtimeflowidentity.Instance
-	InstanceKey   string
-	CreatingInput FlowConstructionInput
-	Fields        map[string]any
+	Identity        runtimeflowidentity.Instance
+	InstanceKey     string
+	WorkflowVersion string
+	BundleHash      string
+	CreatingInput   FlowConstructionInput
+	Fields          map[string]any
 }
 
 type FlowConstructionPublicationReader interface {
@@ -79,7 +81,7 @@ func ProjectFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Ru
 	if err != nil {
 		return FlowConstructionPublicationEvidence{}, err
 	}
-	evidence := FlowConstructionPublicationEvidence{Identity: receipt.Identity, InstanceKey: receipt.InstanceKey, CreatingInput: receipt.CreatingInput}
+	evidence := FlowConstructionPublicationEvidence{Identity: receipt.Identity, InstanceKey: receipt.InstanceKey, WorkflowVersion: receipt.WorkflowVersion, BundleHash: receipt.BundleHash, CreatingInput: receipt.CreatingInput}
 	if receipt.Persisted.Fields == nil {
 		return evidence, nil
 	}

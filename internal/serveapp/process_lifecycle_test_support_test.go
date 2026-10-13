@@ -253,7 +253,7 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 		t.Fatal(err)
 	}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity}
+	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",

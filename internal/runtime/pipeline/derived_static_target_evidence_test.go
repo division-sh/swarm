@@ -72,7 +72,7 @@ func derivedStaticTargetObservation(t *testing.T, source semanticview.Source, fa
 	} else {
 		readiness := DynamicFlowRuntimeReadiness{Plan: DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 			OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active"}
-		observation, err = AdmitNativeFlowInstanceObservation(request, instance, run, 3, FlowConstructionPublicationEvidence{Identity: identity}, readiness)
+		observation, err = AdmitNativeFlowInstanceObservation(request, instance, run, 3, FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash()}, readiness)
 	}
 	if err != nil {
 		t.Fatal(err)

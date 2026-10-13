@@ -38,7 +38,10 @@ func AdmitNativeFlowInstanceObservation(request FlowInstanceLookupRequest, insta
 	if !request.Valid() {
 		return FlowInstanceObservation{}, fmt.Errorf("native instance observation requires its admitted request")
 	}
-	observation, err := admitFlowInstanceObservation(request, instance, run, revision, request.Source().WorkflowVersion())
+	if _, err := correlation.NewSourceArtifactFact(receipt.BundleHash); err != nil {
+		return FlowInstanceObservation{}, fmt.Errorf("native instance requires its original construction source: %w", err)
+	}
+	observation, err := admitFlowInstanceObservation(request, instance, run, revision, receipt.WorkflowVersion)
 	if err != nil {
 		return FlowInstanceObservation{}, err
 	}

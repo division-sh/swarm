@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -157,8 +158,21 @@ type flowInstanceIndexSnapshot struct {
 }
 
 func validateFlowInstanceIndexSnapshot(source semanticview.Source, hash string, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) error {
-	if source == nil || historical == nil || run.Validate() != nil || run.BundleHash != hash {
+	if historical == nil || run.Validate() != nil {
 		return fmt.Errorf("instance snapshot requires its exact admitted source, lineage and read owner")
+	}
+	fact, err := correlation.NewSourceArtifactFact(hash)
+	if err != nil {
+		return err
+	}
+	if _, err := pipeline.NewFlowInstanceLookupScope(source, fact, run.RunID, nil, nil); err != nil {
+		return err
+	}
+	if _, err := correlation.NewSourceArtifactFact(run.BundleHash); err != nil {
+		return err
+	}
+	if run.BundleHash != hash {
+		return &pipeline.FlowInstanceSourceConflict{RunID: run.RunID, RequestedBundleHash: hash, ActiveBundleHash: run.BundleHash}
 	}
 	return nil
 }

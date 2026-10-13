@@ -79,7 +79,7 @@ func emitInstanceObservation(t testing.TB, source semanticview.Source, identity 
 		header.EntityType = entity.EntityType
 	}
 	run := runlifecycle.Snapshot{RunID: toolTestRunID, BundleHash: fact.BundleHash(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), StartedAt: at}
-	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key}
+	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{
 		Plan:            pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: toolTestRunID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",

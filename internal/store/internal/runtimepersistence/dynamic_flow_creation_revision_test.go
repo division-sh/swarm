@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -60,9 +61,37 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					if err != nil || !native {
 						t.Fatalf("read immutable native receipt: native=%v err=%v", native, err)
 					}
+					scope, err := runtimepipeline.NewFlowInstanceLookupScope(semanticview.Wrap(bundle), sourceartifactfixture.FactFor(bundle.SourceArtifact), f.runID, nil, []flowidentity.RunScopedFlowInstance{observed.Owner()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					batch, err := f.selected.ListFlowInstances(ctx, scope)
+					if err != nil || len(batch) != 1 {
+						t.Fatalf("read batched native construction: count=%d err=%v", len(batch), err)
+					}
+					batchedReceipt, native, err := batch[0].NativeConstruction()
+					if err != nil || !native || !reflect.DeepEqual(receipt, batchedReceipt) {
+						t.Fatalf("batch changed original construction evidence: native=%t err=%v", native, err)
+					}
+					projected, err := f.selected.LoadFlowConstructionPublication(ctx, observed.Owner(), observed.Identity().EntityID)
+					if err != nil || !reflect.DeepEqual(receipt, projected) {
+						t.Fatalf("singleton projection changed original construction evidence: %v", err)
+					}
 					return receipt
 				}
 				originalConstruction := construction(f.ctx, originalBundle)
+				if originalConstruction.WorkflowVersion != originalBundle.WorkflowVersion() || originalConstruction.BundleHash != originalBundle.SourceArtifact.BundleHash() {
+					t.Fatalf("original construction lost its admitted source and version: %+v", originalConstruction)
+				}
+				parent := original.Plan.Identity.ParentRoute
+				parentOwner, err := flowidentity.NewRunScopedFlowInstance(f.runID, flowidentity.StoredRoute(parent.FlowID, flowidentity.LogicalInstanceID(parent.FlowInstance), parent.FlowInstance))
+				if err != nil {
+					t.Fatal(err)
+				}
+				originalParentConstruction, err := f.selected.LoadFlowConstructionPublication(f.ctx, parentOwner, original.Plan.Identity.ParentEntityID)
+				if err != nil {
+					t.Fatalf("read original structural-parent construction: %v", err)
+				}
 				ownership, err := f.grant.InspectRunExecutionOwnership(f.ctx, f.runID)
 				if err != nil || ownership != runtimemanager.RunExecutionOwned {
 					t.Fatalf("pre-revision generation ownership: disposition=%v err=%v", ownership, err)
@@ -119,8 +148,12 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				// Revision may win after the early source check but before the
 				// transaction's exact generation fence. Both reject stale publication.
 				generationRefused := order == "concurrent" && errors.Is(publicationErr, runtimemanager.ErrRunExecutionNotOwned)
+				var staleSource *runtimepipeline.FlowInstanceSourceConflict
+				sourceRefused := errors.As(publicationErr, &staleSource) && staleSource.RunID == f.runID &&
+					staleSource.RequestedBundleHash == originalConstruction.BundleHash && staleSource.ActiveBundleHash == source.BundleHash()
 				if publicationErr != nil &&
 					!generationRefused &&
+					!sourceRefused &&
 					!strings.Contains(publicationErr.Error(), "readiness source does not match persisted run") &&
 					!strings.Contains(publicationErr.Error(), "mutation log bundle source fact does not match active run") {
 					t.Fatalf("publication lost for an unrelated reason: %v", publicationErr)
@@ -141,6 +174,46 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				}
 				wait(f.bus)
 				current := load()
+				beforeStaleReads, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				oldRequest, err := runtimepipeline.NewExactFlowInstanceLookup(semanticview.Wrap(originalBundle), sourceartifactfixture.FactFor(originalBundle.SourceArtifact), flowidentity.RunScopedFlowInstance{RunID: f.runID, Route: original.Plan.Identity.Route()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				oldScope, err := runtimepipeline.NewFlowInstanceLookupScope(oldRequest.Source(), oldRequest.SourceFact(), f.runID, nil, []flowidentity.RunScopedFlowInstance{{RunID: f.runID, Route: original.Plan.Identity.Route()}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertStaleSource := func(err error) {
+					t.Helper()
+					var conflict *runtimepipeline.FlowInstanceSourceConflict
+					if !errors.As(err, &conflict) || conflict.RunID != f.runID || conflict.RequestedBundleHash != originalConstruction.BundleHash || conflict.ActiveBundleHash != source.BundleHash() {
+						t.Fatalf("changed admitted source lost its exact typed refusal: %v", err)
+					}
+				}
+				if observed, found, err := f.selected.LookupFlowInstance(f.ctx, oldRequest); found || observed.Valid() {
+					t.Fatal("stale source returned a native observation")
+				} else {
+					assertStaleSource(err)
+				}
+				if observed, err := f.selected.ListFlowInstances(f.ctx, oldScope); len(observed) != 0 {
+					t.Fatal("stale source returned a native inventory")
+				} else {
+					assertStaleSource(err)
+				}
+				cancelled, cancel := context.WithCancel(f.ctx)
+				cancel()
+				if _, _, err := f.selected.LookupFlowInstance(cancelled, oldRequest); !errors.Is(err, context.Canceled) || errors.As(err, &staleSource) {
+					t.Fatalf("cancellation became a stale-source refusal: %v", err)
+				}
+				if got := load(); !reflect.DeepEqual(current, got) {
+					t.Fatal("stale-source reads mutated readiness")
+				}
+				if after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected); err != nil || !reflect.DeepEqual(beforeStaleReads, after) {
+					t.Fatalf("stale-source refusal mutated durable evidence: %v", err)
+				}
 				ownership, err = f.grant.InspectRunExecutionOwnership(f.ctx, f.runID)
 				if err != nil || ownership != runtimemanager.RunExecutionOtherNormalSource {
 					t.Fatalf("revised run must be outside the still-current original grant: disposition=%v err=%v", ownership, err)
@@ -154,6 +227,10 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				}
 				desired := current.Plan
 				desired.BundleHash = source.BundleHash()
+				desired.WorkflowVersion = revisedBundle.WorkflowVersion()
+				if desired.WorkflowVersion == originalConstruction.WorkflowVersion {
+					t.Fatal("proof requires distinct original construction and current executable versions")
+				}
 				if !oldPublished {
 					creation := *current.Plan.CreationEvent
 					creation.EventID = uuid.NewString()
@@ -172,8 +249,20 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if got := load(); !reflect.DeepEqual(current, got) {
 					t.Fatal("stale observation mutated readiness")
 				}
-				if err := reconcile(current, desired); err != nil {
+				parentReadiness, found, err := f.workflow.LoadDynamicFlowRuntimeReadiness(ctx, f.runID, parentOwner.Route)
+				if err != nil || !found {
+					t.Fatalf("read current structural-parent readiness: found=%t err=%v", found, err)
+				}
+				parentDesired := parentReadiness.Plan
+				parentDesired.BundleHash, parentDesired.WorkflowVersion = source.BundleHash(), revisedBundle.WorkflowVersion()
+				if _, err := f.workflow.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{
+					{Observed: parentReadiness, Expected: parentDesired},
+					{Observed: current, Expected: desired},
+				}, time.Now().UTC()); err != nil {
 					t.Fatalf("explicit pending-plan reconciliation: %v", err)
+				}
+				if got, err := f.selected.LoadFlowConstructionPublication(ctx, parentOwner, original.Plan.Identity.ParentEntityID); err != nil || !reflect.DeepEqual(originalParentConstruction, got) {
+					t.Fatalf("source revision replaced original structural-parent construction: %v", err)
 				}
 				if got := construction(ctx, revisedBundle); !reflect.DeepEqual(originalConstruction, got) {
 					t.Fatal("source revision replaced the original immutable construction receipt")

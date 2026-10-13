@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func instanceObservationTestFixture(t *testing.T) (FlowInstanceLookupRequest, Wo
 		CreatedAt: at, UpdatedAt: at, Fields: map[string]any{"nested": map[string]any{"value": "original"}},
 	}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := FlowConstructionPublicationEvidence{Identity: identity, Fields: instance.Fields}
+	receipt := FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash(), Fields: instance.Fields}
 	readiness := DynamicFlowRuntimeReadiness{
 		Plan:            DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",
@@ -142,6 +143,54 @@ func TestFlowInstanceObservationHistoricalVersionUsesFixedCut(t *testing.T) {
 		if _, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, nil); err == nil {
 			t.Fatalf("historical header accepted crossed or absent fixed version %q", version)
 		}
+	}
+}
+
+func TestFlowInstanceObservationNativeVersionUsesOriginalConstruction(t *testing.T) {
+	request, instance, run, receipt, readiness := instanceObservationTestFixture(t)
+	instance.WorkflowVersion = "captured-native-v0"
+	receipt.WorkflowVersion = instance.WorkflowVersion
+	receipt.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	if receipt.BundleHash == request.SourceFact().BundleHash() || receipt.WorkflowVersion == request.Source().WorkflowVersion() {
+		t.Fatal("proof requires original construction to differ from current executable source")
+	}
+	observation, err := AdmitNativeFlowInstanceObservation(request, instance, run, 3, receipt, readiness)
+	if err != nil || !observation.Valid() {
+		t.Fatalf("current source replaced original native construction: %+v %v", observation, err)
+	}
+	stored, err := observation.WorkflowInstance()
+	if err != nil || stored.WorkflowVersion != receipt.WorkflowVersion {
+		t.Fatalf("native observation rewrote the original header: %+v %v", stored, err)
+	}
+	construction, native, err := observation.NativeConstruction()
+	if err != nil || !native || construction.WorkflowVersion != receipt.WorkflowVersion || construction.BundleHash != receipt.BundleHash {
+		t.Fatalf("native observation lost original source provenance: %+v %v", construction, err)
+	}
+	for _, fault := range []string{"header_version", "receipt_version", "missing_receipt_version", "missing_receipt_source", "malformed_receipt_source", "readiness_version", "readiness_source", "run_source"} {
+		t.Run(fault, func(t *testing.T) {
+			header, original, desired, active := instance, receipt, readiness, run
+			switch fault {
+			case "header_version":
+				header.WorkflowVersion = request.Source().WorkflowVersion()
+			case "receipt_version":
+				original.WorkflowVersion = request.Source().WorkflowVersion()
+			case "missing_receipt_version":
+				original.WorkflowVersion = ""
+			case "missing_receipt_source":
+				original.BundleHash = ""
+			case "malformed_receipt_source":
+				original.BundleHash = "not-an-artifact"
+			case "readiness_version":
+				desired.Plan.WorkflowVersion = receipt.WorkflowVersion
+			case "readiness_source":
+				desired.Plan.BundleHash = receipt.BundleHash
+			case "run_source":
+				active.BundleHash = receipt.BundleHash
+			}
+			if got, err := AdmitNativeFlowInstanceObservation(request, header, active, 3, original, desired); err == nil || got.Valid() {
+				t.Fatalf("crossed %s produced native authority: %+v %v", fault, got, err)
+			}
+		})
 	}
 }
 

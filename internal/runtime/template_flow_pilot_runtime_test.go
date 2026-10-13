@@ -298,7 +298,7 @@ func (s *templateFlowPilotMemoryStore) addObservation(t testing.TB, source seman
 		header.EntityType = entity.EntityType
 	}
 	run := runtimerunlifecycle.Snapshot{RunID: owner.RunID, State: runtimerunlifecycle.StateRunning, Origin: runtimerunlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key}
+	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: owner.RunID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",

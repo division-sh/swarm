@@ -48,7 +48,11 @@ func installNativeConstructionIndexFixture(t testing.TB, store *targetRouteMemor
 	t.Helper()
 	observed := constructionIndexObservation(t, source, runID, identity, key)
 	store.installIndexObservation(observed)
-	store.installConstructionReceipt(observed.Owner(), pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key})
+	receipt, native, err := observed.NativeConstruction()
+	if err != nil || !native {
+		t.Fatalf("index fixture requires its native receipt: native=%t err=%v", native, err)
+	}
+	store.installConstructionReceipt(observed.Owner(), receipt)
 }
 
 func admitConstructionIndexTestObservation(source semanticview.Source, runID string, identity flowidentity.Instance, key string) (pipeline.FlowInstanceObservation, error) {
@@ -79,7 +83,7 @@ func admitConstructionIndexTestObservation(source semanticview.Source, runID str
 		instance.EntityType = entity.EntityType
 	}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key}
+	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{
 		Plan:            pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",

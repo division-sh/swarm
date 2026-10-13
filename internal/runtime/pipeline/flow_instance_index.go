@@ -95,6 +95,16 @@ func (e *FlowInstanceConstructionCorruption) Error() string {
 
 func (e *FlowInstanceConstructionCorruption) Unwrap() error { return e.Cause }
 
+// FlowInstanceSourceConflict reports different admitted artifacts, not missing
+// lineage, malformed requests, cancellation or independent storage failures.
+type FlowInstanceSourceConflict struct {
+	RunID, RequestedBundleHash, ActiveBundleHash string
+}
+
+func (e *FlowInstanceSourceConflict) Error() string {
+	return fmt.Sprintf("flow instance source conflict run=%s requested=%s active=%s", e.RunID, e.RequestedBundleHash, e.ActiveBundleHash)
+}
+
 func admitFlowInstanceLookupKey(source semanticview.Source, flowID string, field contracts.TemplateInstanceField, keys []contracts.TemplateInstanceKeyValue) (string, error) {
 	if field.Empty() {
 		if len(keys) != 0 {
