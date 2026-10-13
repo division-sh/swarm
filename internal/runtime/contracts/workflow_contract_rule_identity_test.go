@@ -25,15 +25,15 @@ func TestHandlerRuleIdentityDerivesFromCanonicalDeclarationSite(t *testing.T) {
 		return handler.Rules[0]
 	}
 
-	before := decode("rules:\n  - id: original-label\n    else: true\n")
-	after := decode("rules:\n  - id: renamed-label\n    else: true\n")
+	before := decode("rules:\n  - when: payload.ready\n")
+	after := decode("rules:\n  - when: payload.ready == true\n")
 	beforeRef, beforeOK := before.DeclarationIdentity()
 	afterRef, afterOK := after.DeclarationIdentity()
 	if !beforeOK || !afterOK || !beforeRef.Equal(afterRef) {
 		t.Fatalf("display-label rename changed declaration identity: before=%#v after=%#v", beforeRef, afterRef)
 	}
-	if before.ID == after.ID {
-		t.Fatal("fixture did not rename the display label")
+	if before.DisplayLabel("rules", 0) == after.DisplayLabel("rules", 0) {
+		t.Fatal("fixture did not change derived predicate presentation")
 	}
 	if beforeRef.Flow().String() != "scout" || beforeRef.Family() != "handler_rule" || !strings.Contains(beforeRef.SemanticPath(), "handlers[\"work.requested\"].rules[0]") {
 		t.Fatalf("derived declaration identity = %#v", beforeRef)
@@ -59,16 +59,16 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 		for _, rule := range handler.Rules {
 			identity, ok := rule.DeclarationIdentity()
 			if !ok {
-				t.Fatalf("rule %q lacks declaration identity", rule.ID)
+				t.Fatalf("predicate %q lacks declaration identity", rule.Condition)
 			}
-			out[rule.ID] = identity
+			out[rule.Condition] = identity
 		}
 		return out
 	}
 
-	before := decode("rules:\n  - {id: first, when: payload.ready}\n  - {id: second, else: true}\n")
-	after := decode("rules:\n  - {id: second, else: true}\n  - {id: first, when: payload.ready}\n")
-	if before["first"].Equal(after["first"]) || before["second"].Equal(after["second"]) {
+	before := decode("rules:\n  - {when: payload.ready}\n  - {else: true}\n")
+	after := decode("rules:\n  - {else: true}\n  - {when: payload.ready}\n")
+	if before["payload.ready"].Equal(after["payload.ready"]) || before["else"].Equal(after["else"]) {
 		t.Fatalf("reordered rows retained positional identity: before=%#v after=%#v", before, after)
 	}
 }

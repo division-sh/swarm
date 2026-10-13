@@ -61,9 +61,9 @@ func TestHandlerRulePresentationKeepsContextIdentityAndFullTextSeparate(t *testi
 	if got := row.DisplayLabel("on_complete", 0); got != "on_complete[0]: condition "+long {
 		t.Fatalf("full completion text lost: %q", got)
 	}
-	row.ID = "not-authority"
+	row.Activity.ID = "separate-activity-owner"
 	if got := row.DisplayLabel("on_complete", 0); got != "on_complete[0]: condition "+long {
-		t.Fatalf("authored label changed derived presentation: %q", got)
+		t.Fatalf("activity identity changed derived predicate presentation: %q", got)
 	}
 	if got, valid := row.DeclarationIdentity(); !valid || got != ref {
 		t.Fatal("presentation altered declaration identity")
