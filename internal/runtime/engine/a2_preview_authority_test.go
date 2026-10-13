@@ -16,7 +16,7 @@ func TestA2PreviewEvaluatesTransitionWithoutDurableOccurrence(t *testing.T) {
 	for _, rule := range []bool{false, true} {
 		handler := contracts.SystemNodeEventHandler{AdvancesTo: "done"}
 		if rule {
-			handler = contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{ID: "chosen", Condition: "else", AdvancesTo: "done"}}}
+			handler = contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "done"}}}
 		}
 		var err error
 		handler, err = completeSemanticFixtureHandlerRuleIdentity(node, "work.requested", handler)
