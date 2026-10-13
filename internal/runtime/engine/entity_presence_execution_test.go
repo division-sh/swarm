@@ -40,7 +40,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 					RootTypes:    rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}},
 					RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}, "captured": {Type: "text"}}}},
 					Events: map[string]rc.EventCatalogEntry{
-						"work.received": {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"items": {Type: "list<text>"}}, Required: []string{"items"}}},
+						"work.received": {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"items": {Type: "[text]"}}, Required: []string{"items"}}},
 						"work.result":   {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}},
 					},
 					Nodes: map[string]rc.SystemNodeContract{"worker": {EventHandlers: map[string]rc.SystemNodeEventHandler{"work.received": handler}}},

@@ -1,8 +1,8 @@
 work.requested:
   mode: Mode
   details: Details
-  tags: "[text]"
+  tags: [text]
 work.alternate:
   mode: Mode
   details: Details
-  tags: "[text]"
+  tags: [text]

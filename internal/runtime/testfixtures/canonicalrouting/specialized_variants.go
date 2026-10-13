@@ -145,7 +145,7 @@ line_item.requested:
     ticket.sla_escalated: {}
     line_item.requested: {}
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\n  line_items: \"[text]\"\nticket.closed:\n  line_item_id: string\n  result: string\n")
+	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\n  line_items: [text]\nticket.closed:\n  line_item_id: string\n  result: string\n")
 	return root
 }
 

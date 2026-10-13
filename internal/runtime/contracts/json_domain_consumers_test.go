@@ -3,7 +3,7 @@ package contracts
 import "testing"
 
 func TestJSONDomainRefinementsAndInstanceIdentity(t *testing.T) {
-	for _, other := range []string{"json", "object", "text", "numeric", "list<json>"} {
+	for _, other := range []string{"json", "object", "text", "numeric", "[json]"} {
 		fields := map[string]schemaRefinementField{
 			"a": {Name: "a", TypeRef: "json", Refinements: SchemaRefinements{EqualTo: "b"}},
 			"b": {Name: "b", TypeRef: other},
@@ -30,7 +30,7 @@ func TestJSONDomainRefinementsAndInstanceIdentity(t *testing.T) {
 	if _, err := validateTemplateInstanceField("child", field, primary); err == nil {
 		t.Fatal("JSON accepted as scalar instance identity")
 	}
-	for _, ref := range []string{"json", "map[text]json", "list<json>", "map[text]list<json>"} {
+	for _, ref := range []string{"json", "map[text]json", "[json]", "map[text][json]"} {
 		if err := singletonCoordinatorValidateTypeRef(primary.Types, ref); err != nil {
 			t.Fatalf("contained JSON value %s rejected: %v", ref, err)
 		}

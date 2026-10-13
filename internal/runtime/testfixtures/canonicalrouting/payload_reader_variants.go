@@ -50,10 +50,10 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
 	root := t.TempDir()
 	for path, contents := range map[string]string{
 		"schema.yaml":           "name: scalar-fan-out-proof\npins:\n  inputs:\n    - scan.requested\n  outputs:\n    - scan.requested\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
-		"events.yaml":           "scan.requested:\n  industries: \"[text]\"\n",
+		"events.yaml":           "scan.requested:\n  industries: [text]\n",
 		"scanner/schema.yaml":   "name: scanner\npins:\n  inputs:\n    - scan.requested\n",
 		"scanner/entities.yaml": "scan: {}\n",
-		"scanner/events.yaml":   "market_research.industry_assigned:\n  industry: text\n  taxonomy_categories: \"[text]\"\n",
+		"scanner/events.yaml":   "market_research.industry_assigned:\n  industry: text\n  taxonomy_categories: [text]\n",
 		"scanner/nodes.yaml": `scan-orchestrator:
   execution_type: system_node
   subscribes_to: [scan.requested]

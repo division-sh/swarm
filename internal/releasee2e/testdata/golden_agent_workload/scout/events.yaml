@@ -1,6 +1,6 @@
 scout.work.requested:
   query: text?
-  candidate_ids: "[text]?"
+  candidate_ids: {type: "[text]?"}
 scout.completed:
   batch_id: text
-  candidate_ids: "[text]"
+  candidate_ids: [text]

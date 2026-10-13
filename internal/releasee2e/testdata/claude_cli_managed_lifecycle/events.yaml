@@ -1,4 +1,4 @@
 task.assigned:
-  request: "[text]"
+  request: [text]
 agent.completed:
   result: text?

@@ -47,7 +47,7 @@ pins:
   inputs:
     - item.received
 `)
-		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "events.yaml"), "item.received:\n  items: '[text]'\n")
+		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "events.yaml"), "item.received:\n  items: [text]\n")
 		entities := "state: {}\n"
 		nodes := `
 shared-node:
@@ -97,7 +97,7 @@ types:
   LeadScore:
     status: text
     score: integer
-    observations: "[Observation]"
+    observations: [Observation]
   Observation:
     source: text
     note: text

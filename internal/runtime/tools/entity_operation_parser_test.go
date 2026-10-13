@@ -16,7 +16,7 @@ func entityOperationParserContract() entityruntime.Contract {
 		EntityType: "case",
 		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"status": {Type: "text"},
-			"items":  {Type: "list<text>"},
+			"items":  {Type: "[text]"},
 			"labels": {Type: "map[text]text"},
 		}},
 	}

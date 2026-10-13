@@ -142,7 +142,7 @@ func (c *checkerContext) validateJoinPaths(location, flowID, nodeID, eventType s
 			primary, primaryErr := bundle.ResolveFlowPrimaryEntity(flowID)
 			projection, projectionErr := runtimecontracts.AdmitCollectionProjection(runtimecontracts.CatalogTypeReference{Type: field.TypeRef, Catalog: primary.Types})
 			if primaryErr != nil || projectionErr != nil || projection.ItemType().Kind != runtimecontracts.CatalogTypeText {
-				out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.members.from requires list<text> or map[text]T"))
+				out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.members.from requires [text] or map[text]T"))
 			}
 		}
 	}

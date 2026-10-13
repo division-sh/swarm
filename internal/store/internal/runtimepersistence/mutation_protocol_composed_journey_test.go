@@ -81,7 +81,7 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 		}
 	}
 	for _, addition := range []struct{ file, content string }{
-		{"events.yaml", "fanout.requested:\n  items: '[text]'\nfanout.child:\n  value: text\n"},
+		{"events.yaml", "fanout.requested:\n  items: [text]\nfanout.child:\n  value: text\n"},
 		{"nodes.yaml", "    fanout.requested:\n      fan_out:\n        items_from: payload.items\n        as: entry\n        identity: entry\n        max_items: 2\n        emit:\n          event: fanout.child\n          fields:\n            value: entry\n"},
 	} {
 		path := filepath.Join(root, addition.file)
