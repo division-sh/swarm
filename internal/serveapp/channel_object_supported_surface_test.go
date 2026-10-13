@@ -22,9 +22,11 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
@@ -82,6 +84,8 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					t.Fatalf("learned object connect cannot complete confirmation/publication/native qualification: %+v", ready)
 				}
 				waitObjectNativeQualification(t, h, begun.Operation.OperationID)
+				provider.intentIdentity = channeldelivery.IntentObservationQuery{Provider: ready.Operation.Provider, InterfaceKey: ready.Operation.Interface.Key()}
+				provider.intentReader = openChannelAnchorObservation(t, h)
 				provider.mu.Lock()
 				confirmationCorrect := len(provider.deliveries) > 0 && provider.deliveries[0]["queue"] == "queue-a"
 				install, read := "/v2/install", "/v2/read"
@@ -113,7 +117,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 						"text": "/" + command, "principal": probe.principal, "room": "queue-a", "scope": scope,
 						"message": map[string]any{"id": probe.id}, "entry": map[string]any{"reference": command, "address": probe.address},
 					})
-					waitObjectChannelDisposition(t, db, "operator_channel_text_intents", probe.id, "entry_rejected")
+					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentText, probe.id), "entry_rejected")
 				}
 				var identity apiv1.RuntimeIdentityResult
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
@@ -144,8 +148,10 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				postAction("reject-1", message, reject)
 				waitObjectMessageText(t, provider, message, "Input: reason (text) required")
 				waitChannelDraftPromptSettlement(t, db, card)
+				closeObjectIntentObservation(t, provider)
 				h.stop(t)
 				h.start(t)
+				provider.intentReader = openChannelAnchorObservation(t, h)
 				restarted := getChannelOnboardingRPC(t, h, begun.Operation.OperationID)
 				if restarted.Readiness == nil || !restarted.Readiness.Ready {
 					t.Fatalf("retained object activation lost READY: %+v", restarted)
@@ -169,8 +175,10 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				waitObjectMessageText(t, provider, message, "Decision: reject")
 				for _, restart := range []bool{false, true} {
 					if restart {
+						closeObjectIntentObservation(t, provider)
 						h.stop(t)
 						h.start(t)
+						provider.intentReader = openChannelAnchorObservation(t, h)
 					}
 					provider.mu.Lock()
 					callback, signing = provider.callback, provider.signing
@@ -179,12 +187,12 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					stale := map[string]any{"token": reject, "cursor": id, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": message}}
 					objectChannelIngress(t, callback, signing, id, stale)
 					objectChannelIngress(t, callback, signing, id, stale)
-					waitObjectChannelDisposition(t, db, "operator_channel_action_intents", id, "stale", "rejected")
+					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentAction, id), "stale", "rejected")
 					objectChannelIngress(t, callback, signing, id+"-text", map[string]any{
 						"text": "obsolete-private-answer", "principal": "operator-a", "room": "queue-a", "scope": scope,
 						"message": map[string]any{"id": id + "-text"}, "reply": map[string]any{"id": message},
 					})
-					waitObjectChannelDisposition(t, db, "operator_channel_text_intents", id+"-text", "teaching")
+					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentText, id+"-text"), "teaching")
 				}
 				var decisions int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
@@ -295,6 +303,8 @@ func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHar
 		t.Fatalf("object rebind not READY: %+v", ready)
 	}
 	waitObjectNativeQualification(t, h, begun.Operation.OperationID)
+	// Capture the actual successor ingress before submitting new occurrences.
+	successorIntent := channeldelivery.IntentObservationQuery{Provider: ready.Operation.Provider, InterfaceKey: ready.Operation.Interface.Key()}
 	install := "/v2/install"
 	if scope == "shared" {
 		install += "_shared"
@@ -319,11 +329,11 @@ func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHar
 	objectChannelIngress(t, callback, signing, "old-native", map[string]any{
 		"text": "/" + oldCommand, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "old-native"}, "entry": map[string]any{"reference": oldCommand, "address": "mock_bot"},
 	})
-	waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "old-native", "entry_rejected")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(successorIntent, channeldelivery.IntentText, "old-native"), "entry_rejected")
 	objectChannelIngress(t, callback, signing, "new-native", map[string]any{
 		"text": "/" + command, "principal": "operator-a", "room": "queue-b", "scope": scope, "message": map[string]any{"id": "new-native"}, "entry": map[string]any{"reference": command, "address": "mock_bot"},
 	})
-	waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "new-native", "entry")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(successorIntent, channeldelivery.IntentText, "new-native"), "entry")
 	p.mu.Lock()
 	for _, delivery := range p.deliveries[before:] {
 		if delivery["queue"] != "queue-b" {
@@ -343,8 +353,10 @@ func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHar
 	if err := db.QueryRow(`SELECT COUNT(*) FROM connected_channel_activations WHERE status='current'`).Scan(&current); err != nil || current != 0 {
 		t.Fatalf("unbind retained execution authority: %d %v", current, err)
 	}
+	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	h.start(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	retired := getChannelOnboardingRPC(t, h, begun.Operation.OperationID)
 	if retired.Readiness != nil && retired.Readiness.Ready {
 		t.Fatal("retired object activation became executable on restart")
@@ -357,33 +369,59 @@ func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHar
 	}
 }
 
-func waitObjectChannelDisposition(t *testing.T, db *sql.DB, table, occurrence string, allowed ...string) {
+func objectIntentQuery(identity channeldelivery.IntentObservationQuery, kind channeldelivery.IntentKind, occurrence string) channeldelivery.IntentObservationQuery {
+	identity.Kind, identity.ProviderEventID = kind, occurrence
+	return identity
+}
+
+func closeObjectIntentObservation(t *testing.T, p *objectChannelProvider) {
 	t.Helper()
-	queries := map[string]string{
-		"operator_channel_action_intents": `SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE provider_event_id=$1`,
-		"operator_channel_text_intents":   `SELECT state,COALESCE(disposition,'') FROM operator_channel_text_intents WHERE provider_event_id=$1`,
+	if p.intentReader != nil {
+		if err := p.intentReader.Close(); err != nil {
+			t.Fatal(err)
+		}
+		p.intentReader = nil
 	}
-	query, ok := queries[table]
-	if !ok {
-		t.Fatal("unknown object intent table")
-	}
+}
+
+func waitObjectChannelDisposition(t *testing.T, reader channeldelivery.Observer, query channeldelivery.IntentObservationQuery, allowed ...string) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var state, disposition string
-		err := db.QueryRow(query, occurrence).Scan(&state, &disposition)
-		if err == nil && state == "settled" {
-			for _, want := range allowed {
-				if disposition == want {
-					return
-				}
-			}
-			t.Fatalf("object occurrence %s settled %s, want %v", occurrence, disposition, allowed)
+		settled, result := observeChannelDisposition(t, reader, query, allowed...)
+		if settled {
+			return
 		}
-		if err != nil && err != sql.ErrNoRows || time.Now().After(deadline) {
-			t.Fatalf("object occurrence %s not settled: %s/%s %v", occurrence, state, disposition, err)
+		if time.Now().After(deadline) {
+			t.Fatalf("object intent %+v not settled: %+v", query, result)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func observeChannelDisposition(t *testing.T, reader channeldelivery.Observer, query channeldelivery.IntentObservationQuery, allowed ...string) (bool, channeldelivery.IntentObservation) {
+	t.Helper()
+	result, found, err := reader.ObserveChannelIntent(context.Background(), query)
+	if err != nil {
+		t.Fatalf("exact intent %+v observation failed: %v", query, err)
+	}
+	settled, err := channelDispositionAccepted(result, found, allowed)
+	if err != nil {
+		t.Fatalf("exact intent %+v: %v", query, err)
+	}
+	return settled, result
+}
+
+func channelDispositionAccepted(result channeldelivery.IntentObservation, found bool, allowed []string) (bool, error) {
+	if !found || result.State != "settled" {
+		return false, nil
+	}
+	for _, want := range allowed {
+		if result.Disposition == want {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("settled %s, want %v", result.Disposition, allowed)
 }
 
 func proveObjectChannelPages(t *testing.T, db *sql.DB, p *objectChannelProvider, card, reference string, post func(string, string, string)) int {
@@ -619,6 +657,8 @@ func objectChannelIngressStatus(t *testing.T, callback, signing, id string, data
 // The provider uses workspace/queue/principal objects and its own HTTP protocol,
 // not Telegram update shapes or scalarized channel references.
 type objectChannelProvider struct {
+	intentIdentity    channeldelivery.IntentObservationQuery
+	intentReader      storetest.ChannelObservation
 	mu                sync.Mutex
 	callback, signing string
 	baseURL           string

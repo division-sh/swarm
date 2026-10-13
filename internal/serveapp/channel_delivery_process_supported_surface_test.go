@@ -3,10 +3,12 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -118,6 +120,8 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				}
 				second := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = second.endpoint(t)
+				intentIdentity := captureChannelIntentIdentity(t, h)
+				intentReader := openChannelAnchorObservation(t, h)
 				want := "settled"
 				if cut == "launched" {
 					want = "outcome_uncertain"
@@ -159,13 +163,16 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					},
 				})
 				if cut == "launched" {
-					waitChannelRejectedCallback(t, db, token)
+					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(940000+messageID)), "stale", "rejected")
 					var count int
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 0 {
 						t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
 					}
 				} else {
 					waitChannelAnchorDecision(t, db, card)
+				}
+				if err := intentReader.Close(); err != nil {
+					t.Fatal(err)
 				}
 				if err := second.stop(); err != nil {
 					t.Fatalf("recovered process did not stop: %v\n%s", err, second.output.String())

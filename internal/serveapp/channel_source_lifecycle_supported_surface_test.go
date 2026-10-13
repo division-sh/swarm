@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -26,6 +28,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				var deliveryReader servedRunDeliveryReader
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
+				intentIdentity := captureChannelIntentIdentity(t, h)
 				var standingRun string
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
@@ -85,8 +88,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatalf("changed process replaced retained source: %v", err)
 						}
 						callback, signing, _ = h.provider.Registration()
-						if postChannelSourceControl(t, callback, signing, card, token, messageID) == http.StatusAccepted {
-							waitChannelRejectedCallback(t, db, token)
+						freshIdentity := captureChannelIntentIdentity(t, h)
+						status, postedIntent := postChannelSourceControlObserved(t, callback, signing, freshIdentity, card, token, messageID)
+						if status == http.StatusAccepted {
+							reader := openChannelAnchorObservation(t, h)
+							waitObjectChannelDisposition(t, reader, postedIntent, "stale", "rejected")
 						}
 						var decisions int
 						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
@@ -112,7 +118,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							"data":    rejectedToken,
 						},
 					})
-					waitChannelRejectedCallback(t, db, rejectedToken)
+					reader := openChannelAnchorObservation(t, h)
+					waitObjectChannelDisposition(t, reader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, "978002"), "stale", "rejected")
+					if err := reader.Close(); err != nil {
+						t.Fatal(err)
+					}
 					waitChannelDeliverySendsSettled(t, db, backend)
 					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
 						var count int
@@ -343,12 +353,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						return state
 					}
 					parentBefore := readParent()
-					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
+					_, childIntent := postChannelSourceControlObserved(t, callback, signing, intentIdentity, child, childToken, childMessage)
+					reader := openChannelAnchorObservation(t, h)
 					deadline := time.Now().Add(5 * time.Second)
 					for {
-						var intentState, disposition string
-						err := db.QueryRow(`SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE CAST(fact AS TEXT) LIKE $1`, "%"+childToken+"%").Scan(&intentState, &disposition)
-						if err == nil && intentState == "settled" && disposition == "unsupported" {
+						settled, result := observeChannelDisposition(t, reader, childIntent, "unsupported")
+						if settled {
 							break
 						}
 						if time.Now().After(deadline) {
@@ -356,9 +366,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							cardErr := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict)
 							var decisions int
 							eventErr := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&decisions)
-							t.Fatalf("selected-fork callback lacks terminal unsupported disposition: state=%s disposition=%s err=%v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", intentState, disposition, err, status, verdict, cardErr, decisions, eventErr)
+							t.Fatalf("selected-fork callback %+v lacks terminal unsupported disposition: observation=%+v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", childIntent, result, status, verdict, cardErr, decisions, eventErr)
 						}
 						time.Sleep(20 * time.Millisecond)
+					}
+					if err := reader.Close(); err != nil {
+						t.Fatal(err)
 					}
 					var status string
 					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, child).Scan(&status); err != nil || status != "pending" {
@@ -593,10 +606,23 @@ func readChannelSourceHistory(t *testing.T, db *sql.DB, card string) string {
 
 func postChannelSourceControl(t *testing.T, callback, signing, card, token string, messageID int) int {
 	t.Helper()
-	return postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 976000 + messageID, "callback_query": map[string]any{
+	return postChannelSourceUpdate(t, callback, signing, channelSourceControlPayload(card, token, messageID))
+}
+
+func channelSourceControlPayload(card, token string, messageID int) map[string]any {
+	return map[string]any{"update_id": 976000 + messageID, "callback_query": map[string]any{
 		"id": "source-" + card, "from": map[string]any{"id": 7000},
 		"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
-	}})
+	}}
+}
+
+func postChannelSourceControlObserved(t *testing.T, callback, signing string, identity channeldelivery.IntentObservationQuery, card, token string, messageID int) (int, channeldelivery.IntentObservationQuery) {
+	t.Helper()
+	payload := channelSourceControlPayload(card, token, messageID)
+	// The admitted Telegram trigger declares delivery_id.json_path=$.update_id.
+	// HTTP status, callback token and callback_query.id are not occurrence IDs.
+	query := objectIntentQuery(identity, channeldelivery.IntentAction, fmt.Sprint(payload["update_id"]))
+	return postChannelSourceUpdate(t, callback, signing, payload), query
 }
 
 func postChannelSourceUpdate(t *testing.T, callback, signing string, update map[string]any) int {

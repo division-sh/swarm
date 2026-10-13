@@ -39,7 +39,7 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 					var token, chooser string
 					if mode == "chosen" {
 						postObjectChannelFact(t, p, "selected-retained-answer", map[string]any{"text": "retained answer"})
-						waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "selected-retained-answer", "chooser")
+						waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "selected-retained-answer"), "chooser")
 						_, chooser = waitObjectRequestedResponse(t, db, "selected-retained-answer")
 						token = firstObjectDraftChoice(t, p, chooser)
 						var raw []byte
@@ -118,11 +118,11 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 						switch mode {
 						case "chosen":
 							postObjectInputAction(t, p, "selected-choice", chooser, token)
-							waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "selected-choice", "unsupported")
-							waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "selected-retained-answer", "unsupported")
+							waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "selected-choice"), "unsupported")
+							waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "selected-retained-answer"), "unsupported")
 						case "skip":
 							postObjectInputAction(t, p, "selected-skip", receipt, token)
-							waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "selected-skip", "unsupported")
+							waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "selected-skip"), "unsupported")
 						default:
 							fact := map[string]any{"text": "refused answer"}
 							if mode == "quoted" {
@@ -130,7 +130,7 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 							}
 							postObjectChannelFact(t, p, "selected-text", fact)
 							postObjectChannelFact(t, p, "selected-text", fact)
-							waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "selected-text", "unsupported")
+							waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "selected-text"), "unsupported")
 						}
 						if after := selectedChannelDraftState(t, db, card); before != after {
 							t.Fatalf("unsupported %s changed card/draft: before=%v after=%v", mode, before, after)

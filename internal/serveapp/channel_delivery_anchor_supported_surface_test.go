@@ -697,26 +697,6 @@ func waitChannelAnchorDecision(t *testing.T, db *sql.DB, cardID string) {
 	}
 }
 
-func waitChannelRejectedCallback(t *testing.T, db *sql.DB, token string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var count int
-		query := `SELECT COUNT(*) FROM operator_channel_action_intents
-			WHERE state='settled' AND disposition IN ('stale','rejected') AND CAST(fact AS TEXT) LIKE $1`
-		if err := db.QueryRow(query, "%"+token+"%").Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("stale callback has no durable non-mutation disposition")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 func waitChannelAnchorTerminalEdit(t *testing.T, h *channelOnboardingE2EHarness, messageID int) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)

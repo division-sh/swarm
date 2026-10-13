@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -20,8 +21,10 @@ func TestChannelLearnedObjectRecoveryPagingPublicJourney(t *testing.T) {
 				cards := createObjectUncertainCards(t, h, db, p, hash)
 				receipt, deliveryID := requestObjectRecoveryInbox(t, h, db, p, command, "recovery-entry")
 				if schedule == "restart" {
+					closeObjectIntentObservation(t, p)
 					h.stop(t)
 					h.start(t)
+					p.intentReader = openChannelAnchorObservation(t, h)
 				}
 				if schedule == "edit_ack_loss" {
 					proveObjectResponseEditLoss(t, h, db, p, deliveryID, receipt)
@@ -55,7 +58,7 @@ func createObjectUncertainCards(t *testing.T, h *channelOnboardingE2EHarness, db
 func requestObjectRecoveryInbox(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, command, id string) (string, string) {
 	t.Helper()
 	postObjectChannelFact(t, p, id, map[string]any{"text": "/" + command, "entry": map[string]any{"reference": command, "address": "mock_bot"}})
-	waitObjectChannelDisposition(t, db, "operator_channel_text_intents", id, "entry")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, id), "entry")
 	deliveryID, receipt := waitObjectRequestedResponse(t, db, id)
 	return receipt, deliveryID
 }
@@ -119,7 +122,7 @@ func proveObjectAllRecoveryChoices(t *testing.T, h *channelOnboardingE2EHarness,
 			waitObjectFreshCopyCount(t, db, len(seen))
 			id := fmt.Sprintf("recover-repeat-%d", page)
 			postObjectChannelFact(t, p, id, map[string]any{"token": resend, "cursor": id, "message": map[string]any{"id": receipt}})
-			waitObjectChannelDisposition(t, db, "operator_channel_action_intents", id, "stale", "rejected")
+			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, id), "stale", "rejected")
 		}
 		if len(seen) < len(cards) {
 			if next == "" {
@@ -132,8 +135,10 @@ func proveObjectAllRecoveryChoices(t *testing.T, h *channelOnboardingE2EHarness,
 	if len(seen) != len(cards) {
 		t.Fatalf("only %d/%d explicit recovery choices reachable", len(seen), len(cards))
 	}
+	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	h.start(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	for _, card := range cards {
 		fresh := waitObjectCardReceipt(t, db, card)
 		if fresh == "" {
@@ -175,14 +180,16 @@ func proveObjectResponseEditLoss(t *testing.T, h *channelOnboardingE2EHarness, d
 	waitObjectDeliveryState(t, db, deliveryID, "uncertain")
 	for _, restart := range []bool{false, true} {
 		if restart {
+			closeObjectIntentObservation(t, p)
 			h.stop(t)
 			h.start(t)
+			p.intentReader = openChannelAnchorObservation(t, h)
 		}
 		id := fmt.Sprintf("rsp-stale-%t", restart)
 		postObjectChannelFact(t, p, id, map[string]any{"token": old, "cursor": id, "message": map[string]any{"id": receipt}})
-		waitObjectChannelDisposition(t, db, "operator_channel_action_intents", id, "stale", "rejected")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, id), "stale", "rejected")
 		postObjectChannelFact(t, p, id+"-text", map[string]any{"text": "object-private-obsolete", "reply": map[string]any{"id": receipt}})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", id+"-text", "teaching")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, id+"-text"), "teaching")
 	}
 	p.mu.Lock()
 	edits := 0

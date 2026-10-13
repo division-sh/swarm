@@ -23,6 +23,8 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					ttl = 4 * time.Second
 				}
 				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
+				intentIdentity := captureChannelIntentIdentity(t, h)
+				intentReader := openChannelAnchorObservation(t, h)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
@@ -43,8 +45,12 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				var response map[string]any
 				switch transition {
 				case "cancel":
+					if err := intentReader.Close(); err != nil {
+						t.Fatal(err)
+					}
 					h.stop(t)
 					h.start(t)
+					intentReader = openChannelAnchorObservation(t, h)
 					postUncertainCopyCallback(t, h, message, cancel, 902010)
 				case "expire":
 					var detail struct {
@@ -56,11 +62,15 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					if detail.Card.Cadence.InputDraftTTL != ttl.String() {
 						t.Fatalf("card did not consume configured canonical TTL: %+v", detail.Card.Cadence)
 					}
+					if err := intentReader.Close(); err != nil {
+						t.Fatal(err)
+					}
 					h.stop(t)
 					if remaining := time.Until(acknowledgedPrompt.Prompt.ExpiresAt); remaining > 0 {
 						time.Sleep(remaining)
 					}
 					h.start(t)
+					intentReader = openChannelAnchorObservation(t, h)
 					draftStatus = "expired"
 				case "external_decision":
 					params := lifecycleDecisionParamsForCard(t, servedControlProofRuntime{Endpoint: h.rpcEndpoint()}, cardID, "approve")
@@ -75,8 +85,12 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				waitChannelDraftStatus(t, db, cardID, draftStatus)
 				for _, restart := range []bool{false, true} {
 					if restart {
+						if err := intentReader.Close(); err != nil {
+							t.Fatal(err)
+						}
 						h.stop(t)
 						h.start(t)
+						intentReader = openChannelAnchorObservation(t, h)
 					}
 					update := 902020
 					if restart {
@@ -84,10 +98,10 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					}
 					postUncertainCopyCallback(t, h, message, cancel, update)
 					postUncertainCopyCallback(t, h, message, cancel, update, http.StatusOK)
-					waitChannelDraftCallbackRejection(t, db, update)
+					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(update)), "stale", "rejected")
 					postUncertainCopyText(t, h, message, "obsolete-private-draft-answer", update+1)
 					postUncertainCopyText(t, h, message, "obsolete-private-draft-answer", update+1, http.StatusOK)
-					waitChannelTextTeaching(t, db, update+1)
+					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentText, fmt.Sprint(update+1)), "teaching")
 					var actualStatus string
 					var actualDecisions int
 					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, cardID).Scan(&actualStatus); err != nil || actualStatus != cardStatus {
@@ -199,44 +213,6 @@ func waitChannelDraftStatus(t *testing.T, db *sql.DB, cardID, status string) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("canonical draft status=%s, want %s", actual, status)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func waitChannelTextTeaching(t *testing.T, db *sql.DB, update int) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents
-			WHERE provider_event_id=$1 AND state='settled' AND disposition='teaching'`, fmt.Sprint(update)).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count == 1 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("this obsolete quoted answer has no exact durable teaching disposition")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func waitChannelDraftCallbackRejection(t *testing.T, db *sql.DB, update int) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents
-			WHERE provider_event_id=$1 AND state='settled' AND disposition IN ('stale','rejected')`, fmt.Sprint(update)).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count == 1 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("this obsolete callback occurrence lacks its exact durable non-mutation disposition")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

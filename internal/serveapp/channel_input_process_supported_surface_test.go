@@ -28,10 +28,12 @@ func TestChannelInputAuthorityRestartPublicJourney(t *testing.T) {
 func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backend, change string) {
 	t.Helper()
 	h, db, p, command, hash := startObjectChannelInputJourney(t, backend, false)
+	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 	first := startChannelOnboardingCrashServeProcess(t, h.opts, objectChannelProviderURL(t, p))
 	h.endpoint = first.endpoint(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	var cards [2]string
 	var before [2][7]string
 	for index := range cards {
@@ -42,7 +44,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 	}
 	for _, occurrence := range []string{"authority-answer", "authority-unrelated"} {
 		postObjectChannelFact(t, p, occurrence, map[string]any{"text": occurrence + "-private"})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", occurrence, "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, occurrence), "chooser")
 		waitObjectRequestedResponse(t, db, occurrence)
 	}
 	_, chooser := waitObjectRequestedResponse(t, db, "authority-answer")
@@ -52,6 +54,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 		t.Fatal(err)
 	}
 	old := getChannelOnboardingRPC(t, h, operationID)
+	successorIntent := p.intentIdentity
 	var result map[string]any
 	if change == "rebind" {
 		var begun channelonboarding.Result
@@ -79,6 +82,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 			t.Fatal("public rebind did not become READY")
 		}
 		waitObjectNativeQualification(t, h, begun.Operation.OperationID)
+		successorIntent = channeldelivery.IntentObservationQuery{Provider: ready.Operation.Provider, InterfaceKey: ready.Operation.Interface.Key()}
 	} else {
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.unbind", map[string]any{
 			"interface": old.Operation.Interface.Selector, "expected_revision": old.Binding.Revision, "idempotency_key": "authority-unbind",
@@ -86,6 +90,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 	}
 	waitChannelDeliverySendsSettled(t, db, h.backend)
 	beforeACK, beforeEdit := objectChannelCallCounts(p)
+	closeObjectIntentObservation(t, p)
 	if err := first.kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +99,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 	}
 	second := startChannelOnboardingCrashServeProcess(t, h.opts, objectChannelProviderURL(t, p))
 	h.endpoint = second.endpoint(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	waitChannelDeliverySendsSettled(t, db, h.backend)
 	if ack, edit := objectChannelCallCounts(p); ack != beforeACK || edit != beforeEdit {
 		t.Fatalf("authority restart replayed old effects: ACK %d/%d edit %d/%d", beforeACK, ack, beforeEdit, edit)
@@ -102,11 +108,11 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 		for attempt := 0; attempt < 2; attempt++ {
 			postObjectChannelFact(t, p, "authority-old-choice", map[string]any{"token": token, "cursor": "authority-old-choice", "message": map[string]any{"id": chooser}})
 		}
-		waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "authority-old-choice", "stale", "rejected")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(successorIntent, channeldelivery.IntentAction, "authority-old-choice"), "stale", "rejected")
 		postObjectChannelFact(t, p, "authority-old-text", map[string]any{
 			"text": "/" + command, "entry": map[string]any{"reference": command, "address": "mock_bot"},
 		})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "authority-old-text", "entry_rejected")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(successorIntent, channeldelivery.IntentText, "authority-old-text"), "entry_rejected")
 	} else {
 		p.mu.Lock()
 		callback, signing := p.callback, p.signing
@@ -130,12 +136,13 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 		t.Fatalf("obsolete control dispatched effects: ACK %d/%d edit %d/%d", beforeACK, ack, beforeEdit, edit)
 	}
 	for _, occurrence := range []string{"authority-answer", "authority-unrelated"} {
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", occurrence, "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, occurrence), "chooser")
 	}
 	var decisions int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'`).Scan(&decisions); err != nil || decisions != 0 {
 		t.Fatalf("obsolete authority decided a card: %d %v", decisions, err)
 	}
+	closeObjectIntentObservation(t, p)
 	if err := second.stop(); err != nil {
 		t.Fatalf("authority recovery did not stop: %v", err)
 	}
@@ -157,10 +164,12 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	t.Helper()
 	root := canonicalrouting.CopyChannelLearnedObjectOptionalInputJourney(t, partial)
 	h, db, p, _, hash := startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
+	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 	first := startChannelOnboardingCrashServeProcess(t, h.opts, objectChannelProviderURL(t, p))
 	h.endpoint = first.endpoint(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	card, receipt, reject := beginObjectInputCard(t, h, db, p, hash, 0)
 	postObjectInputAction(t, p, "crash-input-begin", receipt, reject)
 	waitChannelDraftPromptSettlement(t, db, card)
@@ -171,7 +180,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 		postObjectInputAction(t, p, "crash-other-begin", actionReceipt, reject)
 		waitChannelDraftPromptSettlement(t, db, otherCard)
 		postObjectChannelFact(t, p, "crash-answer", map[string]any{"text": "private-crash-answer"})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "crash-answer", "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "crash-answer"), "chooser")
 		_, actionReceipt = waitObjectRequestedResponse(t, db, "crash-answer")
 		action = firstObjectDraftChoice(t, p, actionReceipt)
 		selected := objectChannelChoiceCard(t, db, action)
@@ -181,7 +190,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 		}
 		unrelated = selectedChannelDraftState(t, db, otherCard)
 		postObjectChannelFact(t, p, "crash-unrelated-answer", map[string]any{"text": "unrelated-private-answer"})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "crash-unrelated-answer", "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "crash-unrelated-answer"), "chooser")
 	}
 	if mode == "skip" {
 		actionReceipt = receipt
@@ -198,9 +207,11 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	case <-time.After(20 * time.Second):
 		t.Fatal("committed input never reached the real provider edit-response barrier")
 	}
+	waitChannelInputCommitDispositions(t, p, mode, partial)
 	assertChannelInputCommit(t, db, card, mode, partial)
 	committed := selectedChannelDraftState(t, db, card)
 	beforeACK, beforeEdit := objectChannelCallCounts(p)
+	closeObjectIntentObservation(t, p)
 	if err := first.kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -210,6 +221,8 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	release()
 	second := startChannelOnboardingCrashServeProcess(t, h.opts, objectChannelProviderURL(t, p))
 	h.endpoint = second.endpoint(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
+	waitChannelInputCommitDispositions(t, p, mode, partial)
 	assertChannelInputCommit(t, db, card, mode, partial)
 	if after := selectedChannelDraftState(t, db, card); after != committed {
 		t.Fatalf("restart reinterpreted committed input: %v / %v", committed, after)
@@ -219,12 +232,13 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	} else {
 		postObjectChannelFact(t, p, "crash-input-action", map[string]any{"token": action, "cursor": "crash-input-action", "message": map[string]any{"id": actionReceipt}})
 	}
+	waitChannelInputCommitDispositions(t, p, mode, partial)
 	assertChannelInputCommit(t, db, card, mode, partial)
 	if mode == "chosen" {
 		if after := selectedChannelDraftState(t, db, otherCard); after != unrelated {
 			t.Fatal("chosen input consumed the unrelated draft")
 		}
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "crash-unrelated-answer", "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "crash-unrelated-answer"), "chooser")
 	}
 	afterACK, afterEdit := objectChannelCallCounts(p)
 	if beforeACK != afterACK || beforeEdit != afterEdit {
@@ -233,12 +247,13 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	if after := selectedChannelDraftState(t, db, card); after != committed {
 		t.Fatal("duplicate occurrence repeated committed draft progress")
 	}
+	closeObjectIntentObservation(t, p)
 	if err := second.stop(); err != nil {
 		t.Fatalf("recovered input process did not stop: %v", err)
 	}
 }
 
-func assertChannelInputCommit(t *testing.T, db *sql.DB, card, mode string, partial bool) {
+func waitChannelInputCommitDispositions(t *testing.T, p *objectChannelProvider, mode string, partial bool) {
 	t.Helper()
 	if mode != "skip" {
 		disposition := "input_complete"
@@ -248,11 +263,15 @@ func assertChannelInputCommit(t *testing.T, db *sql.DB, card, mode string, parti
 		if mode == "chosen" {
 			disposition = "chooser"
 		}
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "crash-answer", disposition)
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "crash-answer"), disposition)
 	}
 	if mode != "plain" {
-		waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "crash-input-action", "applied")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "crash-input-action"), "applied")
 	}
+}
+
+func assertChannelInputCommit(t *testing.T, db *sql.DB, card, mode string, partial bool) {
+	t.Helper()
 	var index, decisions int
 	var draftStatus, cardStatus, draftFields, cardFields string
 	if err := db.QueryRow(`SELECT d.next_field_index,d.status,c.status,CAST(d.input_fields AS TEXT),CAST(c.fields AS TEXT),

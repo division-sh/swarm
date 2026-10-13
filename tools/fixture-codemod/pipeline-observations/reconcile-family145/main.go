@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
@@ -23,7 +24,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "dee15a2dbd672025c6b8055a57c9314e34f0d3d2931564597d5392bcaefb4b27"
+const targetDigest = "b9c50450ed8e2bbcc46cb5cb8c22c948c9eaabeb9411432675383f90f6ab790c"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -275,6 +276,7 @@ func main() {
 	includePublicJoinTargets()
 	includeForkCompanionTargets()
 	includeForkNoticeTargets()
+	includeChannelIntentTargets()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -320,6 +322,37 @@ func main() {
 		writeJSON(transitionLedger, changes)
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
+	}
+}
+
+var channelIntentRetirements = map[string]map[string]bool{}
+
+func includeChannelIntentTargets() {
+	raw, err := os.ReadFile(channelintent.Path)
+	must(err)
+	pins, err := channelintent.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		if pin.Before == "" || strings.HasPrefix(pin.Function, "type/") {
+			continue
+		}
+		found := false
+		for _, path := range files {
+			found = found || path == pin.File
+		}
+		if !found {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+		if pin.After == "" {
+			if channelIntentRetirements[pin.File] == nil {
+				channelIntentRetirements[pin.File] = map[string]bool{}
+			}
+			channelIntentRetirements[pin.File][pin.Function] = true
+		}
 	}
 }
 
@@ -617,6 +650,12 @@ var gateRecoveryTargets = map[string]map[string]bool{
 }
 
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if channelIntentRetirements[path][key] {
+		if after[key] != "" {
+			panic("retired channel-intent interpreter survived: " + path + "/" + key)
+		}
+		return "", true
+	}
 	if retiredEventFixtureHelpers[path][key] {
 		if after[key] != "" {
 			panic("retired raw event fixture helper survived: " + path + "/" + key)

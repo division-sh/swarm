@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
@@ -49,9 +50,14 @@ func main() {
 		panic("usage: migrate-served-debug [-write]")
 	}
 	var results []result
+	snapshot, err := exec.Command("git", "ls-tree", "-r", "--name-only", predecessor, "--", "internal/serveapp").Output()
+	must(err)
 	must(checkoutsource.WalkDir(".", "internal/serveapp", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
+		}
+		if !strings.Contains("\n"+string(snapshot), "\n"+path+"\n") {
+			return nil // New files have no body in this immutable historical inventory.
 		}
 		source, err := exec.Command("git", "show", predecessor+":"+path).Output()
 		if err != nil {
@@ -200,7 +206,12 @@ func currentOutput(r result) []byte {
 		must(err)
 		noticePins, err := forknotice.Decode(noticeManifest)
 		must(err)
-		previous := forknotice.Previous(noticePins, r.path, key, actual)
+		intentManifest, err := os.ReadFile(channelintent.Path)
+		must(err)
+		intentPins, err := channelintent.Decode(intentManifest)
+		must(err)
+		previous := channelintent.Previous(intentPins, r.path, key, actual)
+		previous = forknotice.Previous(noticePins, r.path, key, previous)
 		previous = forkcompanion.Previous(companionPins, r.path, key, previous)
 		previous = receiverreadback.Previous(pins, key, previous)
 		previous = publicendpoint.Previous(r.path, key, previous)

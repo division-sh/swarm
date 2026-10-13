@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -73,7 +74,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					}
 					occurrence := fmt.Sprintf("anchor-approve-%d", index)
 					postObjectInputAction(t, p, occurrence, receipt, approve)
-					waitObjectChannelDisposition(t, db, "operator_channel_action_intents", occurrence, "applied")
+					waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, occurrence), "applied")
 					waitChannelAnchorDecision(t, db, card)
 					if arrived != nil {
 						select {
@@ -122,7 +123,7 @@ func proveObjectRejectedControl(t *testing.T, db *sql.DB, p *objectChannelProvid
 	fact := map[string]any{"token": token, "cursor": occurrence, "message": map[string]any{"id": receipt}}
 	postObjectChannelFact(t, p, occurrence, fact)
 	postObjectChannelFact(t, p, occurrence, fact)
-	waitObjectChannelDisposition(t, db, "operator_channel_action_intents", occurrence, "rejected")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, occurrence), "rejected")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.calls["/v2/ack"]) != acknowledgments {

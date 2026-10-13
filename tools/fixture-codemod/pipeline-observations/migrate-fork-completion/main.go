@@ -42,9 +42,14 @@ func main() {
 	}
 	var rules []transformation
 	calls := 0
+	snapshot, err := exec.Command("git", "ls-tree", "-r", "--name-only", predecessor, "--", "internal/serveapp").Output()
+	must(err)
 	must(checkoutsource.WalkDir(".", "internal/serveapp", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
+		}
+		if !strings.Contains("\n"+string(snapshot), "\n"+path+"\n") {
+			return nil // New files have no body in this immutable historical inventory.
 		}
 		source, err := exec.Command("git", "show", predecessor+":"+path).Output()
 		if err != nil {

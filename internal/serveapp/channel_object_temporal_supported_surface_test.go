@@ -45,15 +45,19 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 						"card_id": card, "until": time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano), "idempotency_key": "object-temporal-defer",
 					}, &result)
 					waitObjectMessageText(t, p, receipt, fragment)
+					closeObjectIntentObservation(t, p)
 					h.stop(t)
 					h.start(t)
+					p.intentReader = openChannelAnchorObservation(t, h)
 					waitObjectMessageText(t, p, receipt, fragment)
 				case "expire_restart":
+					closeObjectIntentObservation(t, p)
 					h.stop(t)
 					if remaining := time.Until(deadline); remaining > 0 {
 						time.Sleep(remaining)
 					}
 					h.start(t)
+					p.intentReader = openChannelAnchorObservation(t, h)
 					fragment = "The decision expired. No action was taken."
 				case "stop_supersedes":
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{

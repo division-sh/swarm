@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -51,6 +51,8 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			if connected.Readiness == nil || !connected.Readiness.Ready {
 				t.Fatalf("public connection is not ready: %#v", connected)
 			}
+			intentIdentity := captureChannelIntentIdentity(t, h)
+			intentReader := openChannelAnchorObservation(t, h)
 			db, err := sql.Open(backendName, h.storeDSN)
 			if err != nil {
 				t.Fatal(err)
@@ -110,7 +112,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				}); len(names) != 0 {
 					t.Fatalf("customer callback became business authority: %v", names)
 				}
-				waitReceptionistActionRejection(t, h, fmt.Sprint(83200+index))
+				waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(83200+index)), "rejected")
 			}
 			if after := receptionistPendingMailbox(t, h); !reflect.DeepEqual(beforeMailbox, after) {
 				t.Fatalf("customer callbacks mutated operator inbox: before=%v after=%v", beforeMailbox, after)
@@ -190,35 +192,6 @@ func receptionistPendingMailbox(t *testing.T, h *channelOnboardingE2EHarness) []
 		t.Fatal("operator inbox has no pending card")
 	}
 	return result.Items
-}
-
-func waitReceptionistActionRejection(t *testing.T, h *channelOnboardingE2EHarness, providerID string) {
-	t.Helper()
-	driver, placeholder := "sqlite", "?"
-	if h.backend == servedparity.BackendExplicitPostgres {
-		driver, placeholder = "postgres", "$1"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		var state, disposition string
-		err := db.QueryRow("SELECT state, COALESCE(disposition, '') FROM operator_channel_action_intents WHERE provider_event_id="+placeholder, providerID).Scan(&state, &disposition)
-		if err != nil && err != sql.ErrNoRows {
-			t.Fatal(err)
-		}
-		if err == nil && state == "settled" {
-			if disposition != "rejected" {
-				t.Fatalf("foreign action disposition=%q", disposition)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("foreign customer action did not reach durable rejection")
 }
 
 type receptionistAnthropicDouble struct {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -52,11 +53,11 @@ func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
 				waitChannelDraftPromptSettlement(t, db, card)
 			}
 			postObjectChannelFact(t, p, "typed-invalid-answer", map[string]any{"text": "not-an-integer"})
-			waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "typed-invalid-answer", "chooser")
+			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "typed-invalid-answer"), "chooser")
 			_, chooser := waitObjectRequestedResponse(t, db, "typed-invalid-answer")
 			choice := firstObjectDraftChoice(t, p, chooser)
 			postObjectInputAction(t, p, "typed-invalid-select", chooser, choice)
-			waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "typed-invalid-select", "navigation")
+			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "typed-invalid-select"), "navigation")
 			_, teaching := waitObjectIntentResponse(t, db, "operator_channel_action_intents", "typed-invalid-select")
 			waitObjectMessageText(t, p, teaching, "That answer does not match the requested field.")
 			p.mu.Lock()
@@ -71,10 +72,10 @@ func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
 				t.Fatalf("invalid chosen answer completed a card: %d %v", decided, err)
 			}
 			postObjectChannelFact(t, p, "typed-valid-answer", map[string]any{"text": "27"})
-			waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "typed-valid-answer", "chooser")
+			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "typed-valid-answer"), "chooser")
 			_, nextChooser := waitObjectRequestedResponse(t, db, "typed-valid-answer")
 			postObjectInputAction(t, p, "typed-valid-select", nextChooser, firstObjectDraftChoice(t, p, nextChooser))
-			waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "typed-valid-select", "applied")
+			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "typed-valid-select"), "applied")
 			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE status='decided'`).Scan(&decided); err != nil || decided != 1 {
 				t.Fatalf("valid retry did not complete exactly one card: %d %v", decided, err)
 			}
@@ -161,6 +162,8 @@ func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root 
 		t.Fatalf("public learned input journey not READY: %+v", ready)
 	}
 	waitObjectNativeQualification(t, h, begun.Operation.OperationID)
+	p.intentIdentity = channeldelivery.IntentObservationQuery{Provider: ready.Operation.Provider, InterfaceKey: ready.Operation.Interface.Key()}
+	p.intentReader = openChannelAnchorObservation(t, h)
 	p.mu.Lock()
 	installed := p.calls["/v2/install"]
 	var command string
@@ -233,16 +236,18 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 		waitChannelDraftPromptSettlement(t, db, card)
 	}
 	postObjectChannelFact(t, p, "ambiguous-answer", map[string]any{"text": "object-private-ambiguous-answer"})
-	waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "ambiguous-answer", "chooser")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "ambiguous-answer"), "chooser")
 	deliveryID, receipt := waitObjectRequestedResponse(t, db, "ambiguous-answer")
 	if schedule == "chooser_restart" {
+		closeObjectIntentObservation(t, p)
 		h.stop(t)
 		h.start(t)
+		p.intentReader = openChannelAnchorObservation(t, h)
 	}
 	if schedule == "chooser_edit_ack_loss" {
 		proveObjectResponseEditLoss(t, h, db, p, deliveryID, receipt)
 		postObjectChannelFact(t, p, "fresh-chooser-answer", map[string]any{"text": "object-private-new-answer"})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "fresh-chooser-answer", "chooser")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "fresh-chooser-answer"), "chooser")
 		_, fresh := waitObjectRequestedResponse(t, db, "fresh-chooser-answer")
 		if fresh == receipt {
 			t.Fatal("new explicit answer reused uncertain chooser")
@@ -294,10 +299,12 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	h.start(t)
+	p.intentReader = openChannelAnchorObservation(t, h)
 	postObjectChannelFact(t, p, "obsolete-choice", map[string]any{"token": selected, "cursor": "obsolete-choice", "message": map[string]any{"id": receipt}})
-	waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "obsolete-choice", "stale", "rejected")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "obsolete-choice"), "stale", "rejected")
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("duplicate/restart changed chooser completion cardinality: %d %v", count, err)
@@ -357,14 +364,16 @@ func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, 
 	waitObjectMessageText(t, p, oldReceipt, "Input: reason (text) required")
 	for _, restart := range []bool{false, true} {
 		if restart {
+			closeObjectIntentObservation(t, p)
 			h.stop(t)
 			h.start(t)
+			p.intentReader = openChannelAnchorObservation(t, h)
 		}
 		id := fmt.Sprintf("old-prompt-%t", restart)
 		postObjectChannelFact(t, p, id, map[string]any{"token": reject, "cursor": id, "message": map[string]any{"id": oldReceipt}})
-		waitObjectChannelDisposition(t, db, "operator_channel_action_intents", id, "stale", "rejected")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, id), "stale", "rejected")
 		postObjectChannelFact(t, p, id+"-text", map[string]any{"text": "object-private-obsolete", "reply": map[string]any{"id": oldReceipt}})
-		waitObjectChannelDisposition(t, db, "operator_channel_text_intents", id+"-text", "teaching")
+		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, id+"-text"), "teaching")
 	}
 	postObjectChannelFact(t, p, "prompt-recovery", map[string]any{"text": "/" + command, "entry": map[string]any{"reference": command, "address": "mock_bot"}})
 	inbox := waitObjectDeliveryContaining(t, p, "Older copies may be outdated")

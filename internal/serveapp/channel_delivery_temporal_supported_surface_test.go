@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -15,6 +16,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 		for _, transition := range []string{"defer_restart", "expire_restart", "stop_supersedes"} {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
+				intentIdentity := captureChannelIntentIdentity(t, h)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
@@ -89,7 +91,8 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					}); len(names) != 0 {
 						t.Fatalf("stale human action escaped into business events: %v", names)
 					}
-					waitChannelRejectedCallback(t, db, token)
+					reader := openChannelAnchorObservation(t, h)
+					waitObjectChannelDisposition(t, reader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(839000+message)), "stale", "rejected")
 					var decisions int
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
 						t.Fatalf("terminal receipt regained verdict authority: decisions=%d err=%v", decisions, err)

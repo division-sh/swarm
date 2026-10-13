@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -19,6 +20,8 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
+				intentIdentity := captureChannelIntentIdentity(t, h)
+				intentReader := openChannelAnchorObservation(t, h)
 				waitChannelDeliverySendsSettled(t, db, backend)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
@@ -30,10 +33,6 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				if !ok {
 					t.Fatal("real gate has no callback control")
 				}
-				intentQuery := `SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE json_extract(fact,'$.token')=$1`
-				if backend == servedparity.BackendExplicitPostgres {
-					intentQuery = `SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE fact->>'token'=$1`
-				}
 				var arrived <-chan struct{}
 				var release func()
 				if cut == "launched" {
@@ -41,17 +40,18 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					t.Cleanup(release)
 				}
 				callback, signing, _ := h.provider.Registration()
-				postChannelSourceControl(t, callback, signing, card, token, messageID)
+				_, intentQuery := postChannelSourceControlObserved(t, callback, signing, intentIdentity, card, token, messageID)
 				if arrived != nil {
 					select {
 					case <-arrived:
-						var status, state, disposition string
+						var status string
 						var decisions int
 						if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, card).Scan(&status); err != nil || status != "pending" {
 							t.Fatalf("ACK barrier is not before business mutation: %s %v", status, err)
 						}
-						if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil || state != "pending" || disposition != "" {
-							t.Fatalf("verified action missing at pre-mutation barrier: %s %v", state, err)
+						result, found, err := intentReader.ObserveChannelIntent(context.Background(), intentQuery)
+						if err != nil || !found || result.State != "pending" || result.Disposition != "" {
+							t.Fatalf("verified exact action %+v missing at pre-mutation barrier: %+v found=%t %v", intentQuery, result, found, err)
 						}
 						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
 							t.Fatalf("pre-mutation cut already emitted a decision: %d %v", decisions, err)
@@ -64,6 +64,9 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				}
 				operation := waitChannelAcknowledgmentAttempt(t, db, cut)
 				before := len(h.provider.Acknowledgments())
+				if err := intentReader.Close(); err != nil {
+					t.Fatal(err)
+				}
 				if err := first.kill(); err != nil {
 					t.Fatal(err)
 				}
@@ -75,6 +78,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				}
 				second := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = second.endpoint(t)
+				intentReader = openChannelAnchorObservation(t, h)
 				want := "settled"
 				if cut == "launched" {
 					want = "outcome_uncertain"
@@ -83,9 +87,9 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					t.Fatal("restart replaced original acknowledgment operation")
 				}
 				waitChannelAnchorDecision(t, db, card)
-				var state, disposition string
-				if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil || state != "settled" || disposition != "applied" {
-					t.Fatalf("restart did not atomically complete the exact action: %s/%s %v", state, disposition, err)
+				result, found, err := intentReader.ObserveChannelIntent(context.Background(), intentQuery)
+				if err != nil || !found || result.State != "settled" || result.Disposition != "applied" {
+					t.Fatalf("restart did not atomically complete exact action %+v: %+v found=%t %v", intentQuery, result, found, err)
 				}
 				if len(h.provider.Acknowledgments()) != before {
 					t.Fatal("restart replayed uncertain or settled acknowledgment")
@@ -93,6 +97,9 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				var decisions int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
 					t.Fatalf("ACK was confused with business completion: decisions=%d err=%v", decisions, err)
+				}
+				if err := intentReader.Close(); err != nil {
+					t.Fatal(err)
 				}
 				if err := second.stop(); err != nil {
 					t.Fatalf("recovered process did not stop: %v\n%s", err, second.output.String())
