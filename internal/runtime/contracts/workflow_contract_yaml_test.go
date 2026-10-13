@@ -1526,7 +1526,7 @@ func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t 
 	}{
 		{
 			name: "activity only",
-			raw:  "rules: {activity: {tool: notify}}\n",
+			raw:  "rules: {activity: {id: singleton_activity_probe, tool: notify}}\n",
 			assert: func(t testing.TB, rule HandlerRuleEntry) {
 				if rule.Activity.Tool != "notify" {
 					t.Fatalf("activity = %#v", rule.Activity)
