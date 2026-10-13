@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -45,6 +46,61 @@ func constructionReceiptRaw(t *testing.T, receipt FlowConstructionReceipt) []byt
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestFlowConstructionReceiptV3CanonicalCorrespondence(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*FlowConstructionReceipt)
+	}{
+		{name: "exact"},
+		{name: "birth", mutate: func(r *FlowConstructionReceipt) { r.OccurredAt = r.OccurredAt.Add(time.Microsecond) }},
+		{name: "frozen fields", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Fields["changed"] = int64(7) }},
+		{name: "bookkeeping", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Bookkeeping["changed"] = true }},
+		{name: "numeric kind", mutate: func(r *FlowConstructionReceipt) {
+			r.Persisted.Bookkeeping["initial"].(map[string]any)["integer"] = float64(7)
+		}},
+		{name: "accumulator", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Accumulator["changed"] = []any{"other"} }},
+		{name: "gate", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Gates["original-gate"] = false }},
+		{name: "header presentation", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Control.Slug = "other-slug" }},
+		{name: "creation occurrence", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.EventID = "44444444-4444-4444-8444-444444444444" }},
+		{name: "reply context", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.DeliveryContext.Reply.ID = "other-reply" }},
+		{name: "creating input", mutate: func(r *FlowConstructionReceipt) {
+			r.CreatingInput.EventID = "55555555-5555-4555-8555-555555555555"
+			r.CreationEvent.ParentEventID = r.CreatingInput.EventID
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			expected, owner := constructionReceiptFixture(t)
+			before, err := EncodeFlowConstructionReceipt(expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := DecodeFlowConstructionReceipt(before, owner, expected.EntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.mutate != nil {
+				test.mutate(&actual)
+			}
+			if _, err := EncodeFlowConstructionReceipt(actual); err != nil {
+				t.Fatalf("comparison control is not independently admitted: %v", err)
+			}
+			err = ValidateProjectedFlowConstructionReceipt(actual, expected)
+			if (err != nil) != (test.mutate != nil) {
+				t.Fatalf("complete correspondence changed: %v", err)
+			}
+			if after, err := EncodeFlowConstructionReceipt(expected); err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("comparison mutated immutable source: %v", err)
+			}
+		})
+	}
+	valid, _ := constructionReceiptFixture(t)
+	for _, pair := range [][2]FlowConstructionReceipt{{{}, valid}, {valid, {}}} {
+		if err := ValidateProjectedFlowConstructionReceipt(pair[0], pair[1]); err == nil {
+			t.Fatal("missing receipt evidence acquired correspondence")
+		}
+	}
 }
 
 func TestFlowConstructionReceiptV3IndependentIdentityAndOccurrence(t *testing.T) {

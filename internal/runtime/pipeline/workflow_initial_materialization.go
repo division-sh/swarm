@@ -499,6 +499,23 @@ func EncodeFlowConstructionReceipt(receipt FlowConstructionReceipt) ([]byte, err
 	return raw, nil
 }
 
+// Correspondence compares every immutable component through the receipt codec,
+// retaining numeric kinds and rejecting invalid evidence on either side.
+func ValidateProjectedFlowConstructionReceipt(recorded, projected FlowConstructionReceipt) error {
+	actual, err := EncodeFlowConstructionReceipt(recorded)
+	if err != nil {
+		return err
+	}
+	expected, err := EncodeFlowConstructionReceipt(projected)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(actual, expected) {
+		return fmt.Errorf("historical construction receipt disagrees with admitted initialization: flow=%s recorded_birth=%s projected_birth=%s", projected.FlowInstance, recorded.OccurredAt, projected.OccurredAt)
+	}
+	return nil
+}
+
 // ProjectFlowConstructionReceipt consumes caller-admitted correspondence only.
 // It never re-runs construction or derives parent or publication identities.
 func ProjectFlowConstructionReceipt(receipt FlowConstructionReceipt, childOwner runtimeflowidentity.RunScopedFlowInstance, childIdentity runtimeflowidentity.Instance, creatingInput FlowConstructionInput, creationEvent *DynamicFlowRuntimeCreationEventPlan) (FlowConstructionReceipt, error) {

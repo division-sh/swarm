@@ -86,14 +86,6 @@ func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runl
 	if err != nil {
 		return "", err
 	}
-	var present bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND instance_path=$2)`, run.RunID, header.StorageRef).Scan(&present); err != nil {
-		return "", fmt.Errorf("inspect fork-local creating receipt: %w", err)
-	}
-	if historical && present {
-		return "", fmt.Errorf("receiver has contradictory historical and native construction evidence")
-	}
 	if historical {
 		return "", nil
 	}

@@ -143,8 +143,7 @@ func RequireSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, po
 // Exact materialization reuse also compares immutable initialization. Header
 // equality alone cannot prove that later fields have not replaced the receipt.
 func RequireSelectedHistoricalWorkflowReceipt(ctx context.Context, tx *sql.Tx, expected pipeline.FlowConstructionReceipt) error {
-	raw, err := pipeline.EncodeFlowConstructionReceipt(expected)
-	if err != nil {
+	if _, err := pipeline.EncodeFlowConstructionReceipt(expected); err != nil {
 		return err
 	}
 	var persisted []byte
@@ -152,13 +151,11 @@ func RequireSelectedHistoricalWorkflowReceipt(ctx context.Context, tx *sql.Tx, e
 		WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, expected.RunID, expected.FlowInstance, expected.EntityID).Scan(&persisted); err != nil {
 		return fmt.Errorf("read immutable historical construction: %w", err)
 	}
-	if _, err := pipeline.DecodeStoredFlowConstructionReceipt(persisted, expected.RunID, expected.EntityID, expected.FlowInstance, expected.WorkflowName); err != nil {
+	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(persisted, expected.RunID, expected.EntityID, expected.FlowInstance, expected.WorkflowName)
+	if err != nil {
 		return err
 	}
-	if !workflowCommitJSONEqual(persisted, raw) {
-		return fmt.Errorf("historical construction receipt disagrees with admitted initialization")
-	}
-	return nil
+	return pipeline.ValidateProjectedFlowConstructionReceipt(receipt, expected)
 }
 
 func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord, revision int64) error {
