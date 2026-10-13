@@ -63,6 +63,15 @@ PR. If the reviewer finds a wider role obligation, implementation stays frozen.
 - The fresh full repo-wide guard/census sweep is running; no completed result is
   claimed until it exits. Independent review/hosted qualification remain required.
 
+The sweep also found the existing
+`TestEntityToolLeafSelectorNames_GuardsRecursiveNamedTypes` expecting partial
+`node.label` evidence from an invalid recursive carrier. This is the approved
+S07 rule change, not permission to restore a stopping object. The corrected
+test requires canonical recursion refusal, retains the independent valid status
+selector, excludes all partial recursive selectors, then removes the cycle and
+checks the original exact finite selector pair. No production leaf repair,
+assertion removal, timing change or passing aggregate is claimed.
+
 Evidence lives in the owned local state directory
 `~/.local/state/agent-g-2447-catalog-type-preaudit/`. Focused commands used the
 swarm-test admission wrapper and PostgreSQL16; no duplicate Local tier or full
