@@ -1368,8 +1368,8 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if _, exists := reflect.TypeOf(runtimeV2.manager).MethodByName("SpawnAgent"); exists {
 		t.Fatal("retired generic agent hire writer remains exported")
 	}
-	if cfg, err := runtimeV1.manager.ResolveAgentConfig(runID, readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v1" {
-		t.Fatalf("stale predecessor process projection changed after replay rejection: %#v err=%v", cfg, err)
+	if _, err := runtimeV1.manager.ResolveAgentConfig(runID, readerID, descriptor.FlowInstance); !errors.Is(err, runtimemanager.ErrAgentNotFound) {
+		t.Fatalf("retired predecessor remains publicly resolvable: %v", err)
 	}
 	if revisedReadiness.Plan.WorkflowVersion != sourceV2.WorkflowVersion() {
 		t.Fatalf("revised runtime readiness = %#v", revisedReadiness)
