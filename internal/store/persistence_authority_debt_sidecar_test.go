@@ -67,6 +67,16 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
+		if collector == debtPublicA2EndpointCollectorTo {
+			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+				return baseline, err
+			}
+			if priorErr := debtPublicA2EndpointUnrefreshedMetadata(root, metadataBytes, data, baseline); priorErr != nil {
+				return baseline, priorErr
+			}
+			baseline.Collector = collector
+			return baseline, nil
+		}
 		if collector == debtServedDebugCollectorTo {
 			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
 				return baseline, err
@@ -112,4 +122,22 @@ func debtServedDebugUnrefreshedMetadata(root string, metadata, data []byte, base
 		}
 	}
 	return debtServedDebugSourcePins(root)
+}
+
+func debtPublicA2EndpointUnrefreshedMetadata(root string, metadata, data []byte, baseline authorityDebtBaseline) error {
+	if baseline.Collector != debtCacheCollectorFrom {
+		return fmt.Errorf("historical TSV collector header changed")
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtServedDebugCollectorTo); err != nil {
+		return err
+	}
+	ancestor, _ := debtQuiescenceUncertaintyTransition()
+	old, current := debtPublicA2EndpointTransition()
+	if baseline.Sites[ancestor.identity()] != ancestor && baseline.Sites[old.identity()] != old || baseline.Sites[current.identity()].Multiplicity != 0 {
+		return fmt.Errorf("unrefreshed A2 uncertainty lacks exact predecessor donor")
+	}
+	if _, _, _, failures := debtPublicA2EndpointComparisons(map[string]authorityDebtSite{current.identity(): current}, baseline.Sites, baseline.Sites, baseline.Sites); len(failures) != 0 {
+		return fmt.Errorf("unrefreshed A2 uncertainty has contradictory donors: %v", failures)
+	}
+	return debtPublicA2EndpointSourcePins(root)
 }

@@ -64,3 +64,39 @@ carrier/selected-store migration and all pre-existing qualification holds stay
 OPEN. No push/PR/rebase/tier/server2; rebase once after#2617 and handoff. The
 mandatory future clean rebased push runs swarm-test preflight and reports its
 actual receipt; it is not run or credited on this held older-base checkpoint.
+
+## Authorized accounting repair (6139798019)
+
+The independent ruling accepts the semantic wave and authorizes only the exact
+one-way02a974... ->07c61f... declaration pair, counted1->1. The original
+facfe2d5... ->02a974... function and history are unchanged. Actual/head/trusted
+baseline/trusted-source comparisons explicitly compose the two pairs. Unknown
+body/context/file/declaration/owner/family, missing or mismatched donors,
+increased multiplicity, ancestor/intermediate/current coexistence, reversal and
+resurrection reject. Landed comparison is inert; genuine later deletion is
+preserved and cannot finance reintroduction. Complete current source must match
+the unchanged reviewed manifest/body. No classifier or permission relaxation.
+
+Collector/sidecar rotation is exact and source-bound: only the local downward
+path can consume its intact95de50... predecessor metadata; read-only, CI,
+historical, malformed/missing-donor and contradictory states reject. The final
+collector is4f0e55f7ea16bcc6af6eb9fcf1ca94fb441a54fcdcc9736389ac6f3c208d9ebe;
+baseline checksum7c775a5a097f1014d3f7941ea38a4ba94c7ca802e4acb432c81764624dd30b47.
+All previous collector/source/history controls retain their immutable
+predecessors; only assertions naming the current fingerprint advance.
+
+Fresh normal-owner downward census PASS48.083s, followed by ordinary READ-ONLY
+ratchet PASS25.078s. Policy/ancestor/source/metadata regression collection:
+29 roots /1632 passes, no failures/skips,5.306s. Affected U1000 passes. The
+fingerprint-discovery and intermediate unrefreshed metadata receipts stay RED;
+they are not retries or passing evidence. Runtime, candidate-overlay, finite
+corpus and cross-package receipts above carry unchanged.
+
+Independent exact TSV reconciliation confirms **7340 /5065 ->7268 /4998**:
+72 findings removed (67 raw-operation helper-call entries and five raw-type
+parameters), ZERO additions, all67 excluded-source occurrences retained. The
+one renamed uncertainty row earns ZERO removal credit. Correction to the
+earlier provisional raw-site estimate above: the narrowed helper calls WERE
+classified raw-authority operations, so67 such entries are removed despite
+unchanged physical SQL. This is capability confinement, not a runtime speed or
+reliability claim. Parent completion and all unrelated holds remain OPEN.

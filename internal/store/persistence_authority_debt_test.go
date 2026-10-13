@@ -150,6 +150,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(failures) != 0 {
 		return failures
 	}
+	head, base, baseActual, failures = debtPublicA2EndpointComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	old, current := debtQuiescenceUncertaintyTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -822,6 +826,96 @@ func debtQuiescenceUncertaintyTransition() (authorityDebtSite, authorityDebtSite
 	return old, current
 }
 
+// Ruling6139798019 appends one counted uncertainty receipt to the prior pair.
+func debtPublicA2EndpointTransition() (authorityDebtSite, authorityDebtSite) {
+	_, old := debtQuiescenceUncertaintyTransition()
+	current := old
+	current.Operation = "declaration:07c61f6897d875c893313af0f6c3e68fb338a9e08fd58c7f6c85ee7af0331f48"
+	return old, current
+}
+
+func debtPublicA2EndpointComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	ancestor, _ := debtQuiescenceUncertaintyTransition()
+	old, current := debtPublicA2EndpointTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+		present := 0
+		for _, site := range []authorityDebtSite{ancestor, old, current} {
+			if state[site.identity()].Multiplicity > 1 {
+				return head, base, source, []string{"reviewed A2 uncertainty multiplicity increased"}
+			}
+			if state[site.identity()].Multiplicity > 0 {
+				present++
+			}
+		}
+		if present > 1 {
+			return head, base, source, []string{"reviewed ancestor/intermediate/current A2 uncertainty identities coexist"}
+		}
+	}
+	if actual[current.identity()] != current {
+		return head, base, source, nil
+	}
+	for _, state := range []map[string]authorityDebtSite{head, base, source} {
+		if state[ancestor.identity()] != ancestor && state[old.identity()] != old && state[current.identity()] != current {
+			return head, base, source, []string{"reviewed A2 uncertainty lacks exact comparison donor"}
+		}
+	}
+	forward := func(state map[string]authorityDebtSite) map[string]authorityDebtSite {
+		state = debtForwardQuiescenceUncertainty(state, ancestor, old)
+		return debtForwardQuiescenceUncertainty(state, old, current)
+	}
+	return forward(head), forward(base), forward(source), nil
+}
+
+func debtPublicA2EndpointSourcePins(root string) error {
+	const manifest = "tools/fixture-codemod/pipeline-observations/internal/publicendpoint/preimages.json"
+	raw, err := os.ReadFile(filepath.Join(root, manifest))
+	if err != nil || debtBaselineChecksum(raw) != "4f37a50d17478fdbd4cb64bb8df0d73c5722c7e92578878e20e277950cc83d1c" {
+		return fmt.Errorf("reviewed A2 complete source manifest changed: %v", err)
+	}
+	var pins []struct{ File, Function, Before, After, SHA256 string }
+	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 16 {
+		return fmt.Errorf("invalid A2 complete source inventory: %v", err)
+	}
+	old, current := debtPublicA2EndpointTransition()
+	for _, pin := range pins {
+		if pin.File != current.File || pin.Function != current.Declaration {
+			continue
+		}
+		if "declaration:"+debtBaselineChecksum([]byte(pin.Before)) != old.Operation ||
+			"declaration:"+debtBaselineChecksum([]byte(pin.After)) != current.Operation || pin.SHA256 != strings.TrimPrefix(old.Operation, "declaration:") {
+			return fmt.Errorf("A2 source manifest lost exact before/after provenance")
+		}
+		bodies, err := debtServedDebugDeclarations(filepath.Join(root, pin.File))
+		if err != nil || bodies[pin.Function] != pin.After {
+			return fmt.Errorf("current A2 uncertainty body differs from reviewed successor: %v", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("reviewed A2 uncertainty source missing from manifest")
+}
+
+func debtPublicA2EndpointCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtPublicA2EndpointCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtServedDebugCollectorTo {
+		intermediate := trusted
+		intermediate.Collector = debtServedDebugCollectorTo
+		if debtValidateCollectorIdentity(base, intermediate.Collector, trusted, intermediate, "") != nil {
+			return false
+		}
+	}
+	ancestor, _ := debtQuiescenceUncertaintyTransition()
+	old, successor := debtPublicA2EndpointTransition()
+	if trusted.Sites[ancestor.identity()] != ancestor && trusted.Sites[old.identity()] != old {
+		return false
+	}
+	if head.Sites[ancestor.identity()] != ancestor && head.Sites[old.identity()] != old && head.Sites[successor.identity()] != successor {
+		return false
+	}
+	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
+}
+
 func debtForwardQuiescenceUncertainty(sites map[string]authorityDebtSite, old, current authorityDebtSite) map[string]authorityDebtSite {
 	if sites[old.identity()] != old || sites[current.identity()].Multiplicity != 0 {
 		return sites
@@ -1255,6 +1349,12 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if err := debtServedDebugSourceTransition(root, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
+	_, a2Successor := debtPublicA2EndpointTransition()
+	if actual[a2Successor.identity()] == a2Successor {
+		if err := debtPublicA2EndpointSourcePins(root); err != nil {
+			t.Fatal(err)
+		}
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -1265,6 +1365,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		normalized, _, _, _ = debtRunFixtureSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		normalized, _, _, _ = debtWriterStageSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		normalized, _, _, _ = debtServedDebugSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
+		normalized, _, _, _ = debtPublicA2EndpointComparisons(actual, normalized, normalizedBase, normalizedSource)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -1328,6 +1429,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return nil
 	}
 	if debtServedDebugCollectorTransition(base, current, trusted, head) {
+		return nil
+	}
+	if debtPublicA2EndpointCollectorTransition(base, current, trusted, head) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

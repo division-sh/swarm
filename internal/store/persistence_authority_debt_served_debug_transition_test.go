@@ -92,8 +92,8 @@ func TestPersistenceAuthorityDebtServedDebugModelMatchesExactReviewedManifest(t 
 		t.Fatal(err)
 	}
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtServedDebugCollectorTo {
-		t.Fatalf("actual served-debug source=%s pinned=%s err=%v", digest, debtServedDebugCollectorTo, err)
+	if err != nil || digest != debtPublicA2EndpointCollectorTo {
+		t.Fatalf("actual A2 source=%s pinned=%s err=%v", digest, debtPublicA2EndpointCollectorTo, err)
 	}
 }
 
