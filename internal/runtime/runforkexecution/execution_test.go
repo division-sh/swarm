@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
@@ -33,6 +34,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -1253,15 +1255,45 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.ExecutedEventCount != 2 || len(result.ForkEvents) != 2 {
-		t.Fatalf("execution result = %#v, want two sequential fork events", result)
+	if !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil ||
+		len(result.ForkLocalRuntimeContainer.SourceEventIDs) != 2 ||
+		!slices.Contains(result.ForkLocalRuntimeContainer.SourceEventIDs, earlierEventID) ||
+		!slices.Contains(result.ForkLocalRuntimeContainer.SourceEventIDs, laterEventID) {
+		t.Fatalf("activation lost the exact source event membership: %+v", result)
 	}
-	if result.ForkEvents[0].SourceEventID != earlierEventID || result.ForkEvents[1].SourceEventID != laterEventID {
-		t.Fatalf("sequential fork execution order = %#v, want [%s %s]", result.ForkEvents, earlierEventID, laterEventID)
-	}
-	var outputs int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 2 {
-		t.Fatalf("chronological execution did not commit both handler outputs: count=%d err=%v", outputs, err)
+	// Activation acknowledges ownership; actual ordered dispatch is durable
+	// evidence produced by the retained runtime after that acknowledgment.
+	wait, cancel := context.WithTimeout(ctx, selectedContractAgentRuntimeDefaultQuiescenceTimeout)
+	defer cancel()
+	want := []string{activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, earlierEventID),
+		activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, laterEventID)}
+	for {
+		logs, err := pg.ListOperatorRuntimeLogs(wait, operatorread.OperatorRuntimeLogListOptions{RunID: result.Materialization.ForkRunID,
+			Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Order: "asc", Limit: 3})
+		if err != nil || logs.NextCursor != "" || len(logs.Logs) > 2 {
+			t.Fatalf("read exact chronological dispatch evidence: %+v error=%v", logs, err)
+		}
+		for index, log := range logs.Logs {
+			if log.EventID != want[index] || log.Action != "selected_contract_event_dispatched" || log.EventType != "item.received" {
+				t.Fatalf("durable dispatch reordered source events: %+v, want %v", logs.Logs, want)
+			}
+		}
+		outputs, err := storetest.ReadLifecycleEventCardinality(wait, pg, result.Materialization.ForkRunID, "item.processed")
+		if err != nil || outputs > 2 {
+			t.Fatalf("chronological handler output count=%d error=%v", outputs, err)
+		}
+		pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, pg, result.Materialization.ForkRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(logs.Logs) == 2 && outputs == 2 && pending == 0 {
+			break
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("chronological execution did not finish both outputs: logs=%+v outputs=%d pending=%d cause=%v", logs.Logs, outputs, pending, context.Cause(wait))
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
