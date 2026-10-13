@@ -1069,13 +1069,10 @@ func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
 		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("canonical terminal flow identity: %w", err)
 	}
 	canonicalRoute := flowIdentity.Route
-	configs := am.lifecycle.executionConfigs()
-	agentIdentities := make([]runtimeagentidentity.Identity, 0, len(configs))
-	for _, cfg := range configs {
-		identity, err := cfg.ConcreteIdentity()
-		if err != nil {
-			return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("terminal flow instance agent %q identity: %w", cfg.ID, err)
-		}
+	// An accepted self-author remains a terminal member after publication is fenced.
+	identities := am.lifecycle.executionIdentities()
+	agentIdentities := make([]runtimeagentidentity.Identity, 0, len(identities))
+	for _, identity := range identities {
 		if identity.RunID == flowIdentity.RunID && identity.FlowInstance() == canonicalFlowPath {
 			agentIdentities = append(agentIdentities, identity)
 		}

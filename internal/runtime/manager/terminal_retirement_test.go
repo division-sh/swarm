@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -420,6 +422,139 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 			am.launchTerminalFlowCompletion(lease, set, commitErr)
 			if err := c.waitForWork(ctx); (err != nil) != wantError || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
 				t.Fatalf("owned completion lost failure: %v", err)
+			}
+		})
+	}
+}
+
+func TestTerminalPlanRetainsFencedAcceptedSelfAuthor(t *testing.T) {
+	for _, sourceKind := range []string{"same_flow", "foreign_flow", "foreign_run"} {
+		t.Run(sourceKind, func(t *testing.T) {
+			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
+			ctx := testAuthorActivityContext(context.Background())
+			records := make([]PersistedAgent, 3)
+			for i := range records {
+				rec := lifecycleTestPersistedAgent(t)
+				rec.Config.ID = fmt.Sprintf("held-terminal-%d", i)
+				if i == 2 {
+					rec.Config.ID = "held-terminal-0"
+				}
+				path, instance := "review/inst-1", "inst-1"
+				runID := rec.Config.Identity.RunID
+				if i == 2 {
+					if sourceKind == "foreign_run" {
+						runID = uuid.NewString()
+					} else {
+						path, instance = "review/foreign", "foreign"
+					}
+				}
+				rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, runID, rec.Config.ID, "held-terminal-test", "review", instance, path)
+				rec.Config.FlowPath = path
+				if err := c.registerExecution(ctx, rec, true, &reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
+					t.Fatal(err)
+				}
+				records[i] = rec
+			}
+			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			tokens := make([]runtimeeffects.LifecycleToken, len(records))
+			dones := make([]chan struct{}, len(records))
+			loopContexts := make([]context.Context, len(records))
+			for i, rec := range records {
+				loopCtx, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				loopContexts[i], tokens[i], dones[i] = loopCtx, token, done
+			}
+			sourceIndex := 0
+			foreign := sourceKind != "same_flow"
+			if foreign {
+				sourceIndex = 2
+			}
+			source := records[sourceIndex].Config.Identity
+			c.mu.Lock()
+			for _, token := range tokens {
+				c.cells[token.Identity].execution.routeToken = token
+			}
+			c.mu.Unlock()
+			accepted, err := c.acquireDeliveryExecution(ctx, tokens[sourceIndex])
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer accepted.Release()
+			// Retained admission outlives executable publication during a fence.
+			c.mu.Lock()
+			c.cells[source].execution.fenced = true
+			c.mu.Unlock()
+			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
+			if _, err := am.ResolveAgentConfig(source.RunID, source.AgentID(), source.FlowInstance()); !errors.Is(err, ErrAgentNotFound) {
+				t.Fatalf("fenced source remains public: %v", err)
+			}
+			parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, source.RunID, events.EventEnvelope{}, time.Now().UTC())
+			carrier := eventtest.ChildWithLineageAndRoutingSource(uuid.NewString(), "work.finished", source.AgentID(), "", nil, 1, events.LineageFromEvent(parent), events.EventEnvelope{}, eventtest.ConcreteTemplateRoutingSource("review", source.FlowInstance(), "ent-1"), time.Now().UTC())
+			terminalCtx := runtimecorrelation.WithInboundEvent(ctx, carrier)
+			flow, err := runtimeflowidentity.NewRunScopedFlowInstance(records[0].Config.Identity.RunID, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := am.terminalFlowInstanceSideEffectPlan(terminalCtx, runtimepipeline.FlowInstanceDeactivationRequest{
+				Instance: runtimeflowidentity.Stored(nil, "review", "review/inst-1", "inst-1", "ent-1", ""),
+			}, runtimepipeline.FlowInstanceTermination{Identity: flow, Instance: runtimepipeline.WorkflowInstance{StorageRef: "review/inst-1", Status: "terminated"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.AgentIdentities) != 2 {
+				t.Errorf("terminal membership lost retained source or included foreign instance: %+v", plan.AgentIdentities)
+			}
+			if foreign {
+				if !plan.SelfRetiringAgent.IsZero() {
+					t.Fatalf("foreign source donated self-author rights: %+v", plan.SelfRetiringAgent)
+				}
+			} else if plan.SelfRetiringAgent != source {
+				t.Errorf("held source lost exact self-author selection: got=%+v want=%+v", plan.SelfRetiringAgent, source)
+			}
+			set, err := c.fenceTerminalFlow(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.commitTerminalFlow(terminalCtx, set); err != nil {
+				t.Fatal(err)
+			}
+			if err := loopContexts[sourceIndex].Err(); err != nil {
+				t.Errorf("terminal plan canceled admitted source before receipt settlement: %v", err)
+			}
+			if !foreign {
+				state, found, err := probe.LoadAgentLifecycleState(ctx, source)
+				if err != nil || !found || state.Phase != AgentLifecycleRunning || state.Generation != tokens[sourceIndex].Generation {
+					t.Errorf("terminal CAS overtook accepted source: state=%+v found=%t err=%v", state, found, err)
+				}
+			}
+			accepted.Release()
+			for i := 0; i < 2; i++ {
+				if err := releaseCoordinatorLoop(c, tokens[i], dones[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			lease, err := am.beginWork(ctx, "join held-source terminal set")
+			if err != nil {
+				t.Fatal(err)
+			}
+			am.launchTerminalFlowCompletion(lease, set, nil)
+			if err := c.waitForWork(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				state, found, err := probe.LoadAgentLifecycleState(ctx, records[i].Config.Identity)
+				if err != nil || !found || state.Phase != AgentLifecycleTerminated || state.Generation != tokens[i].Generation+1 || c.cells[records[i].Config.Identity].terminalSet != nil {
+					t.Fatalf("terminal set not settled and joined: state=%+v found=%t err=%v", state, found, err)
+				}
+			}
+			if err := loopContexts[2].Err(); err != nil {
+				t.Fatalf("terminal set canceled foreign instance: %v", err)
+			}
+			if err := releaseCoordinatorLoop(c, tokens[2], dones[2]); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
