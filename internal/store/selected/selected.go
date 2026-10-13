@@ -442,7 +442,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 
 func managerRoles(selected *private.PostgresStore) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
-		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected,
+		LifecycleCensus: selected, LifecycleState: selected, LifecycleOutcome: selected, LifecycleEffects: selected,
 		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
 		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
 	}
@@ -450,7 +450,7 @@ func managerRoles(selected *private.PostgresStore) runtimemanager.PersistenceRol
 
 func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
-		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected,
+		LifecycleCensus: selected, LifecycleState: selected, LifecycleOutcome: selected, LifecycleEffects: selected,
 		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
 		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
 	}

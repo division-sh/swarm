@@ -218,7 +218,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{})
 			rec := lifecycleTestPersistedAgent(t)
-			if err := registerCoordinatorLifecycleCell(t, am.lifecycle, testAuthorActivityContext(context.Background()), rec, false); err != nil {
+			if err := registerCoordinatorLifecycleCell(t, am.lifecycle, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)
 			}
 

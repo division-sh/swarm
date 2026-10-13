@@ -150,6 +150,22 @@ func (b *recoveryTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowI
 
 type recoveryTestStore struct {
 	agents []PersistedAgent
+	rows   *lifecyclePersistenceProbe
+}
+
+func (s *recoveryTestStore) lifecycleRows() *lifecyclePersistenceProbe {
+	if s.rows == nil {
+		s.rows = newLifecyclePersistenceProbe()
+	}
+	return s.rows
+}
+
+func (s *recoveryTestStore) LoadAgentLifecycleState(ctx context.Context, identity agentidentity.Identity) (AgentLifecycleState, bool, error) {
+	return s.lifecycleRows().LoadAgentLifecycleState(ctx, identity)
+}
+
+func (s *recoveryTestStore) ReadAgentLifecycleOutcome(ctx context.Context, request AgentLifecycleTransition) (AgentLifecycleTransitionResult, bool, error) {
+	return s.lifecycleRows().ReadAgentLifecycleOutcome(ctx, request)
 }
 
 func (s *recoveryTestStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
@@ -216,16 +232,8 @@ func (*recoveryTestStore) ProcessExecutionBinding() (ProcessExecutionBinding, er
 	return binding, binding.Validate()
 }
 
-func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
-	return AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: "11111111-1111-4111-8111-111111111111",
-		Identity: req.Identity, AgentID: req.AgentID,
-		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
-		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
-		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
-		ProcessBinding: lifecycleProbeProcessBinding(),
-	}, nil
+func (s *recoveryTestStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	return s.lifecycleRows().CommitAgentLifecycleTransition(ctx, req)
 }
 
 func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
@@ -261,6 +269,14 @@ func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *re
 	}
 	for i := range store.agents {
 		store.agents[i].Topology = admission
+		if store.agents[i].LifecyclePhase == "" {
+			store.agents[i].LifecycleEpoch = runtimebus.CurrentRuntimeEpoch()
+			store.agents[i].LifecyclePhase, store.agents[i].LifecycleRunMode = AgentLifecycleRegistered, AgentRunModeStopped
+		}
+		store.agents[i].ProcessBinding = lifecycleProbeProcessBinding()
+		if err := store.lifecycleRows().seedAgentRow(store.agents[i]); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := am.InstallStartupTopology(store, admission, plan); err != nil {
 		t.Fatalf("install recovery topology: %v", err)
@@ -747,6 +763,13 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		hydrated = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
+	ensureManagerTestSemanticSource(am)
+	if err := bindCanonicalAgentPrompt(am.semanticSource, &store.agents[0].Config); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admitAgentConfigSubscriptions(am.semanticSource, &store.agents[0].Config, nil); err != nil {
+		t.Fatal(err)
+	}
 	installRecoveryTestStaticTopology(t, am, store)
 	if err := am.hydratePersistedAgentExecutions(context.Background()); err != nil {
 		t.Fatalf("hydrate canonical loaded agent: %v", err)

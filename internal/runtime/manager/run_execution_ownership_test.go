@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -41,6 +42,10 @@ type runExecutionOwnerProbe struct {
 	mu          sync.Mutex
 	disposition RunExecutionOwnership
 	err         error
+}
+
+func (p *runExecutionOwnerProbe) LoadAgentLifecycleState(ctx context.Context, identity runtimeagentidentity.Identity) (AgentLifecycleState, bool, error) {
+	return p.AgentLifecyclePersistence.(AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, identity)
 }
 
 func (p *runExecutionOwnerProbe) InspectRunExecutionOwnership(context.Context, string) (RunExecutionOwnership, error) {
@@ -86,6 +91,14 @@ func TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption(t *testing
 				t.Fatal("foreign registration constructed execution or changed persistence")
 			}
 			owner.set(RunExecutionOwned, nil)
+			if !persist {
+				record.LifecycleEpoch, record.LifecycleGeneration = 1, 1
+				record.LifecyclePhase, record.LifecycleRunMode = AgentLifecycleRegistered, AgentRunModeStopped
+				record.ProcessBinding = lifecycleProbeProcessBinding()
+				if err := store.seedAgentRow(record); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := register(); err != nil {
 				t.Fatalf("owned registration: %v", err)
 			}

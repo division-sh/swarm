@@ -248,6 +248,16 @@ func (p *terminalSetPersistenceProbe) InspectRunExecutionOwnership(ctx context.C
 	return inspectRunExecutionOwnership(ctx, p.AgentLifecyclePersistence, runID)
 }
 
+func (p *terminalSetPersistenceProbe) LoadAgentLifecycleState(ctx context.Context, identity runtimeagentidentity.Identity) (AgentLifecycleState, bool, error) {
+	p.mu.Lock()
+	member := p.agents[identity]
+	p.mu.Unlock()
+	if member == nil {
+		return AgentLifecycleState{}, false, nil
+	}
+	return member.LoadAgentLifecycleState(ctx, identity)
+}
+
 func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	p.mu.Lock()
 	member := p.agents[req.Identity]

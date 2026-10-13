@@ -169,6 +169,11 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		"static_topology.go":           1,
 	})
 	requireStaticReadinessCalls(t, calls, "registerExecutionWithTopology", map[string]int{
+		"lifecycle_coordinator.go": 1,
+	})
+	// Initial factories and pre-built/lifecycle-only candidates use one owner.
+	// It observes the row before construction and rechecks before publication.
+	requireStaticReadinessCalls(t, calls, "registerExecutionCandidate", map[string]int{
 		"agent_manager.go":         1,
 		"lifecycle_coordinator.go": 1,
 	})

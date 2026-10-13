@@ -103,6 +103,9 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.LifecycleState == nil {
 		roles.LifecycleState, _ = candidate.(AgentLifecycleStateReader)
 	}
+	if roles.LifecycleOutcome == nil {
+		roles.LifecycleOutcome, _ = candidate.(AgentLifecycleOutcomeReader)
+	}
 	if roles.LifecycleEffects == nil {
 		roles.LifecycleEffects, _ = candidate.(runtimeeffects.Store)
 	}
@@ -265,6 +268,12 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.LifecycleStore == nil && len(stores) > 0 {
 		opts.LifecycleStore, _ = any(stores[0]).(AgentLifecyclePersistence)
 	}
+	unitLifecycle := opts.LifecycleStore == nil
+	if unitLifecycle {
+		// Pure loop fixtures model the row explicitly; this grants no native
+		// process authority and is never used by selected-store proofs.
+		opts.LifecycleStore = &ephemeralLifecyclePersistenceProbe{newLifecyclePersistenceProbe()}
+	}
 	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, bus)
 	if opts.PersistenceRoles.DirectiveOperations == nil {
 		if provider, ok := bus.(managerTestDirectiveOperationProvider); ok {
@@ -316,7 +325,7 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if setter, ok := bus.(interface {
 		SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizer)
 	}); ok {
-		if opts.LifecycleStore == nil {
+		if unitLifecycle {
 			setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.finalizeEphemeralTestReadiness))
 		} else {
 			setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))

@@ -30,7 +30,7 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 			Role:          "reviewer",
 			Model:         "regular",
 		}),
-	}, false); err != nil {
+	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 	cfg, ok := testAgentConfig(t, am, "agent-1", "")
@@ -432,7 +432,11 @@ func (s *liveMockAlternativePersistence) UpsertAgent(_ context.Context, rec Pers
 	return nil
 }
 
-func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	result, err := s.recoveryTestStore.CommitAgentLifecycleTransition(ctx, req)
+	if err != nil || result.Replayed {
+		return result, err
+	}
 	if req.Agent != nil {
 		rec := *req.Agent
 		rec.LifecycleEpoch = req.TargetEpoch
@@ -443,15 +447,7 @@ func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(_ contex
 		rec.ProcessBinding = lifecycleProbeProcessBinding()
 		s.records = append(s.records, rec)
 	}
-	return AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: "11111111-1111-4111-8111-111111111111",
-		Identity: req.Identity, AgentID: req.AgentID,
-		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
-		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
-		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
-		ProcessBinding: lifecycleProbeProcessBinding(),
-	}, nil
+	return result, nil
 }
 
 func (s *liveMockAlternativePersistence) LoadAgents(context.Context) ([]PersistedAgent, error) {

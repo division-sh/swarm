@@ -295,7 +295,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
 		for _, invalid := range []sessions.RotationMetadata{
 			{OperationID: "receipt-a", TerminationReason: "unknown"},
-			{OperationID: "receipt-a", TerminationReason: sessions.TerminationReasonLegacy},
+			{OperationID: "receipt-a", TerminationReason: "legacy"},
 		} {
 			if _, err := reopened.Rotate(ctx, acquired, invalid); err == nil {
 				t.Fatalf("accepted invalid reason %q", invalid.TerminationReason)

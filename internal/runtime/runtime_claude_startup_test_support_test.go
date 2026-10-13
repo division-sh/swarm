@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -16,6 +17,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -24,8 +26,16 @@ type startupCapabilityStore struct {
 	surfaces map[string]managedcapabilities.Surface
 }
 
-func newClaudeStartupManager() *runtimemanager.AgentManager {
+func newClaudeStartupManager(t testing.TB) *runtimemanager.AgentManager {
+	t.Helper()
+	session := newRuntimeTestRetainedSession(t)
+	_, grant, err := newRuntimeTestProcessCapabilityWithSession(t, nil, nil, sourceartifactfixture.Fact(), authorActivityTestRuntimeInstanceID, session)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		LifecycleStore:    grant,
+		PersistenceRoles:  runtimemanager.PersistenceRoles{LifecycleState: session},
 		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        "claude_cli",
 		ReceiverExecution: eventreceiver.NormalExecution(),

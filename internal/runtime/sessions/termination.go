@@ -14,7 +14,6 @@ const (
 	TerminationReasonFailed       TerminationReason = "failed"
 	TerminationReasonOrphaned     TerminationReason = "orphaned"
 	TerminationReasonContaminated TerminationReason = "contaminated"
-	TerminationReasonLegacy       TerminationReason = "legacy"
 )
 
 func (r TerminationReason) String() string { return string(r) }
@@ -31,8 +30,6 @@ func normalizeTerminationReason(raw string) TerminationReason {
 		return TerminationReasonOrphaned
 	case TerminationReasonContaminated.String():
 		return TerminationReasonContaminated
-	case TerminationReasonLegacy.String():
-		return TerminationReasonLegacy
 	default:
 		return ""
 	}
@@ -50,9 +47,6 @@ func validateRuntimeTerminationReason(reason TerminationReason) error {
 	reason = normalizeTerminationReason(reason.String())
 	if reason == "" {
 		return fmt.Errorf("termination reason is required")
-	}
-	if reason == TerminationReasonLegacy {
-		return fmt.Errorf("termination reason legacy is reserved for migration backfill")
 	}
 	return nil
 }

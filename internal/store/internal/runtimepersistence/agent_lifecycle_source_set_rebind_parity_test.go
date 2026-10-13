@@ -962,11 +962,19 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	replacement := request
 	replacement.OperationID, replacement.RequestHash = uuid.NewString(), "individual-replacement"
 	replacement.TargetGeneration++
+	physicalBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := grant.CommitAgentLifecycleTransition(ctx, replacement); err == nil {
 		t.Fatal("running source-set rebind advanced generation without replacement execution evidence")
 	}
 	unchanged, found, err = store.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || !reflect.DeepEqual(after, unchanged) {
 		t.Fatalf("bare running replacement changed current row: before=%#v after=%#v found=%v err=%v", after, unchanged, found, err)
+	}
+	physicalAfter, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+	if err != nil || !reflect.DeepEqual(physicalBefore, physicalAfter) {
+		t.Fatalf("bare running replacement changed session/effect/diagnostic or other application facts: err=%v", err)
 	}
 }

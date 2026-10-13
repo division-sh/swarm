@@ -41224,6 +41224,9 @@ agent_lifecycle_authority:
       resurrect execution. A lost replacement acknowledgment retains the exact
       request until the immutable outcome owner resolves it without a new mutation;
       execution is adopted only after the current row confirms that outcome.
+      Confirming a committed successor fences predecessor admission immediately,
+      while preserving its accepted-work settlement and resource joins. Exact retry
+      adopts that outcome without reissuing the native mutation.
       No store-less or session-registry lifecycle projection exists. Cleanup failure
       fences and retains physical responsibility without inventing a durable failed phase.
   lifecycle_token:

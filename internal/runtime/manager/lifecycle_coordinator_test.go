@@ -125,6 +125,28 @@ type lifecycleProbeCell struct {
 	Phase      AgentLifecyclePhase
 }
 
+type ephemeralLifecyclePersistenceProbe struct{ *lifecyclePersistenceProbe }
+
+func (p *lifecyclePersistenceProbe) seedAgentRow(rec PersistedAgent) error {
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	revision, err := lifecycleConfigRevision(rec)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.views[identity] = AgentLifecycleState{
+		Identity: identity, AgentID: rec.Config.ID, RuntimeEpoch: rec.LifecycleEpoch,
+		Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
+		ConfigRevision: revision, RunMode: rec.LifecycleRunMode, Topology: rec.Topology,
+		ProcessBinding: rec.ProcessBinding, LastTransitionID: uuid.NewString(),
+	}
+	return nil
+}
+
 func newLifecyclePersistenceProbe() *lifecyclePersistenceProbe {
 	return &lifecyclePersistenceProbe{operations: map[string]AgentLifecycleTransitionResult{}, views: map[runtimeagentidentity.Identity]AgentLifecycleState{}}
 }
@@ -811,7 +833,7 @@ func ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregat
 		return agent, nil
 	}, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
 	record := PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_wait"}})}
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, false); err != nil {
+	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, true); err != nil {
 		t.Fatalf("spawn waiting agent: %v", err)
 	}
 	if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
@@ -906,7 +928,7 @@ func ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerC
 		return agent, nil
 	}, AgentManagerOptions{DeliveryStore: deliveryStore}, persistence)
 	record := PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_cancelled"}})}
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, false); err != nil {
+	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, true); err != nil {
 		t.Fatalf("spawn waiting agent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))

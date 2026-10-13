@@ -56,15 +56,16 @@ type runtimeTestCandidateRegistration struct{}
 type runtimeTestUnavailableDecisionCards struct{ decisioncard.Store }
 
 type runtimeTestRetainedSession struct {
-	mu              sync.Mutex
-	authority       runtimestartupownership.Authority
-	plan            runtimeagenttopology.SourceSetPlan
-	agents          map[string]runtimemanager.PersistedAgent
-	runs            map[string]runtimecorrelation.SourceArtifactFact
-	grants          map[string]string
-	callback        func(runtimestartupownership.TerminalResult)
-	grantTransition func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
-	released        bool
+	mu               sync.Mutex
+	authority        runtimestartupownership.Authority
+	plan             runtimeagenttopology.SourceSetPlan
+	agents           map[string]runtimemanager.PersistedAgent
+	agentTransitions map[string]string
+	runs             map[string]runtimecorrelation.SourceArtifactFact
+	grants           map[string]string
+	callback         func(runtimestartupownership.TerminalResult)
+	grantTransition  func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
+	released         bool
 }
 
 // In-memory Runtime controls need immutable attribution, not a native lease.
@@ -259,6 +260,10 @@ func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Co
 		rec.Status = "terminated"
 	}
 	s.agents[key] = rec
+	if s.agentTransitions == nil {
+		s.agentTransitions = map[string]string{}
+	}
+	s.agentTransitions[key] = result.TransitionID
 	return result, nil
 }
 
@@ -286,9 +291,18 @@ func (s *runtimeTestRetainedSession) LoadAgentLifecycleState(_ context.Context, 
 	if !ok {
 		return runtimemanager.AgentLifecycleState{}, false, nil
 	}
+	plan, err := identity.Plan()
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	revision, err := runtimemanager.AgentConfigPlanRevision(rec.Config, plan)
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
 	return runtimemanager.AgentLifecycleState{
 		Identity: identity.Normalize(), AgentID: identity.AgentID(), RuntimeEpoch: rec.LifecycleEpoch,
 		Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
+		ConfigRevision: revision, LastTransitionID: s.agentTransitions[key],
 		RunMode: rec.LifecycleRunMode, Topology: rec.Topology, ProcessBinding: rec.ProcessBinding,
 	}, true, nil
 }
@@ -459,7 +473,7 @@ func registerRuntimeTestAgent(manager *runtimemanager.AgentManager, cfg runtimea
 		return err
 	}
 	ctx := runtimecorrelation.WithRunID(context.Background(), identity.RunID)
-	return manager.MaterializeAdmittedAgentForExecution(ctx, runtimemanager.PersistedAgent{
+	return manager.MaterializeAdmittedAgent(ctx, runtimemanager.PersistedAgent{
 		Config: cfg, Topology: admission, Status: "ephemeral",
 	})
 }

@@ -143,6 +143,10 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 				}
 			}
 			var err error
+			physicalBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if invalid.mutate != nil {
 				_, err = grant.CommitAgentLifecycleTransition(ctx, request)
 			} else {
@@ -155,6 +159,10 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 			after, found, err := store.LoadAgentLifecycleState(ctx, identity)
 			if err != nil || !found || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refusal changed current lifecycle: before=%#v after=%#v found=%v err=%v", before, after, found, err)
+			}
+			physicalAfter, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+			if err != nil || !reflect.DeepEqual(physicalBefore, physicalAfter) {
+				t.Fatalf("refusal changed session/effect/diagnostic or other application facts: err=%v", err)
 			}
 		})
 	}

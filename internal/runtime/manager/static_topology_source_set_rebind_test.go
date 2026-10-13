@@ -124,7 +124,8 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.InstallStartupTopology(newLifecyclePersistenceProbe(), admission, plan); err != nil {
+	rowOwner := newLifecyclePersistenceProbe()
+	if err := manager.InstallStartupTopology(rowOwner, admission, plan); err != nil {
 		t.Fatal(err)
 	}
 	identity, _ := records[0].Config.ConcreteIdentity()
@@ -135,6 +136,8 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 41, Generation: 17, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: binding},
 	}
 	manager.lifecycle.mu.Unlock()
+	rowOwner.views[identity] = manager.lifecycle.cells[identity].view
+	manager.lifecycle.stateReader = rowOwner
 	return &durableSourceSetPreparationFixture{
 		manager: manager, source: source, plan: plan, admission: admission, binding: binding,
 		states: []AgentLifecycleState{{
@@ -165,6 +168,12 @@ func (p *sourceSetLifecycleCommitProbe) CommitAgentLifecycleTransition(ctx conte
 		return AgentLifecycleTransitionResult{}, err
 	}
 	result.ProcessBinding = p.binding
+	p.mu.Lock()
+	view := p.views[req.Identity]
+	view.ProcessBinding = p.binding
+	p.views[req.Identity] = view
+	p.operations[req.OperationID] = result
+	p.mu.Unlock()
 	return result, nil
 }
 
@@ -243,6 +252,8 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	manager.lifecycle.mu.Unlock()
+	oldStore.views[identity] = manager.lifecycle.cells[identity].view
+	manager.lifecycle.stateReader = oldStore
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
 		Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
 		Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard,
@@ -255,7 +266,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	})
 
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: oldStore, binding: sourceSetSuccessorProcessBinding(),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleRunning}
@@ -382,6 +393,8 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	manager.lifecycle.mu.Unlock()
+	oldStore.views[identity] = manager.lifecycle.cells[identity].view
+	manager.lifecycle.stateReader = oldStore
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
 		Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
 		Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped,
@@ -389,7 +402,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	}}}
 
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: oldStore, binding: sourceSetSuccessorProcessBinding(),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleFailed}
@@ -449,7 +462,8 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.InstallStartupTopology(newLifecyclePersistenceProbe(), predecessorAdmission, predecessorPlan); err != nil {
+	rowOwner := newLifecyclePersistenceProbe()
+	if err := manager.InstallStartupTopology(rowOwner, predecessorAdmission, predecessorPlan); err != nil {
 		t.Fatal(err)
 	}
 	staticIdentity, _ := records[0].Config.ConcreteIdentity()
@@ -488,6 +502,9 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		identity: flowIdentity, view: AgentLifecycleState{Identity: flowIdentity, AgentID: flowIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: flowRevision, RunMode: AgentRunModeAuthoritativeDeliveryOnly, Topology: flowTopology, ProcessBinding: predecessorBinding},
 	}
 	manager.lifecycle.mu.Unlock()
+	rowOwner.views[staticIdentity] = manager.lifecycle.cells[staticIdentity].view
+	rowOwner.views[flowIdentity] = manager.lifecycle.cells[flowIdentity].view
+	manager.lifecycle.stateReader = rowOwner
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{
 		{
 			Identity: staticIdentity, AgentID: staticIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
@@ -501,7 +518,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		},
 	}}
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: rowOwner, binding: sourceSetSuccessorProcessBinding(),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleRunning}
@@ -676,22 +693,18 @@ func TestPrepareDurableTopologySourceSetRebindSerializesDurableRegistration(t *t
 }
 
 type failSecondStaticTopologyRebindStore struct {
+	*lifecyclePersistenceProbe
 	calls   int
 	binding ProcessExecutionBinding
 	err     error
 }
 
-func (s *failSecondStaticTopologyRebindStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+func (s *failSecondStaticTopologyRebindStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	s.calls++
 	if s.calls == 2 {
 		return AgentLifecycleTransitionResult{}, s.err
 	}
-	return AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, Identity: req.Identity, AgentID: req.AgentID,
-		RuntimeEpoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
-		ProcessBinding: s.binding,
-	}, nil
+	return s.lifecyclePersistenceProbe.CommitAgentLifecycleTransition(ctx, req)
 }
 
 func (s *failSecondStaticTopologyRebindStore) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
@@ -713,9 +726,14 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	first := &agentLifecycleCell{
 		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 31, Generation: 7, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
+	secondIdentity := runtimeagentidentitytest.RootRuntime(t, "second-survivor", "lifecycle-test")
 	second := &agentLifecycleCell{
-		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 32, Generation: 8, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
+		identity: secondIdentity, view: AgentLifecycleState{Identity: secondIdentity, AgentID: secondIdentity.AgentID(), RuntimeEpoch: 32, Generation: 8, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
+	rowOwner := newLifecyclePersistenceProbe()
+	rowOwner.views[identity], rowOwner.views[secondIdentity] = first.view, second.view
+	manager.lifecycle.stateReader = rowOwner
+	manager.lifecycle.cells[identity], manager.lifecycle.cells[secondIdentity] = first, second
 	manager.lifecycle.sourceSetPublishMu.Lock()
 	first.opMu.Lock()
 	second.opMu.Lock()
@@ -726,12 +744,12 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
 		bindings: []durableTopologySourceSetBinding{
 			{identity: identity, identityKey: "first", cell: first, epoch: first.view.RuntimeEpoch, generation: first.view.Generation, phase: first.view.Phase, runMode: first.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
-			{identity: identity, identityKey: "second", cell: second, epoch: second.view.RuntimeEpoch, generation: second.view.Generation, phase: second.view.Phase, runMode: second.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
+			{identity: secondIdentity, identityKey: "second", cell: second, epoch: second.view.RuntimeEpoch, generation: second.view.Generation, phase: second.view.Phase, runMode: second.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
 		},
 		locked: []*agentLifecycleCell{first, second},
 	}
 	injected := errors.New("injected second lifecycle commit failure")
-	store := &failSecondStaticTopologyRebindStore{binding: lifecycleProbeProcessBinding(), err: injected}
+	store := &failSecondStaticTopologyRebindStore{lifecyclePersistenceProbe: rowOwner, binding: lifecycleProbeProcessBinding(), err: injected}
 	if err := prepared.Commit(context.Background(), store, "88888888-8888-4888-8888-888888888888"); !errors.Is(err, injected) {
 		t.Fatalf("source-set rebind error = %v, want injected second commit failure", err)
 	}
@@ -747,7 +765,11 @@ type staticStartupReconcileStore struct {
 	transitions []AgentLifecycleTransition
 }
 
-func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	result, err := s.recoveryTestStore.CommitAgentLifecycleTransition(ctx, req)
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
 	s.transitions = append(s.transitions, req)
 	for i := range s.agents {
 		identity, err := s.agents[i].Config.ConcreteIdentity()
@@ -760,15 +782,7 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.C
 		s.agents[i].LifecycleRunMode = req.RunMode
 		s.agents[i].Topology = req.Topology
 	}
-	return AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: "77777777-7777-4777-8777-777777777777",
-		Identity: req.Identity, AgentID: req.AgentID,
-		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
-		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
-		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
-		ProcessBinding: lifecycleProbeProcessBinding(),
-	}, nil
+	return result, nil
 }
 
 func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T) {
@@ -803,6 +817,10 @@ func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T)
 	failed.LifecycleRunMode = AgentRunModeStopped
 	failed.StartedAt = time.Now().UTC()
 	store.agents = []PersistedAgent{failed}
+	failed.ProcessBinding = lifecycleProbeProcessBinding()
+	if err := store.lifecycleRows().seedAgentRow(failed); err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.InstallStartupTopology(store, admission, plan); err != nil {
 		t.Fatalf("install startup topology: %v", err)
 	}

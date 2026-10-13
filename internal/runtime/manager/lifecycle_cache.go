@@ -14,6 +14,15 @@ type unacknowledgedAgentReplacement struct {
 	outcome AgentLifecycleTransitionResult
 }
 
+func sameAgentRowObservation(left, right AgentLifecycleState) bool {
+	if !left.Topology.Equal(right.Topology) {
+		return false
+	}
+	// Admission contains pointer arms; equality is over their typed facts.
+	left.Topology = right.Topology
+	return left == right
+}
+
 func (c *agentLifecycleCoordinator) loadAgentView(ctx context.Context, identity agentidentity.Identity) (AgentLifecycleState, bool, error) {
 	if c == nil || c.persistence() == nil || c.stateReader == nil {
 		return AgentLifecycleState{}, false, errors.New("agent lifecycle requires its durable row owner")
@@ -43,19 +52,23 @@ func (c *agentLifecycleCoordinator) committedAgentView(ctx context.Context, resu
 // A changed durable view never grants the old executable projection new rights.
 func (c *agentLifecycleCoordinator) refreshAgentViewLocked(ctx context.Context, cell *agentLifecycleCell) error {
 	if pending := cell.unacknowledged; pending != nil {
-		reader, ok := c.stateReader.(AgentLifecycleOutcomeReader)
-		if !ok {
+		if c.outcomeReader == nil {
 			return errors.New("agent lifecycle outcome owner is required to resolve an unacknowledged replacement")
 		}
-		outcome, found, err := reader.ReadAgentLifecycleOutcome(ctx, pending.request)
+		outcome, found, err := c.outcomeReader.ReadAgentLifecycleOutcome(ctx, pending.request)
 		if err != nil {
 			return err
 		}
 		if found {
-			if _, err := c.committedAgentView(ctx, outcome); err != nil {
+			view, err := c.committedAgentView(ctx, outcome)
+			if err != nil {
 				return err
 			}
 			pending.outcome = outcome
+			if cell.execution != nil && (cell.execution.token != lifecycleToken(cell.identity, view.RuntimeEpoch, view.Generation) ||
+				!lifecycleProjectionEqual(view.ConfigRevision, view.Topology, cell.view.ConfigRevision, cell.view.Topology)) {
+				cell.execution.fenced = true
+			}
 			return nil
 		}
 		cell.unacknowledged = nil
