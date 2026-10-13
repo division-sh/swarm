@@ -3,10 +3,14 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -14,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"gopkg.in/yaml.v3"
 )
 
 // The external test package supplies the native store composition without an
@@ -32,7 +37,7 @@ func inboundTransportSource(t testing.TB, targets []InboundTarget, observe bool)
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo,
-		canonicalrouting.CopyInboundTransport(t, flows, observe), runtimecontracts.DefaultPlatformSpecFile(repo),
+		copyInboundTransport(t, flows, observe), runtimecontracts.DefaultPlatformSpecFile(repo),
 		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +53,61 @@ func inboundTransportSource(t testing.TB, targets []InboundTarget, observe bool)
 		}
 	}
 	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), ingress)
+}
+
+// Keep provider-aware fixture assembly beside its runtime-only caller, not in
+// the low-level corpus package consumed by contracts and semanticview tests.
+func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(relativePath, source string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(relativePath))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("schema.yaml", "name: inbound-fixture\n")
+	events := []string{"inbound.telegram", "inbound.github.push", "inbound.github.issue_comment", "inbound.slack.message_channels", "inbound.slack.message", "inbound.stripe", "inbound.twilio", "inbound.shopify", "inbound.typeform", "inbound.intercom", "inbound.partner", "inbound.json"}
+	flows = append([]string(nil), flows...)
+	sort.Strings(flows)
+	for i, flow := range flows {
+		if i != 0 && flow == flows[i-1] {
+			continue
+		}
+		switch flow {
+		case "test-inbound-flow", "chat-flow", "ingress", "partner-flow", "json-flow", "chat", "coordinator":
+		default:
+			t.Fatalf("unclassified inbound transport flow %q", flow)
+		}
+		write(flow+"/schema.yaml", "name: "+flow+"\npins:\n  inputs: ["+strings.Join(events, ", ")+"]\n")
+		if observe {
+			catalog := make(map[string]any, len(events))
+			handlers := make(map[string]any, len(events))
+			fields := make(map[string]string)
+			for name, field := range providertriggers.RawEventCatalogEntry().Payload.Properties {
+				fields[name] = field.Type
+			}
+			for _, event := range events {
+				catalog[event] = fields
+				handlers[event] = map[string]any{}
+			}
+			for name, document := range map[string]any{
+				"events.yaml": catalog,
+				"nodes.yaml":  map[string]any{"observer": map[string]any{"execution_type": "system_node", "subscribes_to": events, "event_handlers": handlers}},
+			} {
+				raw, err := yaml.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				write(flow+"/"+name, string(raw))
+			}
+		}
+	}
+	return root
 }
 
 // The transport publication owner stays isolated; its instance observations
