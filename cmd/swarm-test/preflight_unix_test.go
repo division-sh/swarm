@@ -300,17 +300,7 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 			runPreflightSurvivorFixture(t, mode)
 			return
 		}
-		if mode == "fail" {
-			t.Fatal("selected guard failure")
-		}
-		if mode == "hold" {
-			if err := publishSignalFixturePID(os.Getenv(signalFixturePIDEnv), os.Getpid(), nil); err != nil {
-				t.Fatal(err)
-			}
-			for {
-				time.Sleep(time.Hour)
-			}
-		}
+		runPreflightTerminalFixture(t, mode)
 		return
 	}
 	t.Run("unsupported-platform-refuses-before-launch", checkPreflightUnsupportedPlatform)
@@ -318,61 +308,18 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"success", "fail", "hold"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Setenv(modeEnv, mode)
-			pidPath := filepath.Join(t.TempDir(), "child.pid")
-			t.Setenv(signalFixturePIDEnv, pidPath)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() {
-				_, err := runPreflightProcess(ctx, []string{"go", "test", filepath.Join(repo, "cmd/swarm-test"), "-count=1", "-run", "^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}, io.Discard, io.Discard)
-				result <- err
-			}()
-			var pid int
-			if mode == "hold" {
-				pid = waitForSignalFixturePID(t, pidPath)
-				cancel()
-			}
-			select {
-			case err := <-result:
-				if (err == nil) != (mode == "success") {
-					t.Fatalf("%s process result: %v", mode, err)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("preflight did not join cancellation")
-			}
-			if pid != 0 {
-				waitForProcessAbsent(t, pid)
-			}
-		})
-	}
+	provePreflightTerminalOutcomes(t)
 	if run([]string{"preflight", "--run", "^$"}) != 2 {
 		t.Fatal("local preflight admitted a filtered selection")
 	}
 	t.Run("static-child-cancellation", func(t *testing.T) {
-		t.Setenv(modeEnv, "hold")
-		pidPath := filepath.Join(t.TempDir(), "static.pid")
-		t.Setenv(signalFixturePIDEnv, pidPath)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		result := make(chan error, 1)
-		go func() {
-			_, err := runPreflightProcess(ctx, []string{os.Args[0], "-test.run=^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}, io.Discard, io.Discard)
-			result <- err
-		}()
-		pid := waitForSignalFixturePID(t, pidPath)
-		cancel()
-		select {
-		case err := <-result:
-			if err == nil {
-				t.Fatal("canceled static command became success")
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("static cancellation was not joined")
+		fixture := startPreflightFixture(t, context.Background(), "hold", preflightFixtureCommand())
+		fixture.ready(t)
+		deadline := time.Now().Add(5 * time.Second)
+		fixture.cancel()
+		if err := fixture.wait(time.Until(deadline)); !errors.Is(err, context.Canceled) {
+			t.Fatalf("static cancellation lost its outcome: %v", err)
 		}
-		waitForProcessAbsent(t, pid)
 	})
 	t.Run("source-mutation-refuses-command", func(t *testing.T) {
 		repo, head := completionRepo(t)
@@ -392,8 +339,9 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 			t.Fatalf("soft target changed execution outcome: %s", output.String())
 		}
 	})
-	provePreflightDoesNotAcquireNativeSlot(t, repo)
+	provePreflightDoesNotAcquireNativeSlot(t)
 	provePreflightSurvivingDescendants(t, repo)
+	provePreflightEarlyCleanup(t, repo)
 	t.Run("unresolved-lifetime-refuses-completion", func(t *testing.T) {
 		reader, writer, err := os.Pipe()
 		if err != nil {
@@ -406,6 +354,37 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 			t.Fatalf("unresolved inherited lifetime became success: %v", err)
 		}
 	})
+}
+
+func runPreflightTerminalFixture(t *testing.T, mode string) {
+	t.Helper()
+	release := os.Getenv("SWARM_TEST_PREFLIGHT_RELEASE")
+	if mode == "startup-hold" {
+		fmt.Fprintln(os.Stderr, "fixture entered startup before readiness")
+		if err := publishSignalFixturePID(os.Getenv(signalFixturePIDEnv)+".entered", os.Getpid(), nil); err != nil {
+			t.Fatal(err)
+		}
+		waitForPreflightFixtureRelease(t, release)
+		mode = "hold"
+	}
+	fmt.Fprintf(os.Stderr, "fixture ready: mode=%s pid=%d\n", mode, os.Getpid())
+	if release != "" || mode == "hold" {
+		if err := publishSignalFixturePID(os.Getenv(signalFixturePIDEnv), os.Getpid(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mode != "hold" && release != "" {
+		waitForPreflightFixtureRelease(t, release)
+	}
+	fmt.Fprintf(os.Stderr, "fixture selected: mode=%s\n", mode)
+	if mode == "fail" {
+		t.Fatal("selected guard failure")
+	}
+	if mode == "hold" {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 }
 
 func checkPreflightUnsupportedPlatform(t *testing.T) {
@@ -477,8 +456,9 @@ func TestUnsupported(t *testing.T){
 	}
 }
 
-func provePreflightDoesNotAcquireNativeSlot(t *testing.T, repo string) {
+func provePreflightDoesNotAcquireNativeSlot(t *testing.T) {
 	t.Run("occupied-native-slot-is-untouched", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
 		home := t.TempDir()
 		t.Setenv("XDG_STATE_HOME", home)
 		t.Setenv("SWARM_TEST_PREFLIGHT_PROCESS_FIXTURE", "success")
@@ -495,7 +475,14 @@ func provePreflightDoesNotAcquireNativeSlot(t *testing.T, repo string) {
 		before := preflightNativeFixtureFiles(t, home)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := runPreflightProcess(ctx, []string{"go", "test", filepath.Join(repo, "cmd/swarm-test"), "-count=1", "-run", "^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}, io.Discard, io.Discard); err != nil {
+		fixture := startPreflightFixture(t, ctx, "success", preflightFixtureCommand())
+		if err := fixture.release(); err != nil {
+			t.Fatal(err)
+		}
+		deadline, _ := ctx.Deadline()
+		err = fixture.wait(time.Until(deadline))
+		raw, readErr := os.ReadFile(fixture.output.Name())
+		if err := errors.Join(readErr, preflightTerminalOutcome("success", err, raw)); err != nil {
 			t.Fatalf("static guard waited on an occupied native slot: %v", err)
 		}
 		if after := preflightNativeFixtureFiles(t, home); !reflect.DeepEqual(before, after) {
@@ -529,12 +516,8 @@ func runPreflightSurvivorFixture(t *testing.T, mode string) {
 		if err := publishSignalFixturePID(os.Getenv(signalFixturePIDEnv), os.Getpid(), nil); err != nil {
 			t.Fatal(err)
 		}
-		for {
-			if _, err := os.Stat(os.Getenv("SWARM_TEST_PREFLIGHT_RELEASE")); err == nil {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		waitForPreflightFixtureRelease(t, os.Getenv("SWARM_TEST_PREFLIGHT_RELEASE"))
+		return
 	}
 	child := exec.Command(os.Args[0], "-test.run=^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$")
 	child.Env = replaceEnvironment(os.Environ(), "SWARM_TEST_PREFLIGHT_PROCESS_FIXTURE", "survivor-child")
@@ -557,45 +540,36 @@ func runPreflightSurvivorFixture(t *testing.T, mode string) {
 func provePreflightSurvivingDescendants(t *testing.T, repo string) {
 	for _, mode := range []string{"survivor-success", "survivor-fail", "survivor-cancel"} {
 		t.Run(mode, func(t *testing.T) {
-			root := t.TempDir()
-			release := filepath.Join(root, "release")
-			pidPath := filepath.Join(root, "survivor.pid")
-			t.Setenv("SWARM_TEST_PREFLIGHT_PROCESS_FIXTURE", mode)
-			t.Setenv("SWARM_TEST_PREFLIGHT_RELEASE", release)
-			t.Setenv(signalFixturePIDEnv, pidPath)
-			t.Cleanup(func() {
-				if err := os.WriteFile(release, []byte("release\n"), 0600); err != nil {
-					t.Error(err)
-				}
-			})
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() {
-				_, err := runPreflightProcess(ctx, []string{"go", "test", filepath.Join(repo, "cmd/swarm-test"), "-count=1", "-run", "^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}, io.Discard, io.Discard)
-				result <- err
-			}()
-			pid := waitForSignalFixturePID(t, pidPath)
+			args := []string{"go", "test", filepath.Join(repo, "cmd/swarm-test"), "-count=1", "-run", "^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}
+			fixture := startPreflightFixture(t, context.Background(), mode, args)
+			fixture.ready(t)
 			if mode == "survivor-cancel" {
-				cancel()
+				fixture.cancel()
 			}
 			select {
-			case err := <-result:
+			case err := <-fixture.result:
+				fixture.joined, fixture.terminal = true, err
 				t.Fatalf("leader exit/cancellation falsely joined a redirected survivor: %v", err)
 			case <-time.After(200 * time.Millisecond):
 			}
-			if err := os.WriteFile(release, []byte("release\n"), 0600); err != nil {
+			deadline := time.Now().Add(5 * time.Second)
+			if err := fixture.release(); err != nil {
 				t.Fatal(err)
 			}
-			select {
-			case err := <-result:
-				if (err == nil) != (mode == "survivor-success") {
-					t.Fatalf("survivor result: %v", err)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("released descendant was not joined")
+			err := fixture.wait(time.Until(deadline))
+			if (err == nil) != (mode == "survivor-success") || !fixture.joined {
+				t.Fatalf("survivor result: %v / joined=%v", err, fixture.joined)
 			}
-			waitForProcessAbsent(t, pid)
+			if mode == "survivor-fail" {
+				var exitErr *exec.ExitError
+				raw, readErr := os.ReadFile(fixture.output.Name())
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || readErr != nil || !strings.Contains(string(raw), "selected guard failure with a surviving descendant") {
+					t.Fatalf("survivor failed before its selected guard: %v / %v\n%s", err, readErr, raw)
+				}
+			}
+			if mode == "survivor-cancel" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("survivor lost cancellation: %v", err)
+			}
 		})
 	}
 }
