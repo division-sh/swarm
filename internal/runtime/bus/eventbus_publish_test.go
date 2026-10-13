@@ -1342,7 +1342,8 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ch := runtimebustest.Subscribe(t, bus, "agent-1", events.EventType("task.requested"))
+	runID := uuid.NewString()
+	ch := runtimebustest.SubscribeForRun(t, bus, runID, "agent-1", events.EventType("task.requested"))
 
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -1351,7 +1352,7 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		"",
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
@@ -1439,7 +1440,8 @@ func TestEventBusPublish_AttachesSourceArtifactFactToRuntimeLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ch := runtimebustest.Subscribe(t, bus, "agent-1", events.EventType("task.requested"))
+	runID := uuid.NewString()
+	ch := runtimebustest.SubscribeForRun(t, bus, runID, "agent-1", events.EventType("task.requested"))
 	if err := bus.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("task.requested"),
@@ -1447,7 +1449,7 @@ func TestEventBusPublish_AttachesSourceArtifactFactToRuntimeLogs(t *testing.T) {
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		uuid.NewString(),
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
@@ -1528,10 +1530,11 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.replay.checked"))
+	runID := uuid.NewString()
+	runtimebustest.SubscribeForRun(t, eb, runID, "agent-a", events.EventType("custom.replay.checked"))
 
 	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()))
 	if !errors.Is(err, runtimepipelineobligation.ErrMissingScope) {
 		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
 	}

@@ -916,10 +916,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 					testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-claim"), ""),
 				},
 			}}
-			eb, err := newScopedTestEventBus(store)
-			if err != nil {
-				t.Fatalf("NewEventBus: %v", err)
-			}
+			eb := newOutboxPublicationBus(t, store)
 			reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 			intent := runtimeengine.EmitIntent{
 				Event: eventtest.RunCreatingRootIngress(

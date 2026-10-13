@@ -1476,35 +1476,17 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 	return planner
 }
 
-func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventType events.EventType) deliveryPlanner {
+func mixedNodeAgentDeliveryPlanner(t testing.TB, source semanticview.Source, policy deliveryRecipientPolicy, connectPlanner connectRoutePlanResolver, nodeID, agentID string, eventType events.EventType) deliveryPlanner {
 	t.Helper()
 	identity := agentidentitytest.RootRuntime(t, agentID, "eventbus-target-test")
 	event := strings.TrimSpace(string(eventType))
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: "system_node", SubscribesTo: []string{event},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: {}},
-	}
-	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
-	root := runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema,
-		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node}, Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &rootSchema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "root", Version: "1.0.0",
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{nodeID: node.EventHandlers},
-		},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{nodeID: node},
-		Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	})
 	handlerNode := testRootNode(t, nodeID)
 	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, handlerNode)
 	if err != nil {
 		t.Fatalf("admit mixed-route target handler: %v", err)
+	}
+	policy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}}, true, nil
 	}
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
@@ -1524,14 +1506,8 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			semanticSource: source,
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{
-					identity: {Identity: identity},
-				}, true, nil
-			},
-		},
+		policy,
+		connectPlanner,
 	)
 	return planner
 }
@@ -1675,13 +1651,22 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 
 func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: mixed-delivery\npins:\n  inputs: [custom.mixed_node_agent]\n",
+		"events.yaml": "custom.mixed_node_agent:\n",
+		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  event_handlers:\n    custom.mixed_node_agent: {}\n",
+	}))
+	runID := agentidentitytest.RootRuntime(t, "agent-missing", "eventbus-target-test").RunID
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("custom.mixed_node_agent"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner(t, "workflow-node", "agent-missing", evt.Type())
+	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
+	evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
+		events.EventType("custom.mixed_node_agent"), "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner(t, source, eb.deliveryPlanner.recipientPolicy, eb.deliveryPlanner.connectPlanner, "workflow-node", "agent-missing", evt.Type())
 
 	err = eb.Publish(context.Background(), evt)
 	if err == nil {
@@ -3095,23 +3080,27 @@ func TestEventBusPublish_NodeProducedSameFlowOutputPersistsNodeDelivery(t *testi
 	}
 	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
-	rootOwner := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("cycle-root-owner")}
+	root := ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+	rootOwner := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: root.EntityID}
 	store.setTargetOwnerRoutes(rootOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	installNativeConstructionIndexFixture(t, store, source, runID, root, "")
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedChildForProducer(
+	evt := eventtest.ChildForProducerWithRoutingSource(
 		eventID,
 		events.EventType("cycle.pong"),
 		eventtest.Producer(events.EventProducerNode, "test-node"),
 		"cycle-task",
 		[]byte(`{}`),
 		1,
-		runID,
-		uuid.NewString(),
+		events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
 		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
+		eventtest.RootRoutingSource(root.EntityID),
 		time.Now().UTC(),
 	)
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Target: events.MustExistingEntityTarget(rootOwner)}

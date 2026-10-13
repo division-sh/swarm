@@ -9,18 +9,40 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func newOutboxPublicationBus(t *testing.T, store runtimebus.EventStore) *runtimebus.EventBus {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyEngineOutboxPublication(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
+	observation := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, identity, "")
+	bus, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		Durable: runtimebus.DurableDependencies{
+			Instances: runtimebus.FlowInstanceIndexFixture(observation),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bus
+}
 
 func TestEnginePublicationPreparationBindsExactAdmittedSource(t *testing.T) {
 	entityID := eventtest.UUID("prepared-source-entity")
 	store := &outboxClaimStore{directRecipientTransactionalStore: directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{testActiveAgentDescriptor(t, "reviewer", entityID, "")},
 	}}
-	eb, err := newScopedTestEventBus(store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	eb := newOutboxPublicationBus(t, store)
 	runtimebustest.Subscribe(t, eb, "reviewer")
 	now := time.Now().UTC()
 	makeEvent := func(id, run, payload string, at time.Time) events.Event {
