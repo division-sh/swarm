@@ -33,6 +33,8 @@ func TestCompletion2270EvidenceConsumerCensus(t *testing.T) {
 		{"internal/runtime/llm/cli_runtime_process.go", "runStreamingPrepared", "retainClaudeFailureObservations", "TestServedCompletion2270CLIFailureNativeBothStores"},
 		{"internal/runtime/llm/completion_observation.go", "decodeClaudeCompletionResult", "completionObservationFieldList", "TestServedCompletion2270InvalidFinalCLIResultBothStores"},
 		{"internal/runtime/llm/completion_observation.go", "completionObservationFieldList", "completionObservationDecode", "TestCompletion2270ContributorUnicodeStrictness"},
+		{"internal/runtime/llm/completion_observation.go", "observeClaudeTokens", "decodeClaudeCompletionTokens", "TestServedCompletion2270CLIProtocolKeysBothStores"},
+		{"internal/runtime/llm/completion_observation.go", "decodeClaudeCompletionTokens", "completionObservationDecode", "TestCompletion2270TokenProtocolKeysAreExact"},
 		{"internal/runtime/llm/completion_authority.go", "settleCompletionTurnWithProviderHead", "Clone", "TestCompletion2270EvidenceCopiesDoNotAlias"},
 		{"internal/runtime/llm/completion_authority.go", "completionContinuationForHandle", "completionContinuationForPayload", "TestSettledCompletionRecoveryUsesImmutableProjectedTurn"},
 		{"internal/runtime/llm/completion_authority.go", "validateCompletionContinuation", "ValidateEvidence", "TestSettledCompletionRecoveryUsesImmutableProjectedTurn"},
