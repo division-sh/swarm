@@ -31,6 +31,22 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+type StandingEventNameDiagnostic = eventrecord.StandingEventNameDiagnostic
+
+func ReadStandingEventNameDiagnosticsForTest(ctx context.Context, selected any) ([]StandingEventNameDiagnostic, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) ([]StandingEventNameDiagnostic, error) {
+		return eventrecord.ReadStandingEventNameDiagnosticsTx(ctx, tx, postgres)
+	})
+}
+
+func ReadStandingRuntimeLogDiagnosticsForTest(ctx context.Context, selected any) ([]string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadStandingRuntimeLogDiagnosticsTx(ctx, tx, postgres)
+	})
+}
+
 func ReadWorkflowTimerEventIdentityForTest(ctx context.Context, selected any, runID, eventName string) (string, error) {
 	_, postgres := selected.(*PostgresStore)
 	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (string, error) {

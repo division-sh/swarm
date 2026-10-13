@@ -29,13 +29,14 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/standingdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/workflowstate"
 )
 
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "445c8e6cc0a783aab1d11b1d9d88b025eb32e723826fd3b5a29de5afd6a9c567"
+const targetDigest = "990cbc7a864ca9c6b49839a6d0c59ee1a9959a914e0f49e0974587181b5aa71f"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -282,6 +283,7 @@ var files = []string{
 
 func main() {
 	includeRunPhysicalTargets()
+	includeStandingDiagnosticTargets()
 	includeServedDebugTargets()
 	includePublicA2EndpointTargets()
 	includeReceiverPublicReadbackTargets()
@@ -353,6 +355,25 @@ func includeRunPhysicalTargets() {
 	pins, err := runphysical.Decode(raw)
 	must(err)
 	for _, pin := range pins {
+		if !slices.Contains(files, pin.File) {
+			files = append(files, pin.File)
+			gateRecoveryTargets[pin.File] = map[string]bool{}
+		}
+		if targets, limited := gateRecoveryTargets[pin.File]; limited {
+			targets[pin.Function] = true
+		}
+	}
+}
+
+func includeStandingDiagnosticTargets() {
+	raw, err := os.ReadFile(standingdiagnostic.Path)
+	must(err)
+	manifest, err := standingdiagnostic.Decode(raw)
+	must(err)
+	for _, pin := range manifest.Pins {
+		if pin.Before == pin.After {
+			continue
+		}
 		if !slices.Contains(files, pin.File) {
 			files = append(files, pin.File)
 			gateRecoveryTargets[pin.File] = map[string]bool{}

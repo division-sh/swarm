@@ -1676,108 +1676,11 @@ func waitForStandingDeliveryQuiescence(t testing.TB, selectedStore string) {
 }
 
 func standingPostgresDiagnostics(dsn string) string {
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return err.Error()
-	}
-	defer db.Close()
-	rows, err := db.Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
-	if err != nil {
-		return err.Error()
-	}
-	defer rows.Close()
-	parts := []string{}
-	for rows.Next() {
-		var name string
-		var count int
-		if rows.Scan(&name, &count) == nil {
-			parts = append(parts, fmt.Sprintf("%s=%d", name, count))
-		}
-	}
-	logRows, err := db.Query(`SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
-	if err == nil {
-		defer logRows.Close()
-		for logRows.Next() {
-			var payload string
-			if logRows.Scan(&payload) == nil {
-				parts = append(parts, payload)
-			}
-		}
-	}
-	deliveryRows, err := db.Query(`SELECT event_id::text, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
-	if err == nil {
-		defer deliveryRows.Close()
-		for deliveryRows.Next() {
-			var eventID, subscriber, status string
-			if deliveryRows.Scan(&eventID, &subscriber, &status) == nil {
-				parts = append(parts, fmt.Sprintf("delivery:%s:%s:%s", eventID, subscriber, status))
-			}
-		}
-	}
-	receiptRows, err := db.Query(`SELECT event_id::text, status, COALESCE(failure::text, '') FROM pipeline_receipts ORDER BY updated_at`)
-	if err == nil {
-		defer receiptRows.Close()
-		for receiptRows.Next() {
-			var eventID, status, failure string
-			if receiptRows.Scan(&eventID, &status, &failure) == nil {
-				parts = append(parts, fmt.Sprintf("receipt:%s:%s:%s", eventID, status, failure))
-			}
-		}
-	}
-	return strings.Join(parts, ",")
+	return standingStoreDiagnostics("postgres", dsn)
 }
 
 func standingSQLiteDiagnostics(path string) string {
-	selected, err := store.NewSQLiteRuntimeStore(path)
-	if err != nil {
-		return err.Error()
-	}
-	defer selected.Close()
-	rows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
-	if err != nil {
-		return err.Error()
-	}
-	defer rows.Close()
-	parts := []string{}
-	for rows.Next() {
-		var name string
-		var count int
-		if err := rows.Scan(&name, &count); err != nil {
-			return err.Error()
-		}
-		parts = append(parts, fmt.Sprintf("%s=%d", name, count))
-	}
-	logRows, err := storetest.DatabaseForTest(selected).Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
-	if err == nil {
-		defer logRows.Close()
-		for logRows.Next() {
-			var payload string
-			if logRows.Scan(&payload) == nil {
-				parts = append(parts, payload)
-			}
-		}
-	}
-	deliveryRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
-	if err == nil {
-		defer deliveryRows.Close()
-		for deliveryRows.Next() {
-			var eventID, subscriber, status string
-			if deliveryRows.Scan(&eventID, &subscriber, &status) == nil {
-				parts = append(parts, fmt.Sprintf("delivery:%s:%s:%s", eventID, subscriber, status))
-			}
-		}
-	}
-	receiptRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
-	if err == nil {
-		defer receiptRows.Close()
-		for receiptRows.Next() {
-			var eventID, status, failure string
-			if receiptRows.Scan(&eventID, &status, &failure) == nil {
-				parts = append(parts, fmt.Sprintf("receipt:%s:%s:%s", eventID, status, failure))
-			}
-		}
-	}
-	return strings.Join(parts, ",")
+	return standingStoreDiagnostics("sqlite", path)
 }
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {

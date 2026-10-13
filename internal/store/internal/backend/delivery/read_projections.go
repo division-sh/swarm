@@ -18,6 +18,31 @@ import (
 	"github.com/google/uuid"
 )
 
+type StandingDeliveryDiagnostic struct{ EventID, Subscriber, Status string }
+
+func ReadStandingDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]StandingDeliveryDiagnostic, error) {
+	query := `SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`
+	if postgres {
+		query = `SELECT event_id::text, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StandingDeliveryDiagnostic
+	for rows.Next() {
+		var row StandingDeliveryDiagnostic
+		if rows.Scan(&row.EventID, &row.Subscriber, &row.Status) == nil {
+			out = append(out, row)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadGateEventFailureTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
 	var failure string
 	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1`, eventID).Scan(&failure)

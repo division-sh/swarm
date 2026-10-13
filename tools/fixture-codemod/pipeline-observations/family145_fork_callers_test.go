@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 815 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "445c8e6cc0a783aab1d11b1d9d88b025eb32e723826fd3b5a29de5afd6a9c567" {
+	if err != nil || len(rows) != 817 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "990cbc7a864ca9c6b49839a6d0c59ee1a9959a914e0f49e0974587181b5aa71f" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -42,6 +42,9 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			continue
 		}
 		if family145CheckRunPhysicalWholeRule(t, row.File, row.Function, row.After) {
+			continue
+		}
+		if family145CheckStandingDiagnosticWholeRule(t, row.File, row.Function, row.After) {
 			continue
 		}
 		if family145CheckStopWitnessAmendment(t, row.File, row.Function, row.After) {
