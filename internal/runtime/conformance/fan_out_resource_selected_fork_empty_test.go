@@ -103,14 +103,14 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				f.boot(t)
 				f.runtime.fanOutServing.Wake()
 				recoveredOwner, recovery := deploymentForkOwner(t, f)
-				var controlOnly bool
+				var resumed bool
 				for _, entry := range recovery {
 					if entry.RunID == result.ForkRunID {
-						controlOnly = entry.Disposition == runfork.SelectedForkRecoveryControlOnly
+						resumed = entry.Disposition == runfork.SelectedForkRecoveryResume && entry.Continuation != nil
 					}
 				}
-				if !controlOnly {
-					t.Fatalf("empty completed selected fork recovered executable work: %+v", recovery)
+				if !resumed {
+					t.Fatalf("empty nonterminal root lost its exact unfinished successor: %+v", recovery)
 				}
 				restartedServer := deploymentForkServerAt(t, f, recoveredOwner, func() time.Time { return time.Now().Add(48 * time.Hour) })
 				restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
@@ -124,8 +124,8 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventsAfter); err != nil {
 					t.Fatal(err)
 				}
-				if generationsAfter != generationsBefore || eventsAfter != 0 {
-					t.Fatalf("empty restart resurrected work: generations=%d want=%d events=%d", generationsAfter, generationsBefore, eventsAfter)
+				if generationsAfter != generationsBefore+1 || eventsAfter != 0 {
+					t.Fatalf("empty successor invented business work or lost its one fresh generation: generations=%d want=%d events=%d", generationsAfter, generationsBefore+1, eventsAfter)
 				}
 			})
 		}
