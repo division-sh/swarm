@@ -22,6 +22,10 @@ types:
   Item:
     id: Label
     note: Label?
+  List:
+    value: Label
+  LIST:
+    value: Label
 `
 
 const admissionPublicNodes = `complete-task:
@@ -33,6 +37,10 @@ const admissionPublicNodes = `complete-task:
       amounts:
         - numeric(5,2)
       items: [Item]
+      named_list: List
+      named_upper: {type: LIST}
+      named_lists: [List]
+      named_uppers: [LIST]
       scalar_amount: numeric(5,2)
       snapshot: jsonb
   subscribes_to: [task.requested, key.observed]

@@ -67,3 +67,34 @@ explicit: {type: '[text]', default: []}
 		})
 	}
 }
+
+func TestCatalogAdmissionAuthoredNodeNamedListIdentity(t *testing.T) {
+	for _, entry := range []struct{ source, want string }{
+		{"List", "List"}, {"LIST", "LIST"},
+		{"[List]", "[List]"}, {"[LIST]", "[LIST]"},
+		{"{type: List}", "List"}, {"{type: LIST}", "LIST"},
+		{"{type: '[List]'}", "[List]"}, {"{type: '[LIST]'}", "[LIST]"},
+	} {
+		t.Run(entry.source, func(t *testing.T) {
+			snapshot, err := yamlsource.Load([]byte("items: " + entry.source + "\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root())
+			if err != nil || len(fields) != 1 || fields[0].Type != entry.want {
+				t.Fatalf("declared named identity changed: %+v, %v; want %s", fields, err, entry.want)
+			}
+		})
+	}
+	for _, source := range []string{"list", "{type: list}", "list<List>", "'[List]'", "{type: list, of: List}"} {
+		t.Run(source, func(t *testing.T) {
+			snapshot, err := yamlsource.Load([]byte("items: " + source + "\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root()); err == nil {
+				t.Fatalf("retired keyword or invalid style gained authority: %q", source)
+			}
+		})
+	}
+}
