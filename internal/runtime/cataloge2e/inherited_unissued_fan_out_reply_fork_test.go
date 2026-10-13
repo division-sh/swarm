@@ -127,6 +127,7 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
+			baseline := h.processOwner.ActiveCount()
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: selection, AgentRuntime: options,
@@ -138,11 +139,13 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			defer stop()
 			waitCopiedActivityRequesterReturn(t, returned, selected, staged.ForkRunID)
 			progress, err := storetest.ReadFanOutIntentCompletionStorage(returned, selected, copied.Request.Key)
+			page, pageErr := selected.ListFanOutIntents(returned, fanoutobligation.ListQuery{RunID: staged.ForkRunID, Limit: 10})
 			settled, replyErr := selected.LoadReplyContext(returned, childRows[0].ID)
-			if err != nil || replyErr != nil || progress.Status != string(fanoutobligation.StatusClosed) ||
+			if err != nil || pageErr != nil || replyErr != nil || len(page.Intents) != 1 || page.Intents[0].Key != copied.Request.Key ||
+				page.Intents[0].Owed != 0 || page.NextCursor != "" || progress.Status != string(fanoutobligation.StatusClosed) ||
 				progress.Cursor != 1 || progress.Cardinality != 1 || len(progress.Outcomes) != 1 ||
 				settled.State != replycontext.StateTerminal || settled.AcceptedReplyEventID == "" {
-				t.Fatalf("inherited ordinal or own-row return missed final settlement: progress=%+v reply=%+v errors=%v/%v", progress, settled, err, replyErr)
+				t.Fatalf("inherited ordinal or own-row return missed final settlement: progress=%+v intents=%+v reply=%+v errors=%v/%v/%v", progress, page, settled, err, pageErr, replyErr)
 			}
 			outcome := progress.Outcomes[0]
 			publication, found, err := selected.LoadPreparedPublishEvent(returned, outcome.EventID)
@@ -169,6 +172,14 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 						t.Fatalf("inherited ordinal returned different business data: %+v", event)
 					}
 				}
+			}
+			cleanup, join := context.WithTimeout(context.WithoutCancel(h.ctx), 10*time.Second)
+			defer join()
+			if err := owner.RetireSelectedContexts(cleanup); err != nil || h.processOwner.ActiveCount() != baseline {
+				t.Fatalf("inherited reply execution did not join its own retained resources: work=%d baseline=%d error=%v", h.processOwner.ActiveCount(), baseline, err)
+			}
+			if err := owner.RetireSelectedContexts(cleanup); err != nil || h.processOwner.ActiveCount() != baseline {
+				t.Fatalf("joined inherited reply retirement is not idempotent: %v", err)
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(returned, selected, catalogRuntimeRunID)
 			afterRows, rowsErr := storetest.ReadReplyContextRecords(returned, selected, catalogRuntimeRunID)
