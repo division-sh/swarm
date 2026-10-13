@@ -149,6 +149,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	if err := populateMergedFlowViews(bundle); err != nil {
 		return nil, err
 	}
+	if err := validateWorkflowCatalogReferences(bundle); err != nil {
+		return nil, err
+	}
 	if err := validateWave1ContractsLoadBoundary(bundle); err != nil {
 		return nil, err
 	}

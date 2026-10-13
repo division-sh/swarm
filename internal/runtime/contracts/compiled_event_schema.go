@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 // CompiledEventSchemaClassification distinguishes authored declarations from
@@ -555,6 +556,14 @@ func newCompiledEventSchema(
 	businessKeyField string,
 	source CompiledEventSchemaSource,
 ) (CompiledEventSchema, error) {
+	for name, field := range entry.Payload.Properties {
+		if field.ExactSchema != nil || field.Type == runtimefailures.EnvelopeSchemaVersion+" envelope" {
+			continue
+		}
+		if _, err := (CatalogTypeReference{Type: field.Type, Catalog: types}).Resolve(); err != nil {
+			return CompiledEventSchema{}, fmt.Errorf("event %s field %s: %w", eventName, name, err)
+		}
+	}
 	readback := eventSchemaFromCatalogEntry(eventName, entry, types)
 	acceptanceSchema := runtimeeventschema.CanonicalAcceptanceSchema(readback.Schema)
 	canonicalSchema, err := canonicaljson.Bytes(acceptanceSchema)

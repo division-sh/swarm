@@ -116,128 +116,55 @@ func singletonCoordinatorContainedFields(primary PrimaryEntityContract) ([]Singl
 }
 
 func singletonCoordinatorContainedKind(primary PrimaryEntityContract, typeRef string) (string, error) {
-	typeRef = strings.TrimSpace(typeRef)
-	if keyType, valueType, ok := singletonCoordinatorMapTypeParts(typeRef); ok {
-		if err := singletonCoordinatorValidateMapKeyType(primary.Types, keyType); err != nil {
-			return "", err
-		}
-		if err := singletonCoordinatorValidateTypeRef(primary.Types, valueType); err != nil {
-			return "", fmt.Errorf("map value type %q does not resolve: %w", valueType, err)
-		}
-		return "map", nil
+	resolved, err := (CatalogTypeReference{Type: typeRef, Catalog: primary.Types}).Resolve()
+	if err != nil {
+		return "", err
 	}
-	if templateInstanceIsListType(typeRef) {
-		itemType := singletonCoordinatorListItemType(typeRef)
-		if strings.TrimSpace(itemType) == "" {
-			return "", fmt.Errorf("list item type is required")
-		}
-		if err := singletonCoordinatorValidateTypeRef(primary.Types, itemType); err != nil {
-			return "", fmt.Errorf("list item type %q does not resolve: %w", itemType, err)
-		}
+	if err := singletonCoordinatorValidateResolvedType(primary.Types, resolved); err != nil {
+		return "", err
+	}
+	switch resolved.Kind {
+	case CatalogTypeMap:
+		return "map", nil
+	case CatalogTypeList:
 		return "list", nil
 	}
 	return "", nil
 }
 
 func singletonCoordinatorValidateTypeRef(types TypeCatalogDocument, typeRef string) error {
-	return singletonCoordinatorValidateTypeRefSeen(types, typeRef, map[string]struct{}{})
-}
-
-func singletonCoordinatorValidateTypeRefSeen(types TypeCatalogDocument, typeRef string, seen map[string]struct{}) error {
-	typeRef = strings.TrimSpace(typeRef)
-	if typeRef == "" {
-		return fmt.Errorf("type is required")
-	}
-	if keyType, valueType, ok := singletonCoordinatorMapTypeParts(typeRef); ok {
-		if err := singletonCoordinatorValidateMapKeyType(types, keyType); err != nil {
-			return err
-		}
-		if err := singletonCoordinatorValidateTypeRefSeen(types, valueType, seen); err != nil {
-			return fmt.Errorf("map value type %q does not resolve: %w", valueType, err)
-		}
-		return nil
-	}
-	if templateInstanceIsListType(typeRef) {
-		itemType := singletonCoordinatorListItemType(typeRef)
-		if strings.TrimSpace(itemType) == "" {
-			return fmt.Errorf("list item type is required")
-		}
-		if err := singletonCoordinatorValidateTypeRefSeen(types, itemType, seen); err != nil {
-			return fmt.Errorf("list item type %q does not resolve: %w", itemType, err)
-		}
-		return nil
-	}
-	if templateInstanceIsTextType(typeRef) ||
-		templateInstanceIsIntegerType(types, typeRef) ||
-		templateInstanceIsNumericType(types, typeRef) ||
-		templateInstanceIsBooleanType(types, typeRef) ||
-		templateInstanceIsJSONValueType(types, typeRef) ||
-		templateInstanceIsJSONObjectType(types, typeRef) ||
-		templateInstanceIsJSONArrayType(types, typeRef) ||
-		templateInstanceIsTimestampType(types, typeRef) ||
-		templateInstanceIsUUIDType(types, typeRef) ||
-		templateInstanceIsEnumType(types, typeRef) {
-		return nil
-	}
-	typeName := templateInstanceTypeName(types, typeRef)
-	if _, ok := types.Types[typeName]; !ok {
-		return fmt.Errorf("unsupported contract type %s", typeRef)
-	}
-	if _, ok := seen[typeName]; ok {
-		return nil
-	}
-	seen[typeName] = struct{}{}
-	resolved, err := (CatalogTypeReference{Type: typeName, Catalog: types}).Resolve()
+	resolved, err := (CatalogTypeReference{Type: typeRef, Catalog: types}).Resolve()
 	if err != nil {
 		return err
 	}
-	for _, field := range resolved.Fields {
-		if err := singletonCoordinatorValidateTypeRefSeen(types, field.TypeRef, seen); err != nil {
-			return fmt.Errorf("field %s: %w", field.Name, err)
+	return singletonCoordinatorValidateResolvedType(types, resolved)
+}
+
+func singletonCoordinatorValidateResolvedType(types TypeCatalogDocument, resolved ResolvedCatalogType) error {
+	switch resolved.Kind {
+	case CatalogTypeMap:
+		if err := singletonCoordinatorValidateResolvedMapKey(types, *resolved.Key); err != nil {
+			return err
+		}
+		return singletonCoordinatorValidateResolvedType(types, *resolved.Value)
+	case CatalogTypeList:
+		return singletonCoordinatorValidateResolvedType(types, *resolved.Element)
+	case CatalogTypeObject:
+		for _, field := range resolved.Fields {
+			if err := singletonCoordinatorValidateResolvedType(types, field.Type); err != nil {
+				return fmt.Errorf("field %s: %w", field.Name, err)
+			}
 		}
 	}
-	delete(seen, typeName)
 	return nil
 }
 
-func singletonCoordinatorValidateMapKeyType(types TypeCatalogDocument, keyType string) error {
-	if templateInstanceIsTextType(keyType) || templateInstanceIsUUIDType(types, keyType) || templateInstanceIsEnumType(types, keyType) {
+func singletonCoordinatorValidateResolvedMapKey(types TypeCatalogDocument, key ResolvedCatalogType) error {
+	_, enum := types.Enums[key.Name]
+	if key.PlainText() || key.Format == "uuid" || enum {
 		return nil
 	}
-	return fmt.Errorf("map key type %q is unsupported; use text, uuid, or enum", strings.TrimSpace(keyType))
-}
-
-func singletonCoordinatorMapTypeParts(typeRef string) (string, string, bool) {
-	typeRef = strings.TrimSpace(typeRef)
-	if !strings.HasPrefix(strings.ToLower(typeRef), "map[") {
-		return "", "", false
-	}
-	closeIdx := strings.Index(typeRef, "]")
-	if closeIdx <= len("map[") {
-		return "", "", false
-	}
-	keyType := strings.TrimSpace(typeRef[len("map["):closeIdx])
-	valueType := strings.TrimSpace(typeRef[closeIdx+1:])
-	if keyType == "" || valueType == "" {
-		return "", "", false
-	}
-	return keyType, valueType, true
-}
-
-func singletonCoordinatorListItemType(typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	switch {
-	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
-		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
-	case strings.HasSuffix(typeRef, "[]"):
-		return strings.TrimSpace(typeRef[:len(typeRef)-2])
-	case strings.HasPrefix(typeRef, "[]"):
-		return strings.TrimSpace(typeRef[2:])
-	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
-		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
-	default:
-		return typeRef
-	}
+	return fmt.Errorf("map key type is unsupported; use text, uuid, or enum")
 }
 
 func validateTemplateInstanceField(flowID string, field TemplateInstanceField, primary PrimaryEntityContract) (TemplateInstanceField, error) {
@@ -258,98 +185,27 @@ func validateTemplateInstanceField(flowID string, field TemplateInstanceField, p
 }
 
 func templateInstanceFieldLeafKind(primary PrimaryEntityContract, typeRef string) string {
-	switch {
-	case templateInstanceIsJSONValueType(primary.Types, typeRef):
-		return "json"
-	case templateInstanceIsTextType(typeRef):
-		return "scalar"
-	case templateInstanceIsIntegerType(primary.Types, typeRef):
-		return "scalar"
-	case templateInstanceIsNumericType(primary.Types, typeRef):
-		return "scalar"
-	case templateInstanceIsBooleanType(primary.Types, typeRef):
-		return "scalar"
-	case templateInstanceIsJSONObjectType(primary.Types, typeRef):
-		return "object"
-	case templateInstanceIsJSONArrayType(primary.Types, typeRef):
-		return "list"
-	case templateInstanceIsTimestampType(primary.Types, typeRef):
-		return "scalar"
-	case templateInstanceIsUUIDType(primary.Types, typeRef):
-		return "scalar"
-	case templateInstanceIsEnumType(primary.Types, typeRef):
-		return "enum"
-	case templateInstanceIsNamedType(primary.Types, typeRef):
-		return "object"
-	case templateInstanceIsListType(typeRef):
-		return "list"
-	default:
+	ref := CatalogTypeReference{Type: typeRef, Catalog: primary.Types}
+	resolved, err := ref.Resolve()
+	if err != nil {
 		return ""
 	}
-}
-
-func templateInstanceTypeName(types TypeCatalogDocument, typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	if scalar, ok := types.Scalars[typeRef]; ok {
-		return strings.TrimSpace(scalar.Base)
+	switch resolved.Kind {
+	case CatalogTypeText:
+		if resolved.Name != "" {
+			return "enum"
+		}
+		return "scalar"
+	case CatalogTypeInteger, CatalogTypeNumber, CatalogTypeBoolean:
+		return "scalar"
+	case CatalogTypeObject:
+		return "object"
+	case CatalogTypeList:
+		return "list"
+	case CatalogTypeDynamic:
+		return ref.ComparableDomain()
 	}
-	return typeRef
-}
-
-func templateInstanceIsNamedType(types TypeCatalogDocument, typeRef string) bool {
-	_, ok := types.Types[templateInstanceTypeName(types, typeRef)]
-	return ok
-}
-
-func templateInstanceIsEnumType(types TypeCatalogDocument, typeRef string) bool {
-	_, ok := types.Enums[templateInstanceTypeName(types, typeRef)]
-	return ok
-}
-
-func templateInstanceIsTextType(typeRef string) bool {
-	typeRef = strings.ToLower(strings.TrimSpace(typeRef))
-	return typeRef == "text" || typeRef == "string"
-}
-
-func templateInstanceIsIntegerType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "integer")
-}
-
-func templateInstanceIsNumericType(types TypeCatalogDocument, typeRef string) bool {
-	raw := strings.ToLower(strings.TrimSpace(templateInstanceTypeName(types, typeRef)))
-	return raw == "numeric" || raw == "number" || raw == "float" || raw == "double" || raw == "real" || strings.HasPrefix(raw, "numeric(")
-}
-
-func templateInstanceIsBooleanType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "boolean")
-}
-
-func templateInstanceIsJSONObjectType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "object")
-}
-
-func templateInstanceIsJSONValueType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "json")
-}
-
-func templateInstanceIsJSONArrayType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "array")
-}
-
-func templateInstanceIsTimestampType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "timestamp")
-}
-
-func templateInstanceIsUUIDType(types TypeCatalogDocument, typeRef string) bool {
-	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "uuid")
-}
-
-func templateInstanceIsListType(typeRef string) bool {
-	typeRef = strings.TrimSpace(typeRef)
-	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
-		strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
-		strings.HasSuffix(typeRef, "[]") ||
-		strings.HasPrefix(typeRef, "[]")
+	return ""
 }
 
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {

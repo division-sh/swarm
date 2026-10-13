@@ -37,6 +37,9 @@ type ResolvedCatalogType struct {
 	Key     *ResolvedCatalogType
 	Value   *ResolvedCatalogType
 	Fields  []ResolvedCatalogField
+	// primitive preserves opaque JSON versus object/array declaration policy
+	// without changing the exported executable shape or diagnostic identity.
+	primitive string
 }
 
 // Clone returns a detached structural value. Callers may inspect and compose
@@ -270,9 +273,79 @@ func (r CatalogTypeReference) ResolveReference(typeRef string) (ResolvedCatalogT
 	return resolveCatalogTypeReference(strings.TrimSpace(typeRef), r.Catalog, map[string]struct{}{})
 }
 
+func catalogReferenceError(problem string) error {
+	return NewExpectedShapeDiagnostic("contract_loader.invalid_type_reference", "", problem, "Declare a supported, nonrecursive catalog type.", ErrInvalidField)
+}
+
+func retiredCatalogListSpelling(typeRef string) error {
+	var item string
+	switch {
+	case strings.HasSuffix(typeRef, "[]"):
+		item = strings.TrimSpace(strings.TrimSuffix(typeRef, "[]"))
+	case strings.HasPrefix(typeRef, "[]"):
+		item = strings.TrimSpace(strings.TrimPrefix(typeRef, "[]"))
+	default:
+		return nil
+	}
+	if item == "" {
+		item = "T"
+	}
+	return catalogReferenceError(fmt.Sprintf("type reference %q is retired; use [%s]", typeRef, item))
+}
+
+// PlainText excludes the UUID, timestamp and enum domains despite their string
+// representation. Alias spelling does not change the resolved domain.
+func (t ResolvedCatalogType) PlainText() bool {
+	return t.Kind == CatalogTypeText && t.Name == "" && t.Format == ""
+}
+
+// ComparableDomain preserves declared domains, unlike structural assignment.
+func (r CatalogTypeReference) ComparableDomain() string {
+	resolved, err := r.Resolve()
+	if err != nil {
+		return ""
+	}
+	return catalogComparableDomain(resolved)
+}
+
+func catalogComparableDomain(resolved ResolvedCatalogType) string {
+	switch resolved.Kind {
+	case CatalogTypeList:
+		return "list:" + catalogComparableDomain(*resolved.Element)
+	case CatalogTypeMap:
+		return "map:" + catalogComparableDomain(*resolved.Key) + ":" + catalogComparableDomain(*resolved.Value)
+	case CatalogTypeObject:
+		return "type:" + resolved.Name
+	case CatalogTypeText:
+		if resolved.Name != "" {
+			return "enum:" + resolved.Name
+		}
+		switch resolved.Format {
+		case "uuid":
+			return "uuid"
+		case "date-time":
+			return "timestamp"
+		default:
+			return "string"
+		}
+	case CatalogTypeInteger:
+		return "integer"
+	case CatalogTypeNumber:
+		return "number"
+	case CatalogTypeBoolean:
+		return "boolean"
+	case CatalogTypeDynamic:
+		return resolved.primitive
+	}
+	return ""
+}
+
 func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, resolving map[string]struct{}) (ResolvedCatalogType, error) {
 	if typeRef == "" {
-		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
+		return ResolvedCatalogType{}, catalogReferenceError("catalog type reference is required")
+	}
+	if err := retiredCatalogListSpelling(typeRef); err != nil {
+		return ResolvedCatalogType{}, err
 	}
 	if isEventListType(typeRef) {
 		element, err := resolveCatalogTypeReference(eventListItemType(typeRef), catalog, resolving)
@@ -286,6 +359,10 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 		if err != nil {
 			return ResolvedCatalogType{}, err
 		}
+		switch key.Kind {
+		case CatalogTypeInteger, CatalogTypeNumber, CatalogTypeBoolean:
+			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("map key type %q is unsupported", keyRef))
+		}
 		value, err := resolveCatalogTypeReference(valueRef, catalog, resolving)
 		if err != nil {
 			return ResolvedCatalogType{}, err
@@ -295,10 +372,10 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 	if scalar, ok := catalog.Scalars[typeRef]; ok {
 		base := strings.TrimSpace(scalar.Base)
 		if base == "" {
-			return ResolvedCatalogType{}, fmt.Errorf("catalog scalar %q has empty base", typeRef)
+			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("catalog scalar %q has empty base", typeRef))
 		}
 		if _, cycle := resolving[typeRef]; cycle {
-			return ResolvedCatalogType{}, fmt.Errorf("catalog scalar alias cycle at %s", typeRef)
+			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("catalog scalar alias cycle at %s", typeRef))
 		}
 		resolving[typeRef] = struct{}{}
 		defer delete(resolving, typeRef)
@@ -309,7 +386,7 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 	}
 	if named, ok := catalog.Types[typeRef]; ok {
 		if _, cycle := resolving[typeRef]; cycle {
-			return ResolvedCatalogType{Kind: CatalogTypeObject, Name: typeRef}, nil
+			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("recursive catalog type %q is unsupported in Wave 1", typeRef))
 		}
 		resolving[typeRef] = struct{}{}
 		defer delete(resolving, typeRef)
@@ -356,11 +433,13 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 	case "boolean", "bool":
 		return ResolvedCatalogType{Kind: CatalogTypeBoolean}, nil
 	case "array":
-		return ResolvedCatalogType{Kind: CatalogTypeDynamic, Name: strings.ToLower(strings.TrimSpace(normalized))}, nil
-	case "object", "json", "jsonb":
-		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
+		return ResolvedCatalogType{Kind: CatalogTypeDynamic, Name: strings.ToLower(strings.TrimSpace(normalized)), primitive: "array"}, nil
+	case "object":
+		return ResolvedCatalogType{Kind: CatalogTypeDynamic, primitive: "object"}, nil
+	case "json", "jsonb":
+		return ResolvedCatalogType{Kind: CatalogTypeDynamic, primitive: "json"}, nil
 	default:
-		return ResolvedCatalogType{}, fmt.Errorf("unknown catalog type %q", typeRef)
+		return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("unknown catalog type %q", typeRef))
 	}
 }
 

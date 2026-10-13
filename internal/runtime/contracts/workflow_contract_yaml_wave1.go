@@ -862,6 +862,9 @@ func decodeProjectionMapValue(value yamlsource.Value) (map[string]any, error) {
 
 func validateWave1TypeRef(raw, context string) error {
 	raw = strings.TrimSpace(raw)
+	if err := retiredCatalogListSpelling(raw); err != nil {
+		return fmt.Errorf("%s: %w", context, err)
+	}
 	if raw == "" {
 		return fmt.Errorf("%s type is required", context)
 	}

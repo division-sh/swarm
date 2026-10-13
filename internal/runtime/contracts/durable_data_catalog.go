@@ -149,15 +149,11 @@ func BuildDurableDataImportShapeCatalog(bundle *WorkflowContractBundle) (durable
 }
 
 func compiledFileTextField(field ResolvedCatalogField, types TypeCatalogDocument) bool {
-	if field.Type.Kind != CatalogTypeText {
+	if !field.Type.PlainText() {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(eventTypeName(types, field.TypeRef))) {
-	case "text", "string":
-		return true
-	default:
-		return false
-	}
+	resolved, err := (CatalogTypeReference{Type: field.TypeRef, Catalog: types}).Resolve()
+	return err == nil && resolved.PlainText()
 }
 
 func staticDataEntryOwner(bundle *WorkflowContractBundle, label string) (string, string, bool) {
