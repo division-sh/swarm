@@ -148,7 +148,7 @@ func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
-					if err := ordinary.RetireAndWait(context.Background()); err != nil {
+					if _, err := ordinary.RetireAndWait(context.Background()); err != nil {
 						t.Error(err)
 					}
 				})
