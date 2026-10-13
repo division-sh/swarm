@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 const detachedCatalogFields = "  label: {type: text, pattern: '^[a-z]+$', length: {min: 1, max: 10}, equal_to: peer}\n  peer: {type: text, length: {min: 1, max: 10}}\n  score: {type: numeric, range: {min: 1.5, max: 9.5}, equal_to: other}\n  other: {type: numeric, range: {min: 1.5, max: 9.5}}\n  note: text?\n"
@@ -231,14 +233,17 @@ func addDetachedPlanObservations(t *testing.T, out map[string]catalogDetachedObs
 			return detachedTypeField(t, get().CollectionProjection.Type, name).Refinements
 		}}
 	}
-	join := WorkflowJoinPlan{ResultType: CatalogTypeReference{Type: "Probe", Catalog: ref.Catalog}, MembersCollectionProjection: projection}
+	join := WorkflowJoinPlan{Node: identitytest.RootNode(t, "collector"), ResultType: CatalogTypeReference{Type: "Probe", Catalog: ref.Catalog}, MembersCollectionProjection: projection}
 	out["D09/join/catalog"] = catalogDetachedObservation{func() any { return join }, func() SchemaRefinements {
 		return join.Clone().ResultType.Catalog.Types["Probe"].Fields[name].Refinements
 	}}
 	out["D09/join/projection"] = catalogDetachedObservation{func() any { return join }, func() SchemaRefinements {
 		return detachedTypeField(t, join.Clone().MembersCollectionProjection.Type, name).Refinements
 	}}
-	entry := b.Events["audit.record"]
+	entry, _, ok := b.ResolveFlowEventCatalogEntry(".", "audit.record")
+	if !ok {
+		t.Fatal("missing authored event declaration")
+	}
 	out["D10/event-local-copy"] = catalogDetachedObservation{func() any { return entry }, func() SchemaRefinements { return cloneEventCatalogEntry(entry).Payload.Properties[name].Refinements }}
 }
 
@@ -277,7 +282,10 @@ func TestCatalogTypeDetachmentCompiledInputCapture(t *testing.T) {
 	for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
 		t.Run(bound, func(t *testing.T) {
 			b := loadDetachedCatalogFixture(t)
-			entry := b.Events["audit.record"]
+			entry, _, ok := b.ResolveFlowEventCatalogEntry(".", "audit.record")
+			if !ok {
+				t.Fatal("missing authored event declaration")
+			}
 			compiled, err := CompileImportedEventSchema(".", "audit.record", entry, CompiledEventSchemaSource{FlowPath: ".", Layer: "audit", File: "events.yaml"})
 			if err != nil {
 				t.Fatal(err)
