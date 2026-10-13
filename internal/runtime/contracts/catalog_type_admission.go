@@ -26,17 +26,24 @@ func validateFlowCatalogReferences(bundle *WorkflowContractBundle, source FlowSo
 		types = bundle.ResolvedTypeCatalogForFlow(source.FlowPath)
 		entities = bundle.flowEntities[source.FlowPath]
 	}
-	names := make([]string, 0, len(types.Scalars)+len(types.Types))
-	for name := range types.Scalars {
-		names = append(names, name)
+	if err := validateCatalogTypeNamespace(bundle, source, types); err != nil {
+		return err
 	}
-	for name := range types.Types {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if err := validateScopedCatalogReference(types, name, source.Types, "type "+name); err != nil {
+	for _, name := range sortedContractKeys(types.Scalars) {
+		if err := validateScopedCatalogReference(types, types.Scalars[name].Base, source.Types, "scalar "+name); err != nil {
 			return err
+		}
+	}
+	for _, name := range sortedContractKeys(types.Enums) {
+		if err := types.Enums[name].Validate(name); err != nil {
+			return wrapLoaderDiagnosticFile(err, source.Types)
+		}
+	}
+	for _, name := range sortedContractKeys(types.Types) {
+		for _, field := range sortedContractKeys(types.Types[name].Fields) {
+			if err := validateScopedCatalogReference(types, types.Types[name].Fields[field].Type, source.Types, "type "+name+"."+field); err != nil {
+				return err
+			}
 		}
 	}
 	for _, name := range sortedEntityContractKeys(entities) {
