@@ -44,6 +44,25 @@ type startupClockReceiptFault struct {
 	admitted []genericschedule.Activation
 }
 
+// A refused callback is still execution before the startup handoff. Observe its
+// canonical diagnostic as well as successful publication, retaining persistence.
+type startupTimerCallbackWitness struct {
+	runtime.RuntimeLogPersistence
+	proof *startuphandoff.Proof
+}
+
+func (w *startupTimerCallbackWitness) PersistRuntimeLog(ctx context.Context, record runtime.RuntimeLogPersistenceRecord) error {
+	payload, err := runtime.DecodeCanonicalRuntimeLogPayload(record.Payload)
+	if err != nil {
+		return err
+	}
+	if payload.Action == "workflow_timer_fire_failed" {
+		id, _ := payload.Detail["activation_id"].(string)
+		w.proof.ObserveExecutionAttempt(id)
+	}
+	return w.RuntimeLogPersistence.PersistRuntimeLog(ctx, record)
+}
+
 func (s *startupClockReceiptFault) AdmitGenericScheduleOutcome(ctx context.Context, command genericschedule.AdmissionCommand) (genericschedule.AdmissionCommit, error) {
 	s.calls++
 	commit, err := s.Store.AdmitGenericScheduleOutcome(ctx, command)
@@ -194,6 +213,9 @@ ingress:
 				persistence := projectServeRuntimePersistence(stores)
 				persistence.deps.PipelineObligations = proof.RecoveryStore(persistence.deps.PipelineObligations)
 				persistence.deps.DeliveryStore = proof.DeliveryStore(persistence.deps.DeliveryStore)
+				if workflowCase {
+					persistence.deps.RuntimeLogStore = &startupTimerCallbackWitness{RuntimeLogPersistence: persistence.deps.RuntimeLogStore, proof: proof}
+				}
 				var receiptFault *startupClockReceiptFault
 				if sourceCase == "partial_clock_receipt" {
 					receiptFault = &startupClockReceiptFault{Store: persistence.deps.GenericScheduleStore, fault: errors.New("lost second real deployment clock receipt")}
