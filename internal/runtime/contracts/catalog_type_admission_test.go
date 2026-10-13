@@ -40,13 +40,18 @@ func TestCatalogAdmissionRejectsInvalidReferences(t *testing.T) {
 }
 
 func TestCatalogAdmissionNodeListTeaching(t *testing.T) {
-	for _, ref := range []string{"numeric(5,2)[]", "[]numeric(5,2)"} {
+	for _, ref := range []string{"numeric(5,2)[]", "[]numeric(5,2)", " numeric(5,2)[] ", " []numeric(5,2) "} {
 		err := retiredCatalogListSpelling(ref)
 		if _, ok := AsLoaderDiagnostic(err); !ok {
 			t.Fatalf("retired node list lacks typed refusal: %v", err)
 		}
 		if !strings.Contains(err.Error(), "amounts:\n  - numeric(5,2)") || !strings.Contains(err.Error(), "has two items") {
 			t.Fatalf("numeric retirement teaches an invalid YAML replacement: %v", err)
+		}
+	}
+	for _, ref := range []string{" text[] ", " []text ", " DimensionScore[] ", " []DimensionScore "} {
+		if err := retiredCatalogListSpelling(ref); err == nil {
+			t.Fatalf("authored retired spelling with outer whitespace escaped refusal: %q", ref)
 		}
 	}
 	snapshot, err := yamlsource.Load([]byte("amounts:\n  - numeric(5,2)\n"))

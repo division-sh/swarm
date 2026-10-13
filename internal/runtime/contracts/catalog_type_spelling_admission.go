@@ -10,6 +10,7 @@ func catalogReferenceError(problem string) error {
 }
 
 func retiredCatalogListSpelling(typeRef string) error {
+	typeRef = strings.TrimSpace(typeRef)
 	var item string
 	switch {
 	case strings.HasSuffix(typeRef, "[]"):
