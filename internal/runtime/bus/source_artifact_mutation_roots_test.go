@@ -494,7 +494,8 @@ func commitSourceMutationEnginePublications(ctx context.Context, bus *EventBus, 
 }
 
 func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(t *testing.T) {
-	owned := sourceMutationFact(t, "a")
+	source := sourceMutationPublicationSource(t)
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	foreign := sourceMutationFact(t, "b")
 	for _, tc := range []struct {
 		name      string
@@ -514,12 +515,14 @@ func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
-			bus := newSourceMutationProbeBus(t, tc.busFact, owner)
+			store := newTargetRouteMemoryStore()
+			bus := newSourceMutationProbeBusWithStore(t, store, tc.busFact, owner, source)
 			ctx := context.Background()
 			if tc.context != nil {
 				ctx = tc.context(ctx)
 			}
 			event := sourceMutationEvent()
+			bus.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: event.RunID()}
 
 			err := commitSourceMutationEnginePublications(ctx, bus, []runtimeengine.EmitIntent{{Event: event}})
 			if tc.wantError {
@@ -554,6 +557,14 @@ func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(
 			}
 		})
 	}
+}
+
+func sourceMutationPublicationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: source-mutation-proof\npins:\n  outputs: [test.source_mutation]\n",
+		"events.yaml": "test.source_mutation:\n",
+	}))
 }
 
 func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *testing.T) {
@@ -727,14 +738,17 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 }
 
 func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnership(t *testing.T) {
-	owned := sourceMutationFact(t, "5")
+	source := sourceMutationPublicationSource(t)
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	foreign := sourceMutationFact(t, "6")
 
 	t.Run("pending outbox", func(t *testing.T) {
 		owner := newSourceMutationProbeOwner()
-		bus := newSourceMutationProbeBus(t, owned, owner)
+		store := newTargetRouteMemoryStore()
+		bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, source)
 		ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), owned)
 		event := sourceMutationEvent()
+		bus.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: event.RunID()}
 		if err := commitSourceMutationEnginePublications(ctx, bus, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
 			t.Fatalf("commit engine publications: %v", err)
 		}

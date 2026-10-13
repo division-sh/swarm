@@ -1121,10 +1121,13 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	interceptor := &targetRouteConsumingInterceptor{}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
+	source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
+		"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+	))
+	instance := StoredFlowInstanceIdentityFixture(source, "worker", "inst-1", busInternalTestRunID, target.EntityID)
+	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, instance, "inst-1")
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(t,
-			"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
-		)),
+		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{targetBlueprint}, nil
 		},
@@ -1550,15 +1553,21 @@ func nodeOnlyDeliveryPlan(t testing.TB, evt events.Event, nodeID string) RoutePl
 
 func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: node-only-proof\npins:\n  inputs: [custom.node_only]\n",
+		"events.yaml": "custom.node_only:\n",
+		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only]\n  event_handlers:\n    custom.node_only: {}\n",
+	}))
+	runID := uuid.NewString()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	runID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("custom.node_only"), "", "", []byte(`{}`), 0, runID, "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, runID), time.Now().UTC())
-	eb.deliveryPlanner = nodeOnlyDeliveryPlanner(t, "workflow-node", evt.Type())
-	eb.semanticSource = eb.deliveryPlanner.recipientPolicy.semanticSource
+	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
+	evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
+		events.EventType("custom.node_only"), "", "", []byte(`{}`), 0, runID, events.EnvelopeForFlowInstance(events.EventEnvelope{}, runID), time.Now().UTC())
 	deliveries := subscribeInternalDeliveriesForTest(t, eb, workflowRuntimeInternalCarrierID, evt.Type())
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
