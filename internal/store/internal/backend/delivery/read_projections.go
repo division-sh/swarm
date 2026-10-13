@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -1401,6 +1402,29 @@ func ReadSourceDeliveryStorageTables(ctx context.Context, q queryer, runID strin
 	return out, nil
 }
 
+func ReadMailboxCompletionDeliveryEffectsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
+	const query = `SELECT d.* FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 ORDER BY d.delivery_id`
+	table, err := readSourceDeliveryStorageTable(ctx, tx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, values := range table.Rows {
+		raw, err := json.Marshal(values)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, query+":"+string(raw))
+	}
+	return out, nil
+}
+
+func CountRunDeadLetterDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&count)
+	return count, err
+}
+
 func readSourceDeliveryStorageTable(ctx context.Context, q queryer, query, runID string) (SourceDeliveryStorageTable, error) {
 	rows, err := q.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -1422,7 +1446,7 @@ func readSourceDeliveryStorageTable(ctx context.Context, q queryer, query, runID
 		}
 		for i, value := range values {
 			if raw, ok := value.([]byte); ok {
-				values[i] = append([]byte(nil), raw...)
+				values[i] = slices.Clone(raw)
 			}
 		}
 		out.Rows = append(out.Rows, values)

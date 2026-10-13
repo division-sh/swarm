@@ -33,6 +33,11 @@ func family145ServedSnapshotProjection(function string) bool {
 func family145ServedProjectionProofError(function, before, after string) error {
 	results := 2
 	if function == "newRetainedMailboxCompletionRuntimeConfigured" {
+		after = strings.NewReplacer(
+			"\n\tvar receiverReader receiverProofStateReader", "",
+			"\n\t\treceiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)", "",
+			"ReceiverStateReader: receiverReader, ", "",
+		).Replace(after)
 		results = 1
 	} else if function != "startServedControlProofRuntimeWithFixture" && function != "startServedTestSetupEntitiesProofRuntimeConfigured" {
 		return fmt.Errorf("unreviewed served snapshot projection: %s", function)

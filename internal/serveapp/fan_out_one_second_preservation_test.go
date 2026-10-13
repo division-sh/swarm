@@ -44,7 +44,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			if started.RunID != runID {
 				t.Fatalf("HTTP start changed run identity: %+v", started)
 			}
-			waitPublicationSiteCompletion(t, rt, runID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{
 				Delay: time.Second, DelayScope: storetest.DelayAllCommits,
 			})

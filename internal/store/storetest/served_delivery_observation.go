@@ -70,6 +70,14 @@ func ReadServedIncompletePipelineHandoffCount(ctx context.Context, selected any,
 	return private.ReadServedIncompletePipelineHandoffCountForTest(ctx, selected, runID)
 }
 
+func CountRunDeadLetterDeliveries(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountRunDeadLetterDeliveriesForTest(ctx, selected, runID)
+}
+
+func ReadMailboxCompletionRunEffects(ctx context.Context, selected any, runID string) ([]string, error) {
+	return private.ReadMailboxCompletionRunEffectsForTest(ctx, selected, runID)
+}
+
 func ReadServedDeliveryStatusCount(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
 	return private.ReadServedDeliveryStatusCountForTest(ctx, selected, eventID, subscriberType, subscriberID, statuses...)
 }

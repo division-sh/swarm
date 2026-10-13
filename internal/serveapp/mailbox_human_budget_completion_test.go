@@ -36,7 +36,7 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 					params["verdict"], params["fields"], params["input_draft_id"] = "reject", map[string]any{"reason": "not needed"}, draft["input_draft_id"]
 				}
 				if outcome == "budget_forced_defer" {
-					before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 					reached, remove := installMailboxCompletionFaultWitness(t, rt, params["idempotency_key"].(string))
 					response, status, err := mailboxTransportRequest(f.ctx, rt.Endpoint, "http", secondToken, "mailbox.decide", params)
 					if err != nil || status != http.StatusOK || response.Error == nil {
@@ -44,7 +44,7 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 					}
 					reached()
 					remove()
-					if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatalf("failed response INSERT changed snapshot: %s", mailboxEffectsDifference(before, after))
 					}
 				}
@@ -89,7 +89,7 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 			}
 			rt, _ = restart()
 			for _, row := range completed {
-				before := mailboxCompletionRunEffects(t, rt, row.runID)
+				before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, row.runID)
 				response, _, err := mailboxTransportRequest(context.Background(), rt.Endpoint, "http", secondToken, "mailbox.decide", row.params)
 				if err != nil || response.Error != nil {
 					t.Fatalf("post-restart outcome replay: err=%v rpc=%+v", err, response.Error)
@@ -105,7 +105,7 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 				if !reflect.DeepEqual(row.result, replay) {
 					t.Fatalf("restart changed actual outcome: %v / %v", row.result, replay)
 				}
-				if after := mailboxCompletionRunEffects(t, rt, row.runID); !reflect.DeepEqual(before, after) {
+				if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, row.runID); !reflect.DeepEqual(before, after) {
 					t.Fatal("restart replay changed human state")
 				}
 			}

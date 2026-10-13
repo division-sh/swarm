@@ -68,7 +68,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			account := "account-" + tc.name
 			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			waitPublicationSiteCompletion(t, rt, seed.RunID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			if tc.name == "optional_null_normalized" {
 				var public operatorread.OperatorEventFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": seed.EventID}, &public)
@@ -94,7 +94,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 				reuseParams := receiverInitializationPublishParams(rt, fmt.Sprintf("%s-reuse-%d", tc.name, index), account, values)
 				reuseParams["run_id"] = seed.RunID
 				reuse := requireServedEventPublishRPCResult(t, rt.Endpoint, reuseParams)
-				waitPublicationSiteCompletion(t, rt, seed.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				gotPath, gotEntity := requireServedReceiverInitialization(t, rt, reuse, want, index+2)
 				if reuse.RunID != seed.RunID || gotPath != path || gotEntity != entityID {
 					t.Fatal("reuse changed receiver or run identity")

@@ -39,7 +39,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 						f := mailboxCompletionFixtureInRuntime(t, rt, owner)
 						params := mailboxPrincipalMutationParams(t, f, kind, method)
 						key := fmt.Sprint(params["idempotency_key"])
-						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+						before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 						for _, token := range []string{"", "not-an-admitted-token"} {
 							for _, transport := range []string{"http", "ws"} {
 								_, status, err := mailboxTransportRequest(context.Background(), rt.Endpoint, transport, token, method, params)
@@ -54,7 +54,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 								t.Fatalf("HTTP-only mutation admitted through WebSocket: status=%d err=%v rpc=%+v", status, err, response.Error)
 							}
 						}
-						if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+						if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 							t.Fatalf("authentication/transport refusal changed run facts: %s", mailboxEffectsDifference(before, after))
 						}
 						type result struct {
@@ -130,7 +130,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 							t.Fatalf("completion count=%d, %v", count, err)
 						}
 						req := apiidempotency.Request{Method: method, Actor: apiidempotency.PrincipalActor(principal), ResourceID: resource, RequestHash: hash, IdempotencyKey: key, Now: time.Now().UTC(), TTL: 24 * time.Hour}
-						domain := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+						domain := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 						for _, change := range []string{"body", "resource"} {
 							bad := req
 							if change == "body" {
@@ -160,7 +160,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 						if !reflect.DeepEqual(stored, tokenless) {
 							t.Fatalf("tokenless response differs: %s", observed)
 						}
-						if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(domain, after) {
+						if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(domain, after) {
 							t.Fatalf("principal refusal/replay changed committed domain: %s", mailboxEffectsDifference(domain, after))
 						}
 						t.Run("tokenless_first", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fresh.base.RunID)
-							before := mailboxCompletionRunEffects(t, rt, fresh.base.RunID)
+							before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, fresh.base.RunID)
 							for _, token := range []string{apiv1.DefaultLoopbackAPIToken, secondToken} {
 								got, status, err := mailboxTransportRequest(fresh.ctx, rt.Endpoint, "http", token, method, params)
 								if err != nil || status != http.StatusOK || got.Error != nil {
@@ -194,7 +194,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 									t.Fatalf("tokenless-to-HTTP response changed: %s / %s", response, got.Result)
 								}
 							}
-							if after := mailboxCompletionRunEffects(t, rt, fresh.base.RunID); !reflect.DeepEqual(before, after) {
+							if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, fresh.base.RunID); !reflect.DeepEqual(before, after) {
 								t.Fatal("HTTP replay changed tokenless domain mutation")
 							}
 						})
@@ -246,13 +246,13 @@ func TestMailboxUnkeyedMutationsRemainPrincipalOwnedBothStores(t *testing.T) {
 					params := mailboxPrincipalMutationParams(t, f, kind, method)
 					delete(params, "idempotency_key")
 					req := mailboxPrincipalRequest(t, rt, method, params)
-					before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 					bad := req
 					bad.Actor = apiidempotency.PrincipalActor(uuid.NewString())
 					if _, _, err := mailboxTokenlessMutation(f.ctx, rt, owner, bad, params); err == nil {
 						t.Fatal("unkeyed request bypassed principal admission")
 					}
-					if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatalf("unkeyed principal refusal mutated domain: %s", mailboxEffectsDifference(before, after))
 					}
 					var result map[string]any

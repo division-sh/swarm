@@ -38,7 +38,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 				"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "idempotency_key": uuid.NewString(),
 				"payload": map[string]any{"portfolio_id": "incident", "threshold": 75},
 			})
-			waitPublicationSiteCompletion(t, rt, opened.RunID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, opened.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(),
 				"payload": map[string]any{"portfolio_id": "incident", "account_ids": []map[string]any{

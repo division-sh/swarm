@@ -122,7 +122,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 							if eventID == "" {
 								t.Fatalf("missing generated outcome; calls=%d\n%s", calls.Load(), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 							}
-							waitPublicationSiteCompletion(t, rt, seed.RunID)
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 							before := requireActivityPublicationReadback(t, rt, seed.RunID, eventID, mode, local)
 							if calls.Load()-beforeCalls != wantCalls {
 								t.Fatalf("provider calls=%d want=%d", calls.Load()-beforeCalls, wantCalls)
@@ -149,7 +149,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								var decision map[string]any
 								requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", row.decisionParams, &decision)
 							}
-							waitPublicationSiteCompletion(t, rt, row.runID)
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, row.runID)
 							if after := requireActivityPublicationReadback(t, rt, row.runID, row.eventID, mode, row.local); after != row.readback || calls.Load() != wantTotalCalls {
 								t.Fatalf("restart/duplicate changed generated outcome or re-executed provider: calls=%d", calls.Load())
 							}

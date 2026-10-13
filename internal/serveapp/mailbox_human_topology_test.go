@@ -111,7 +111,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							for _, request := range completed {
 								var replay map[string]any
 								waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.runID)
-								before := mailboxCompletionRunEffects(t, rt, request.runID)
+								before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, request.runID)
 								requireServedJSONRPCResult(t, rt.Endpoint, request.method, request.params, &replay)
 								want := make(map[string]any, len(request.response))
 								for key, value := range request.response {
@@ -121,7 +121,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 								if !reflect.DeepEqual(replay, want) {
 									t.Fatalf("restart response changed: got=%#v want=%#v", replay, want)
 								}
-								if after := mailboxCompletionRunEffects(t, rt, request.runID); !reflect.DeepEqual(before, after) {
+								if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, request.runID); !reflect.DeepEqual(before, after) {
 									t.Fatalf("completed retry changed run effects: %v -> %v", before, after)
 								}
 							}
@@ -184,11 +184,11 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 					t.Error(err)
 				}
 			})
-			before := mailboxCompletionRunEffects(t, rt, card.RunID)
+			before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID)
 			if response := requestServedJSONRPC(t, rt.Endpoint, method, params); response.Error == nil {
 				t.Fatalf("foreign requester %s was admitted", tc.column)
 			}
-			if after := mailboxCompletionRunEffects(t, rt, card.RunID); !reflect.DeepEqual(before, after) {
+			if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(before, after) {
 				t.Fatalf("foreign requester mutation changed run effects: %v -> %v", before, after)
 			}
 			var status string

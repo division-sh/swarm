@@ -49,9 +49,11 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedparity.Backend, root, configSuffix string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
+	var receiverReader receiverProofStateReader
 	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
 			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
 		}
@@ -113,7 +115,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		process.waitForReadyLine()
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		rt := servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		rt := servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
 		var owner cursorMailboxStore = sq
 		if pg != nil {
 			owner = pg
@@ -187,7 +189,7 @@ func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
 	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
-	waitPublicationSiteCompletion(t, f.rt, f.base.RunID)
+	waitPublicationSiteCompletion(t, f.rt.ReceiverStateReader, f.base.RunID)
 	var id, summary, from string
 	if err := f.rt.DB.QueryRow(`SELECT item_id,summary,from_agent FROM mailbox WHERE source_event_id=$1 AND item_type=$2`, seed.EventID, runtimetools.NotifyHumanMailboxItemType).Scan(&id, &summary, &from); err != nil {
 		t.Fatalf("real notify_human did not persist the notice: %v", err)

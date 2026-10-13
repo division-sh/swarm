@@ -67,7 +67,7 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			if started.RunID != runID {
 				t.Fatalf("run identity changed: %+v", started)
 			}
-			waitPublicationSiteCompletion(t, rt, runID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			rows := make([]map[string]any, 8)
 			for ordinal := range rows {
@@ -180,7 +180,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			if started.RunID != runID {
 				t.Fatalf("HTTP start changed run identity: %+v", started)
 			}
-			waitPublicationSiteCompletion(t, rt, runID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 			var metadataRaw []byte
 			if err := rt.DB.QueryRow(`SELECT fields FROM entity_state WHERE run_id=$1 AND flow_instance='portfolio' ORDER BY updated_at DESC LIMIT 1`, runID).Scan(&metadataRaw); err != nil {
 				t.Fatal(err)

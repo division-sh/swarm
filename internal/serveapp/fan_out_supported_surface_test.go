@@ -56,7 +56,7 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 					if opened.RunID == "" {
 						t.Fatalf("%s did not create a run: %+v", method, opened)
 					}
-					waitPublicationSiteCompletion(t, rt, opened.RunID)
+					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, opened.RunID)
 					wanted := make(map[string]map[string]any)
 					for batch := 0; batch < 2; batch++ {
 						var rows []map[string]any
@@ -146,7 +146,7 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 					RunID string `json:"run_id"`
 				}
 				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &opened)
-				waitPublicationSiteCompletion(t, rt, opened.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, opened.RunID)
 				publishIssue2394ReporterBatch(t, rt, opened.RunID, portfolio, []map[string]any{{
 					"account_id": "held-1", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString(),
 				}})

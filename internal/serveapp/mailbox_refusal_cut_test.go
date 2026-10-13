@@ -68,7 +68,7 @@ func TestMailboxRefusalAtPreparationAndCommitBothStores(t *testing.T) {
 										requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", winnerParams, &winResult)
 										waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, card.RunID)
 									}
-									before = mailboxCompletionRunEffects(t, rt, card.RunID)
+									before = mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID)
 								}
 								fault := &mailboxPostCommitFault{}
 								if cut == "before_prepare" {
@@ -88,13 +88,13 @@ func TestMailboxRefusalAtPreparationAndCommitBothStores(t *testing.T) {
 								if !errors.Is(err, want) || replayed || hits != 1 {
 									t.Fatalf("cut refusal: err=%v want=%v replay=%t winner_hits=%d", err, want, replayed, hits)
 								}
-								if after := mailboxCompletionRunEffects(t, rt, card.RunID); !reflect.DeepEqual(before, after) {
+								if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(before, after) {
 									t.Fatalf("losing commit mutated domain: %s", mailboxEffectsDifference(before, after))
 								}
 								if refusal := requireServedJSONRPCError(t, rt.Endpoint, method, params); refusal.Data["code"] != code {
 									t.Fatalf("served refusal = %+v, want %s", refusal, code)
 								}
-								if after := mailboxCompletionRunEffects(t, rt, card.RunID); !reflect.DeepEqual(before, after) {
+								if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(before, after) {
 									t.Fatalf("served refusal mutated domain: %s", mailboxEffectsDifference(before, after))
 								}
 								var completions int

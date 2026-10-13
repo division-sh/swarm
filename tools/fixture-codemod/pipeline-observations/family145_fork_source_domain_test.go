@@ -60,6 +60,7 @@ func family145ForkSourceDomainReaderProofError(before, after string) error {
 }
 
 func family145ForkSourceDomainCallerProofError(function, before, after string) error {
+	after = family145MailboxCompletionCallerInverse(after)
 	normalized, err := family145ForkSourceDomainCallerInverse(function, after)
 	if err != nil {
 		return err

@@ -36,7 +36,7 @@ func TestEdgeOwnedConnectionPoliciesSharingInputBothStores(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "edge-create",
 					"payload": map[string]any{"creation_id": "fresh-one", "reuse_id": "shared"},
 				})
-				waitPublicationSiteCompletion(t, rt, seed.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				requireConnectionPolicyRoutes(t, rt, plans, seed.RunID, []string{"fresh-one", "shared"}, 1)
 				if code := process.stop(); code != 0 {
 					t.Fatalf("first serve shutdown failed: %d\n%s", code, process.outputString())
@@ -49,7 +49,7 @@ func TestEdgeOwnedConnectionPoliciesSharingInputBothStores(t *testing.T) {
 				if reuse.RunID != seed.RunID {
 					t.Fatal("reuse changed the run")
 				}
-				waitPublicationSiteCompletion(t, rt, seed.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				requireConnectionPolicyRoutes(t, rt, plans, seed.RunID, []string{"fresh-one", "fresh-two", "shared"}, 2)
 			})
 		}
@@ -74,7 +74,7 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 					_, start := lifecycleRestartHarness(t, backend, root)
 					process, rt := start()
 					seed := publishMixedConnectionRequest(t, rt, "", "mixed-create")
-					waitPublicationSiteCompletion(t, rt, seed)
+					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed)
 					before := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1)
 					if code := process.stop(); code != 0 {
 						t.Fatalf("shutdown=%d\n%s", code, process.outputString())
@@ -84,7 +84,7 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 						t.Fatalf("restart reminted routes: %v -> %v", before, got)
 					}
 					publishMixedConnectionRequest(t, rt, seed, "mixed-reuse")
-					waitPublicationSiteCompletion(t, rt, seed)
+					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed)
 					paths := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 2)
 					if len(paths) != 3 {
 						t.Fatalf("create/reuse paths=%v, want three", paths)

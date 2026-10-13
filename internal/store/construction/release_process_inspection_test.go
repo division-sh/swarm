@@ -66,6 +66,7 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if got, err := readReleaseInspectionLifecycle(ctx, observer, identity.RunID); err != nil || !reflect.DeepEqual(lifecycle, got) {
 				t.Fatalf("independent unaccepted inspection lost physical lifecycle rows: %+v %v", got, err)
 			}
+			requireReleaseInspectionMailboxAndDiagnostics(t, writer, observer, identity.RunID)
 			var retained context.Context
 			if err := observer.InspectSnapshot(ctx, func(scoped context.Context) error {
 				retained = scoped
@@ -125,6 +126,31 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			}
 		})
 	}
+}
+
+func requireReleaseInspectionMailboxAndDiagnostics(t *testing.T, writer any, observer storetest.ReleaseProcessReadOnlyInspection, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	want, err := storetest.ReadMailboxCompletionRunEffects(ctx, writer, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := observer.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		got, err = storetest.ReadMailboxCompletionRunEffects(scoped, observer, runID)
+		return err
+	}); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("independent unaccepted inspection changed full mailbox rows: %v %v", got, err)
+	}
+	summary, err := storetest.ReadServedRunDebugSummary(ctx, writer, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := storetest.ReadServedRunDebugSummary(ctx, observer, runID); err != nil || got != summary || len(strings.Split(got, "\n")) != 11 {
+		t.Fatalf("independent unaccepted inspection lost diagnostic sections/fields: %s %v", got, err)
+	}
+	requireReleaseInspectionUnaccepted(t, ctx, observer)
 }
 
 func readReleaseInspectionLifecycle(ctx context.Context, observer storetest.ReleaseProcessReadOnlyInspection, runID string) ([]storetest.LifecycleBusinessStorageRow, error) {

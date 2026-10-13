@@ -54,7 +54,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 						t.Fatalf("missing state-result %s\n%s\n%s", outcome, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID), first.outputString())
 					}
 					readback := func() string {
-						waitPublicationSiteCompletion(t, rt, seed.RunID)
+						waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 						var results, settled int
 						if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND event_name IN ($3,$4)`, seed.RunID, seed.EventID, eventName, otherEventName).Scan(&results); err != nil {
 							t.Fatal(err)

@@ -798,6 +798,25 @@ func ReadServedIncompletePipelineHandoffCountForTest(ctx context.Context, select
 	return count, nil
 }
 
+func CountRunDeadLetterDeliveriesForTest(ctx context.Context, selected any, runID string) (int, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return 0, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = delivery.CountRunDeadLetterDeliveriesTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
 	dialect, err := eventFixtureDialectForTest(selected)
 	if err != nil {
@@ -819,13 +838,16 @@ func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID s
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
 		return "", err
 	}
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if err := validateChannelObservationOwner(selected); err != nil {
 		return "", err
 	}
-	sections := make([]string, 0, 10)
-	for _, scope := range []string{"runs", "entity_state", "flow_instances", "events", "event_deliveries", "settled_delivery_attempts", "event_receipts", "dead_letters", "delivery_agents", "runtime_logs"} {
-		section := readServedRunDebugSection(ctx, selected, string(dialect), scope, runID)
+	backend := "sqlite"
+	if _, postgres := selected.(*PostgresStore); postgres {
+		backend = "postgres"
+	}
+	sections := make([]string, 0, 11)
+	for _, scope := range []string{"runs", "entity_state", "flow_instances", "events", "event_deliveries", "settled_delivery_attempts", "event_receipts", "pipeline_obligations", "dead_letters", "delivery_agents", "runtime_logs"} {
+		section := readServedRunDebugInspectionSection(ctx, selected, backend, scope, runID)
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
@@ -834,7 +856,33 @@ func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID s
 	return strings.Join(sections, "\n"), nil
 }
 
-func readServedRunDebugSection(ctx context.Context, selected any, backend, scope, runID string) string {
+// Independent section transactions preserve later diagnostics after a failed
+// PostgreSQL query, including for an unaccepted read-only process inspector.
+func readServedRunDebugInspectionSection(ctx context.Context, selected any, backend, scope, runID string) string {
+	var out []string
+	var stage string
+	inspect := func(scoped context.Context) error {
+		var err error
+		out, stage, err = readServedRunDebugSection(scoped, selected, backend, scope, runID)
+		return err
+	}
+	var err error
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		err = owner.InspectSnapshot(ctx, inspect)
+	case *SQLiteRuntimeStore:
+		err = owner.InspectSnapshot(ctx, inspect)
+	}
+	if err != nil {
+		return fmt.Sprintf("%s%s: %v", scope, stage, err)
+	}
+	if len(out) == 0 {
+		return scope + ": []"
+	}
+	return scope + ": " + strings.Join(out, "; ")
+}
+
+func readServedRunDebugSection(ctx context.Context, selected any, backend, scope, runID string) ([]string, string, error) {
 	if scope == "runs" || scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
 		out, stage := []string{}, ""
 		err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
@@ -851,17 +899,11 @@ func readServedRunDebugSection(ctx context.Context, selected any, backend, scope
 			}
 			return err
 		})
-		if err != nil {
-			return fmt.Sprintf("%s%s: %v", scope, stage, err)
-		}
-		if len(out) == 0 {
-			return scope + ": []"
-		}
-		return scope + ": " + strings.Join(out, "; ")
+		return out, stage, err
 	}
 	sqlText := servedRunDebugSQL(backend, scope)
 	if sqlText == "" {
-		return scope + ": unsupported debug query"
+		return nil, "", fmt.Errorf("unsupported debug query")
 	}
 	out := []string{}
 	stage := ""
@@ -900,13 +942,7 @@ func readServedRunDebugSection(ctx context.Context, selected any, backend, scope
 		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Sprintf("%s%s: %v", scope, stage, err)
-	}
-	if len(out) == 0 {
-		return scope + ": []"
-	}
-	return scope + ": " + strings.Join(out, "; ")
+	return out, stage, err
 }
 
 func servedRunDebugSQL(backend, scope string) string {
@@ -917,13 +953,15 @@ func servedRunDebugSQL(backend, scope string) string {
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = $1::uuid ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id::text, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', ''), COALESCE(d.failure->'detail'->'attributes'->>'validation_error', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure::text FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		case "runtime_logs":
 			sqlText = `SELECT payload::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
 		}
@@ -932,13 +970,15 @@ func servedRunDebugSQL(backend, scope string) string {
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = ? ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = ? ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), ''), COALESCE(json_extract(d.failure, '$.detail.attributes.validation_error'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		case "runtime_logs":
 			sqlText = `SELECT payload FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
 		}

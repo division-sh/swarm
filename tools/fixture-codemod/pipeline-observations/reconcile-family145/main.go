@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "fdaa9266dac7b8c9ddc394182bb2118a143d04abe876a0b84c4526113aa5bb98"
+const targetDigest = "ef1d13e7a57ee6c4351390b878495621de107fb47de01f57315a9f7a3c55f67c"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -171,6 +171,26 @@ var files = []string{
 	"internal/runtime/runforkexecution/runtime_outcome_test.go",
 	"internal/runtime/runforkexecution/selected_execution_authority_fixture_test.go",
 	"internal/serveapp/main_runtime_test.go",
+	"internal/serveapp/mailbox_completion_fault_witness_test.go",
+	"internal/serveapp/mailbox_card_completion_matrix_test.go",
+	"internal/serveapp/mailbox_human_budget_completion_test.go",
+	"internal/serveapp/mailbox_human_topology_test.go",
+	"internal/serveapp/mailbox_mutation_admission_test.go",
+	"internal/serveapp/mailbox_notice_completion_test.go",
+	"internal/serveapp/mailbox_principal_transport_test.go",
+	"internal/serveapp/mailbox_projection_fault_test.go",
+	"internal/serveapp/mailbox_refusal_cut_test.go",
+	"internal/serveapp/mailbox_source_admission_test.go",
+	"internal/serveapp/materializing_sender_test.go",
+	"internal/serveapp/publication_sites_test.go",
+	"internal/serveapp/publication_activity_test.go",
+	"internal/serveapp/publication_state_result_test.go",
+	"internal/serveapp/receiver_initialization_ingress_test.go",
+	"internal/serveapp/connection_edge_policy_test.go",
+	"internal/serveapp/fan_out_one_second_preservation_test.go",
+	"internal/serveapp/fan_out_original_reporter_http_test.go",
+	"internal/serveapp/fan_out_served_incident_test.go",
+	"internal/serveapp/fan_out_supported_surface_test.go",
 	"internal/serveapp/mailbox_completion_test.go",
 	"internal/serveapp/lifecycle_transition_restart_test.go",
 	"internal/serveapp/lifecycle_transition_served_test.go",
@@ -317,7 +337,7 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/serveapp/standing_ingress_supported_surface_test.go":    {"TestStandingRestartMixedHealthyAndTerminalProcessParity": true},
 	"internal/serveapp/agent_mock_supported_surface_test.go":          {"runMockAgentSupportedSurface": true},
 	"internal/serveapp/agent_memory_supported_surface_test.go":        {"runStandingTelegramMemorySupportedSurface": true},
-	"internal/serveapp/mailbox_completion_fixture_test.go":            {"newRetainedMailboxCompletionRuntimeConfigured": true},
+	"internal/serveapp/mailbox_completion_fixture_test.go":            {"newRetainedMailboxCompletionRuntimeConfigured": true, "mailboxCompletionNotice": true},
 	"internal/serveapp/fork_receiver_ownership_test.go":               {"readForkReceiverProducerEvidence": true, "readForkReceiverRows": true, "requireForkReceiverDelivery": true, "TestSelectedForkIndependentReceiverBusinessMutationBothStores": true, "snapshotForkReceiverApplication": true, "runForkReceiverOwnershipJourney": true, "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores": true, "TestServedForkSourceCompletionWithoutForkBothStores": true},
 	"internal/serveapp/fork_receiver_execution_effect_test.go":        {"requireForkReceiverExecution": true},
 	"internal/serveapp/fork_receiver_acquisition_effect_only_test.go": {"requireSupplementalForkAcquisitionSettlement": true, "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores": true},

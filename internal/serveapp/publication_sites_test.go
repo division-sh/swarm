@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedPublicationSitesBothStores(t *testing.T) {
@@ -40,7 +42,7 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
 				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-				waitPublicationSiteCompletion(t, rt, published.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
 				want := map[string][]int{"alpha/result.direct": {1}}
 				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
 				if code := first.stop(); code != 0 {
@@ -53,7 +55,7 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				if duplicate.EventID != published.EventID || duplicate.RunID != published.RunID {
 					t.Fatalf("restart changed idempotent ingress: %+v -> %+v", published, duplicate)
 				}
-				waitPublicationSiteCompletion(t, rt, published.RunID)
+				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
 				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
 				for _, caseID := range []string{"alpha", "beta"} {
 					next := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -63,7 +65,7 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 					if next.RunID != published.RunID || next.EventID == published.EventID {
 						t.Fatalf("fresh publication changed run or reused original event: %+v", next)
 					}
-					waitPublicationSiteCompletion(t, rt, published.RunID)
+					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
 					want[caseID+"/result.direct"] = append(want[caseID+"/result.direct"], 2)
 					requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
 				}
@@ -135,7 +137,7 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 							}
 							published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							runID = published.RunID
-							waitPublicationSiteCompletion(t, rt, runID)
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 							waitPublicationSiteFanOut(t, rt, runID)
 							key := caseID + "/result." + family
 							want[key] = append(want[key], values...)
@@ -144,7 +146,7 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 							if duplicate.EventID != published.EventID || duplicate.RunID != runID {
 								t.Fatalf("duplicate changed ingress: %+v -> %+v", published, duplicate)
 							}
-							waitPublicationSiteCompletion(t, rt, runID)
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 							requirePublicationSiteReadback(t, rt, runID, mode, want, textValues)
 						}
 					}
@@ -154,19 +156,25 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 	}
 }
 
-func waitPublicationSiteCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
+func waitPublicationSiteCompletion(t *testing.T, reader receiverProofStateReader, runID string) {
 	t.Helper()
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
 		var failed, incomplete int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&failed); err != nil {
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			failed, err = storetest.CountRunDeadLetterDeliveries(ctx, reader, runID)
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if failed != 0 {
-			t.Fatalf("publication delivery failed: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("publication delivery failed: %s", servedInspectionRunDebugSummary(reader, runID))
 		}
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
-			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
-			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&incomplete); err != nil {
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			incomplete, err = storetest.ReadServedIncompletePipelineHandoffCount(ctx, reader, runID)
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if incomplete == 0 {
@@ -176,7 +184,15 @@ func waitPublicationSiteCompletion(t *testing.T, rt servedControlProofRuntime, r
 	}
 	stack := make([]byte, 512*1024)
 	n := runtime.Stack(stack, true)
-	t.Fatalf("publication pipeline did not finish: %s\n%s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID), stack[:n])
+	t.Fatalf("publication pipeline did not finish: %s\n%s", servedInspectionRunDebugSummary(reader, runID), stack[:n])
+}
+
+func servedInspectionRunDebugSummary(reader receiverProofStateReader, runID string) string {
+	summary, err := storetest.ReadServedRunDebugSummary(context.Background(), reader, runID)
+	if err != nil {
+		return fmt.Sprint(err)
+	}
+	return summary
 }
 
 func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID string) {
@@ -197,7 +213,7 @@ func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID
 			t.Fatalf("fan-out semantic rejection: %s", failure)
 		}
 		if pending == 0 {
-			waitPublicationSiteCompletion(t, rt, runID)
+			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

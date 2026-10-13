@@ -6045,3 +6045,98 @@ wave has a live shared publication wait/debug dependency and is not dishonestly
 credited as closed by moving only its snapshot queries. Local only; no push,
 PR, tier or server2. Rebase still waits for #2617 and the orchestrator handoff.
 Receipts:~/.cache/swarm-2542-family145/lifecycle-business-*.
+
+## Whole mailbox effects and publication-completion dependency (2026-10-13)
+
+The rule-level6134544118 gate covers this whole dependency: ALL43 mailbox
+effect calls and ALL23 external publication-completion wait calls (plus the
+one wait inside the mailbox witness). The existing receiverProofStateReader
+and original InspectSnapshot lifetime replace the raw served-runtime argument.
+The retained mailbox constructor captures that exact serving projection; the
+already-existing release-process observer supplies the same read-only role.
+No owner-to-pool map, bootstrap, reconstruction, selector or callback escape.
+
+ReadMailboxCompletionRunEffects uses one selected-native read transaction for
+the exact nine-table footprint. Complete driver rows, column order, NULLs,
+byte JSON encoding, every clock, per-table row ordering and the original fixed
+diagnostic labels remain unchanged. Only runtime_diagnostic/diagnostic_direct
+events are excluded. The closed delivery owner holds the event-to-delivery
+join; its detached byte clone preserves nil versus empty bytes. Query/column/
+scan/encoding/iteration/close failure discards the entire provisional witness.
+The helper still joins publication completion BEFORE opening its snapshot.
+
+The completion wait retains its failed-first dead-letter refusal, exact active
+OR missing-handoff OR missing-platform/pipeline-receipt predicate, separate
+read cuts, poll/deadline/sleep, stack capture and diagnostic-only failure path.
+It reuses the existing pipeline handoff owner and closed delivery status owner.
+Native and independent process inspection neither admit nor mutate a run.
+
+The existing selected debug owner now retains ALL11 original diagnostic
+sections, including pipeline_obligations. Reconciliation restores unfiltered
+physical flow headers and full dead-letter failure text, not their previously
+narrowed projections. A complete22-query BOTH-dialect correspondence control
+pins all fields, LEFT JOINs, scope, order and limits against the original helper.
+Each section independently joins its original inspection transaction; failures
+remain section diagnostics, preserve rollback/cleanup evidence, and cannot
+poison later sections or become unconditional test failures. The three older
+native run-section tests now consume that same inspection owner, retaining
+every lifecycle-clock/error/counter assertion. The broader raw debug-helper
+chain remains explicitly queued for the next dependency wave, not credited.
+
+Execution path retained: native selected construction and compiled-source/
+schema/process admission -> real mock runtime/workspace readiness -> admitted
+HTTP principal and transport -> public initial publication/real producer ->
+delivery settlement and exact pipeline handoff -> nine-table baseline -> real
+mailbox mutation or named selected-writer response-insert fault -> rollback/
+lost acknowledgment/verbatim replay -> retained restart -> unchanged physical
+footprint -> joined runtime/process teardown before selected-store cleanup.
+Only observation ownership changes here. Source, readiness, principal,
+transport, mutation, idempotency, restart and teardown gates remain their
+existing concepts/owners and retain their original assertions.
+
+Finite codemod/output:1330 recipes/600 family145 transitions, digest
+ef1d13e7a57ee6c4351390b878495621de107fb47de01f57315a9f7a3c55f67c.
+Historical Before/After/Successor and all24 immutable receipts survive.
+Whole-body inverses, owned-source enumeration and hostile source/predicate/
+projection/owner/assertion/cut controls cover every matching consumer. One
+explicit historical exception is Master's already-approved reporter serving
+window, which postdates the frozen source. Its ENTIRE predecessor body at
+signed ee05cae31d is independently hashed23377f519af846666a4db08467fdbd3093337a147aba844cf1da9ef8e40186bb;
+only the typed wait-argument splice is permitted. No assertion subset waiver.
+Unknown/altered inputs fail before writing; no per-site manual ledger.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Nine-table full-row ordering/NULL/bytes/clocks/run/sibling/empty fidelity and exact read-only coordinator | reproduced and fixed | Independent original SQL oracle and native transaction counters on BOTH stores under race; complete footprint unchanged |
+| Invalid/raw/uninitialized/cancelled/closed owner and late relation failure | execution-proven through the same corrected path | Native refusal roots BOTH stores under race; named selected-writer late-table fault with preinstalled cleanup and exact restoration, no partial first-eight-table result |
+| Every handoff OR arm, dead-letter status and exact run/receipt/subscriber identity | execution-proven through the same corrected path | Existing two handoff roots and new real failed-settlement count root BOTH stores under race; no fabricated dead-letter status |
+| Independent unaccepted process inspection and11 diagnostic sections/error rollback | reproduced and fixed | Existing read-only construction proof extended without runtime admission, plus original run-storage clock/refusal proofs and new11-section counters BOTH stores under race |
+| Lost diagnostic error/rollback provenance | reproduced and fixed | Compilable actual swallowed-callback-error regression fails BOTH stores; exact callback restoration passes all native debug/counter cases; initial invalid mutation build is not execution proof |
+| Notice response fault, lost HTTP acknowledgment, replay/restart and prospective/provider ingress | reproduced and fixed | Original three served roots BOTH stores under race PASS90.697s; no receipt/assertion/time-limit change |
+| All three card anchors and all four mutation/replay/retained-restart variants | execution-proven through the same corrected path | Original entire card matrix BOTH stores under race PASS244.53s; aggregate later timeout belongs to the following transport root, not this receipt |
+| Principal/HTTP/WS/concurrent refusal and complete row immutability | execution-proven through the same corrected path | Completed SQLite stage cells carried; only interrupted/never-run SQLite human/proposed/notice PASS210.59s and PostgreSQL PASS162.26s qualified separately with unchanged per-command5m and per-operation deadlines |
+| Unkeyed principal ownership and real independent release-process receiver initialization | execution-proven through the same corrected path | Original roots BOTH stores under race PASS74.60s/67.80s; no runtime-pointer assumption or shortened process journey |
+
+The initial two-root command exhausted its5m aggregate after the first root's
+244.53s, leaving55.47s for the transport root. Its RED receipt is retained;
+it is not described as inherited, pressure-caused, fixed or an aggregate PASS.
+The bounded suffix qualification carries completed cells instead of blindly
+rerunning until green, enlarging timeouts, or weakening any operation deadline.
+
+Fresh downward census PASS156.90s:7740 ->7654 findings,5447 ->5364 raw sites,
+86/83 removed, ZERO added. Unchanged ratchet PASS25.72s. Supplied-pool53 and
+excluded67 unchanged. Cheap family/historical/idempotence collection19.639s;
+candidate-overlay typing144.58s covers the unchanged finite rewritten corpus.
+The subsequent private diagnostic-row/error-return refinement and its three
+test consumers are separately compiled/executed through focused BOTH-store
+race/counterexamples; no duplicate local tier. Boundaries, U1000 and signed
+complexity are required before the checkpoint report.
+
+Governing context remains the exact selected_runtime_store_projection fixture
+and read-projection policy plus the6134544118 gate. No production runtime or
+platform contract changes, compatibility owner, generalized fault/query port
+or new framework. Existing #2542/#2151/watchlist tracking remains sufficient;
+all qualification holds, including the separately recorded static-fork seed
+timeout, survive. No push/PR/tier/server2/rebase. Next high-yield dependency is
+entity-state plus the reconciled debug-summary caller chain, preserving exact
+entity versus earliest matching-state selection and independent-process roles.

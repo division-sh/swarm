@@ -51,7 +51,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				if rejectMissingHeader {
-					before := mailboxCompletionRunEffects(t, rt, seed.RunID)
+					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID)
 					companions := readForkReceiverCompanions(t, rt, seed.RunID, instance)
 					_, err := rt.DB.Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, seed.RunID, instance)
 					if backend == servedparity.BackendExplicitPostgres {
@@ -65,7 +65,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 							t.Fatalf("missing constructed header did not fail foreign-key integrity: %v", err)
 						}
 					}
-					if after := mailboxCompletionRunEffects(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatal("refused header removal changed state, publications or receiver delivery")
 					}
 					if after := readForkReceiverCompanions(t, rt, seed.RunID, instance); !reflect.DeepEqual(companions, after) {
@@ -97,14 +97,14 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 				if deliveries != 2 || companions != 1 {
 					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 				}
-				before := mailboxCompletionRunEffects(t, rt, seed.RunID)
+				before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID)
 				rt, _ = restart()
 				duplicate = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != updated.EventID || duplicate.RunID != seed.RunID {
 					t.Fatal("restart changed the committed prospective-state publication")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				if after := mailboxCompletionRunEffects(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+				if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(before, after) {
 					t.Fatal("restart/duplicate changed state, companion, publication or receiver delivery")
 				}
 			})
