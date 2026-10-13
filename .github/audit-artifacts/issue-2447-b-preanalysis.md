@@ -1,5 +1,25 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S24 Constructed Runtime Admission Diagnostic Oracle
+
+Attempt3 of hosted run38410589647 at7cec972a3 fails the runtime-full root
+TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema. Matched
+focused comparison passes on masterfc49cfbdd and fails on7cec: the same
+NotDeclared field is correctly refused earlier by the catalog reference owner,
+not admitted. Reviewer-g6148314476 scopes a test-only exact-diagnostic update;
+pre-edit classification/native-unused receipt6148458504 retains both controls.
+
+| Row | Producer, canonical owner and consumer | Required proof |
+|---|---|---|
+| S24 constructed invalid event compilation | Typed bundle in workflow_validation_test.go -> CompileWorkflowSemantics -> newCompiledEventSchema -> CatalogTypeReference.Resolve | Assert exact new event/field-qualified unknown-catalog-type refusal before boot, retaining the unchanged no-executable-schema assertion. Focused root, adjacent generated-emit/boot controls, complete runtime package, clean preflight and fresh hosted lifecycle. |
+
+The fixture has no YAML file; no fabricated source-location, public command or
+backend credit. Original attempt3 stays RED. No production, grammar, fallback,
+selector, guard, baseline or deadline change; B accounting is S01-S24 plus K
+and existing subrows. Native Linux default/race/issue2413 analysis at clean7cec
+PASS775.95s/no findings, not cross-platform union or new-head tier evidence.
+C stays read-only under2647 ->2648 ->C; D's angle/long retirement is unchanged.
+
 ## Recursion Diagnostic Vocabulary Correction
 
 Exact-head hosted38407052342 atffe8dc5ff fails broad-08's complete production
