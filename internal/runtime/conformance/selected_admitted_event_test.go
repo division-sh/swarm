@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"context"
 	"testing"
 	"time"
 
