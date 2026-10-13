@@ -1,9 +1,13 @@
 package conformance
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,8 +26,22 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 			t.Run(backend+"/"+map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
 				f := selectedDeploymentResourceFixture(t, backend, "root")
 				f.runtime.fanOutServing.Close()
+				server := f.operatorServer(t)
 				sourceRun := uuid.NewString()
-				eventID := publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, sourceRun, selectedDeploymentEvent, map[string]any{"account_id": "event-source", "document": map[string]any{}})
+				payloadPath := filepath.Join(t.TempDir(), "event.json")
+				if err := os.WriteFile(payloadPath, []byte(`{"account_id":"event-source","document":{}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var stdout, stderr bytes.Buffer
+				args := []string{"run", "start", "--connect", server.URL, "--run-id", sourceRun, "--event", selectedDeploymentEvent, "--payload", payloadPath, "--no-follow"}
+				if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
+					t.Fatalf("create the real event-origin source: code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+				}
+				page := deploymentResourcePublicEventsByName(t, f.ctx, server, sourceRun, selectedDeploymentEvent, "")
+				if len(page.Events) != 1 {
+					t.Fatalf("initial source event count=%d want one", len(page.Events))
+				}
+				eventID := page.Events[0].EventID
 				owner, recovered := deploymentForkOwner(t, f)
 				if len(recovered) != 0 {
 					t.Fatal("fresh event source unexpectedly requires selected recovery")
