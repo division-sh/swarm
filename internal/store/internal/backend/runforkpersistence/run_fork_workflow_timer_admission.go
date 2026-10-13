@@ -143,23 +143,20 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 		}
 		active[id] = struct{}{}
 	}
-	for _, id := range i.ArrivalScheduleIDs {
-		if _, duplicate := ids[id]; duplicate || id == "" {
-			return "", fmt.Errorf("timer history repeats or omits an arrival identity")
+	for _, family := range []struct {
+		ids  []string
+		name string
+	}{
+		{i.ArrivalScheduleIDs, "an arrival"},
+		{i.TransferredPublicationIDs, "a transferred publication"},
+		{i.OneShotScheduleIDs, "a one-shot"},
+	} {
+		for _, id := range family.ids {
+			if _, duplicate := ids[id]; duplicate || id == "" {
+				return "", fmt.Errorf("timer history repeats or omits %s identity", family.name)
+			}
+			ids[id] = struct{}{}
 		}
-		ids[id] = struct{}{}
-	}
-	for _, id := range i.TransferredPublicationIDs {
-		if _, duplicate := ids[id]; duplicate || id == "" {
-			return "", fmt.Errorf("timer history repeats or omits a transferred publication identity")
-		}
-		ids[id] = struct{}{}
-	}
-	for _, id := range i.OneShotScheduleIDs {
-		if _, duplicate := ids[id]; duplicate || id == "" {
-			return "", fmt.Errorf("timer history repeats or omits a one-shot identity")
-		}
-		ids[id] = struct{}{}
 	}
 	digest, err := canonicaljson.Hash(struct {
 		SourceRunID    string
