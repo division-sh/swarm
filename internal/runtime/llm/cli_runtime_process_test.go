@@ -34,11 +34,12 @@ func beginClaudeTestCompletion(t *testing.T, parent context.Context, request str
 	if actor, ok := runtimeactors.ActorFromContext(parent); ok {
 		ctx = runtimeactors.WithActor(ctx, actor)
 	}
+	profile, model := testClaudeProviderSelection(t)
+	ctx = withEffectTestRequest(t, ctx, profile, model)
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte(request))
 	if err != nil {
 		t.Fatalf("authorize claude completion: %v", err)
 	}
-	_, model := testClaudeProviderSelection(t)
 	dispatch := newCompletionDispatch(attempt, "")
 	dispatch.providerModel = model
 	return harness, ctx, dispatch

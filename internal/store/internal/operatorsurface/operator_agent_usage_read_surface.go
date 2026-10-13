@@ -3,6 +3,7 @@ package operatorsurface
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -217,8 +218,8 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 			  AND agent_name_owner = $3
 			  AND agent_name_source = $4
 			  AND agent_route_presence = $5
-			  AND agent_flow_scope_key = $6
-			  AND agent_flow_instance_id = $7
+			  AND COALESCE(agent_flow_scope_key, '') = $6
+			  AND COALESCE(agent_flow_instance_id, '') = $7
 			  AND flow_instance = $8
 			  %s
 		)
@@ -333,8 +334,8 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 			  AND agent_name_owner = ?
 			  AND agent_name_source = ?
 			  AND agent_route_presence = ?
-			  AND agent_flow_scope_key = ?
-			  AND agent_flow_instance_id = ?
+			  AND COALESCE(agent_flow_scope_key, '') = ?
+			  AND COALESCE(agent_flow_instance_id, '') = ?
 			  AND flow_instance = ?
 			  %s
 		)
@@ -438,8 +439,13 @@ func validateOperatorAgentUsageBreakdown(row operatorread.OperatorAgentUsageBrea
 	if row.Transport == "" {
 		return fmt.Errorf("agent usage read owner returned empty transport")
 	}
-	if row.Totals.LedgerEntries < 0 || row.Totals.InputTokens < 0 || row.Totals.OutputTokens < 0 || row.Totals.CostUSD < 0 || row.Totals.EstimatedCostUSD < 0 {
+	if row.Totals.LedgerEntries < 0 || row.Totals.InputTokens < 0 || row.Totals.OutputTokens < 0 {
 		return fmt.Errorf("agent usage read owner returned negative totals")
+	}
+	for _, cost := range []float64{row.Totals.CostUSD, row.Totals.EstimatedCostUSD, row.Totals.ProviderReportedCostUSD, row.Totals.ReservationExhaustionUSD, row.Totals.UnattributedCostUSD} {
+		if cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			return fmt.Errorf("agent usage read owner returned invalid costs")
+		}
 	}
 	return nil
 }
@@ -455,9 +461,8 @@ func projectAgentUsageCompletionEvidence(row *operatorread.OperatorAgentUsageBre
 	if err != nil {
 		return fmt.Errorf("decode agent usage completion evidence: %w", err)
 	}
-	request := evidence.Request
-	if request.RequestedModel != row.Model || request.ModelAlias != row.ModelAlias || request.BackendProfile != row.BackendProfile ||
-		request.Provider != row.Provider || request.Transport != row.Transport || evidence.ResolvedModel() != row.ResolvedModel || evidence.CostProvenance != row.CostProvenance {
+	request := runtimeeffects.CompletionRequest{RequestedModel: row.Model, ModelAlias: row.ModelAlias, BackendProfile: row.BackendProfile, Provider: row.Provider, Transport: row.Transport}
+	if err := evidence.ValidateRequest(request, row.ResolvedModel); err != nil || evidence.CostProvenance != row.CostProvenance {
 		return fmt.Errorf("agent usage columns contradict completion evidence")
 	}
 	row.CompletionEvidence = &evidence

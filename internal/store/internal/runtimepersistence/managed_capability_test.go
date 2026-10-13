@@ -626,8 +626,14 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 	}
 	surfaceA := managedCompletionTestSurface(t, authorityFor(identityA), "anthropic_api")
 	surfaceB := managedCompletionTestSurface(t, authorityFor(identityB), "anthropic_api")
+	frame := managedCompletionTestFrame(t, authorityFor(identityA), "anthropic_api")
+	bound, err := runtimeeffects.BindCompletionRequest(authorityFor(identityA), runtimeeffects.AuthorizeRequest{AgentFrame: &frame})
+	if err != nil {
+		t.Fatal(err)
+	}
 	evidence := completionRecoveryAuthorityEvidence{
 		ActorTokenID: identityA.AgentID(), ExecutionMode: string(runtimeeffects.ExecutionModeLive),
+		ProviderRequest: bound.CompletionRequest,
 	}
 	evidence.UsageTarget.Kind = string(targetA.Kind)
 	evidence.UsageTarget.ID = targetA.ID
@@ -649,7 +655,7 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		Adapter: "anthropic_api", Transport: "api", State: string(runtimeeffects.StateAuthorized),
 		TargetKind: string(targetA.Kind), TargetID: targetA.ID,
 	}
-	frameBytes, err := agentframe.EncodeDurable(managedCompletionTestFrame(t, authorityFor(identityA), "anthropic_api"))
+	frameBytes, err := agentframe.EncodeDurable(frame)
 	if err != nil {
 		t.Fatalf("encode recovery execution frame: %v", err)
 	}

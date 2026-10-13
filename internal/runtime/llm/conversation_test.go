@@ -183,7 +183,9 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 	}
 	if _, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"turn": r.calls + 1}},
-		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
+		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output,
+			Evidence: runtimeeffects.CompletionEvidence{Request: handle.Attempt().Authority.CompletionRequest,
+				Models: []runtimeeffects.CompletionModelObservation{{Model: "test-model", Source: runtimeeffects.CompletionModelResponse}}, CostProvenance: runtimeeffects.CompletionCostEstimated}},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
 			Identity: target.AgentIdentity,
@@ -191,7 +193,8 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
-			Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http",
+			Model: handle.Attempt().Authority.CompletionRequest.RequestedModel, ModelAlias: handle.Attempt().Authority.CompletionRequest.ModelAlias,
+			BackendProfile: "anthropic", Provider: "anthropic", Transport: "api",
 			ResolvedModel: "test-model", InvocationType: "task",
 		},
 	}); err != nil {

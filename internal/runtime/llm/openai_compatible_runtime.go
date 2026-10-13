@@ -276,6 +276,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	start := time.Now()
 	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
 	latency := time.Since(start)
+	completionUsage := apiCompletionUsageFromRaw(rawResp, "prompt_tokens", "completion_tokens")
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
@@ -287,7 +288,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 			Failure:        agentTurnFailure(err, "openai_compatible_turn"),
 		}, nil)
 		if dispatch != nil {
-			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
 				return nil, errors.Join(err, settleErr)
 			}
 		}
@@ -308,7 +309,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		return nil, err
 	}
 
-	usage, ok := openAICompatibleUsage(parsed)
+	_, ok := openAICompatibleUsage(parsed)
 	if !ok {
 		err := errors.New("openai-compatible response missing usage")
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
@@ -320,7 +321,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_compatible_usage"),
 		}, nil)
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableObservedCompletionUsage(parsed.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -341,7 +342,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_compatible_decode"),
 		}, nil)
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionObservedUsage(usage.InputTokens, usage.OutputTokens, usage.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -366,7 +367,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		ParseOK:        true,
 		Latency:        latency,
 	}, &resp)
-	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionObservedUsage(usage.InputTokens, usage.OutputTokens, usage.Model), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
+	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage, runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
 	if !settled.Committed {
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}

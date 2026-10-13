@@ -195,8 +195,12 @@ func loadCompletionFrameBytes(t *testing.T, fixture completionSettlementFixture,
 	if !fixture.sqlite {
 		placeholder = "$1::uuid"
 	}
+	query := `SELECT agent_frame_bytes FROM ` + table + ` WHERE ` + idColumn + `=` + placeholder
+	if table == "runtime_external_effect_attempts" {
+		query = `SELECT o.agent_frame_bytes FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE a.attempt_id=` + placeholder
+	}
 	var got []byte
-	if err := fixture.db.QueryRow(`SELECT agent_frame_bytes FROM `+table+` WHERE `+idColumn+`=`+placeholder, id).Scan(&got); err != nil {
+	if err := fixture.db.QueryRow(query, id).Scan(&got); err != nil {
 		t.Fatalf("load %s frame bytes: %v", table, err)
 	}
 	return got
@@ -1717,6 +1721,9 @@ func requireCompletionRecoveryRows(t *testing.T, fixture completionSettlementFix
 	}
 	if turns != wantTurns || spend != wantSpend || reservations != wantReservations {
 		t.Fatalf("completion recovery rows turns=%d spend=%d reservations=%d, want %d/%d/%d", turns, spend, reservations, wantTurns, wantSpend, wantReservations)
+	}
+	if wantTurns > 0 {
+		requireCompletion2270FrozenNativeEvidence(t, fixture, attemptID)
 	}
 }
 

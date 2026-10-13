@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/spf13/cobra"
 )
 
@@ -151,14 +152,14 @@ type forkChatTurn struct {
 }
 
 type forkChatSnapshot struct {
-	ForkID          string                   `json:"fork_id"`
-	SourceSessionID string                   `json:"source_session_id"`
-	SourceRunID     string                   `json:"source_run_id,omitempty"`
-	SourceAgentID   string                   `json:"source_agent_id"`
-	SourceTurn      map[string]any           `json:"source_turn"`
-	EntitySnapshot  []forkChatEntitySnapshot `json:"entity_snapshot"`
-	SnapshotOwner   string                   `json:"snapshot_owner"`
-	CreatedAt       string                   `json:"created_at"`
+	ForkID          string                              `json:"fork_id"`
+	SourceSessionID string                              `json:"source_session_id"`
+	SourceRunID     string                              `json:"source_run_id,omitempty"`
+	SourceAgentID   string                              `json:"source_agent_id"`
+	SourceTurn      *runfork.ConversationForkSourceTurn `json:"source_turn"`
+	EntitySnapshot  []forkChatEntitySnapshot            `json:"entity_snapshot"`
+	SnapshotOwner   string                              `json:"snapshot_owner"`
+	CreatedAt       string                              `json:"created_at"`
 }
 
 type forkChatEntitySnapshot struct {
@@ -817,6 +818,9 @@ func validateForkChatSnapshot(snapshot forkChatSnapshot) error {
 	if snapshot.SourceTurn == nil {
 		return fmt.Errorf("malformed conversation.fork_chat result.snapshot: source_turn is required")
 	}
+	if err := validateCLICompletionEvidence("snapshot.source_turn", snapshot.SourceTurn.CompletionEvidence, snapshot.SourceTurn.ResolvedModel); err != nil {
+		return err
+	}
 	if snapshot.EntitySnapshot == nil {
 		return fmt.Errorf("malformed conversation.fork_chat result.snapshot: entity_snapshot is required")
 	}
@@ -952,6 +956,11 @@ func writeForkChatSessionDetail(out io.Writer, fork forkChatSession) {
 		Rows:         rows,
 		EmptyMessage: "No forkchat turns recorded.",
 	})
+	for _, turn := range fork.Turns {
+		for _, completion := range turn.Completions {
+			fmt.Fprintf(out, "turn %d completion %d: %s\n", turn.TurnIndex, completion.Ordinal, cliCompletionEvidenceSummary(completion.Usage.Evidence))
+		}
+	}
 }
 
 func writeForkChatChatResult(out io.Writer, result forkChatChatResult) {

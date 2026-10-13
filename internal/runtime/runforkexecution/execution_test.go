@@ -2162,7 +2162,7 @@ PY
 fi
 printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\",\"mcp__runtime-tools__notify_human\"]}"
 if [ "$count" -gt 1 ]; then
-  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"model\":\"claude-selected-fork\",\"result\":\"selected-fork-flow-complete\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}"
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"model\":\"reported-selected-cli\",\"result\":\"selected-fork-flow-complete\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}"
 fi
 `
 	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
@@ -2296,6 +2296,7 @@ fi
 		t.Fatalf("selected-fork flow-scoped MCP emissions = %d, want 1", emitted)
 	}
 	assertSelectedForkClaudeCapabilityEvidence(t, ctx, db, result)
+	assertCompletion2270SelectedCLIReadback(t, ctx, selected, result.Materialization.ForkRunID)
 }
 
 func capturedSelectedForkArgValue(t testing.TB, raw []byte, name string) string {

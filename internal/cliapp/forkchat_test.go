@@ -470,7 +470,7 @@ func validForkChatSnapshot(forkID string) map[string]any {
 		"source_session_id": "sess-1",
 		"source_run_id":     "run-1",
 		"source_agent_id":   "agent-1",
-		"source_turn":       map[string]any{"turn_id": "turn-2", "turn_index": 2},
+		"source_turn":       map[string]any{"turn_id": "turn-2", "turn_index": 2, "selected_at": "2026-05-25T11:02:00Z", "created_at": "2026-05-25T11:01:00Z", "completion_evidence": completionEvidenceFixtureForCLI()},
 		"entity_snapshot": []map[string]any{
 			{"entity_id": "entity-1", "current_state": "active"},
 		},
