@@ -9,13 +9,13 @@ import (
 )
 
 type HandlerDeclarativeEmitSite struct {
-	Source    string
-	SiteKey   string
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
-	RuleIndex int
-	Spec      EmitSpec
-	ItemAlias string
+	Source      string
+	SiteKey     string
+	RuleDisplay string
+	RuleRef     runtimeidentity.DeclarationIdentity
+	RuleIndex   int
+	Spec        EmitSpec
+	ItemAlias   string
 }
 
 func (s HandlerDeclarativeEmitSite) EventType() string {
@@ -34,7 +34,7 @@ func HandlerEmitEvents(handler SystemNodeEventHandler, plans []FanOutCompiledPla
 
 func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutCompiledPlan) []HandlerDeclarativeEmitSite {
 	out := make([]HandlerDeclarativeEmitSite, 0, 8)
-	add := func(source, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, ruleIndex int, spec EmitSpec, itemAlias ...string) {
+	add := func(source, siteKey, ruleDisplay string, ruleRef runtimeidentity.DeclarationIdentity, ruleIndex int, spec EmitSpec, itemAlias ...string) {
 		if spec.Empty() {
 			return
 		}
@@ -43,13 +43,13 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 			alias = strings.TrimSpace(itemAlias[0])
 		}
 		out = append(out, HandlerDeclarativeEmitSite{
-			Source:    strings.TrimSpace(source),
-			SiteKey:   strings.TrimSpace(siteKey),
-			RuleID:    strings.TrimSpace(ruleID),
-			RuleRef:   ruleRef,
-			RuleIndex: ruleIndex,
-			Spec:      cloneEmitSpec(spec),
-			ItemAlias: alias,
+			Source:      strings.TrimSpace(source),
+			SiteKey:     strings.TrimSpace(siteKey),
+			RuleDisplay: ruleDisplay,
+			RuleRef:     ruleRef,
+			RuleIndex:   ruleIndex,
+			Spec:        cloneEmitSpec(spec),
+			ItemAlias:   alias,
 		})
 	}
 	templateSites := HandlerRuleEmitTemplateSites(handler)
@@ -57,7 +57,7 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 		add("handler.emit", "handler.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Emit)
 		for idx, rule := range handler.Rules {
 			ruleRef, _ := rule.DeclarationIdentity()
-			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
+			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.DisplayLabel("rules", idx), ruleRef, idx, rule.Emit)
 		}
 	} else {
 		out = append(out, templateSites...)
@@ -65,13 +65,13 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 	add("handler.on_success.emit", "handler.on_success.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
 		ruleRef, _ := rule.DeclarationIdentity()
-		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
+		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.DisplayLabel("on_complete", idx), ruleRef, idx, rule.Emit)
 	}
 	if handler.Join != nil {
 		completeRef, _ := handler.Join.OnComplete.DeclarationIdentity()
 		deadlineRef, _ := handler.Join.OnDeadline.DeclarationIdentity()
-		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), completeRef, 0, handler.Join.OnComplete.Emit)
-		add("handler.join.on_deadline.emit", "handler.join.on_deadline.emit", handler.Join.EffectiveID(), deadlineRef, 0, handler.Join.OnDeadline.Emit)
+		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.OnComplete.DisplayLabel("join.on_complete", 0), completeRef, 0, handler.Join.OnComplete.Emit)
+		add("handler.join.on_deadline.emit", "handler.join.on_deadline.emit", handler.Join.OnDeadline.DisplayLabel("join.on_deadline", 0), deadlineRef, 0, handler.Join.OnDeadline.Emit)
 	}
 	for _, plan := range plans {
 		site := HandlerDeclarativeEmitSite{Spec: cloneEmitSpec(plan.Emit), ItemAlias: plan.ItemAlias, RuleIndex: plan.Site.Index}
@@ -83,14 +83,14 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 				continue
 			}
 			rule := handler.Rules[plan.Site.Index]
-			site.Source, site.SiteKey, site.RuleID = "handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", plan.Site.Index, "fan_out.emit"), rule.ID
+			site.Source, site.SiteKey, site.RuleDisplay = "handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", plan.Site.Index, "fan_out.emit"), rule.DisplayLabel("rules", plan.Site.Index)
 			site.RuleRef, _ = rule.DeclarationIdentity()
 		case FanOutSiteOnComplete:
 			if plan.Site.Index < 0 || plan.Site.Index >= len(handler.OnComplete) {
 				continue
 			}
 			rule := handler.OnComplete[plan.Site.Index]
-			site.Source, site.SiteKey, site.RuleID = "handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", plan.Site.Index, "fan_out.emit"), rule.ID
+			site.Source, site.SiteKey, site.RuleDisplay = "handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", plan.Site.Index, "fan_out.emit"), rule.DisplayLabel("on_complete", plan.Site.Index)
 			site.RuleRef, _ = rule.DeclarationIdentity()
 		default:
 			continue
@@ -114,12 +114,12 @@ func HandlerRuleEmitTemplateSites(handler SystemNodeEventHandler) []HandlerDecla
 		}
 		ruleRef, _ := rule.DeclarationIdentity()
 		out = append(out, HandlerDeclarativeEmitSite{
-			Source:    "handler.rules.emit_template",
-			SiteKey:   indexedHandlerEmitSiteKey("handler.rules", idx, "emit_template"),
-			RuleID:    strings.TrimSpace(rule.ID),
-			RuleRef:   ruleRef,
-			RuleIndex: idx,
-			Spec:      spec,
+			Source:      "handler.rules.emit_template",
+			SiteKey:     indexedHandlerEmitSiteKey("handler.rules", idx, "emit_template"),
+			RuleDisplay: rule.DisplayLabel("rules", idx),
+			RuleRef:     ruleRef,
+			RuleIndex:   idx,
+			Spec:        spec,
 		})
 	}
 	return out
