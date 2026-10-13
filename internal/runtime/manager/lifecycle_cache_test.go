@@ -261,6 +261,13 @@ func TestAgentRowCacheLostAckFinalizerCannotMutateSuccessor(t *testing.T) {
 		t.Fatal("lost acknowledgment was reported as success")
 	}
 	committed, _, _ := probe.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if _, _, _, err := replaceCoordinatorLoop(coordinator, ctx, record, "reconfigure", "", &record, sessions.LifecycleMutationPlan{}); err == nil {
+		t.Fatal("lost acknowledgment accepted the predecessor configuration as a no-op")
+	}
+	unchanged, _, _ := probe.LoadAgentLifecycleState(ctx, record.Config.Identity)
+	if !sameAgentRowObservation(committed, unchanged) {
+		t.Fatal("predecessor no-op changed the committed replacement")
+	}
 	lease, err := coordinator.acquireExecutionIdentity(ctx, record.Config.Identity, "lost-ack admission", true)
 	if err == nil || lease != nil {
 		if lease != nil {

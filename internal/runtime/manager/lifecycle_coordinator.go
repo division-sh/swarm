@@ -1773,6 +1773,10 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		}
 	}
 	if trigger == "reconfigure" && lifecycleProjectionEqual(revision, transitionTopology, cell.view.ConfigRevision, cell.view.Topology) {
+		if cell.unacknowledged != nil {
+			c.mu.Unlock()
+			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_unacknowledged_request_conflict", "agent-lifecycle", trigger, map[string]any{"agent_identity": identity})
+		}
 		token := lifecycleToken(identity, cell.view.RuntimeEpoch, cell.view.Generation)
 		c.mu.Unlock()
 		return nil, token, nil, nil

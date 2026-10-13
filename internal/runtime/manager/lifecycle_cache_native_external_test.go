@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -23,9 +24,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
 			ctx := manager.TerminalPanicFixtureContext()
-			record := manager.TerminalPanicFixture(t)
-			record.Config.LLMBackend, record.Config.ResolvedLLMBackend = "anthropic", "anthropic"
-			record.Topology = agenttopology.Admission{}
+			record := manager.ReconfigureMemoryNativeFixture(t, false)
 			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
 			view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 			if err != nil || !found {
@@ -42,6 +41,8 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				return snapshot
+			}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
+				return admitNativeReconfigureCandidate(t, selected, candidate)
 			})
 		})
 	}
