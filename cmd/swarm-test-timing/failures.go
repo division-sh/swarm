@@ -28,6 +28,12 @@ type failureRunMetadata struct {
 	Event string `json:"event"`
 }
 
+type failurePopulationReport struct {
+	Runs    []testtiming.FailureRun      `json:"runs"`
+	Matches []testtiming.FailureMatch    `json:"matches"`
+	Summary testtiming.FailurePopulation `json:"summary"`
+}
+
 func runFailures(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("failures", flag.ContinueOnError)
 	var options failureOptions
@@ -101,12 +107,17 @@ func runFailures(args []string, output io.Writer) error {
 		count := summary.ByPhenomenon[kind]
 		fmt.Fprintf(output, "  %s: RED runs=%d; runs with reviewed non-PR evidence=%d; unknown observations=%d (overlapping classes, not additive)\n", kind, count.RedRuns, count.ReviewedNonPRRuns, count.UnknownObservations)
 	}
-	if options.output != "" {
-		return writeJSON(options.output, struct {
-			Runs    []testtiming.FailureRun      `json:"runs"`
-			Matches []testtiming.FailureMatch    `json:"matches"`
-			Summary testtiming.FailurePopulation `json:"summary"`
-		}{runs, matches, summary})
+	return finishFailurePopulation(options.output, failurePopulationReport{runs, matches, summary})
+}
+
+func finishFailurePopulation(path string, report failurePopulationReport) error {
+	if path != "" {
+		if err := writeJSON(path, report); err != nil {
+			return err
+		}
+	}
+	if report.Summary.Incomplete != 0 {
+		return fmt.Errorf("failure population incompletely observed: %d runs; inspect the retained report for missing history or evidence", report.Summary.Incomplete)
 	}
 	return nil
 }

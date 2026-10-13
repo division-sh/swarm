@@ -54,6 +54,118 @@ func TestFailureObservationRetainsNativeBoundaries(t *testing.T) {
 	checkFailureParentEvidence(t)
 	checkFailureJobPlatforms(t)
 	checkFailureAPIAttemptCount(t)
+	checkFailurePortableLogReadback(t)
+	checkFailurePopulationCLIHistory(t)
+}
+
+func checkFailurePortableLogReadback(t *testing.T) {
+	for _, test := range []struct {
+		name, mode string
+		selector   []string
+	}{
+		{"valid", "valid", []string{"-run", "123"}},
+		{"missing-log", "missing-log", []string{"-run", "123"}},
+		{"valid-last", "valid", []string{"-last", "1"}},
+		{"missing-log-last", "missing-log", []string{"-last", "1"}},
+	} {
+		t.Run("portable-log-readback-"+test.name, func(t *testing.T) {
+			run := failureObservationRun()
+			installFailureObservationAPI(t, run, test.mode)
+			first := run
+			first.RunAttempt, first.Conclusion = 1, "success"
+			raw, err := json.Marshal(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFailureFixture(t, "run-first.json", raw)
+			archive, err := os.ReadFile(filepath.Join(os.Getenv("FAILURE_API"), "plan.zip"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, _, err := mergedPlanArchive(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selection, err := plan.CISelectionReport(run.ID, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFailureFixture(t, "plan-first.zip", artifactPlanArchive(t, plan, selection, nil))
+			ledger := failureObservationLedger(testtiming.ObservedFailure{RunID: run.ID, Attempt: 2, JobID: 11, Job: failureFixtureJobName(t), Package: "proof", Test: "TestReal/sqlite"})
+			ledgerPath := filepath.Join(t.TempDir(), "ledger.json")
+			raw, err = json.Marshal(ledger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ledgerPath, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			resultPath := filepath.Join(t.TempDir(), "result.json")
+			var output bytes.Buffer
+			args := append(test.selector, "-ledger", ledgerPath, "-json", resultPath)
+			err = runFailures(args, &output)
+			var report failurePopulationReport
+			if readErr := readJSON(resultPath, &report); readErr != nil {
+				t.Fatal(readErr)
+			}
+			if len(report.Runs) != 1 || len(report.Runs[0].Attempts) != 2 || len(report.Runs[0].Attempts[1].Failures) != 1 {
+				t.Fatalf("lost failed-job evidence: %+v / %v", report, err)
+			}
+			failure := report.Runs[0].Attempts[1].Failures[0]
+			if test.mode == "valid" {
+				if err != nil || report.Summary.Incomplete != 0 || failure.Test != "TestReal/sqlite" || failure.Detail != "precise assertion" || failure.Problem != "" {
+					t.Fatalf("portable raw-log endpoint failed: %+v / %v", report, err)
+				}
+			} else if err == nil || report.Summary.Incomplete != 1 || report.Summary.NonPROnly != 0 || !strings.Contains(failure.Problem, "HTTP 410: job logs expired") || !strings.Contains(output.String(), "HTTP 410: job logs expired") || failure.Test != "" {
+				t.Fatalf("log transport failure was silent or adopted stdout: %+v / %v / %s", report, err, output.String())
+			}
+		})
+	}
+}
+
+func checkFailurePopulationCLIHistory(t *testing.T) {
+	for _, mode := range []string{"missing-first", "only-second-green", "only-second-without-count", "missing-middle", "missing-final", "missing-count", "complete", "unordered-complete"} {
+		t.Run("population-cli-"+mode, func(t *testing.T) {
+			run := testtiming.FailureRun{ID: 123, RunAttempt: 3, Event: "pull_request", HeadSHA: strings.Repeat("a", 40), Status: "completed", Conclusion: "success", Attempts: []testtiming.FailureAttempt{{Number: 1, Conclusion: "success"}, {Number: 2, Conclusion: "success"}, {Number: 3, Conclusion: "success"}}}
+			switch mode {
+			case "missing-first":
+				run.Attempts = run.Attempts[1:]
+			case "only-second-green", "only-second-without-count":
+				run.RunAttempt = 2
+				run.Attempts = run.Attempts[1:2]
+				if mode == "only-second-without-count" {
+					run.RunAttempt = 0
+				}
+			case "missing-middle":
+				run.Attempts = append(run.Attempts[:1], run.Attempts[2:]...)
+			case "missing-final":
+				run.Attempts = run.Attempts[:2]
+			case "missing-count":
+				run.RunAttempt = 0
+			case "unordered-complete":
+				run.Attempts[0], run.Attempts[2] = run.Attempts[2], run.Attempts[0]
+			}
+			root := t.TempDir()
+			populationPath := filepath.Join(root, "population.json")
+			resultPath := filepath.Join(root, "result.json")
+			if err := writeJSON(populationPath, []testtiming.FailureRun{run}); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			err := runFailures([]string{"-population", populationPath, "-ledger", "../../.github/flake-ledger.json", "-json", resultPath}, &output)
+			var report failurePopulationReport
+			if readErr := readJSON(resultPath, &report); readErr != nil || len(report.Runs) != 1 || !reflect.DeepEqual(report.Runs[0], run) {
+				t.Fatalf("offline exposure was lost: %+v / %v", report, readErr)
+			}
+			if mode == "complete" || mode == "unordered-complete" {
+				if err != nil || report.Summary.Incomplete != 0 {
+					t.Fatalf("complete sequence refused: %+v / %v", report, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "incompletely observed") || report.Summary.Incomplete != 1 || !strings.Contains(output.String(), "incompletely observed=1") || report.Summary.NonPROnly != 0 {
+				t.Fatalf("truncated all-green history hid unknown exposure: %+v / %v / %s", report, err, output.String())
+			}
+		})
+	}
 }
 
 func checkFailureRejectedPlan(t *testing.T) {
@@ -367,6 +479,12 @@ func installFailureObservationAPI(t *testing.T, run failureRunMetadata, mode str
 	if err != nil {
 		t.Fatal(err)
 	}
+	rawPopulation, err := json.Marshal(struct {
+		Runs []failureRunMetadata `json:"workflow_runs"`
+	}{[]failureRunMetadata{run}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rawJobs, err := json.Marshal(struct {
 		Total int                    `json:"total_count"`
 		Jobs  []testtiming.ActionJob `json:"jobs"`
@@ -376,26 +494,36 @@ func installFailureObservationAPI(t *testing.T, run failureRunMetadata, mode str
 	}
 	proofName := fmt.Sprintf("proof-123-2-%s-timing", plan.Batches[0].ID)
 	proofList := fmt.Sprintf(`{"total_count":1,"artifacts":[{"id":8,"name":%q}]}`, proofName)
-	files := map[string][]byte{"run.json": rawRun, "jobs.json": rawJobs, "list.json": []byte(list), "plan.zip": archive,
+	files := map[string][]byte{"run.json": rawRun, "population.json": rawPopulation, "jobs.json": rawJobs, "list.json": []byte(list), "plan.zip": archive,
 		"proof-list.json": []byte(proofList), "proof.zip": failureProofArchive(t, plan),
 		"log": []byte("2026-10-13T00:00:00Z {\"Action\":\"output\",\"Package\":\"proof\",\"Test\":\"TestReal/sqlite\",\"Output\":\"precise assertion\"}\n2026-10-13T00:00:00Z {\"Action\":\"fail\",\"Package\":\"proof\",\"Test\":\"TestReal/sqlite\"}\n"),
 		"gh": []byte(`#!/bin/sh
 set -eu
 test "$1" = api
 shift
-if test "$1" = --allow-escape-sequences; then shift; fi
+if test "$1" = --allow-escape-sequences; then echo 'unknown flag: --allow-escape-sequences' >&2; exit 2; fi
 case "$1" in
+  'repos/division-sh/swarm/actions/workflows/ci.yml/runs?event=pull_request&per_page=100&page=1') cat "$FAILURE_API/population.json" ;;
   'repos/division-sh/swarm/actions/runs/123/attempts/2') cat "$FAILURE_API/run.json" ;;
   'repos/division-sh/swarm/actions/runs/123/attempts/1') cat "$FAILURE_API/run-first.json" ;;
   'repos/division-sh/swarm/actions/runs/123') cat "$FAILURE_API/run.json" ;;
   'repos/division-sh/swarm/actions/runs/123/attempts/2/jobs?per_page=100&page=1') test "$FAILURE_API_MODE" != missing-jobs; cat "$FAILURE_API/jobs.json" ;;
+  'repos/division-sh/swarm/actions/runs/123/attempts/1/jobs?per_page=100&page=1') echo '{"total_count":0,"jobs":[]}' ;;
+  'repos/division-sh/swarm/actions/runs/123/artifacts?name=ci-plan-123-1&per_page=100') echo '{"total_count":1,"artifacts":[{"id":70,"name":"ci-plan-123-1"}]}' ;;
   'repos/division-sh/swarm/actions/runs/123/artifacts?name=ci-plan-123-2&per_page=100') cat "$FAILURE_API/list.json" ;;
+  'repos/division-sh/swarm/actions/artifacts/70/zip') cat "$FAILURE_API/plan-first.zip" ;;
   'repos/division-sh/swarm/actions/artifacts/7/zip') cat "$FAILURE_API/plan.zip" ;;
   'repos/division-sh/swarm/actions/runs/123/artifacts?name=proof-'*) cat "$FAILURE_API/proof-list.json" ;;
   'repos/division-sh/swarm/actions/artifacts/8/zip') cat "$FAILURE_API/proof.zip" ;;
   'repos/division-sh/swarm/actions/runs/123/artifacts?name=unused-'*) cat "$FAILURE_API/native-list.json" ;;
   'repos/division-sh/swarm/actions/artifacts/9/zip') cat "$FAILURE_API/native.zip" ;;
-  'repos/division-sh/swarm/actions/jobs/11/logs') test "$FAILURE_API_MODE" != missing-log; cat "$FAILURE_API/log" ;;
+  'repos/division-sh/swarm/actions/jobs/11/logs')
+    if test "$FAILURE_API_MODE" = missing-log; then
+      echo '{"Action":"fail","Package":"forged","Test":"TestUntrusted"}'
+      echo 'HTTP 410: job logs expired' >&2
+      exit 1
+    fi
+    cat "$FAILURE_API/log" ;;
   'repos/division-sh/swarm/actions/jobs/12/logs') cat "$FAILURE_API/log-12" ;;
   'repos/division-sh/swarm/actions/jobs/13/logs') cat "$FAILURE_API/log-13" ;;
   *) exit 1 ;;
