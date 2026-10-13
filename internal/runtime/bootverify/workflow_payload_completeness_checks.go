@@ -277,35 +277,25 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 func payloadCompletenessDeclarativeSiteLabel(site runtimecontracts.HandlerDeclarativeEmitSite) string {
 	switch strings.TrimSpace(site.Source) {
 	case "handler.rules.emit":
-		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "emit")
+		return site.RuleDisplay + ".emit"
 	case "handler.rules.fan_out.emit":
-		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "fan_out.emit")
+		return site.RuleDisplay + ".fan_out.emit"
 	case "handler.rules.emit_template":
-		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "emit_template")
+		return site.RuleDisplay + ".emit_template"
 	case "handler.on_complete.emit":
-		return payloadCompletenessRuleLabel("on_complete", site.RuleIndex, site.RuleID, "emit")
+		return site.RuleDisplay + ".emit"
 	case "handler.on_complete.fan_out.emit":
-		return payloadCompletenessRuleLabel("on_complete", site.RuleIndex, site.RuleID, "fan_out.emit")
+		return site.RuleDisplay + ".fan_out.emit"
 	case "handler.join.on_complete.emit":
-		return payloadCompletenessRuleLabel("join.on_complete", site.RuleIndex, site.RuleID, "emit")
+		return site.RuleDisplay + ".emit"
 	case "handler.join.on_deadline.emit":
-		return payloadCompletenessRuleLabel("join.on_deadline", site.RuleIndex, site.RuleID, "emit")
+		return site.RuleDisplay + ".emit"
 	default:
 		if label := strings.TrimSpace(site.SiteKey); label != "" {
 			return label
 		}
 		return strings.TrimSpace(site.Source)
 	}
-}
-
-func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) string {
-	scope = strings.TrimSpace(scope)
-	id = strings.TrimSpace(id)
-	suffix = strings.TrimSpace(suffix)
-	if id != "" {
-		return fmt.Sprintf("%s[%s].%s", scope, id, suffix)
-	}
-	return fmt.Sprintf("%s[%d].%s", scope, index, suffix)
 }
 
 func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field, emitSiteLabel string, emitFieldTargets map[string]struct{}, triggerResolution semanticview.EventSchemaResolution, entityFields map[string]struct{}) string {
