@@ -117,6 +117,31 @@ result-observer:
 	return root
 }
 
+// One authored ordinal transfers the complete mixed request through the normal
+// pump, so a held node observer does not block the provider's own return.
+func CopyHandedOffMixedReplyRequest(t testing.TB) string {
+	t.Helper()
+	root := CopyMixedReplyRequest(t)
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    request.started:
+      emit:
+        event: provider.requested
+        fields:
+          account_id: payload.account_id
+          request_id: payload.request_id
+`, `    request.started:
+      fan_out:
+        items_from: '[payload.request_id]'
+        as: request_id
+        identity: request_id
+        emit:
+          event: provider.requested
+          fields:
+            account_id: payload.account_id
+            request_id: request_id
+`)
+	return root
+}
+
 // CopyMixedReplyResponse routes one output both as a reply and as an ordinary
 // observation to the same instance, under different compiled input pins.
 func CopyMixedReplyResponse(t testing.TB) string {

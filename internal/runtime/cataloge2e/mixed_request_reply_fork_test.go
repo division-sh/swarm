@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -54,6 +55,9 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyMixedReplyRequest(t)
+			if returnedRequester {
+				root = canonicalrouting.CopyHandedOffMixedReplyRequest(t)
+			}
 			if responseObserver {
 				root = canonicalrouting.CopyMixedReplyResponse(t)
 			}
@@ -71,6 +75,13 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				h.publishAndWait(step, 20*time.Second)
 			}
 			h.waitForCatalogStoreQuiescence(20 * time.Second)
+			if returnedRequester {
+				progress, err := storetest.ReadFanOutRunProgressStorage(h.ctx, selected, catalogRuntimeRunID)
+				if err != nil || len(progress.Intents) != 1 || progress.Outcomes != 1 ||
+					progress.Intents[0].Cardinality != 1 || progress.Intents[0].Cursor != 1 || progress.Intents[0].Status != "closed" {
+					t.Fatalf("one-item source did not complete its actual pump issuance: progress=%+v error=%v", progress, err)
+				}
+			}
 			sourceRows, err := storetest.ReadReplyContextRecords(h.ctx, selected, catalogRuntimeRunID)
 			if err != nil || len(sourceRows) != 1 || sourceRows[0].State != replycontext.StateTerminal || sourceRows[0].AcceptedReplyEventID == "" {
 				t.Fatalf("ordinary source did not settle its own request: rows=%+v error=%v", sourceRows, err)
@@ -456,6 +467,7 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 				if err != nil || observed != 0 {
 					t.Fatalf("completed-requester cut no longer has an unfinished observer: observed=%d error=%v", observed, err)
 				}
+				proveMixedRequestSourceHandoff(t, ctx, h, selected, row)
 				t.Logf("ordinary source reached completed requester with its original observer still claimed: request=%s return=%s cut=%s claim=%s",
 					row.RequestEventID, row.AcceptedReplyEventID, cut, claim.EventID)
 			}
@@ -476,6 +488,42 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+}
+
+func proveMixedRequestSourceHandoff(t *testing.T, ctx context.Context, h *runtimeHarness, selected unclaimedFanOutReplyStore, row replycontext.Record) {
+	t.Helper()
+	owner, ok := h.rt.Bus.DeliveryContinuationOwner().(*deliverycontinuation.Coordinator)
+	if !ok || !owner.OwnsPersistedRecovery() {
+		t.Fatal("completed-requester source requires the actual managed generation coordinator")
+	}
+	authority, err := h.rt.Bus.DeliveryAuthority()
+	if err != nil || authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
+		t.Fatalf("source lacks its current normal delivery authority: authority=%+v error=%v", authority, err)
+	}
+	publication, found, err := selected.LoadPreparedPublishEvent(ctx, row.RequestEventID)
+	if err != nil || !found || len(publication.DeliveryRoutes) != 2 {
+		t.Fatalf("source handoff lost its complete mixed request: publication=%+v found=%t error=%v", publication, found, err)
+	}
+	receipt, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, selected, row.RequestEventID)
+	if err != nil || receipt.Outcome != "success" || receipt.Reason != "pipeline_persisted" {
+		t.Fatalf("source request was not acknowledged by its actual publication group: receipt=%+v error=%v", receipt, err)
+	}
+	outcomes, err := storetest.ReadFanOutPublishedOutcomeStorage(ctx, selected, catalogRuntimeRunID)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Ordinal != 0 || outcomes[0].EventID != row.RequestEventID || outcomes[0].Kind != "committed" {
+		t.Fatalf("source request did not come from its one real committed ordinal: outcomes=%+v error=%v", outcomes, err)
+	}
+	for _, route := range publication.DeliveryRoutes {
+		id, err := deliverylifecycle.DeliveryID(row.RequestEventID, route)
+		if err != nil || !route.Recipient.IsNode() {
+			t.Fatalf("source handoff substituted its original node recipient: route=%+v error=%v", route, err)
+		}
+		delivery, err := selected.Snapshot(ctx, id)
+		if err != nil || delivery.ContinuationHandoffAt.IsZero() || delivery.StartedAt.IsZero() ||
+			delivery.ContinuationHandoffAt.After(delivery.StartedAt) || !delivery.Authority.Equal(authority) {
+			t.Fatalf("source recipient did not consume an acknowledged current-generation handoff: delivery=%+v error=%v", delivery, err)
+		}
+	}
+	t.Logf("source one-item mixed publication acknowledged before independent claims: request=%s receipt=%+v", row.RequestEventID, receipt)
 }
 
 func logMixedRequesterWait(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, row replycontext.Record) {
