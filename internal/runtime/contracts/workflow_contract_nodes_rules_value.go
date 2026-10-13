@@ -8,41 +8,24 @@ import (
 )
 
 func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
-	if value.Presence() == yamlsource.PresenceNull {
-		return nil, fmt.Errorf("%s handler rule collection must not be null at %s", context, value.Location())
+	if value.Presence() != yamlsource.PresenceSequence && value.Presence() != yamlsource.PresenceEmptySequence {
+		code := "DIALECT-RULES-ORDER"
+		if context == handlerRuleDecodeContextOnComplete {
+			code = "DIALECT-OC-ORDER"
+		}
+		return nil, nodeValueError(value, fmt.Errorf("%s: %s must be an ordered list of rule mappings; write %s: [{emit: done}]", code, context, context))
+	}
+	items, err := value.Sequence()
+	if err != nil {
+		return nil, err
 	}
 	var rows []HandlerRuleEntry
-	switch value.Presence() {
-	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
-		items, err := value.Sequence()
+	for _, item := range items {
+		row, err := projectNodeRuleEntryValue(item, context)
 		if err != nil {
 			return nil, err
 		}
-		for _, item := range items {
-			row, err := projectNodeRuleEntryValue(item, context)
-			if err != nil {
-				return nil, err
-			}
-			rows = append(rows, row)
-		}
-	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		if context == handlerRuleDecodeContextOnComplete {
-			return nil, fmt.Errorf("DIALECT-OC-ORDER: on_complete at %s must be an ordered list", value.Location())
-		}
-		singleton, singletonErr := projectNodeRuleEntryValue(value, context)
-		keyed, keyedErr := projectNodeKeyedRulesValue(value, context)
-		switch {
-		case singletonErr == nil && keyedErr == nil:
-			return nil, fmt.Errorf("AMBIGUOUS-RULE-GRAMMAR: mapping at %s is valid both as one rule and keyed rules; use a sequence", value.Location())
-		case singletonErr == nil:
-			rows = []HandlerRuleEntry{singleton}
-		case keyedErr == nil:
-			rows = keyed
-		default:
-			return nil, nodeRuleMappingDiagnostic(value, singletonErr, keyedErr)
-		}
-	default:
-		return nil, fmt.Errorf("%s at %s must be a rule sequence or mapping", context, value.Location())
+		rows = append(rows, row)
 	}
 	if err := validatePolicySheetRows(rows, context); err != nil {
 		return nil, nodeValueError(value, err)
@@ -60,65 +43,6 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		case row.Compute.Module != nil:
 			row.Compute.Module.RowID = display
 		}
-	}
-	return rows, nil
-}
-
-func nodeRuleMappingDiagnostic(value yamlsource.Value, singletonErr, keyedErr error) error {
-	fields, err := value.Mapping()
-	if err != nil {
-		return singletonErr
-	}
-	if len(fields) == 0 {
-		return keyedErr
-	}
-	for _, entry := range fields {
-		if _, known := ruleFieldOptions[entry.Name]; known && entry.Value.Presence() != yamlsource.PresenceMapping && entry.Value.Presence() != yamlsource.PresenceEmptyMapping {
-			return singletonErr
-		}
-	}
-	for _, entry := range fields {
-		if entry.Name == "condition" && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
-			return keyedErr
-		}
-		if _, known := ruleFieldOptions[entry.Name]; known {
-			continue
-		}
-		if entry.Value.Presence() != yamlsource.PresenceMapping && entry.Value.Presence() != yamlsource.PresenceEmptyMapping {
-			return singletonErr
-		}
-		return keyedErr
-	}
-	return singletonErr
-}
-
-func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
-	fields, err := value.Mapping()
-	if err != nil {
-		return nil, err
-	}
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("keyed rule mapping must contain at least one row at %s", value.Location())
-	}
-	rows := make([]HandlerRuleEntry, 0, len(fields))
-	seen := map[string]struct{}{}
-	for _, field := range fields {
-		label := strings.TrimSpace(field.Name)
-		if label == "" {
-			return nil, fmt.Errorf("keyed rule label must not be empty at %s", field.KeyLocation)
-		}
-		if _, duplicate := seen[label]; duplicate {
-			return nil, fmt.Errorf("duplicate normalized key %q in keyed rules at %s", label, field.KeyLocation)
-		}
-		seen[label] = struct{}{}
-		row, err := projectNodeRuleEntryValue(field.Value, context)
-		if err != nil {
-			return nil, fmt.Errorf("keyed rule %q: %w", label, err)
-		}
-		if row.ID == "" {
-			row.ID = label
-		}
-		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -145,7 +69,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	}
 	out := HandlerRuleEntry{authored: true}
 	if err := nodeValueTexts(fields, map[string]*string{
-		"id": &out.ID, "description": &out.Description, "advances_to": &out.AdvancesTo,
+		"advances_to": &out.AdvancesTo,
 	}, false); err != nil {
 		return HandlerRuleEntry{}, err
 	}

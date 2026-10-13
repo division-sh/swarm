@@ -6,8 +6,6 @@ import (
 )
 
 var ruleFieldOptions = map[string]struct{}{
-	"id":                {},
-	"description":       {},
 	"condition":         {},
 	"when":              {},
 	"case":              {},
