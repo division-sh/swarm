@@ -1,5 +1,30 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Failure-Only Selected-Fork Qualification Diagnostic
+
+Reviewer-g6149702692 authorizes a retained diagnostic on the existing fixed-plan
+refusal branch, not another unchanged-head retry. Hosted38419114537 atae981
+remains RED on the SQLite fixture-control and settled leaves. The disposable
+matched exact-shard base/head pair passed168 roots/665 entries on each arm,
+without reaching the guard; no failing comparison or inherited cause is proved.
+
+Report only already-computed equality flags: source run, complete fork point,
+timestamp representation and instant, fork event, bundle and plan fingerprint.
+Preserve the predicate and error prefix. No raw identities, hashes, payloads,
+SQL, new reader, preparation field, success-path computation or canonicalization.
+The four-file disposable component patch stays off the PR.
+
+TestSelectedForkFixedPlanRefusalClassifiesComparisonsBothStores forces valid
+preparations with a changed plan fingerprint and a same-instant/different-time-
+representation fork point through the real transaction guard. Require exact
+flags, no fork or durable changes, and successful unchanged materialization.
+Run focused both-store controls, touched census/guards and clean preflight,
+then one normal hosted lifecycle qualification at the new head. A recurrence
+requires exact-arm attribution; a green run retains the original REDs and
+negative local attribution under2353, without a fixed/inherited closure claim.
+This changes no B manifestation, selector, deadline or policy; S01-S24/K and
+the binding2647 ->2648 ->C remain unchanged.
+
 ## S24 Constructed Runtime Admission Diagnostic Oracle
 
 Attempt3 of hosted run38410589647 at7cec972a3 fails the runtime-full root
