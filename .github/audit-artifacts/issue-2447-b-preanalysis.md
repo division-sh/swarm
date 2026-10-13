@@ -1,5 +1,28 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Review Cycle 2 Bounded Amendment
+
+Binding review6142490124/checklist6142494003 on9f6c79514 verifies S12-S15
+but requires two distinct corrections before closure. Hosted38374572934 is RED
+only at broad-05's tools unresolved-flow-local-type diagnostic; timing and
+Required summary are consequences. No retry-only disposition or C coding.
+
+| Row | Owner and consumer | Required repair/proof |
+|---|---|---|
+| S16 authored event diagnostic | validateEventCatalogReferences -> existing declaration identity/source coordinates -> validateScopedCatalogReference/LoaderDiagnostic | Decode through the existing identity owner, display root/child authored event plus exact field/file, retain early typed invalid-reference refusal and structural-schema context. Existing tools assertion stays unchanged. Root/child controls and full tools package required. |
+| S17 admitted open lookup versus absent evidence | policySheetLookupPathDomain/validatePolicySheetLookupKeyTypes and existing default/exhaustiveness checker | Distinguish admitted open domains from absent/undeclared paths. Declared json plus scalar entry/default:fail remains valid; no default refuses. Known scalar wrong literals remain invalid. Fix cycle1's overbroad negative and authoritative wording to the existing default contract, not a new policy. Complete checker controls plus full workflowexpr required. |
+
+S17 includes supported recursive payload paths: named-record members consume
+the existing resolved Field evidence; descendants of an admitted open JSON/map/
+list retain unknown-domain/default behavior without claiming a typed member.
+An absent member of a closed record or traversal through a scalar is missing
+evidence, not an open domain. No YAML/path grammar or runtime lookup change.
+
+Lifecycle/no extra units and focused local proof remain binding. Before coding,
+record the amendment and refine the existing watchlist node; no new issue,
+framework, D parser/renderer change, baseline/guard/deadline increase or stored
+data migration. Existing S12-S15 closure is local, not full B-class elimination.
+
 ## Review Cycle 1 Consumer Amendment
 
 Binding repair authorization: PR2647 review6141280928 and checklist6141284374,

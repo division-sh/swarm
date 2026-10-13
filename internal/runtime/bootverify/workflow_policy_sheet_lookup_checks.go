@@ -122,7 +122,7 @@ func policySheetLookupPathIsSimple(path runtimepaths.Path) bool {
 func policySheetLookupDomainsClosedAndExhaustive(source semanticview.Source, ref policySheetLookupRef, spec *runtimecontracts.ComputeLookupSpec, findings *[]Finding) bool {
 	domains := make([][]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, closed := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
+		kind, closed, _ := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
 		if kind == "" {
 			kind = "unknown"
 		}
@@ -185,9 +185,9 @@ func validatePolicySheetLookupKeyTypes(source semanticview.Source, ref policyShe
 	findings := make([]Finding, 0)
 	kinds := make([]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, _ := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
-		if kind == "" {
-			findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.on %q has no admitted scalar literal domain", path.String())))
+		kind, _, admitted := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
+		if !admitted {
+			findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.on %q has no admitted payload path", path.String())))
 		}
 		kinds = append(kinds, kind)
 	}
@@ -222,30 +222,48 @@ func policySheetLookupLiteralMatchesKind(got, want string) bool {
 	}
 }
 
-func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType string, path runtimepaths.Path) (kind string, closed bool) {
-	if source == nil || path.Root != runtimepaths.RootPayload || len(path.Segments) != 1 {
-		return "", false
+func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType string, path runtimepaths.Path) (kind string, closed, admitted bool) {
+	if source == nil || path.Root != runtimepaths.RootPayload || len(path.Segments) == 0 {
+		return "", false, false
 	}
 	resolved, ok := source.ResolveFlowEventStructuralType(flowID, eventType)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
-	field, ok := resolved.Field(strings.TrimSpace(path.Segments[0]))
+	field, ok := policySheetLookupPathType(resolved, path.Segments)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
-	switch field.Type.Kind {
+	switch field.Kind {
 	case runtimecontracts.CatalogTypeBoolean:
-		return "bool", true
+		return "bool", true, true
 	case runtimecontracts.CatalogTypeInteger:
-		return "int", false
+		return "int", false, true
 	case runtimecontracts.CatalogTypeNumber:
-		return "number", false
+		return "number", false, true
 	case runtimecontracts.CatalogTypeText:
-		return "string", false
+		return "string", false, true
+	case runtimecontracts.CatalogTypeDynamic, runtimecontracts.CatalogTypeObject, runtimecontracts.CatalogTypeList, runtimecontracts.CatalogTypeMap:
+		return "", false, true
 	default:
-		return "", false
+		return "", false, false
 	}
+}
+
+func policySheetLookupPathType(resolved runtimecontracts.ResolvedCatalogType, segments []string) (runtimecontracts.ResolvedCatalogType, bool) {
+	for _, segment := range segments {
+		switch resolved.Kind {
+		case runtimecontracts.CatalogTypeDynamic, runtimecontracts.CatalogTypeMap, runtimecontracts.CatalogTypeList:
+			// An open/container descendant has no closed scalar-domain proof.
+			return runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeDynamic}, true
+		}
+		field, found := resolved.Field(strings.TrimSpace(segment))
+		if !found {
+			return runtimecontracts.ResolvedCatalogType{}, false
+		}
+		resolved = field.Type
+	}
+	return resolved, true
 }
 
 func policySheetLookupBindingConsumed(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler, currentRuleIndex int, target string) bool {
