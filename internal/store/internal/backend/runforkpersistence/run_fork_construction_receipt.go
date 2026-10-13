@@ -30,9 +30,11 @@ func runForkConstructionOccurrenceOwed(plan runfork.RunForkPlan, entity runfork.
 	return !slices.Contains(ids, receipt.CreationEvent.EventID), nil
 }
 
-// The fixed receipt supplies initialization; the header supplies current state.
-// Child attachment is a new operation and does not rerun either projection.
-func projectRunForkConstructionReceipt(plan runfork.RunForkPlan, forkRunID string, entity runfork.RunForkEntityState, born time.Time) (pipeline.FlowConstructionReceipt, error) {
+// ProjectRunForkConstructionReceipt projects immutable initialization from the
+// full admitted fixed-cut plan, including reply, join and bookkeeping evidence.
+// born is the child's original materialization birth, not the inspection time.
+// This pure projection grants neither fresh construction nor current execution.
+func ProjectRunForkConstructionReceipt(plan runfork.RunForkPlan, forkRunID string, entity runfork.RunForkEntityState, born time.Time) (pipeline.FlowConstructionReceipt, error) {
 	meta := entity.MaterializationMetadata
 	if meta == nil || meta.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || born.IsZero() {
 		return pipeline.FlowConstructionReceipt{}, fmt.Errorf("fork construction requires an immutable receipt and child birth")

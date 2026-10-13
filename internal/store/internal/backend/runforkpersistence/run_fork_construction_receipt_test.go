@@ -68,7 +68,7 @@ func TestForkConstructionReceiptPreservesInitializationAndExactIdentity(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		child, err := projectRunForkConstructionReceipt(plan, childRun, entity, born)
+		child, err := ProjectRunForkConstructionReceipt(plan, childRun, entity, born)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestForkConstructionReceiptPreservesInitializationAndExactIdentity(t *testi
 			!bytes.Equal(child.CreationEvent.Payload, original.CreationEvent.Payload) || !bytes.Contains(child.CreationEvent.Payload, []byte(`"double":7.0`))) {
 			t.Fatal("child changed frozen business data or occurrence correspondence")
 		}
-		repeated, err := projectRunForkConstructionReceipt(plan, childRun, entity, born)
+		repeated, err := ProjectRunForkConstructionReceipt(plan, childRun, entity, born)
 		if err != nil || !reflect.DeepEqual(repeated, child) {
 			t.Fatal("exact child receipt is not replay-stable")
 		}
@@ -141,7 +141,7 @@ func TestForkConstructionReceiptRejectsMissingAndForeignEvidence(t *testing.T) {
 			case "missing_birth":
 				born = time.Time{}
 			}
-			if _, err := projectRunForkConstructionReceipt(plan, uuid.NewString(), entity, born); err == nil {
+			if _, err := ProjectRunForkConstructionReceipt(plan, uuid.NewString(), entity, born); err == nil {
 				t.Fatal("contradictory construction evidence accepted")
 			}
 		})
