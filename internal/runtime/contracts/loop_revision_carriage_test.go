@@ -37,6 +37,12 @@ func TestLoopRevisionCarriageSchema(t *testing.T) {
 		{"different_required", "text", "other", true, false},
 		{"required_not_normalized", "text", " revision ", true, false},
 		{"numeric", "integer", "revision", true, false},
+		{"alias", "Revision", "revision", true, true},
+		{"enum", "Status", "revision", true, false},
+		{"uuid", "uuid", "revision", true, false},
+		{"timestamp", "timestamp", "revision", true, false},
+		{"unknown", "Missing", "revision", true, false},
+		{"empty", "", "revision", true, false},
 		{"missing_property", "text", "revision", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,7 +50,11 @@ func TestLoopRevisionCarriageSchema(t *testing.T) {
 			if tc.present {
 				payload.Properties["revision"] = EventFieldSpec{Type: tc.kind}
 			}
-			if got := RequiresLoopRevision(payload, "revision"); got != tc.want {
+			ref := CatalogTypeReference{Type: tc.kind, Catalog: TypeCatalogDocument{
+				Scalars: map[string]ScalarTypeDecl{"Revision": {Base: "text"}},
+				Enums:   map[string]EnumTypeDecl{"Status": {Values: []string{"ready"}, Default: "ready"}},
+			}}
+			if got := RequiresLoopRevision(payload, "revision", ref); got != tc.want {
 				t.Fatalf("RequiresLoopRevision = %v, want %v", got, tc.want)
 			}
 		})

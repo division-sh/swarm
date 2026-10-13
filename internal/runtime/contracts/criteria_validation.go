@@ -192,17 +192,18 @@ func validateEventCriteriaCitationFields(bundle *WorkflowContractBundle) []error
 				continue
 			}
 			fieldContext := "event " + scopedKey + " payload." + fieldName + " citation"
+			flowID := strings.TrimSpace(source.FlowPath)
 			if strings.TrimSpace(field.Citation.Criteria) == "" {
 				errs = append(errs, fmt.Errorf("%w: %s criteria is required", ErrInvalidField, fieldContext))
 			}
 			if len(normalizeStrings(field.Citation.AllowedClasses)) == 0 {
 				errs = append(errs, fmt.Errorf("%w: %s allowed_classes is required for PR1 class/disposition compatibility", ErrInvalidField, fieldContext))
 			}
-			if !criteriaCitationTypeAllowed(field.Type) {
+			ref := CatalogTypeReference{Type: field.Type, Catalog: bundle.ResolvedTypeCatalogForFlow(flowID)}
+			if !criteriaCitationTypeAllowed(ref) {
 				errs = append(errs, fmt.Errorf("%w: %s requires text/string or list-of-text field type, got %q", ErrInvalidField, fieldContext, strings.TrimSpace(field.Type)))
 			}
 			criteriaName := strings.TrimSpace(field.Citation.Criteria)
-			flowID := strings.TrimSpace(source.FlowPath)
 			if criteriaName == "" {
 				continue
 			}
@@ -285,47 +286,15 @@ func (c CriteriaCitation) Empty() bool {
 	return strings.TrimSpace(c.Criteria) == "" && len(c.AllowedClasses) == 0
 }
 
-func criteriaCitationTypeAllowed(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func criteriaCitationTypeAllowed(ref CatalogTypeReference) bool {
+	resolved, err := ref.Resolve()
+	if err != nil {
 		return false
 	}
-	if criteriaCitationBaseType(raw) == "text" || criteriaCitationBaseType(raw) == "string" {
+	if resolved.PlainText() {
 		return true
 	}
-	if !criteriaCitationIsList(raw) {
-		return false
-	}
-	item := criteriaCitationListItem(raw)
-	return item == "text" || item == "string"
-}
-
-func criteriaCitationBaseType(raw string) string {
-	return strings.ToLower(strings.TrimSpace(raw))
-}
-
-func criteriaCitationIsList(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	return strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") ||
-		strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") ||
-		strings.HasSuffix(raw, "[]") ||
-		strings.HasPrefix(raw, "[]")
-}
-
-func criteriaCitationListItem(raw string) string {
-	raw = strings.TrimSpace(raw)
-	switch {
-	case strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">"):
-		return strings.ToLower(strings.TrimSpace(raw[len("list<") : len(raw)-1]))
-	case strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]"):
-		return strings.ToLower(strings.TrimSpace(raw[1 : len(raw)-1]))
-	case strings.HasSuffix(raw, "[]"):
-		return strings.ToLower(strings.TrimSpace(raw[:len(raw)-2]))
-	case strings.HasPrefix(raw, "[]"):
-		return strings.ToLower(strings.TrimSpace(raw[2:]))
-	default:
-		return strings.ToLower(strings.TrimSpace(raw))
-	}
+	return resolved.Kind == CatalogTypeList && resolved.Element != nil && resolved.Element.PlainText()
 }
 
 func sortedCriteriaSetNames(in map[string]PolicyCriteriaSet) []string {
