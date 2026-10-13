@@ -1,5 +1,33 @@
 # Full Cadence Observation
 
+## Failure Evidence Readback
+
+`go run ./cmd/swarm-test-timing failures -run <id>` reads the exact Actions
+attempts, their current-attempt native plans, jobs and outer Go failure events.
+It prints failed leaves and matches the reviewed `.github/flake-ledger.json`.
+`-last 150` observes the last 150 PR runs; `-population <file>` consumes a saved
+JSON array of those typed observations. `-json <file>` retains observations,
+matches and the population summary. Missing API/log/artifact evidence remains
+visible and unknown. Expected failing child probes are not outer failures.
+
+A known signature is not causal attribution to a new run. Only an exact reviewed
+run/attempt/job/executed-source observation can supply attribution; an author
+head is not a merge checkout. Historical rates name their comparable exposure
+and evidence, not a guessed fleet probability. Earlier RED attempts remain in
+the population after a green resample. Cancellation and unstarted work are
+separate from test failures; downstream timing/summary REDs do not duplicate a
+primary failure. Non-PR-only RED share is a reviewed lower bound with unknown
+and mixed outcomes shown, not a waiver or a successful-subset estimate.
+
+The ledger preserves #2353's 61 historical IDs and a frozen body/thread source
+index, including superseding and unnumbered intake links. The six curated seed
+records distinguish signing variance, both fixed-plan leaves, debt command
+headroom, Darwin timeout policy and Docker transport. A policy fix is not a
+diagnosed variance cause. Update the source index/record through review; do not
+classify historical prose automatically or erase old failures. Quarantined or
+fixed labels never skip a test. Full-cadence/core-escape analysis below remains
+a separate evidence owner; ledger lookup cannot grant that credit.
+
 The useful daily timing-model publisher remains unchanged in frequency. Weights
 drive balancing, eligible packing, and ETA, never required root membership or hard
 deadlines. Valid model-only create and update bodies select core qualification.
