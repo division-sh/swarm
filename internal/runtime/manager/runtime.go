@@ -1480,6 +1480,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	currentRevision := cell.view.ConfigRevision
 	currentTopology := cell.view.Topology
 	currentLoopLive := am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
+	unacknowledged := cell.unacknowledged != nil
 	am.lifecycle.mu.Unlock()
 	if expected != nil {
 		expectedRevision, revisionErr := lifecycleConfigRevision(PersistedAgent{Config: *expected})
@@ -1566,6 +1567,9 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			replacementTopology = *topology
 		}
 		if lifecycleProjectionEqual(revision, replacementTopology, currentRevision, currentTopology) {
+			if unacknowledged {
+				return replaceExecutionResult{}, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_unacknowledged_request_conflict", "agent-lifecycle", trigger, map[string]any{"agent_identity": identity})
+			}
 			return replaceExecutionResult{previous: current.Config, config: current.Config}, nil
 		}
 		candidateAgent, err := am.buildAgent(updated)
