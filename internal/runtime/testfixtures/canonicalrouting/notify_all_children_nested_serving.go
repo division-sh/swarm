@@ -17,7 +17,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
 		"            command: payload.command\n", "            command: payload.command\n            task_ids: [\"prepare\", \"publish\"]\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "events.yaml"),
-		"  command: text\nportfolio.notify.completed:", "  command: text\n  task_ids: '[text]'\nportfolio.notify.completed:")
+		"  command: text\nportfolio.notify.completed:", "  command: text\n  task_ids: [text]\nportfolio.notify.completed:")
 	// This closed variant uses business system-node recipients, not the example's
 	// LLM agent that would terminate an account before its nested tasks settle.
 	removeClosedVariantFiles(t, root, "account/agents.yaml")

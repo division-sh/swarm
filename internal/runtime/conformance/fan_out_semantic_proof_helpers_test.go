@@ -100,7 +100,7 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	})
 	modify("events.yaml", func(raw string) string {
 		for _, name := range eventsToAdd {
-			raw += fmt.Sprintf("%s:\n  portfolio_id: text\n  account_ids: \"[NumericAccount]\"\n  threshold: integer\n", name)
+			raw += fmt.Sprintf("%s:\n  portfolio_id: text\n  account_ids: [NumericAccount]\n  threshold: integer\n", name)
 		}
 		return raw
 	})
