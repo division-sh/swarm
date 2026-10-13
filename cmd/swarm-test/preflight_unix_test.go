@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -16,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -47,32 +49,57 @@ func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	count := 0
-	for _, pkg := range plan.Packages {
-		count += len(pkg.Required)
-	}
-	if count != 123 {
-		t.Fatalf("finite native-owner projection changed: %d roots", count)
-	}
-	assertPreflightEscapeCompleteness(t, repo, plan)
-}
-
-func assertPreflightEscapeCompleteness(t *testing.T, repo string, plan testplanning.PreflightPlan) {
-	t.Helper()
-	inventory, err := testplanning.DiscoverRootInventory(context.Background(), repo)
+	structural, err := testplanning.StaticAuthorityGuardRoots(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := validatePreflightStructuralCompleteness(plan, structural); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePreflightEscapeCompleteness(plan); err != nil {
+		t.Fatal(err)
+	}
+	assertPreflightFrozenSelectionRefusals(t, plan, structural)
+}
+
+// Independent frozen oracle: package discovery does not admit new candidates.
+var expectedPreflightReadinessCandidates = []string{
+	"Test2376AdmissionSealsCompiledExecutionIdentity",
+	"TestAdmissionPreservesLoaderAdmittedEffectiveSourceContext",
+	"TestAdmissionRejectsIncompleteOrForeignBindings",
+	"TestAdmissionRequiresPositiveSealForEmptyProjection",
+	"TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt",
+	"TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority",
+	"TestAdmissionSealsResolvedModelRevision",
+	"TestSelectedAgentConstructionUsesExactFixedHeader",
+	"TestSelectedConstructedActorProjectionCompleteCensus",
+	"TestSelectedContractAdmissionBindsHistoricalStateKindsAndPresence",
+	"TestSelectedContractHeaderMissingHistoricalEvidenceFailsClosed",
+	"TestSelectedContractHeaderRejectsEveryReceiverConfigCopy",
+	"TestSelectedContractRejectsContradictoryRecordedHeader",
+	"TestSelectedReadinessRequiresCompleteConstruction",
+}
+
+func validatePreflightEscapeCompleteness(plan testplanning.PreflightPlan) error {
 	selected := make(map[string]testplanning.RequiredTest)
 	for _, pkg := range plan.Packages {
 		for _, root := range pkg.Required {
-			selected[root.Package+"::"+root.Name] = root
+			key := root.Package + "::" + root.Name
+			if _, duplicate := selected[key]; duplicate || root.Package != pkg.Package {
+				return fmt.Errorf("duplicate or foreign selected root: %s", key)
+			}
+			selected[key] = root
 		}
 	}
 	const prefix = "github.com/division-sh/swarm/"
-	for _, name := range inventory.Packages[prefix+"internal/runtime/runforkreadiness"].Roots {
+	for _, name := range expectedPreflightReadinessCandidates {
 		if _, ok := selected[prefix+"internal/runtime/runforkreadiness::"+name]; !ok {
-			t.Fatalf("readiness root missing: %s", name)
+			return fmt.Errorf("declared readiness root missing: %s", name)
+		}
+	}
+	for key, root := range selected {
+		if root.Package == prefix+"internal/runtime/runforkreadiness" && !slices.Contains(expectedPreflightReadinessCandidates, root.Name) {
+			return fmt.Errorf("undeclared readiness candidate selected: %s", key)
 		}
 	}
 	for pkg, name := range map[string]string{
@@ -83,17 +110,184 @@ func assertPreflightEscapeCompleteness(t *testing.T, repo string, plan testplann
 	} {
 		root, ok := selected[prefix+pkg+"::"+name]
 		if !ok {
-			t.Fatalf("escape root missing: %s/%s", pkg, name)
+			return fmt.Errorf("escape root missing: %s/%s", pkg, name)
 		}
 		if pkg == "internal/runtime/runforkexecution" && !reflect.DeepEqual(root.Children, []string{"hostile", "production"}) {
-			t.Fatalf("receiver children incomplete: %+v", root)
+			return fmt.Errorf("receiver children incomplete: %+v", root)
 		}
 	}
 	for _, name := range []string{"TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMaterializer", "TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime", "TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames", "TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup"} {
 		if _, ok := selected[prefix+"internal/runtime/runforkexecution::"+name]; ok {
-			t.Fatalf("stateful root entered local preflight: %s", name)
+			return fmt.Errorf("stateful root entered local preflight: %s", name)
 		}
 	}
+	return nil
+}
+
+func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, structural []testplanning.TestRoot) error {
+	selected := map[testplanning.TestRoot]int{}
+	count := 0
+	for _, pkg := range plan.Packages {
+		for _, root := range pkg.Required {
+			selected[root.TestRoot]++
+			count++
+		}
+	}
+	if count != 31+11+len(structural) {
+		return fmt.Errorf("finite native-owner projection changed: %d roots, want %d", count, 31+11+len(structural))
+	}
+	for _, root := range structural {
+		if selected[root] != 1 {
+			return fmt.Errorf("canonical structural root %s/%s has %d selected owners", root.Package, root.Name, selected[root])
+		}
+	}
+	return nil
+}
+
+func TestPreflightFiniteCandidatesPreserveUnselectedNativePackageGrowth(t *testing.T) {
+	repo, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const readiness = "github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	grown := inventory.Packages[readiness]
+	grown.Roots = slices.Clone(grown.Roots)
+	var extras []string
+	for n := range 10 {
+		name := fmt.Sprintf("TestUnselectedNativeReadinessModel%d", n)
+		extras = append(extras, name)
+		grown.Roots = append(grown.Roots, name)
+	}
+	inventory.Packages[readiness] = grown
+	raw, err := os.ReadFile(filepath.Join(repo, ".github/test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := testplanning.LoadPolicy(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofs, err := testplanning.LoadParityProofs(filepath.Join(repo, "internal/apiv1/testdata/public_surface_backend_matrix.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packages []string
+	for pkg := range inventory.Packages {
+		packages = append(packages, pkg)
+	}
+	slices.Sort(packages)
+	model := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "preflight-growth-fixture"}
+	native, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileFull, "finite growth", strings.Repeat("a", 40), testplanning.BuildOptions{Venue: testplanning.VenueLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testplanning.BindExecution(&native, inventory, proofs, policy); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := testplanning.BuildPreflightPlan(repo, strings.Repeat("b", 40), inventory, native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePreflightEscapeCompleteness(plan); err != nil {
+		t.Fatal(err)
+	}
+	structural, err := testplanning.StaticAuthorityGuardRoots(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePreflightStructuralCompleteness(plan, structural); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range extras {
+		owners := 0
+		for _, unit := range native.Units {
+			for _, root := range unit.RequiredTests {
+				if root.Package == readiness && root.Name == name {
+					owners++
+				}
+			}
+		}
+		if owners != 1 {
+			t.Fatalf("unselected native root %s has %d required owners", name, owners)
+		}
+	}
+}
+
+func assertPreflightFrozenSelectionRefusals(t *testing.T, plan testplanning.PreflightPlan, structural []testplanning.TestRoot) {
+	t.Helper()
+	const prefix = "github.com/division-sh/swarm/"
+	for _, change := range []string{"wrong-readiness-name", "missing-readiness", "duplicate-readiness", "foreign-readiness", "extra-readiness", "receiver-hostile", "receiver-production", "stateful-execution", "wrong-structural-name"} {
+		t.Run(change, func(t *testing.T) {
+			mutant := plan
+			mutant.Packages = slices.Clone(plan.Packages)
+			for i := range mutant.Packages {
+				pkg := &mutant.Packages[i]
+				pkg.Required = slices.Clone(pkg.Required)
+				if pkg.Package == prefix+"internal/runtime/runforkreadiness" {
+					switch change {
+					case "wrong-readiness-name":
+						pkg.Required[0].Name = "TestUnselectedNativeReadinessModel"
+					case "missing-readiness":
+						pkg.Required = pkg.Required[1:]
+					case "duplicate-readiness":
+						pkg.Required = append(pkg.Required, pkg.Required[0])
+					case "foreign-readiness":
+						pkg.Required[0].Package = prefix + "foreign"
+					case "extra-readiness":
+						pkg.Required = append(pkg.Required, testplanning.RequiredTest{TestRoot: testplanning.TestRoot{Package: pkg.Package, Name: "TestUnselectedNativeReadinessModel"}})
+					}
+				}
+				if pkg.Package == prefix+"internal/runtime/runforkexecution" {
+					switch change {
+					case "receiver-hostile", "receiver-production":
+						pkg.Required[0].Children = []string{strings.TrimPrefix(change, "receiver-")}
+					case "stateful-execution":
+						pkg.Required = append(pkg.Required, testplanning.RequiredTest{TestRoot: testplanning.TestRoot{Package: pkg.Package, Name: "TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime"}})
+					}
+				}
+				if change == "wrong-structural-name" {
+					for j := range pkg.Required {
+						if pkg.Required[j].TestRoot == structural[0] {
+							pkg.Required[j].Name = "TestForeignStructuralGuard"
+						}
+					}
+				}
+			}
+			if validatePreflightEscapeCompleteness(mutant) == nil && validatePreflightStructuralCompleteness(mutant, structural) == nil {
+				t.Fatalf("accepted %s selection", change)
+			}
+		})
+	}
+	t.Run("canonical-structural-growth", func(t *testing.T) {
+		grown := plan
+		grown.Packages = slices.Clone(plan.Packages)
+		owners := slices.Clone(structural)
+		for i := range grown.Packages {
+			pkg := &grown.Packages[i]
+			if pkg.Package != prefix+"internal/runtime" {
+				continue
+			}
+			pkg.Required = slices.Clone(pkg.Required)
+			for n := range 4 {
+				root := testplanning.TestRoot{Package: pkg.Package, Name: fmt.Sprintf("TestNewCanonicalStructuralGuard%d", n)}
+				owners = append(owners, root)
+				pkg.Required = append(pkg.Required, testplanning.RequiredTest{TestRoot: root})
+			}
+		}
+		if err := validatePreflightStructuralCompleteness(grown, owners); err != nil {
+			t.Fatal(err)
+		}
+		if err := validatePreflightEscapeCompleteness(grown); err != nil {
+			t.Fatal(err)
+		}
+		if validatePreflightStructuralCompleteness(plan, owners) == nil {
+			t.Fatal("growth omitted newly required canonical structural owners")
+		}
+	})
 }
 
 func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testing.T) {
