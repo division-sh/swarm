@@ -365,10 +365,10 @@ func TestCompiledLifecycleEmitterGeneratedOutcomeOwnerMatrix(t *testing.T) {
 				if len(sites) != 1 || sites[0].Node.FlowPath() != flow || sites[0].Spec.ID != "send" || sites[0].Spec.Approval == nil {
 					t.Fatalf("compiled activity sites = %#v", sites)
 				}
-				if rule && (sites[0].RuleID != "send_rule" || sites[0].Source != "handler.rules[0].activity") {
+				if rule && (sites[0].Kind != runtimecontracts.ActivitySiteRule || sites[0].RuleIndex != 0 || !sites[0].RuleRef.Valid() || sites[0].Source != "handler.rules[0].activity") {
 					t.Fatalf("lost selected rule site: %#v", sites[0])
 				}
-				if !rule && sites[0].Source != "handler.activity" {
+				if !rule && (sites[0].Kind != runtimecontracts.ActivitySiteHandler || sites[0].RuleIndex != -1 || sites[0].Source != "handler.activity") {
 					t.Fatalf("invented rule site: %#v", sites[0])
 				}
 				census := BuildAuthoredEventEndpointCensus(source)
