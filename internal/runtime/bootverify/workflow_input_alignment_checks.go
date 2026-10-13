@@ -247,21 +247,14 @@ func payloadFieldCoverageSites(source semanticview.Source) []payloadFieldCoverag
 			}
 			add("handler.data_accumulation", handler.DataAccumulation)
 			for idx, rule := range handler.Rules {
-				add(ruleScope("handler.rules", idx, rule.ID)+".data_accumulation", rule.DataAccumulation)
+				add("handler."+rule.DisplayLabel("rules", idx)+".data_accumulation", rule.DataAccumulation)
 			}
 			for idx, rule := range handler.OnComplete {
-				add(ruleScope("handler.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation)
+				add("handler."+rule.DisplayLabel("on_complete", idx)+".data_accumulation", rule.DataAccumulation)
 			}
 		}
 	}
 	return out
-}
-
-func ruleScope(prefix string, idx int, id string) string {
-	if id = strings.TrimSpace(id); id != "" {
-		return prefix + "[" + id + "]"
-	}
-	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
 type dataAccumulationPayloadSourceRef struct {

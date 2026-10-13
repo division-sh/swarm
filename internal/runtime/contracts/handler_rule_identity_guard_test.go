@@ -93,12 +93,7 @@ func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling Handl
 
 func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
 	return map[string]handlerRuleDisplayLabelAllowance{
-		"internal/runtime/activity_validation.go::validateHandlerActivitySurface":                                                  {Count: 2, Reason: "diagnostic rule label"},
-		"internal/runtime/authoringview/view.go::containedOperationRefs":                                                           {Count: 2, Reason: "authoring presentation label"},
 		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go::wave1ContainedStateOperations":                  {Count: 2, Reason: "diagnostic operation label"},
-		"internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go::wave1HandlerWriteTargets":                        {Count: 2, Reason: "diagnostic write-site label"},
-		"internal/runtime/bootverify/workflow_input_alignment_checks.go::payloadFieldCoverageSites":                                {Count: 2, Reason: "diagnostic payload-site label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::checkPolicySheetLookupValueRows":                      {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::policySheetLookupDuplicateComputedBindings":           {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_validation_checks.go::checkPolicySheetValidationValueRows":              {Count: 1, Reason: "diagnostic row label"},

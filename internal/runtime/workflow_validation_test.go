@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -447,6 +448,39 @@ func TestRuleActivityValidationRequiresExplicitIDAndPreservesCombinationRefusal(
 	errs := validateHandlerActivitySurface(source, node, "request", handler)
 	if len(errs) != 2 || !strings.Contains(errs[0].Error(), "only allowed on handlers without rules") || !strings.Contains(errs[1].Error(), "cannot be combined with rule activities") {
 		t.Fatalf("invalid combined ownership lost its specific refusals: %v", errs)
+	}
+}
+
+func TestActivityDiagnosticsUseRulePresentationAndPreserveRefusal(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle("request")
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"send": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
+		),
+	}
+	source := compiledRuntimeValidationSource(t, bundle)
+	for _, node := range []runtimeidentity.ExecutableNode{identitytest.RootNode(t, "worker"), identitytest.FlowNode(t, "child", "worker")} {
+		t.Run(node.Key(), func(t *testing.T) {
+			row := runtimecontracts.HandlerRuleEntry{
+				Condition: "payload.ready &&\npayload.allowed",
+				Activity:  runtimecontracts.ActivitySpec{ID: "rule_send", Tool: "send"},
+				Emit:      runtimecontracts.EmitSpec{Event: "done"},
+			}
+			errs := validateHandlerActivitySurface(source, node, "request", runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{row}})
+			want := "node " + node.Key() + " handler request.rules[0]: when payload.ready &&\npayload.allowed activity: activity and authored emit/fan_out emit are mutually exclusive in Stage 1; use generated activity result events"
+			if len(errs) != 1 || errs[0].Error() != want {
+				t.Fatalf("rule diagnostic/refusal = %v, want %q", errs, want)
+			}
+			row.Emit = runtimecontracts.EmitSpec{}
+			errs = validateHandlerActivitySurface(source, node, "request", runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{row}})
+			want = "node " + node.Key() + " handler request.on_complete[0]: condition payload.ready &&\npayload.allowed.activity: durable activity is not supported in on_complete in Stage 1"
+			if len(errs) != 1 || errs[0].Error() != want {
+				t.Fatalf("completion diagnostic/refusal = %v, want %q", errs, want)
+			}
+		})
 	}
 }
 

@@ -77,18 +77,12 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 			refs := wave1HandlerContainedStateOperations(node, eventType, "handler", handler.DataAccumulation.Writes)
 			out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			for idx, rule := range handler.Rules {
-				scope := fmt.Sprintf("handler.rules[%d]", idx)
-				if id := strings.TrimSpace(rule.ID); id != "" {
-					scope = "handler.rules[" + id + "]"
-				}
+				scope := "handler." + rule.DisplayLabel("rules", idx)
 				refs := wave1HandlerContainedStateOperations(node, eventType, scope, rule.DataAccumulation.Writes)
 				out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			}
 			for idx, rule := range handler.OnComplete {
-				scope := fmt.Sprintf("handler.on_complete[%d]", idx)
-				if id := strings.TrimSpace(rule.ID); id != "" {
-					scope = "handler.on_complete[" + id + "]"
-				}
+				scope := "handler." + rule.DisplayLabel("on_complete", idx)
 				refs := wave1HandlerContainedStateOperations(node, eventType, scope, rule.DataAccumulation.Writes)
 				out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			}
@@ -97,9 +91,9 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 					scope string
 					rule  runtimecontracts.HandlerRuleEntry
 				}{
-					{"handler.join.on_complete", handler.Join.OnComplete}, {"handler.join.on_deadline", handler.Join.OnDeadline},
+					{"join.on_complete", handler.Join.OnComplete}, {"join.on_deadline", handler.Join.OnDeadline},
 				} {
-					refs := wave1HandlerContainedStateOperations(node, eventType, outcome.scope, outcome.rule.DataAccumulation.Writes)
+					refs := wave1HandlerContainedStateOperations(node, eventType, "handler."+outcome.rule.DisplayLabel(outcome.scope, 0), outcome.rule.DataAccumulation.Writes)
 					out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 				}
 			}
