@@ -41200,6 +41200,17 @@ agent_lifecycle_authority:
     fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id, lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id, lifecycle_bundle_hash, lifecycle_runtime_instance_id, lifecycle_runtime_generation, topology_authority_kind, topology_admission, execution_lifetime]
     phases: [registered, running, terminated, failed]
     rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority. Every transition records its actual target phase. Pending predecessor provider work remains exact runtime_provider_attempt_drains evidence, not another lifecycle phase. Terminal or failed targets cannot be reused while their exact successor-bound sidecars remain pending; running successors remain independently running.
+    row_cas: >-
+      The selected native agent owner reads and locks the complete current row inside
+      the original mutation transaction. Absent creation uses conditional INSERT;
+      an existing-row mutation uses conditional UPDATE matching the exact agent
+      identity, epoch, generation, phase, configuration revision, run mode, last
+      transition, process binding and topology occurrence. Exactly one affected row
+      is required; a conflict rolls back subordinate, drain, fact, outcome and
+      diagnostic writes together. There is no overwriting UPSERT or write-shaped
+      no-op currentness fence. Session/effect mutations consume the same owner in
+      their original transaction. Immutable operation outcomes remain historical
+      evidence, not a replacement for current-row execution admission.
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
@@ -41288,7 +41299,18 @@ agent_lifecycle_authority:
       - Fence the predecessor generation before cancellation and await its generation-aware release before starting a successor loop.
       - Persistence failure cannot be acknowledged as success. Ordinary replacement failure leaves the prior process-local owner unchanged; committed flow termination and panic termination retain their exact fail-closed retirement as specified above.
     replay: Repeating one operation_id first revalidates any current declaration-owned topology authority under the same selected-store serialization used by first execution, then returns its stored outcome without cancelling, restarting, rotating, or advancing generation again. A stale or authority-free replay cannot publish durable or process state.
-    generation: A new create/replace/destroy transition advances exactly one generation; self-release conditionally changes phase without advancing generation.
+    generation: >-
+      A new create/replace/destroy transition advances exactly one agent generation;
+      self-release conditionally changes phase without advancing generation. A complete
+      source-set survivor rebind is provenance-only: it preserves exact agent identity,
+      epoch, generation, phase, configuration and run mode, with no replacement Agent,
+      subordinate mutation or resource retirement. Only the authorized adjacent native
+      process grant and topology stamp change; publication follows all whole-set member
+      commits. Static survivors consume the new static declaration plan; readiness
+      survivors preserve their exact topology and activation attempt through the
+      complete-instance rebind owner. Individual replacements, including changed-plan
+      actors named source_set_rebind, still advance exactly one generation. Operation
+      kind alone never admits a same-generation write.
     runtime_shutdown_reset:
       owner: one retained runtime lifecycle transition in the AgentManager lifecycle coordinator
       shutdown: The watcher claims and executes one shutdown transition, closes admission, cancels the run generation, removes exact routes, joins loop completion, loop settlement, direct execution leases, retry work, and its own watcher lease, then publishes one result. Every explicit caller waits for that same result; its grace budget may add a timeout error but never permits an early return before accepted work settles.

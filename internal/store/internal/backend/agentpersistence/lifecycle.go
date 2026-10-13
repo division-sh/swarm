@@ -664,7 +664,12 @@ func validateLifecycleGeneration(req runtimemanager.AgentLifecycleTransition, pr
 	want := uint64(1)
 	if exists {
 		want = previous.Generation + 1
-		if req.OperationKind == "self_release" || instanceRebind {
+		if req.OperationKind == "self_release" {
+			want = previous.Generation
+		} else if instanceRebind || req.TargetGeneration == previous.Generation {
+			if !sourceSetSurvivorRebind(req, previous, instanceRebind) {
+				return lifecycleConflict(req, previous, true)
+			}
 			want = previous.Generation
 		}
 	}
