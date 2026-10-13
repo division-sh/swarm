@@ -1,5 +1,18 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Final Allocated D Named-Identity Correction
+
+D handoff6140309410 allocates the exact latest list_declaration_value.go from
+signed a92691039: the retired atomic keyword is case-sensitive list, not a
+case-folded ban on declared List/LIST. This is an S08a named-identity manifestation
+in the already allocated decoder, not another reference interpreter or grammar.
+G consumes that file byte-exact with attribution; D remains the editor. Add
+direct node scalar/explicit/list identity and lowercase/style/angle negatives,
+then use the same declared List/LIST source in both-store public boot/restart.
+The previous scalar-node decoder fails before this correction; the final
+preflight and affected proofs must be rerun after the transfer. No baseline,
+physical type, map/key, D global corpus or owner allocation changes.
+
 ## S08 Renderer And Exact PostgreSQL Alias Gates
 
 Reviewer-g6139929337 approves S08d inside B. The exact edit adds only the
