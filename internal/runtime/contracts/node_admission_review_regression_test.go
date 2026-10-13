@@ -208,7 +208,7 @@ func TestNodeClosedComputeAndCompletionPresence(t *testing.T) {
 			}
 		}
 	}
-	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {tool: search}}, {else: true}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
+	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {id: worker_task_ready_rule_0_search, tool: search}}, {else: true}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
 		if _, err := admitReviewNode(t, body); err != nil {
 			t.Fatalf("supported context %s: %v", body, err)
 		}
