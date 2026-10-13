@@ -3,6 +3,7 @@ package manager_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -24,13 +26,21 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected storetest.AgentFixtureStore
-			var peer manager.AgentLifecycleStateReader
+			var reopen func() manager.AgentLifecycleStateReader
 			if backend == "postgres" {
-				owner, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
-				selected, peer = owner, reopen()
+				location := testutil.StartPostgresDSN(t)
+				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+				reopen = func() manager.AgentLifecycleStateReader {
+					owner, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+					return owner
+				}
 			} else {
-				owner, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
-				selected, peer = owner, reopen()
+				location := filepath.Join(t.TempDir(), "agent-row.db")
+				selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
+				reopen = func() manager.AgentLifecycleStateReader {
+					owner, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
+					return owner
+				}
 			}
 			ctx := manager.TerminalPanicFixtureContext()
 			record := manager.ReconfigureMemoryNativeFixture(t, false)
@@ -40,7 +50,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				t.Fatalf("native row: found=%v err=%v", found, err)
 			}
 			record.Topology = view.Topology
-			proveNativeAgentRowCAS(t, selected, peer, record)
+			proveNativeAgentRowCAS(t, selected, reopen(), record)
 			outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
 			if !ok {
 				t.Fatal("selected store lacks the native immutable-outcome owner")
