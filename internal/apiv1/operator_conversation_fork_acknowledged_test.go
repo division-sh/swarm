@@ -69,7 +69,7 @@ func (s *exactAssistantForkLifecycle) RecordOperatorConversationForkChat(ctx con
 		return runfork.ConversationForkChatResult{}, err
 	}
 	s.recordResult = runfork.ConversationForkChatResult{
-		ForkID: req.ForkID,
+		ForkID: req.ForkID, Snapshot: req.Prepared.Snapshot, SandboxPolicy: req.Prepared.SandboxPolicy,
 		Turn: operatorread.OperatorConversationTurn{
 			TurnID: req.Prepared.ForkTurnID, ParseOK: true, ResponsePayload: payload,
 		},
@@ -110,6 +110,7 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 		Snapshot: runfork.ConversationForkSnapshot{
 			ForkID: forkID, SourceRunID: sourceRunID, SourceAgentID: actor.ID,
 			SourceAgent: actor, SnapshotOwner: runfork.ConversationForkChatSnapshotOwner,
+			SourceTurn: runfork.ConversationForkSourceTurn{CompletionEvidence: completion2270APIMockHistory()},
 		},
 		SandboxPolicy: policy, AvailableTools: policy.AvailableToolNames(),
 		ForkTurnID: forkTurnID, SourceBundleHash: bundleHash, RequestOccurrenceID: uuid.NewString(),
@@ -161,6 +162,11 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 	if got := len(harness.CompletionSettlementsForAdapter("mock_python")); got != 2 {
 		t.Fatalf("completion settlements = %d, want 2", got)
 	}
+}
+
+func completion2270APIMockHistory() runtimeeffects.CompletionEvidence {
+	return runtimeeffects.CompletionEvidence{Request: runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "mock-regular", BackendProfile: "mock", Provider: "mock", Transport: "cli"},
+		Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}
 }
 
 type forkChatAckHostWorkspace struct{ root string }

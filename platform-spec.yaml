@@ -34204,7 +34204,7 @@ api_specification:
         properties:
           source:
             type: string
-            enum: [response.model, claude.result.model, claude.result.modelUsage, claude.result.usage, claude.result.total_cost_usd]
+            enum: [response.model, response.usage, claude.result.model, claude.result.modelUsage, claude.result.usage, claude.result.total_cost_usd]
           dimension:
             type: string
             enum: [model, tokens, cost]

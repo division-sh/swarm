@@ -293,6 +293,7 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 		t.Fatal("completion capability surface missing")
 	}
 	identity := authority.Target.AgentIdentity.Normalize()
+	authority.CompletionRequest = runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"}
 	messages := []Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "done"}}
 	payload, err := json.Marshal(completionContinuationEnvelope{
 		Version: completionContinuationVersion,
@@ -301,7 +302,9 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 			Message: messages[1], Raw: json.RawMessage(`{"content":"done"}`),
 			ToolOutputAuthority: &ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()},
 		},
-		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage: runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable,
+			Evidence: runtimeeffects.CompletionEvidence{Request: authority.CompletionRequest,
+				Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}},
 		Projection: completionProjection{
 			SessionID: authority.Target.SessionID, ExpectedTurnCount: 0, TurnCount: 1,
 			Messages: messages, Identity: identity, Memory: authority.Target.Memory, FrameID: "frame-original",
