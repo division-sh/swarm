@@ -2646,6 +2646,18 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if e.deps.Source == nil {
 		return fmt.Errorf("%w: activity semantic source is required", ErrInvalidConfig)
 	}
+	kind, ruleIndex := runtimecontracts.ActivitySiteHandler, -1
+	if frame.rule != nil {
+		kind, ruleIndex = runtimecontracts.ActivitySiteRule, frame.ruleIndex
+	}
+	site := runtimecontracts.ActivitySite{
+		Node: frame.req.Node, HandlerEventKey: frame.req.HandlerEventKey,
+		Kind: kind, RuleIndex: ruleIndex, Spec: activitySpec,
+	}
+	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 	toolID := strings.TrimSpace(activitySpec.Tool)
 	tool, ok := e.deps.Source.ToolEntries()[toolID]
 	if !ok {
@@ -2678,20 +2690,6 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if semanticInput.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("activity input must be a semantic object")
 	}
-	ruleID := ""
-	ruleIndex := -1
-	if frame.rule != nil {
-		ruleID = strings.TrimSpace(frame.rule.ID)
-		ruleIndex = frame.ruleIndex
-	}
-	site := runtimecontracts.ActivitySite{
-		Node:            frame.req.Node,
-		HandlerEventKey: frame.req.HandlerEventKey,
-		RuleID:          ruleID,
-		RuleIndex:       ruleIndex,
-		Spec:            activitySpec,
-	}
-	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	sourceRoute := emitSourceRoute(frame)
 	intentFlowID := identity.NormalizeFlowID(frame.req.ExecutionFlowID.String())

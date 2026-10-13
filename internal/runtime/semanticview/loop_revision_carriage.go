@@ -242,7 +242,10 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 		}
 		handlers := source.ExecutableNodeEventHandlers(node)
 		for _, site := range contracts.ActivitySitesForNode(node, handlers) {
-			events := contracts.ActivityResultEventsForSite(site)
+			events, err := contracts.ActivityResultEventsForSite(site)
+			if err != nil {
+				return nil, err
+			}
 			handler := ResolveFlowEventProof(source, node.FlowPath(), site.HandlerEventKey).Canonical
 			role := operations[operationScope{node, handler}]
 			key := loopActivityScope{node, site.HandlerEventKey, events.ActivityID, site.Spec.Tool}
