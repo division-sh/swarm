@@ -104,7 +104,10 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 			store := &InMemoryEventStore{}
 			probe := &review2460PublicationProbe{failAt: failAt}
 			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe,
+				Durable: DurableDependencies{Instances: FlowInstanceIndexFixture()},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

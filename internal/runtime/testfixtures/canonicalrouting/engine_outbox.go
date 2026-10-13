@@ -13,3 +13,11 @@ pins:
 	writeClosedVariantFile(t, root, "events.yaml", "custom.emitted:\ncustom.followup:\ncustom.snapshot:\ncustom.claimed:\ncustom.conflicting:\n")
 	return root
 }
+
+func CopyEngineOutboxTarget(t testing.TB) string {
+	t.Helper()
+	root := CopyEngineOutboxPublication(t)
+	writeClosedVariantFile(t, root, "flow-original/schema.yaml", "name: original-target\n")
+	writeClosedVariantFile(t, root, "flow-original/events.yaml", "custom.snapshot:\n")
+	return root
+}

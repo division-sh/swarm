@@ -1684,31 +1684,35 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 
 func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml":           "name: per-target-internal-delivery\n",
+		"child-a/schema.yaml":   "instance: instance_key\n",
+		"child-a/events.yaml":   "output.done:\n",
+		"child-a/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
+		"child-a/nodes.yaml":    "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-b/schema.yaml":   "instance: instance_key\n",
+		"child-b/events.yaml":   "output.done:\n",
+		"child-b/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
+		"child-b/nodes.yaml":    "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+	}))
+	runID := uuid.NewString()
+	for _, flow := range []string{"child-a", "child-b"} {
+		entityID := eventtest.UUID(map[string]string{"child-a": "ent-a", "child-b": "ent-b"}[flow])
+		installNativeConstructionIndexFixture(t, store, source, runID, StoredFlowInstanceIdentityFixture(source, flow, "inst-1", runID, entityID), "inst-1")
+	}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+			return []DeliveryRouteBlueprint{
+				{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-a", "child-a-listener")), Target: events.RouteIdentity{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "child-a", "child-a-listener")).ForEvent("output.done")},
+				{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-b", "child-b-listener")), Target: events.RouteIdentity{FlowID: "child-b", FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "child-b", "child-b-listener")).ForEvent("output.done")},
+			}, nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
-		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
-				return []Subscriber{
-					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-a", "child-a-listener")), Path: "child-a/inst-1"},
-					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-b", "child-b-listener")), Path: "child-b/inst-1"},
-				}, nil
-			},
-			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
-				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
-			},
-			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
-				return nil
-			},
-		},
-		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")},
-			ActiveTargetDescriptor{ID: "child-b", FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")},
-		),
-	)
-
+	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("child/output.done"))
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(),
@@ -1717,7 +1721,7 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		"",
 		[]byte(`{}`),
 		0,
-		uuid.NewString(),
+		runID,
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
 			{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")},
@@ -1763,31 +1767,30 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	workerOneID := eventtest.UUID("worker/w-001")
 	workerTwoID := eventtest.UUID("worker/w-002")
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml":          "name: same-node-target-set\n",
+		"worker/schema.yaml":   "instance: instance_key\n",
+		"worker/events.yaml":   "work.assign:\n",
+		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
+		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+	}))
+	for key, entityID := range map[string]string{"w-001": workerOneID, "w-002": workerTwoID} {
+		installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", key, busInternalTestRunID, entityID), key)
+	}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+			handler := runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "worker", "task-handler")).ForEvent("work.assign")
+			return []DeliveryRouteBlueprint{
+				{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerOneID}, Handler: handler},
+				{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-002", EntityID: workerTwoID}, Handler: handler},
+			}, nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
-		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
-				return []Subscriber{
-					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"},
-					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-002"},
-				}, nil
-			},
-			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
-				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
-			},
-			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
-				return nil
-			},
-		},
-		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: workerOneID},
-			ActiveTargetDescriptor{ID: "worker-two", FlowInstance: "worker/w-002", EntityID: workerTwoID},
-		),
-	)
-
+	installConnectionSourceConstructionForRun(t, eb, source, ".", busInternalTestRunID)
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("worker/work.assign"))
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(),
@@ -1826,25 +1829,24 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
 	workerID := eventtest.UUID("worker/w-001")
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml":          "name: targeted-route-node\n",
+		"worker/schema.yaml":   "instance: instance_key\n",
+		"worker/events.yaml":   "work.assign:\n",
+		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
+		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+	}))
+	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, workerID), "w-001")
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
-		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"}}, nil
-			},
-			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
-			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
-				return []PublishDiagnosticRecipient{{ID: "task-handler", Type: "node", Path: "worker/w-001"}}
-			},
-		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: workerID}),
-	)
-	evt := eventtest.RuntimeControl(
+	installConnectionSourceConstructionForRun(t, eb, source, ".", busInternalTestRunID)
+	evt := eventtest.RuntimeControlWithRoutingSource(
 		uuid.NewString(),
-		events.EventType("worker/work.assign"),
+		events.EventType("worker/w-001/work.assign"),
 		"",
 		"",
 		[]byte(`{}`),
@@ -1852,6 +1854,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 		busInternalTestRunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerID}),
+		mustFlowOwnedControlRoutingSource(t, "worker", "worker/w-001", workerID),
 		time.Now().UTC(),
 	)
 
@@ -3449,16 +3452,19 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 	}}}
 	source := semanticview.Wrap(routedTopLevelProjectNodeBundle(t))
 	store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", runID, runID)}
+	durable := DurableTestDependencyProjection(store)
+	durable.Instances = FlowInstanceIndexFixture(constructionIndexObservation(t, source, runID, store.construction.Identity, ""))
+	durable.RunLifecycle = &publicationRunPreflightTestStore{runID: runID}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
-		Durable:        DurableTestDependencyProjection(store),
+		Durable:        durable,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(),
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{},
-		eventtest.RootRoutingSource(eventtest.UUID("rejecting-store-source")), time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
+	if err := eb.Publish(context.Background(), eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(),
+		events.EventType("thing.created"), "", "", []byte(`{}`), 0, runID, events.EventEnvelope{},
+		eventtest.RootRoutingSource(store.construction.Identity.EntityID), time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
 		t.Fatalf("Publish error = %v, want typed delivery route persistence failure", err)
 	}
 }

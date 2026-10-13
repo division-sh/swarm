@@ -623,12 +623,24 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 		t.Fatalf("Begin: %v", err)
 	}
 	originalIdentity := runtimebustest.Identity(t, "agent-original", "flow-original")
-	store := &directRecipientTransactionalStore{
-		descriptors: []runtimebus.ActiveAgentDescriptor{{
-			Identity: originalIdentity, EntityID: eventtest.UUID("entity-original"),
-		}},
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyEngineOutboxTarget(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(bundle)
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
+	original := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "flow-original", "", runtimebustest.DefaultRunID)
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{{Identity: originalIdentity, EntityID: original.EntityID}},
+	}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		Durable: runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, root, ""),
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, original, ""),
+		)},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -645,7 +657,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	defer runtimebustest.Unsubscribe(eb, "agent-mutated")
 
 	payload := []byte(`{"value":"original"}`)
-	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: eventtest.UUID("entity-original")}}
+	targetSet := []events.RouteIdentity{{FlowID: "flow-original", FlowInstance: "flow-original", EntityID: original.EntityID}}
 	recipients := []string{"agent-original"}
 	intents := []runtimeengine.EmitIntent{{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-queued-snapshot"),
@@ -697,7 +709,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload()))
 	}
 	target := got.TargetRoute()
-	if target.FlowInstance != "flow-original" || target.EntityID != eventtest.UUID("entity-original") {
+	if target.FlowInstance != "flow-original" || target.EntityID != original.EntityID {
 		t.Fatalf("delivered target route = %#v, want original snapshot", target)
 	}
 	requireNoBusEvent(t, mutatedCh, "mutated recipient delivery")
