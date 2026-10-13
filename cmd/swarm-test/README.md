@@ -9,8 +9,19 @@ descendants, including work with redirected stdio, before a phase can complete.
 Ordinary broad/native admission is unchanged. `test-results/preflight/` retains
 source/build/selection identity, phase timings, failures and unstarted work.
 The five-minute warm-vemew target is soft: an overrun requires reviewed
-reviewed re-ranking, never shorter test deadlines or automatic selector changes.
+re-ranking, never shorter test deadlines or automatic selector changes.
 An overrun alone does not make a complete passing command fail.
+
+Execution order is formatting, OpenRPC, nine ranked existing package phases,
+complexity, all remaining selected packages in canonical order, then full
+`go vet ./...`. The ranked group is worklifetime, effects, deliverycontinuation,
+manager, testutil, rewrite-stages-2566, backend/authoractivity, swarm-test-timing,
+and testtiming. Rank changes only order, not membership: missing ranked packages
+are never fabricated and future structural packages are never omitted. Cheap
+census failures can surface before expensive checks, but complexity-only or
+vet-only failures can arrive later. This is not an all-green speedup guarantee.
+Every check must still pass for a complete receipt. Source/build fences run
+before and after each phase, and joined cleanup precedes advancement.
 
 Preflight replaces focused proof's shared guards. Declare `Local-Tier: focused`
 and an informational `Preflight: pass (Ns)` receipt; run affected behavioral,
@@ -37,7 +48,8 @@ time. `queue_wait_seconds` is zero: preflight never enters the shared slot queue
 `execution_seconds` includes package build/TestMain and actual commands;
 `cleanup_seconds` records descriptor and log cleanup. `setup_seconds` covers
 discovery, source/variant/result validation and remaining command overhead.
-The same execution/setup/cleanup costs are retained per phase. Do not warm up
+The same execution/setup/cleanup costs and actual start/completion timestamps
+are retained per phase. Do not warm up
 with a whole suite or call a sum of early-failing root durations command latency.
 
 The reviewer chooses independent `CI-Tier` and `Local-Tier` PR-body lines. Use

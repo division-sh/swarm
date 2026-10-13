@@ -24071,8 +24071,8 @@ test_specification:
         Its reviewed finite selection always runs independently of changed paths. The initial thirteen source-guard
         candidates retain exact package/root identity; eighteen reviewed escape roots (the effects primitive manifest,
         delivery-continuation consumer guard, fourteen exact runforkreadiness roots, the runforkexecution receiver
-        compiler guard and the async-site census) join them. With eleven safety roots this is 123 exact roots.
-        The existing eighty-one structural-owner guards are projected
+        compiler guard and the async-site census) join them. With eleven safety roots and the initial eighty-one
+        structural-owner guards this initially totals 123 exact roots. Canonical structural growth is projected
         from their canonical source inventory, not duplicated. Bounded command and ledger safety controls are included.
         Formatting, canonical exact-base/head complexity, OpenRPC check and native vet/type checking execute as real
         commands. Native proof discovery and required child obligations remain authoritative. Missing, foreign,
@@ -24083,6 +24083,19 @@ test_specification:
         Cancellation and unresolved lifetime remain failed/incomplete proof. Ordinary broad/native admission remains
         unchanged. Static/compiler processes remain distinct from test-service authority. Clean source and effective build identity
         must remain unchanged through execution; compilation bytes may be reused, but passing test results may not.
+      execution_order: >-
+        The admitted plan remains canonically sorted and immutable. Execution is a deterministic permutation:
+        formatting, OpenRPC, the ranked existing package phases (internal/runtime/core/worklifetime,
+        internal/runtime/effects, internal/runtime/deliverycontinuation, internal/runtime/manager,
+        internal/testutil, scripts/rewrite-stages-2566, internal/store/internal/backend/authoractivity,
+        cmd/swarm-test-timing, internal/testtiming), exact-base/head complexity, every remaining selected package
+        in canonical order, then unchanged full native go vet ./.... Rank never adds membership, omits future
+        canonical packages, changes commands/selectors/required children, or splits package invocations.
+        The same sequence governs execution and unstarted accounting. Source/build fences apply before and after
+        every phase, and descendants are joined before advancing. An early failure leaves incomplete evidence and
+        all genuinely unstarted phases, including vet. Cheap failure feedback can improve, while complexity-only
+        and vet-only failures may arrive later; no globally optimal order, all-green speedup or five-minute
+        guarantee is claimed. Successful completion still requires every check, including full vet.
       eligibility: >-
         Known-flaky execution variants are excluded by reviewed finite membership, never a dynamic ledger skip list.
         A selected whole root containing the known-flaky leaf must be excluded rather than filtered or weakened.
@@ -24105,7 +24118,7 @@ test_specification:
         automatic membership loss, timeout inflation or a successful partial receipt. An overrun alone does not
         invalidate a complete passing command or justify another qualification run. Receipts distinguish compiled-entry
         end-to-end elapsed, zero native queue wait, execution, setup/validation and cleanup, with corresponding per-phase
-        costs. Outer launcher-to-exit measurement remains separate and includes launcher compilation; ordinary scheduler
+        costs and actual phase start/completion timestamps. Outer launcher-to-exit measurement remains separate and includes launcher compilation; ordinary scheduler
         contention, compilation, TestMain, discovery and cleanup cannot be subtracted as queue wait. No preparatory suite warm-up
         or duplicate local tier is justified by this measurement.
     failure_evidence_ledger:
