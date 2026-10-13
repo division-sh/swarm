@@ -20,8 +20,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -712,47 +714,55 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
+						CostUSD:          0.000675,
 					},
 					Estimated: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
+						CostUSD:          0.000300,
 					},
 				},
 				Breakdown: []operatorread.OperatorAgentUsageBreakdown{{
-					ExecutionMode:   "live",
-					UsageAccounting: operatorread.AgentUsageAccountingExact,
-					InvocationType:  "anthropic",
-					Model:           "claude-3-5-sonnet",
-					ModelAlias:      "regular",
-					BackendProfile:  "anthropic",
-					Provider:        "anthropic",
-					Transport:       "api",
-					ResolvedModel:   "claude-3-5-sonnet",
-					CostDisplay:     "$0.000675 estimated",
+					ExecutionMode:      "live",
+					UsageAccounting:    operatorread.AgentUsageAccountingExact,
+					InvocationType:     "anthropic",
+					Model:              "claude-3-5-sonnet",
+					ModelAlias:         "regular",
+					BackendProfile:     "anthropic",
+					Provider:           "anthropic",
+					Transport:          "api",
+					ResolvedModel:      "claude-3-5-sonnet",
+					CostDisplay:        "$0.000675 estimated",
+					CostProvenance:     runtimeeffects.CompletionCostEstimated,
+					CompletionEvidence: readOnlyProbeCompletionEvidence(t, "anthropic", "claude-3-5-sonnet"),
 					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
+						CostUSD:          0.000675,
 					},
 				}, {
-					ExecutionMode:   "live",
-					UsageAccounting: operatorread.AgentUsageAccountingEstimated,
-					InvocationType:  "claude_cli",
-					Model:           "sonnet",
-					ModelAlias:      "regular",
-					BackendProfile:  "claude_cli",
-					Provider:        "claude",
-					Transport:       "cli",
-					ResolvedModel:   "sonnet",
-					CostDisplay:     "$0.000300 estimated",
+					ExecutionMode:      "live",
+					UsageAccounting:    operatorread.AgentUsageAccountingEstimated,
+					InvocationType:     "claude_cli",
+					Model:              "sonnet",
+					ModelAlias:         "regular",
+					BackendProfile:     "claude_cli",
+					Provider:           "claude",
+					Transport:          "cli",
+					ResolvedModel:      "sonnet",
+					CostDisplay:        "$0.000300 estimated",
+					CostProvenance:     runtimeeffects.CompletionCostEstimated,
+					CompletionEvidence: readOnlyProbeCompletionEvidence(t, "claude_cli", "sonnet"),
 					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
+						CostUSD:          0.000300,
 					},
 				}},
 			},
@@ -822,11 +832,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			conversationTurnsResult: operatorread.OperatorConversationTurnListResult{
 				Conversation: operatorread.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
 				Turns: []operatorread.OperatorConversationTurnListItem{{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now, DurationMS: 25,
+					CompletionEvidence: *readOnlyProbeCompletionEvidence(t, "anthropic", "claude-3-5-sonnet"), ResolvedModel: "claude-3-5-sonnet",
 					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
 			conversationTurnResult: operatorread.OperatorPublicConversationTurnDetail{
 				Session: operatorread.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
 				Turn: operatorread.OperatorPublicConversationTurn{TurnID: readOnlyProbeTurnID, ExecutionMode: "live", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
+					CompletionEvidence: *readOnlyProbeCompletionEvidence(t, "anthropic", "claude-3-5-sonnet"), ResolvedModel: "claude-3-5-sonnet",
 					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []operatorread.OperatorConversationActivity{}},
 				Frame: operatorread.OperatorConversationFrameFacts{
 					Version: "agent-execution-frame.v1", FrameID: "agent-frame:v1:" + readOnlyProbeTurnID,
@@ -865,47 +877,55 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
+						CostUSD:          0.000675,
 					},
 					Estimated: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
+						CostUSD:          0.000300,
 					},
 				},
 				Breakdown: []operatorread.OperatorAgentUsageBreakdown{{
-					ExecutionMode:   "live",
-					UsageAccounting: operatorread.AgentUsageAccountingExact,
-					InvocationType:  "anthropic",
-					Model:           "claude-3-5-sonnet",
-					ModelAlias:      "regular",
-					BackendProfile:  "anthropic",
-					Provider:        "anthropic",
-					Transport:       "api",
-					ResolvedModel:   "claude-3-5-sonnet",
-					CostDisplay:     "$0.000675 estimated",
+					ExecutionMode:      "live",
+					UsageAccounting:    operatorread.AgentUsageAccountingExact,
+					InvocationType:     "anthropic",
+					Model:              "claude-3-5-sonnet",
+					ModelAlias:         "regular",
+					BackendProfile:     "anthropic",
+					Provider:           "anthropic",
+					Transport:          "api",
+					ResolvedModel:      "claude-3-5-sonnet",
+					CostDisplay:        "$0.000675 estimated",
+					CostProvenance:     runtimeeffects.CompletionCostEstimated,
+					CompletionEvidence: readOnlyProbeCompletionEvidence(t, "anthropic", "claude-3-5-sonnet"),
 					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
+						CostUSD:          0.000675,
 					},
 				}, {
-					ExecutionMode:   "live",
-					UsageAccounting: operatorread.AgentUsageAccountingEstimated,
-					InvocationType:  "claude_cli",
-					Model:           "sonnet",
-					ModelAlias:      "regular",
-					BackendProfile:  "claude_cli",
-					Provider:        "claude",
-					Transport:       "cli",
-					ResolvedModel:   "sonnet",
-					CostDisplay:     "$0.000300 estimated",
+					ExecutionMode:      "live",
+					UsageAccounting:    operatorread.AgentUsageAccountingEstimated,
+					InvocationType:     "claude_cli",
+					Model:              "sonnet",
+					ModelAlias:         "regular",
+					BackendProfile:     "claude_cli",
+					Provider:           "claude",
+					Transport:          "cli",
+					ResolvedModel:      "sonnet",
+					CostDisplay:        "$0.000300 estimated",
+					CostProvenance:     runtimeeffects.CompletionCostEstimated,
+					CompletionEvidence: readOnlyProbeCompletionEvidence(t, "claude_cli", "sonnet"),
 					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
+						CostUSD:          0.000300,
 					},
 				}},
 			},
@@ -923,6 +943,26 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			BundleHash:      "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
+}
+
+func readOnlyProbeCompletionEvidence(t *testing.T, profileID, model string) *runtimeeffects.CompletionEvidence {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend(profileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := runtimeeffects.CompletionModelResponse
+	if profile.Transport == "cli" {
+		source = runtimeeffects.CompletionModelCLITerminal
+	}
+	evidence := runtimeeffects.CompletionEvidence{
+		Request: runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: model, BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport},
+		Models:  []runtimeeffects.CompletionModelObservation{{Model: model, Source: source}}, CostProvenance: runtimeeffects.CompletionCostEstimated,
+	}
+	if err := evidence.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return &evidence
 }
 
 func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities) (*Handler, map[string]int) {
