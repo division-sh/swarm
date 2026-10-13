@@ -328,7 +328,7 @@ func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
 		release:      releaseLater,
 	})
 
-	competingBus, err := newScopedTestEventBus(fixture.store)
+	competingBus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{ContractBundle: fixture.source})
 	if err != nil {
 		t.Fatalf("create competing event bus: %v", err)
 	}
