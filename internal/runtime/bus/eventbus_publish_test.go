@@ -2619,6 +2619,16 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, Artifact: bundle.SourceArtifact,
+	})
+	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, runtimerunlifecycle.ForkOriginPointEvent, 1, sourceEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
+		Origin: origin, RunID: forkRunID, Artifact: bundle.SourceArtifact,
+	})
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEventID, "selection:pre-dispatch-proof", "fork-task", "live")
 	if err != nil {
 		t.Fatal(err)
@@ -2646,6 +2656,10 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	})
 	if err == nil || committed.AppendOutcome != runtimebus.EventAppendOutcomeUnknown {
 		t.Fatalf("commit outcome=%v err=%v, want missing-source rollback", committed.AppendOutcome, err)
+	}
+	wantRefusal := fmt.Sprintf("selected-contract source event %s does not belong to source run %s", sourceEventID, sourceRunID)
+	if !strings.HasSuffix(err.Error(), wantRefusal) {
+		t.Fatalf("commit refusal=%v, want exact absent source-event witness %q", err, wantRefusal)
 	}
 	eb.AbandonPreparedPublish(ctx, prepared)
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
