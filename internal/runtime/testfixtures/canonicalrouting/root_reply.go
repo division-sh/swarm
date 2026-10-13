@@ -145,7 +145,7 @@ func ApplyRootReplyBoundaryNegativeMutation(t testing.TB, root string, rootReque
 	case RootReplyCorrelationOptional:
 		field = "  request_id: text?\n"
 	case RootReplyCorrelationList:
-		field = "  request_id: \"[text]\"\n"
+		field = "  request_id: [text]\n"
 	case RootReplyCorrelationIncompatible:
 		field = "  request_id: integer\n"
 	default:
