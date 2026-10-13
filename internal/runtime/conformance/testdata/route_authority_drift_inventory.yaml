@@ -532,6 +532,8 @@ seam_families:
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/contract_frontier_test.go
       - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runforkadmission/fixed_cut_connect.go
+      - internal/runtime/runforkadmission/fixed_cut_topology_test.go
     search_dimensions: [connect_route_plan, route_table_resolve, typed_connect_recipient_evaluation]
     invalid_authority:
       - applying retired receiver-carrier filtering to a global-root connect receiver
@@ -542,6 +544,11 @@ seam_families:
       A repository-root receiver consumes ordinary root node/agent routes;
       nested and non-root receivers remain receiver-carrier-only. The shared
       per-plan lookup is consumed by both frontier and route-history admission.
+      Fixed-cut keyed receivers consume the same compiled key and materializer
+      with the exact captured publication/schema and complete construction/parent
+      index. This selects already-constructed evidence only; it does not create
+      receivers, read current source rows or grant execution. The T17 fixed-cut
+      topology controls preserve missing, changed and foreign-evidence refusal.
   - id: selected_contract_connect_fanout_completeness
     layer: replay_recovery_consumers
     classification: valid_consumer
@@ -554,13 +561,14 @@ seam_families:
     invalid_authority:
       - a proven static sibling suppressing an unresolved runtime receiver
       - discarding proven root or static-child recipients because another plan is unresolved
-      - dynamically resolving template receivers inside selected-contract admission
+      - resolving a future or unbound template receiver without exact fixed-cut construction evidence
     notes: >
       Each matched connect row retains its own runtime-resolution state.
       Frontier and route-history admission preserve recipients from proven
       static/root rows while classifying the event fail-closed when any sibling
-      receiver still requires runtime resolution. Dynamic resolution remains
-      separately tracked and is not implemented here.
+      receiver still requires runtime resolution. The bounded fixed-cut
+      constructor/selector consumer can prove an already-constructed receiver;
+      future, unbound and delivery-minted destinations remain unresolved here.
   - id: connect_receiver_pin_delivery_collision
     layer: route_plan_authority
     classification: canonical_owner
