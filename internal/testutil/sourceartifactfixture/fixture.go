@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-const BundleHash = "bundle-v2:sha256:475110a469b91fc27e36bf58b6a0bfda6dc0eb100b10692299019b487c866cc4"
+const BundleHash = "bundle-v2:sha256:50f57791dbbc28dad36e9660e36e04f0c1a0431e57ce811ff3a409b9bcccffbb"
 
 type Writer interface {
 	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
@@ -24,7 +24,7 @@ type Reader interface {
 }
 
 func Artifact() *sourceartifact.AdmittedSourceArtifact {
-	artifact := New("agents.yaml", []byte("agents: {}\n"))
+	artifact := New("global/schema.yaml", []byte("name: global\n"))
 	if artifact.BundleHash() != BundleHash {
 		panic("source artifact fixture hash drift: " + artifact.BundleHash())
 	}

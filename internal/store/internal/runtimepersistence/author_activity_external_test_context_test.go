@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -22,6 +23,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -115,6 +117,14 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), selected)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		sourceartifactfixture.Require(t, context.Background(), selected)
+	}
+	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
+		repo := runtimepipeline.WorkflowRepoRoot()
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			return nil, err
+		}
+		opts.ContractBundle = semanticview.Wrap(bundle)
 	}
 	if opts.RuntimeInstanceID == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID

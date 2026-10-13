@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -420,7 +421,7 @@ func captureAgentFixtureAuthorityRows(t *testing.T, ctx context.Context, selecte
 	return counts
 }
 
-const agentFixtureTestBundleHash = "bundle-v2:sha256:475110a469b91fc27e36bf58b6a0bfda6dc0eb100b10692299019b487c866cc4"
+const agentFixtureTestBundleHash = sourceartifactfixture.BundleHash
 
 func rejectedAgentFixtureAdmissions(t *testing.T) []runtimeagenttopology.Admission {
 	t.Helper()
