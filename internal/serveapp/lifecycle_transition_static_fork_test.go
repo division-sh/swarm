@@ -28,7 +28,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"choice": "alpha"}, "idempotency_key": "static-fork-frontier",
 			})
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "static-fork"}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
@@ -64,9 +64,9 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				requireLifecycleEventCount(t, rt, fork.ForkRunID, scope+"work.completed", 1)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
+			childBefore := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID)
 			duplicate := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt, seed.RunID) != before || lifecycleStoredSnapshot(t, rt, fork.ForkRunID) != childBefore {
+			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID) != childBefore {
 				t.Fatal("duplicate fork changed child evidence or source state")
 			}
 		})

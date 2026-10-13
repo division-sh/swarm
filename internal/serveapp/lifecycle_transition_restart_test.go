@@ -113,21 +113,21 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
 			}
 			opts.SourceRoot = sourceB
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("restart mutated pending lifecycle")
 			}
 			missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
 			if missingPin.Data["code"] != "BUNDLE_UNAVAILABLE" {
 				t.Fatalf("missing pin=%#v", missingPin)
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("unavailable pin mutated gate")
 			}
 			if code := second.stop(); code != 0 {
@@ -143,7 +143,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			var decided map[string]any
 			stale := map[string]any{"card_id": params["card_id"], "verdict": "approve", "observed_content_hash": strings.Repeat("0", len(params["observed_content_hash"].(string))), "idempotency_key": "stale-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", stale)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("stale hash mutated pending gate")
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
@@ -168,10 +168,10 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			}
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("contradictory verdict mutated routed gate")
 			}
 			if code := second.stop(); code != 0 {
@@ -183,7 +183,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if duplicate.EventID != seed.EventID {
 				t.Fatal("restart reminted ingress")
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("terminal restart/replay changed evidence")
 			}
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
@@ -283,13 +283,13 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if !ok || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 					t.Fatalf("restart escape cause=%#v", compiled)
 				}
-				settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+				settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 				if code := second.stop(); code != 0 {
 					t.Fatalf("second stop=%d", code)
 				}
 				third, rt := start()
 				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
-				if duplicate.EventID != cap.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+				if duplicate.EventID != cap.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 					t.Fatal("terminal restart changed cap identity/history")
 				}
 				requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)

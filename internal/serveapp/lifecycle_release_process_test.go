@@ -63,9 +63,9 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 						t.Fatalf("nested gate final public result: %+v", entity)
 					}
 					requireLifecycleEventCount(t, rt, seed.RunID, prefix+"work.completed", 1)
-					before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+					before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-					if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+					if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 						t.Fatal("duplicate acknowledged gate decision changed durable state")
 					}
 					return

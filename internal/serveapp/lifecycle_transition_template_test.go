@@ -328,12 +328,12 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 				requireLifecycleEventCount(t, rt, runID, s.instance+"/loop.escaped", 1)
 				requireLifecycleEventCount(t, rt, runID, s.flow+"/loop.escaped", 0)
 			}
-			before := lifecycleStoredSnapshot(t, rt, runID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID)
 			for _, s := range siblings {
 				var duplicate map[string]any
 				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", s.decision, &duplicate)
 			}
-			if lifecycleStoredSnapshot(t, rt, runID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID) != before {
 				t.Fatal("same-key template verdict replay mutated persisted history/state")
 			}
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.finished", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-driver-finish"})

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 554 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "803dff30bbdd52806769fab57d213cd33d7615a846871bff4f11071c3679615c" {
+	if err != nil || len(rows) != 568 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fdaa9266dac7b8c9ddc394182bb2118a143d04abe876a0b84c4526113aa5bb98" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -133,6 +133,18 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.Function == "readServedForkRecipientSourceDomain" {
 			if err := family145ForkSourceDomainReaderProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.Function == "lifecycleStoredSnapshot" {
+			if err := family145LifecycleBusinessReaderProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if family145LifecycleBusinessCallers[row.Function] != 0 {
+			if err := family145LifecycleBusinessCallerProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

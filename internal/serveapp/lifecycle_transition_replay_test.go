@@ -36,7 +36,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			// The public replay endpoint requires agent delivery history. Do not
 			// manufacture that history for this real node-only execution.
 			replay := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": repeated.EventID, "idempotency_key": "repeat-replay"})
@@ -44,7 +44,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				t.Fatalf("node-only replay=%#v", replay)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("refused node-only replay mutated the next attempt")
 			}
 			var replayFailures int
@@ -119,9 +119,9 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			}
 			requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", escapeCount)
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
-			if duplicate.EventID != repeated.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if duplicate.EventID != repeated.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("closed replay reminted work or changed evidence")
 			}
 			t.Logf("cap/close winner=%s accepted_public_contenders=%d", closed.CloseReason, len(accepted))

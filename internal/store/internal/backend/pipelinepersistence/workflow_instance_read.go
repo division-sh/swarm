@@ -18,6 +18,41 @@ type ReceiverJoinedInventoryStorageRow struct {
 	EntityID, FlowInstance, EntityType, CurrentState, Fields string
 }
 
+type LifecycleBusinessStorageRow struct {
+	EntityID, CurrentState, Config, Accumulator string
+	Revision                                    int
+	Fields                                      sql.NullString
+}
+
+// This physical LEFT JOIN retains fieldless and unmatched lifecycle headers.
+func ReadLifecycleBusinessStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]LifecycleBusinessStorageRow, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("lifecycle storage requires the selected read transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT f.entity_id,f.current_state,f.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(f.accumulator AS TEXT)
+		FROM flow_instances f LEFT JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path AND e.entity_id=f.entity_id
+		WHERE f.run_id=$1 ORDER BY f.entity_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LifecycleBusinessStorageRow
+	for rows.Next() {
+		var row LifecycleBusinessStorageRow
+		if err := rows.Scan(&row.EntityID, &row.CurrentState, &row.Revision, &row.Fields, &row.Config, &row.Accumulator); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // This physical witness deliberately includes terminal rows and preserves the
 // stored field text rather than substituting the active-target projection.
 func ReadReceiverJoinedInventoryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]ReceiverJoinedInventoryStorageRow, error) {

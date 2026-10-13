@@ -198,9 +198,9 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
 					requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
 				} else {
-					snapshot := lifecycleStoredSnapshot(t, rt, seed.RunID)
+					snapshot := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					refused := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": published.EventID, "idempotency_key": "node-only-refusal"})
-					if refused.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" || lifecycleStoredSnapshot(t, rt, seed.RunID) != snapshot {
+					if refused.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != snapshot {
 						t.Fatal("node-only public refusal contract changed")
 					}
 					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
@@ -213,13 +213,13 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				if closed := readLifecycleLoop(t, rt, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
 					t.Fatal("loop not closed")
 				}
-				closedState := lifecycleStoredSnapshot(t, rt, seed.RunID)
+				closedState := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 				if code := second.stop(); code != 0 {
 					t.Fatalf("second stop=%d", code)
 				}
 				third, rt := start()
 				final := readLifecycleNodeRecoveryDelivery(t, rt, old.Claim.DeliveryID(), "after_closed_recovery")
-				if !reflect.DeepEqual(final, settled) || entries.Load() != 2 || lifecycleStoredSnapshot(t, rt, seed.RunID) != closedState {
+				if !reflect.DeepEqual(final, settled) || entries.Load() != 2 || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != closedState {
 					t.Fatal("terminal recovery reexecuted settled work or changed compiled history")
 				}
 				t.Logf("NODE_REEXECUTION event=%s delivery=%s old_claim=%d new_claim=%d compiled=%#v handler_entries=%d", published.EventID, old.Claim.DeliveryID(), old.Claim.Version(), retry.Claim.Version(), compiled, entries.Load())

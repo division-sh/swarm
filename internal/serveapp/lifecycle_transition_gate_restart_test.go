@@ -132,9 +132,9 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("recovered gate consumer=%#v", entity)
 			}
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("recovered gate duplicate mutated history")
 			}
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)

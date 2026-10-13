@@ -31,9 +31,9 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 			if !ok || compiled.FlowID() != "." || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" || history[0].From != "review" || history[0].To != "approved" {
 				t.Fatalf("advance-only cause=%#v", compiled)
 			}
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("duplicate advance-only verdict mutated history")
 			}
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 0)

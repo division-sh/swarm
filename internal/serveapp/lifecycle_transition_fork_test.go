@@ -63,7 +63,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt, seed.RunID, entityID).RevisionID}
 			}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
@@ -78,12 +78,12 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			} else {
 				requireLifecycleRootLoopForkRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
 			}
-			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
+			childBefore := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt, fork.ForkRunID) != childBefore {
+			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID) != childBefore {
 				t.Fatal("fork retry changed response or child state/history")
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("fork mutated parent business state/history")
 			}
 		})

@@ -5983,3 +5983,65 @@ semantic preconditions, not automatically mechanical. Existing #2542/#2151
 tracking/watchlist suffice. No production/spec semantics change in this chain;
 all qualification holds survive. Local only, no push/PR/tier/server2. Rebase
 waits for #2617's signal. Receipts:source-domain-native-* in the existing cache.
+
+## Whole lifecycle business witness dependency (2026-10-13)
+
+ALL40 lifecycleStoredSnapshot calls across13 enclosing declarations/12 files
+now carry the existing receiverProofStateReader, not the raw served-runtime
+carrier. The actual physical read is owned by pipelinepersistence's existing
+workflow-instance boundary through ReadLifecycleBusinessStorageTx. Its fixed
+six-column query preserves the original LEFT JOIN on run/path/entity, exact-run
+predicate, ordering, header revision/state, raw fields/config/accumulator text
+and sql.NullString.Valid. The serving helper keeps its exact original formatted
+string, error refusal and empty-result refusal. No source, handler, wait, fault,
+generation, workload, restart, teardown or assertion changed in any caller.
+
+Both active serving and independent release/process-restart inspections use
+their existing InspectSnapshot lifetime and the same private read owner. The
+first private validator incorrectly required runtime schema acceptance from an
+independent read-only inspector; the real release and killed-process tests
+reproduced this on BOTH stores. The bounded repair uses the EXISTING initialized
+native observation-role validator, not bootstrap, runtime admission, a raw pool
+or a compatibility fallback. The observer remains schema-unaccepted and unable
+to acquire runtime authority. Active-read admission/visibility is unchanged.
+
+The finite codemod/output preserves every historical Before/After/Successor and
+the24 immutable receipts:1306 recipes/568 transitions, digest
+fdaa9266dac7b8c9ddc394182bb2118a143d04abe876a0b84c4526113aa5bb98.
+Whole-body inverses and owned-source enumeration account for ALL40 call sites.
+Hostile join/run/order preimages are rejected before transformation, and lost
+owner/NULL/fields/revision/config/accumulator/error/empty/assertion cuts fail.
+No new generic SQL callback, selector, constructor or lifecycle framework.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Complete LEFT JOIN NULL-field/header revision/config/accumulator/order/sibling/empty and detached-value fidelity | reproduced and fixed | Original independent storage oracle plus original coordinator counters on BOTH stores under race; actual INNER JOIN regression fails BOTH stores, exact LEFT JOIN restoration PASS12.025s |
+| Non-owner/invalid identity/cancelled/closed refusal and late scan error with no partial rows | execution-proven through the same corrected path | Three native-owner roots BOTH stores under race PASS26.0s; named late NULL-config view fault uses exact selected writer, cleanup registered before installation, restored rows match original oracle |
+| Independent schema-unaccepted inspection and retired/cancelled/closed contexts remain non-authoritative | reproduced and fixed | Expanded existing read-only inspection proof BOTH stores under race PASS42.55s, original unaccepted/runtime/write/whole-store assertions preserved |
+| Selected carrier ordering, loop transition replay and retained restart business immutability | reproduced and fixed | Original three served roots BOTH stores under race PASS102.83s/14.08s/46.06s; all caller bodies mechanically source-pinned |
+| Real release process and actual killed-process gate restart preserve exact history/no mutation | reproduced and fixed | Original two roots initially RED on schema acceptance; bounded observation-role repair BOTH-store race GREEN108.88s/60.23s, no shortened journeys or timeout change |
+| Static fork caller and sibling source/business preservation | execution-proven through the same corrected path | PostgreSQL cell passes in original selected run; one bounded isolated predecessor/native SQLite comparison passes30.824s/32.933s. Earlier mixed-run SQLite initial seed-publication timeout remains separately qualification-open, not erased or causally fixed |
+
+The static SQLite timeout occurs at the initial work.seeded event.publish,
+BEFORE the first lifecycleStoredSnapshot invocation. The predecessor comparison
+does NOT establish clean-master inheritance or a load cause. No retry loop,
+timeout inflation, skip, weakened assertion or runtime repair. That failed
+receipt is retained under the existing startup/deadline qualification territory.
+The detached comparison worktree was clean and removed after its one run.
+
+Complete cheap family/historical/idempotence collection PASS51.490s; six
+persistence boundaries and affected owner structural/construction guards pass.
+Candidate-overlay typing PASS179.568s; final affected U1000 passes. Two new
+test roots initially exceeded cognitive30; extraction of exact assertion/fault
+helpers preserves all controls and makes both sub30 without suppressions.
+Signed-head complexity follows the commit. Fresh downward census PASS158.074s:
+7787 ->7740 findings,5492 ->5447 raw sites,47/45 removed, ZERO added.
+Unchanged ratchet PASS22.462s. Supplied-pool53 and excluded67 unchanged.
+
+No production runtime/spec semantics changed; this is observational ownership,
+not a new lifecycle summary or authority model. Existing #2542/#2151/watchlist
+mapping suffices; all recorded qualification holds survive. The mailbox-effects
+wave has a live shared publication wait/debug dependency and is not dishonestly
+credited as closed by moving only its snapshot queries. Local only; no push,
+PR, tier or server2. Rebase still waits for #2617 and the orchestrator handoff.
+Receipts:~/.cache/swarm-2542-family145/lifecycle-business-*.

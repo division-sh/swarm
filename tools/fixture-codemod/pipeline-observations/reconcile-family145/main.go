@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "803dff30bbdd52806769fab57d213cd33d7615a846871bff4f11071c3679615c"
+const targetDigest = "fdaa9266dac7b8c9ddc394182bb2118a143d04abe876a0b84c4526113aa5bb98"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -173,6 +173,15 @@ var files = []string{
 	"internal/serveapp/main_runtime_test.go",
 	"internal/serveapp/mailbox_completion_test.go",
 	"internal/serveapp/lifecycle_transition_restart_test.go",
+	"internal/serveapp/lifecycle_transition_served_test.go",
+	"internal/serveapp/lifecycle_transition_nested_test.go",
+	"internal/serveapp/lifecycle_transition_static_fork_test.go",
+	"internal/serveapp/lifecycle_transition_gate_restart_test.go",
+	"internal/serveapp/lifecycle_transition_gate_test.go",
+	"internal/serveapp/lifecycle_transition_node_recovery_test.go",
+	"internal/serveapp/lifecycle_transition_replay_test.go",
+	"internal/serveapp/lifecycle_transition_gate_process_test.go",
+	"internal/serveapp/lifecycle_release_process_test.go",
 	"internal/serveapp/receiver_restart_test.go",
 	"internal/serveapp/mailbox_cursor_restart_test.go",
 	"internal/serveapp/issue2277_audit_probe_test.go",
@@ -293,6 +302,15 @@ var retiredEventFixtureHelpers = map[string]map[string]bool{
 }
 
 var gateRecoveryTargets = map[string]map[string]bool{
+	"internal/serveapp/lifecycle_transition_served_test.go":           {"lifecycleStoredSnapshot": true, "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_nested_test.go":           {"TestServedCompiledTransitionNestedCarrierCollisionOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_static_fork_test.go":      {"TestServedCompiledTransitionStaticForkEvidenceOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_gate_restart_test.go":     {"proveServedCompiledGateOutcomeRestart": true},
+	"internal/serveapp/lifecycle_transition_gate_test.go":             {"TestServedCompiledGateAdvanceOnlyOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_node_recovery_test.go":    {"TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_replay_test.go":           {"TestServedCompiledLoopTransitionReplayOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_gate_process_test.go":     {"TestServedCompiledGateOutcomeRestartOnBothStores": true},
+	"internal/serveapp/lifecycle_release_process_test.go":             {"TestReleaseCompiledLifecycleJourneysBothStores": true},
 	"internal/store/durable_data_selected_store_test.go":              {"forEachDurableDataStore": true},
 	"internal/runtime/budget_recovery_parity_test.go":                 {"TestCompletionBudgetRecoveryProjectionParity": true},
 	"internal/serveapp/budget_stage_recovery_test.go":                 {"TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores": true},
@@ -306,8 +324,8 @@ var gateRecoveryTargets = map[string]map[string]bool{
 	"internal/serveapp/fork_receiver_post_revision_refusal_test.go":   {"TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores": true, "requireForkReceiverPostRevisionPolicyRefusal": true},
 	"internal/serveapp/selected_fork_pending_input_test.go":           {"TestSelectedForkPendingInputBothStores": true, "TestExplicitTargetRestrictsConnectedSiblingsBothStores": true},
 	"internal/serveapp/selected_fork_notice_controls_test.go":         {"TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores": true},
-	"internal/serveapp/lifecycle_transition_fork_test.go":             {"requireLifecycleRootLoopForkRevision": true, "requireLifecycleFrozenGateControlRefusal": true},
-	"internal/serveapp/lifecycle_transition_template_test.go":         {"TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores": true},
+	"internal/serveapp/lifecycle_transition_fork_test.go":             {"requireLifecycleRootLoopForkRevision": true, "requireLifecycleFrozenGateControlRefusal": true, "runLifecycleRootForkPolicy": true},
+	"internal/serveapp/lifecycle_transition_template_test.go":         {"TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores": true, "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores": true},
 	"internal/serveapp/fork_historical_context_test.go":               {"TestRunForkHistoricalIdentityPublicExecutionBothStores": true},
 	"internal/serveapp/fork_recipient_authority_test.go":              {"readServedForkRecipientSourceDomain": true, "requireServedForkConsumerAuthority": true, "TestServedForkConnectedRecipientAuthorityOnBothStores": true},
 	"internal/serveapp/receiver_initialization_test.go":               {"requireTypedReceiverInitializationCases": true},

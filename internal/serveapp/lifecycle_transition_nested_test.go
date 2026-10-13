@@ -221,12 +221,12 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			if entities != 6 {
 				t.Fatalf("nested source/gate/final recipients=%d", entities)
 			}
-			before := lifecycleStoredSnapshot(t, rt, runID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID)
 			for _, params := range decisions {
 				var result map[string]any
 				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
 			}
-			if lifecycleStoredSnapshot(t, rt, runID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID) != before {
 				t.Fatal("duplicate sibling verdict changed history or consumer state")
 			}
 		})

@@ -63,7 +63,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 								}
 								path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
 								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != choice || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
-									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 								}
 								var entity operatorread.OperatorEntityFull
 								requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
@@ -79,9 +79,9 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							if entities != len(recipients) {
 								t.Fatalf("public input recipient mismatch: %d entity rows, want %d", entities, len(recipients))
 							}
-							before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+							before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 								t.Fatal("duplicate changed selected transition")
 							}
 						})
@@ -445,27 +445,20 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 }
 
 // SQL is read-only proof of all business rows and persisted transition evidence.
-func lifecycleStoredSnapshot(t *testing.T, rt servedControlProofRuntime, runID string) string {
+func lifecycleStoredSnapshot(t *testing.T, reader receiverProofStateReader, runID string) string {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT f.entity_id,f.current_state,f.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(f.accumulator AS TEXT)
-		FROM flow_instances f LEFT JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path AND e.entity_id=f.entity_id
-		WHERE f.run_id=$1 ORDER BY f.entity_id`, runID)
+	var rows []storetest.LifecycleBusinessStorageRow
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		rows, err = storetest.ReadLifecycleBusinessStorage(ctx, reader, runID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	result := ""
-	for rows.Next() {
-		var id, state, config, loops string
-		var fields sql.NullString
-		var revision int
-		if err := rows.Scan(&id, &state, &revision, &fields, &config, &loops); err != nil {
-			t.Fatal(err)
-		}
-		result += fmt.Sprintf("%s/%s/%d/%t:%s/%s/%s\n", id, state, revision, fields.Valid, fields.String, config, loops)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
+	for _, row := range rows {
+		result += fmt.Sprintf("%s/%s/%d/%t:%s/%s/%s\n", row.EntityID, row.CurrentState, row.Revision, row.Fields.Valid, row.Fields.String, row.Config, row.Accumulator)
 	}
 	if result == "" {
 		t.Fatal("no persisted lifecycle proof rows")
