@@ -41,6 +41,9 @@ event-field semantic classifier was found beyond the three review findings.
 The correction uses admitted structural kind for lookup literal domains, and
 retains exact flow-scoped CatalogTypeReference evidence for citation/carriage
 domain rules (JSON structural shape alone does not preserve enum/format identity).
+S15 also aligns bootverify.loopRequiredTextField's existing structural-only
+revision role with the same domain/required-field law consumed by fork carriage;
+all four verify input/output/region/escape callers are in the consumer table.
 The optional join boundary only treats an exactly absent type token as omission;
 whitespace, unknown, recursive and retired supplied references still refuse.
 Dynamic result evidence grants neither closed-record field access nor unsafe
