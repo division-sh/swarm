@@ -44,6 +44,13 @@ func constructionIndexObservation(t testing.TB, source semanticview.Source, runI
 	return observed
 }
 
+func installNativeConstructionIndexFixture(t testing.TB, store *targetRouteMemoryStore, source semanticview.Source, runID string, identity flowidentity.Instance, key string) {
+	t.Helper()
+	observed := constructionIndexObservation(t, source, runID, identity, key)
+	store.installIndexObservation(observed)
+	store.installConstructionReceipt(observed.Owner(), pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key})
+}
+
 func admitConstructionIndexTestObservation(source semanticview.Source, runID string, identity flowidentity.Instance, key string) (pipeline.FlowInstanceObservation, error) {
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
