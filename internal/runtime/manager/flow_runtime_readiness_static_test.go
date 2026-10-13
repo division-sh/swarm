@@ -204,6 +204,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		}
 	}
 	requireStaticReadinessCalls(t, calls, "VerifyDynamicFlowRuntimeActivationAttempt", map[string]int{
+		"committed_agent_attachment.go":    1,
 		"dynamic_flow_activation_owner.go": 2,
 		"flow_readiness_startup.go":        1,
 		"flow_runtime_readiness.go":        1,

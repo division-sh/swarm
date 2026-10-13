@@ -15,6 +15,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -91,14 +92,19 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 	if bundle, found := semanticview.Bundle(req.ContractBundle); found && bundle.SourceArtifact != nil {
 		readiness.BundleHash = bundle.SourceArtifact.BundleHash()
 	}
+	schema, found := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID)
+	if !found {
+		return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("fixture activation has no compiled declaration")
+	}
 	var key string
-	if schema, found := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); found && !schema.Instance.Empty() {
+	if !schema.Instance.Empty() {
 		key, err = runtimepipeline.AdmitFlowInstanceKey(req.ContractBundle, req.Instance.TemplateID, req.ResolvedKey)
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationPlan{}, err
 		}
 	}
 	instance := runtimepipeline.WorkflowInstance{
+		Mode:               schema.EffectiveMode(),
 		InstanceKey:        key,
 		ParentFlowID:       req.Instance.ParentRoute.FlowID,
 		ParentFlowInstance: req.Instance.ParentRoute.FlowInstance,
@@ -114,7 +120,12 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 		EnteredStageAt:     req.OccurredAt,
 		CreatedAt:          req.OccurredAt,
 		RuntimeReadiness:   &readiness,
-		EntityType:         "test_entity",
+	}
+	if entity, declared := entityruntime.ResolveForFlow(req.ContractBundle, req.Instance.TemplateID); declared {
+		instance.EntityType = entity.EntityType
+	}
+	if graph, compiled := semanticview.WorkflowStageTopology(req.ContractBundle, req.Instance.TemplateID); compiled {
+		instance.StageDefined = graph.StageCount() != 0
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,

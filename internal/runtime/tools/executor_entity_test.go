@@ -610,6 +610,10 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 					t.Fatalf("receiver projection dropped an eligible triggering entity: tool=%s actor_entity=%q event_entity=%q source=%+v", name, currentActor.EffectiveEntityID(), event.EntityID(), event.SourceRoute())
 				}
 			}
+			value, err := exec.Execute(turn, "read_validation_case_status", map[string]any{})
+			if err != nil || value != "open" {
+				t.Fatalf("callable read lost its exact triggering entity: value=%v err=%v", value, err)
+			}
 		})
 	}
 	foreignID := uuid.NewString()

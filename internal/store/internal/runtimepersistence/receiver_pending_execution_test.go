@@ -26,19 +26,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
 func TestReceiverEntitylessPendingAttachmentExecutesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":            "name: pending-static-actor\npins:\n  inputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
-				"events.yaml":            "work.requested:\n",
-				"review/schema.yaml":     "name: review\nstages:\n  pending: {}\npins:\n  inputs: [work.requested]\n",
-				"review/agents.yaml":     "worker:\n  model: regular\n  intent: {inline: Acknowledge the exact assigned work.}\n  subscriptions: [work.requested]\n  mock: {kind: python, module: mocks/worker.py}\n",
-				"review/mocks/worker.py": "def handle(input):\n    return {\"text\": \"Acknowledged.\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n",
-			}, nil, func(options *manager.AgentManagerOptions) {
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, canonicalrouting.ReceiverPendingExecutionDocuments(t), nil, func(options *manager.AgentManagerOptions) {
 				options.ExecutionPosture = executionposture.MockOnly
 			})
 			source := semanticview.Wrap(f.bundle)

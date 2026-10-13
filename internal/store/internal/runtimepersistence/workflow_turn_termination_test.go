@@ -27,6 +27,16 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 	for _, mode := range []string{"committed", "late_rollback", "stale_cas", "other_instance", "prelaunch", "prelaunch_restart"} {
 		t.Run(mode, func(t *testing.T) {
 			forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+				declaration := contracts.FlowSchemaDocument{}
+				key := ""
+				if mode == "other_instance" {
+					field, err := contracts.ParseTemplateInstanceField("instance_key")
+					if err != nil {
+						t.Fatal(err)
+					}
+					declaration.Instance, key = field, "primary"
+					fixture = newCompletionSettlementFixtureForFlow(t, fixture.store, fixture.db, fixture.sqlite, fixture.authority.Target.Memory, "global/primary")
+				}
 				ctx := providerDrainContext(t, fixture, "authored-termination")
 				ctx, turnOwner := runtimeeffects.WithTurnExecution(ctx)
 				defer func() { _, _ = turnOwner.Finish() }()
@@ -45,14 +55,14 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				owner := flowidentity.RunScopedFlowInstance{RunID: fixture.authority.Target.RunID, Route: flowidentity.RouteForInstancePath(path)}
 				entityID := uuid.NewString()
 				now := time.Now().UTC().Truncate(time.Microsecond)
-				record := seedTurnTerminationHeader(t, fixture, owner, entityID, now)
+				record := seedTurnTerminationHeaderForDeclaration(t, fixture, owner, entityID, now, declaration, key)
 				if mode == "other_instance" {
-					owner.Route = flowidentity.RouteForInstancePath(path + "/other")
+					owner.Route = flowidentity.RouteForInstancePath("global/other")
 					entityID = uuid.NewString()
-					record = seedTurnTerminationHeader(t, fixture, owner, entityID, now)
+					record = seedTurnTerminationHeaderForDeclaration(t, fixture, owner, entityID, now, declaration, "other")
 				}
 				event := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
-				node, err := identity.AdmitExecutableNodeDeclaration(path, "router")
+				node, err := identity.AdmitExecutableNodeDeclaration(owner.Route.ScopeKey, "router")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -221,12 +231,19 @@ func turnTerminationCommandForClaim(t *testing.T, record pipeline.WorkflowEngine
 
 func seedTurnTerminationHeader(t *testing.T, fixture completionSettlementFixture, owner flowidentity.RunScopedFlowInstance, entity string, now time.Time) pipeline.WorkflowEngineStateRecord {
 	t.Helper()
-	mode := "static"
-	if owner.Route.InstancePath != owner.Route.ScopeKey {
-		mode = "template"
+	return seedTurnTerminationHeaderForDeclaration(t, fixture, owner, entity, now, contracts.FlowSchemaDocument{}, "")
+}
+
+func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSettlementFixture, owner flowidentity.RunScopedFlowInstance, entity string, now time.Time, declaration contracts.FlowSchemaDocument, key string) pipeline.WorkflowEngineStateRecord {
+	t.Helper()
+	fields := map[string]any{}
+	entityType := ""
+	if !declaration.Instance.Empty() {
+		fields[declaration.Instance.Path()] = key
+		entityType = "termination_context"
 	}
 	return commitPreparedWorkflowAggregateFixture(t, testAuthorActivityContext(), fixture.store.(agentFixtureFlowStore), owner.RunID, pipeline.WorkflowInstance{
-		InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: entity, WorkflowName: owner.Route.ScopeKey, WorkflowVersion: "fixture",
-		Mode: mode, StageDefined: true, CurrentState: "ready", Fields: map[string]any{}, CreatedAt: now, EnteredStageAt: now,
+		InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: entity, EntityType: entityType, WorkflowName: owner.Route.ScopeKey, WorkflowVersion: "fixture",
+		Mode: declaration.EffectiveMode(), InstanceKey: key, StageDefined: true, CurrentState: "ready", Fields: fields, CreatedAt: now, EnteredStageAt: now,
 	}, now)
 }

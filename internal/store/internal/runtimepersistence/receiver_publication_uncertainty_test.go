@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -31,12 +32,7 @@ func TestReceiverPublicationCommitUncertaintyBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, _, connector := newP16RaceStore(t, backend)
-				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":        "name: uncertain-static-receiver\npins:\n  inputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
-					"events.yaml":        "work.requested:\n",
-					"review/schema.yaml": "name: review\nstages:\n  pending: {}\npins:\n  inputs: [work.requested]\n",
-					"review/agents.yaml": "worker:\n  model: regular\n  intent: {inline: Review the assigned work.}\n  subscriptions: [work.requested]\n",
-				}, nil, ownStoreTestAgentManager, nil)
+				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, canonicalrouting.ReceiverPublicationUncertaintyDocuments(t), nil, ownStoreTestAgentManager, nil)
 				source := semanticview.Wrap(f.bundle)
 				runID := correlation.RunIDFromContext(f.ctx)
 				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "work.requested", "uncertain-receiver-proof", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())

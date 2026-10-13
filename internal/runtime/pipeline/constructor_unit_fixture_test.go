@@ -43,6 +43,11 @@ func materializedWorkflowInstanceForSource(t testing.TB, source semanticview.Sou
 		t.Fatal("component fixture requires its exact declared flow")
 	}
 	instance.Mode = schema.EffectiveMode()
+	graph, compiled := semanticview.WorkflowStageTopology(source, instance.WorkflowName)
+	if !compiled {
+		t.Fatal("component fixture requires its compiled stage topology")
+	}
+	instance.StageDefined = graph.StageCount() != 0
 	if !schema.Instance.Empty() {
 		key, err := AdmitFlowInstanceKey(source, instance.WorkflowName, instance.Fields[schema.Instance.Path()])
 		if err != nil {

@@ -65,6 +65,7 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 					command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
 						InstanceID: runID, StorageRef: runID, EntityID: runID,
 						WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
+						Mode:         bundle.RootSchema.EffectiveMode(),
 						CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
 						Fields: map[string]any{},
 					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
