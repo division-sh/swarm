@@ -280,6 +280,7 @@ type HandlerRuleEntry struct {
 	FanOut              *FanOutSpec              `yaml:"fan_out"`
 	declarationIdentity runtimeidentity.DeclarationIdentity
 	authored            bool
+	predicateDisplay    string
 	admissionProvenance map[string]EffectiveValueProvenance
 }
 
