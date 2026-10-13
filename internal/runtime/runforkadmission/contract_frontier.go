@@ -46,6 +46,10 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, err
 	}
+	constructors, err := indexFixedCutConstructions(req.Source, req.Plan)
+	if err != nil {
+		return runfork.RunForkContractFrontierAdmission{}, err
+	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract workflow nodes: %w", err)
@@ -131,7 +135,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source, instances, reply)
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan, constructors, frontier[i].SourceEventID, eventName, source, instances, reply)
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
@@ -540,8 +544,8 @@ type contractFrontierEvaluatedRoute struct {
 	nodeIDs                   []string
 }
 
-func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource, instances []runtimeflowidentity.Instance, reply *replycontext.Record) (contractFrontierEvaluatedRoute, error) {
-	runID = strings.TrimSpace(runID)
+func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, eventID, eventName string, source events.RoutingSource, instances []runtimeflowidentity.Instance, reply *replycontext.Record) (contractFrontierEvaluatedRoute, error) {
+	runID := strings.TrimSpace(cut.SourceRunID)
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if routeTable == nil || runID == "" || eventName == "" {
 		return contractFrontierEvaluatedRoute{}, fmt.Errorf("selected frontier requires route table, exact run and event")
@@ -551,6 +555,11 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 		// admitted separately; event-name parsing must not manufacture a source.
 		return contractFrontierEvaluatedRoute{}, nil
 	}
+	if selector, found, err := cut.HistoricalRouteSelector(eventID); err != nil {
+		return contractFrontierEvaluatedRoute{}, err
+	} else if found && (selector.Type() != events.EventType(eventName) || selector.RoutingSource() != source) {
+		return contractFrontierEvaluatedRoute{}, fmt.Errorf("selected connect source contradicts its captured selector")
+	}
 	sourceEvent, err := runtimepinrouting.AdmitSourceEvent(events.EventType(eventName), source)
 	if err != nil {
 		return contractFrontierEvaluatedRoute{}, err
@@ -558,7 +567,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out := contractFrontierEvaluatedRoute{}
 	seenNodes := map[string]struct{}{}
 	for _, plan := range graph.MatchingSourceEvent(sourceEvent) {
-		targets, matched, err := contractFrontierPlanTargets(selectedSource, runID, plan, reply)
+		targets, matched, err := contractFrontierPlanTargets(selectedSource, cut, constructors, eventID, source, plan, reply)
 		if err != nil {
 			return contractFrontierEvaluatedRoute{}, err
 		}
@@ -620,7 +629,8 @@ func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runti
 	return definitions, nil
 }
 
-func contractFrontierPlanTargets(source semanticview.Source, runID string, plan runtimepinrouting.ConnectRoutePlan, reply *replycontext.Record) ([]events.RouteIdentity, bool, error) {
+func contractFrontierPlanTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, eventID string, routingSource events.RoutingSource, plan runtimepinrouting.ConnectRoutePlan, reply *replycontext.Record) ([]events.RouteIdentity, bool, error) {
+	runID := cut.SourceRunID
 	if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
 		if reply == nil {
 			return nil, true, nil
@@ -640,7 +650,24 @@ func contractFrontierPlanTargets(source semanticview.Source, runID string, plan 
 		return []events.RouteIdentity{{FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID()}}, true, nil
 	}
 	if plan.RequiresRuntimeResolution() {
-		return nil, true, nil
+		return fixedCutConnectTargets(source, cut, constructors, eventID, routingSource, plan)
+	}
+	if selector, found, err := cut.HistoricalRouteSelector(eventID); err != nil {
+		return nil, false, err
+	} else if found && len(cut.Entities) != 0 && plan.ReceiverEndpoint().Readback().FlowID != plan.Readback().FlowPath {
+		parent, err := fixedCutConnectParent(source, cut, constructors, selector, plan)
+		if err != nil {
+			return nil, false, err
+		}
+		instance, err := runtimeflowidentity.KeylessChild(source, parent, plan.ReceiverEndpoint().Readback().FlowID)
+		if err != nil {
+			return nil, false, err
+		}
+		stored, found := constructors.byPath[instance.InstancePath]
+		if !found || stored.instance != instance {
+			return nil, false, fmt.Errorf("selected static receiver lacks its exact captured constructor")
+		}
+		return []events.RouteIdentity{plan.ReceiverRoute(instance.InstancePath, instance.EntityID)}, true, nil
 	}
 	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan)
 	if !materialized.Failure.Empty() {

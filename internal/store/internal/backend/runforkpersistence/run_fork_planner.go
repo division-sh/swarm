@@ -206,6 +206,14 @@ func planRunForkSnapshot(
 	if req.ResolvedPoint != nil && plan.ForkPoint != *req.ResolvedPoint {
 		return runfork.RunForkPlan{}, fmt.Errorf("fixed fork point contradicts its historical revision")
 	}
+	selectors, err := historicalRouteSelectorPublications(snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan, err = plan.WithHistoricalRouteSelectors(snapshot.Revision, selectors)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.EventCountAtFork = len(snapshot.Events)
 	for _, reply := range snapshot.ReplyContexts {
 		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)

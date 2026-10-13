@@ -308,6 +308,7 @@ type RunForkPlan struct {
 	historicalJoins           map[string]PublishedJoinOccurrence
 	historicalRequests        map[string][]string
 	historicalReplyReturns    *historicalReplyReturns
+	historicalRouteSelectors  *historicalRouteSelectors
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a
@@ -1045,6 +1046,7 @@ type RunForkSelectedContractRouteAdmission struct {
 	ContractSelection              RunForkContractSelection                   `json:"contract_selection"`
 	SelectedRouteEvents            []RunForkSelectedContractRouteEvent        `json:"selected_route_events,omitempty"`
 	DynamicFlowInstances           []string                                   `json:"dynamic_flow_instances,omitempty"`
+	ConstructedRouteEvidence       []ConstructedRouteEvidence                 `json:"-"`
 	FrontierAdmissionOwner         string                                     `json:"frontier_admission_owner,omitempty"`
 	FrontierEventCount             int                                        `json:"frontier_event_count"`
 	FrontierSourceEventIDs         []string                                   `json:"frontier_source_event_ids,omitempty"`
@@ -1082,11 +1084,12 @@ type RunForkSelectedContractRouteTopology struct {
 }
 
 type RunForkSelectedContractDynamicTopologyProof struct {
-	FlowInstance      string                             `json:"flow_instance"`
-	SourceEventIDs    []string                           `json:"source_event_ids,omitempty"`
-	EventNames        []string                           `json:"event_names,omitempty"`
-	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
-	Disposition       string                             `json:"disposition"`
+	FlowInstance                string                             `json:"flow_instance"`
+	SourceEventIDs              []string                           `json:"source_event_ids,omitempty"`
+	EventNames                  []string                           `json:"event_names,omitempty"`
+	DerivedRecipients           []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	Disposition                 string                             `json:"disposition"`
+	FixedCutEvidenceFingerprint string                             `json:"fixed_cut_evidence_fingerprint,omitempty"`
 }
 
 type RunForkSelectedContractRouteEvent struct {
