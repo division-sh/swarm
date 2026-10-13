@@ -30,3 +30,21 @@ stop-node:
 `)
 	return root
 }
+
+// The ordered draft belongs to a real authored gate. The separate proposed
+// activity remains unapproved throughout the input-progress proof.
+func CopyNestedPendingActivityReplyWithOrderedInputGate(t testing.TB, providerURL string) string {
+	t.Helper()
+	root := CopyNestedPendingActivityReply(t, providerURL)
+	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "  working: {}\n", `  working:
+    gate:
+      decision: review_input
+      outcomes:
+        edit:
+          input:
+            first: {type: text, required: false}
+            second: {type: text, required: false}
+          advances_to: done
+`)
+	return root
+}
