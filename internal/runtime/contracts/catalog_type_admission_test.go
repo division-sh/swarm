@@ -35,6 +35,11 @@ func TestCatalogAdmissionRejectsInvalidReferences(t *testing.T) {
 			if strings.Contains(ref, "[]") && !strings.Contains(err.Error(), "[Item]") {
 				t.Fatalf("retirement must teach [Item]: %v", err)
 			}
+			if ref == "Cycle" || ref == "[Left]" {
+				if !strings.Contains(err.Error(), "recursive catalog type") || !strings.Contains(err.Error(), "is unsupported") || strings.Contains(err.Error(), "Wave 1") {
+					t.Fatalf("recursion refusal must name the type without an internal phase label: %v", err)
+				}
+			}
 		})
 	}
 }
