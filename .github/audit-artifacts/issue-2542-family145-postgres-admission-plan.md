@@ -6069,6 +6069,10 @@ The completion wait retains its failed-first dead-letter refusal, exact active
 OR missing-handoff OR missing-platform/pipeline-receipt predicate, separate
 read cuts, poll/deadline/sleep, stack capture and diagnostic-only failure path.
 It reuses the existing pipeline handoff owner and closed delivery status owner.
+The identical existing H2 dead-letter statement also consumes the extracted
+closed count leaf; no parallel physical-count interpreter remains there.
+The ordinary production RunSummary is a different status-decoded GROUP BY /
+MIN(next_eligible_at) aggregate, not this fixed physical count witness.
 Native and independent process inspection neither admit nor mutate a run.
 
 The existing selected debug owner now retains ALL11 original diagnostic

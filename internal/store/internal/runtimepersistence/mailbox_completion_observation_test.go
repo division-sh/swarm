@@ -287,6 +287,9 @@ func TestRunDeadLetterDeliveryObservationRetainsExactRunAndFailureStatusBothStor
 				if got, err := CountRunDeadLetterDeliveriesForTest(ctx, fixture.store, id); err != nil || got != want {
 					t.Fatalf("dead-letter exact run/status count=%d/%d err=%v", got, want, err)
 				}
+				if accounting, err := ObserveH2DeliveryAccountingForTest(ctx, fixture.store, id); err != nil || accounting.DeadLetters != want {
+					t.Fatalf("existing H2 physical accounting diverged from the same closed count owner: %+v/%d %v", accounting, want, err)
+				}
 			}
 		})
 	}

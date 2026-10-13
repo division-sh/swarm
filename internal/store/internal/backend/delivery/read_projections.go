@@ -2494,7 +2494,9 @@ func observeH1DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID s
 }
 
 func observeH2DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID string, out *H2DeliveryAccountingEvidence) error {
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&out.DeadLetters); err != nil {
+	var err error
+	out.DeadLetters, err = CountRunDeadLetterDeliveriesTx(ctx, tx, runID)
+	if err != nil {
 		return err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.outcome='retry_scheduled' OR a.outcome='dead_letter')`, runID).Scan(&out.Retried); err != nil {
