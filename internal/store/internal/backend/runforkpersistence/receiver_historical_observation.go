@@ -229,7 +229,7 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	}
 	if present {
 		if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, expected); err != nil {
-			return pipeline.FlowConstructionReceipt{}, false, err
+			return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("receiver has contradictory historical and native construction evidence: %w", err)
 		}
 	}
 	return expected, true, nil

@@ -2,9 +2,12 @@ package runforkpersistence
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -28,9 +31,13 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	at := time.Unix(1700000000, 0).UTC()
+	initial := selectedWorkflowConstructionRecordFixture(t, sourceRun, "bundle-v2:sha256:"+strings.Repeat("a", 64), identity,
+		pipeline.WorkflowInstance{WorkflowVersion: "v1", Mode: "static", Status: "active", CurrentState: "pending", EnteredStageAt: at, CreatedAt: at}, executionmode.Live)
 	state := runfork.RunForkEntityState{EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		FlowTemplate: "child", FlowInstance: "child", FlowConfig: config, Mode: "static",
+		InitialMaterialization: initial.InitialMaterialization,
 	}}
 	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", WorkflowVersion: recordedHeader.WorkflowVersion(), Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun}
 	construction := historicalFlowInstanceConstructionCut{
