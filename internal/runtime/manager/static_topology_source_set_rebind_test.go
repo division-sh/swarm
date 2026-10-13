@@ -132,8 +132,7 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 	binding := lifecycleProbeProcessBinding()
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
-		identity: identity, epoch: 41, generation: 17, phase: AgentLifecycleRunning,
-		configRevision: revision, runMode: AgentRunModeStandard, topology: admission, processBinding: binding,
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 41, Generation: 17, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: binding},
 	}
 	manager.lifecycle.mu.Unlock()
 	return &durableSourceSetPreparationFixture{
@@ -241,9 +240,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	const generation uint64 = 7
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
-		identity: identity, epoch: epoch, generation: generation, phase: AgentLifecycleRunning,
-		configRevision: revision, runMode: AgentRunModeStandard, topology: predecessorAdmission,
-		processBinding: lifecycleProbeProcessBinding(),
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	manager.lifecycle.mu.Unlock()
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
@@ -318,7 +315,7 @@ func TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredeces
 			if test.mutateProcess {
 				fixture.manager.lifecycle.mu.Lock()
 				for _, cell := range fixture.manager.lifecycle.cells {
-					cell.processBinding = foreign
+					cell.view.ProcessBinding = foreign
 				}
 				fixture.manager.lifecycle.mu.Unlock()
 			}
@@ -382,9 +379,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	const generation uint64 = 11
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
-		identity: identity, epoch: epoch, generation: generation, phase: AgentLifecycleFailed,
-		configRevision: revision, runMode: AgentRunModeStopped, topology: predecessorAdmission,
-		processBinding: lifecycleProbeProcessBinding(),
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	manager.lifecycle.mu.Unlock()
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
@@ -487,14 +482,10 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	predecessorBinding := lifecycleProbeProcessBinding()
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[staticIdentity] = &agentLifecycleCell{
-		identity: staticIdentity, epoch: epoch, generation: generation, phase: AgentLifecycleRunning,
-		configRevision: staticRevision, runMode: AgentRunModeStandard, topology: predecessorAdmission,
-		processBinding: predecessorBinding,
+		identity: staticIdentity, view: AgentLifecycleState{Identity: staticIdentity, AgentID: staticIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: staticRevision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: predecessorBinding},
 	}
 	manager.lifecycle.cells[flowIdentity] = &agentLifecycleCell{
-		identity: flowIdentity, epoch: epoch, generation: generation, phase: AgentLifecycleRunning,
-		configRevision: flowRevision, runMode: AgentRunModeAuthoritativeDeliveryOnly, topology: flowTopology,
-		processBinding: predecessorBinding,
+		identity: flowIdentity, view: AgentLifecycleState{Identity: flowIdentity, AgentID: flowIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: flowRevision, RunMode: AgentRunModeAuthoritativeDeliveryOnly, Topology: flowTopology, ProcessBinding: predecessorBinding},
 	}
 	manager.lifecycle.mu.Unlock()
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{
@@ -546,10 +537,10 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	}
 	manager.lifecycle.mu.Lock()
 	defer manager.lifecycle.mu.Unlock()
-	if !manager.lifecycle.cells[staticIdentity].topology.Equal(successorAdmission) ||
-		!manager.lifecycle.cells[flowIdentity].topology.Equal(flowTopology) ||
-		!manager.lifecycle.cells[staticIdentity].processBinding.Equal(sourceSetSuccessorProcessBinding()) ||
-		!manager.lifecycle.cells[flowIdentity].processBinding.Equal(sourceSetSuccessorProcessBinding()) {
+	if !manager.lifecycle.cells[staticIdentity].view.Topology.Equal(successorAdmission) ||
+		!manager.lifecycle.cells[flowIdentity].view.Topology.Equal(flowTopology) ||
+		!manager.lifecycle.cells[staticIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding()) ||
+		!manager.lifecycle.cells[flowIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding()) {
 		t.Fatal("mixed durable process projection did not publish atomically")
 	}
 }
@@ -587,9 +578,7 @@ func TestPrepareDurableTopologySourceSetRebindRejectsCensusProjectionMismatch(t 
 			if test.addProcessCell {
 				fixture.manager.lifecycle.mu.Lock()
 				fixture.manager.lifecycle.cells[identity] = &agentLifecycleCell{
-					identity: identity, epoch: state.RuntimeEpoch, generation: state.Generation, phase: state.Phase,
-					configRevision: state.ConfigRevision, runMode: state.RunMode,
-					topology: topology, processBinding: fixture.binding,
+					identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation, Phase: state.Phase, ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: topology, ProcessBinding: fixture.binding},
 				}
 				fixture.manager.lifecycle.mu.Unlock()
 			}
@@ -624,8 +613,7 @@ func TestPrepareDurableTopologySourceSetRebindLeavesTerminatedRowsAndEphemeralCe
 	}
 	fixture.manager.lifecycle.mu.Lock()
 	fixture.manager.lifecycle.cells[ephemeralIdentity] = &agentLifecycleCell{
-		identity: ephemeralIdentity, epoch: 53, generation: 29, phase: AgentLifecycleRunning,
-		configRevision: "ephemeral-v1", runMode: AgentRunModeStandard, topology: ephemeralTopology,
+		identity: ephemeralIdentity, view: AgentLifecycleState{Identity: ephemeralIdentity, AgentID: ephemeralIdentity.AgentID(), RuntimeEpoch: 53, Generation: 29, Phase: AgentLifecycleRunning, ConfigRevision: "ephemeral-v1", RunMode: AgentRunModeStandard, Topology: ephemeralTopology},
 	}
 	fixture.manager.lifecycle.mu.Unlock()
 	prepared, gate, err := fixture.prepare(t)
@@ -723,14 +711,10 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	}
 	admission := managerTestTopologyAdmission(t)
 	first := &agentLifecycleCell{
-		identity: identity, epoch: 31, generation: 7, phase: AgentLifecycleRunning,
-		configRevision: revision, runMode: AgentRunModeStandard, topology: admission,
-		processBinding: lifecycleProbeProcessBinding(),
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 31, Generation: 7, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	second := &agentLifecycleCell{
-		identity: identity, epoch: 32, generation: 8, phase: AgentLifecycleFailed,
-		configRevision: revision, runMode: AgentRunModeStopped, topology: admission,
-		processBinding: lifecycleProbeProcessBinding(),
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 32, Generation: 8, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
 	}
 	manager.lifecycle.sourceSetPublishMu.Lock()
 	first.opMu.Lock()
@@ -741,8 +725,8 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 		}, currentBinding: lifecycleProbeProcessBinding(), currentIsSuccessor: true,
 		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
 		bindings: []durableTopologySourceSetBinding{
-			{identity: identity, identityKey: "first", cell: first, epoch: first.epoch, generation: first.generation, phase: first.phase, runMode: first.runMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
-			{identity: identity, identityKey: "second", cell: second, epoch: second.epoch, generation: second.generation, phase: second.phase, runMode: second.runMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
+			{identity: identity, identityKey: "first", cell: first, epoch: first.view.RuntimeEpoch, generation: first.view.Generation, phase: first.view.Phase, runMode: first.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
+			{identity: identity, identityKey: "second", cell: second, epoch: second.view.RuntimeEpoch, generation: second.view.Generation, phase: second.view.Phase, runMode: second.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
 		},
 		locked: []*agentLifecycleCell{first, second},
 	}
@@ -753,8 +737,8 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	}
 	manager.lifecycle.mu.Lock()
 	defer manager.lifecycle.mu.Unlock()
-	if !first.processBinding.Equal(lifecycleProbeProcessBinding()) || !second.processBinding.Equal(lifecycleProbeProcessBinding()) {
-		t.Fatalf("failed source-set rebind published partial bindings: first=%#v second=%#v", first.processBinding, second.processBinding)
+	if !first.view.ProcessBinding.Equal(lifecycleProbeProcessBinding()) || !second.view.ProcessBinding.Equal(lifecycleProbeProcessBinding()) {
+		t.Fatalf("failed source-set rebind published partial bindings: first=%#v second=%#v", first.view.ProcessBinding, second.view.ProcessBinding)
 	}
 }
 

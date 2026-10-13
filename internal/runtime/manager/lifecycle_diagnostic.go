@@ -100,14 +100,25 @@ func (p LifecycleDiagnosticProvenance) Validate() error {
 	return nil
 }
 
-func (c *agentLifecycleCoordinator) commitLifecycleTransition(ctx context.Context, store AgentLifecyclePersistence, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+func (c *agentLifecycleCoordinator) lifecycleTransitionWithDiagnostic(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransition, error) {
 	origin := c.diagnosticOrigin
 	if event, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		origin.Causality, origin.ParentEventID = LifecycleDiagnosticAcceptedEvent, event.ID()
 	}
 	if err := origin.Validate(); err != nil {
-		return AgentLifecycleTransitionResult{}, err
+		return AgentLifecycleTransition{}, err
 	}
 	req.DiagnosticOrigin = origin
+	return req, nil
+}
+
+func (c *agentLifecycleCoordinator) commitLifecycleTransition(ctx context.Context, store AgentLifecyclePersistence, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	if store == nil {
+		return AgentLifecycleTransitionResult{}, errors.New("agent lifecycle requires its durable row owner")
+	}
+	req, err := c.lifecycleTransitionWithDiagnostic(ctx, req)
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
 	return store.CommitAgentLifecycleTransition(ctx, req)
 }

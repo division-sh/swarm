@@ -201,6 +201,10 @@ type AgentLifecycleStateReader interface {
 	LoadAgentLifecycleState(context.Context, runtimeagentidentity.Identity) (AgentLifecycleState, bool, error)
 }
 
+type AgentLifecycleOutcomeReader interface {
+	ReadAgentLifecycleOutcome(context.Context, AgentLifecycleTransition) (AgentLifecycleTransitionResult, bool, error)
+}
+
 // AgentLifecycleCellCensus enumerates every durable lifecycle cell that can
 // retain process execution authority, including terminal cells omitted from
 // execution hydration.
@@ -279,7 +283,6 @@ type AgentManagerOptions struct {
 	TestLifecycleProbe             runtimelifecycleprobe.Observer
 	Workspaces                     workspace.Lifecycle
 	Sessions                       sessions.Registry
-	SessionLifecycle               sessions.LifecycleProjection
 	SessionResetter                sessions.Resetter
 	PersistenceRoles               PersistenceRoles
 	SemanticSource                 semanticview.Source

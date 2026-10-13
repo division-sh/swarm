@@ -967,6 +967,10 @@ func (s *PostgresStore) Read(ctx context.Context, scope timerobligation.Scope, o
 	return s.timerObligationPostgresReader.Read(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReadAgentLifecycleOutcome(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, bool, error) {
+	return s.agentPostgresOwner.ReadAgentLifecycleOutcome(ctx, req)
+}
+
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
 	return s.destructiveResetPostgresOwner.ReadResetInventory(ctx)
 }
@@ -2217,6 +2221,10 @@ func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx 
 
 func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.Read(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReadAgentLifecycleOutcome(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, bool, error) {
+	return s.agentSQLiteOwner.ReadAgentLifecycleOutcome(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {

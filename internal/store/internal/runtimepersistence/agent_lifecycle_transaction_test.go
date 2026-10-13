@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -88,25 +89,65 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil || !found {
 		t.Fatalf("read current lifecycle before invalid transitions: found=%v err=%v", found, err)
 	}
+	process, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceSet, found, err := process.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("current lifecycle source set: found=%v err=%v", found, err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, store, sourceSet, runtimeagenttopology.SourceCoordinate{BundleHash: before.ProcessBinding.BundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixtureTest := t
 	for _, invalid := range []struct {
 		name       string
 		kind       string
 		generation uint64
+		mutate     func(*runtimemanager.AgentLifecycleTransition)
 	}{
 		{name: "skipped_generation", kind: "restart", generation: started.Generation + 2},
 		{name: "reused_generation", kind: "restart", generation: started.Generation},
 		{name: "self_release_advances_generation", kind: "self_release", generation: started.Generation + 1},
+		{name: "self_release_epoch", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.TargetEpoch++ }},
+		{name: "self_release_config", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.ConfigRevision = "changed" }},
+		{name: "self_release_mode", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.RunMode = runtimemanager.AgentRunModeStandard }},
+		{name: "self_release_agent", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) {
+			candidate := rec
+			candidate.Topology = runtimeagenttopology.Admission{}
+			r.Agent = &candidate
+		}},
+		{name: "self_release_subordinate", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) {
+			r.Subordinate.Action = runtimesessions.LifecycleMutationTerminateCurrentSet
+		}},
+		{name: "self_release_phase", kind: "self_release", generation: started.Generation, mutate: func(r *runtimemanager.AgentLifecycleTransition) { r.TargetPhase = runtimemanager.AgentLifecycleRunning }},
 	} {
 		t.Run(invalid.name, func(t *testing.T) {
-			_, err := agentfixture.CommitStatic(fixtureTest, ctx, store, runtimemanager.AgentLifecycleTransition{
+			request := runtimemanager.AgentLifecycleTransition{
 				OperationID: uuid.NewString(), OperationKind: invalid.kind, RequestHash: invalid.name,
 				Identity: identity, AgentID: agentID, Trigger: invalid.kind,
 				ExpectedEpoch: started.RuntimeEpoch, ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
 				TargetEpoch: started.RuntimeEpoch, TargetGeneration: invalid.generation,
 				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "revision-1",
 				RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
-			})
+			}
+			if invalid.mutate != nil {
+				request.TargetPhase, request.RunMode = runtimemanager.AgentLifecycleRegistered, runtimemanager.AgentRunModeStopped
+				request.Topology = before.Topology
+				request.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+				invalid.mutate(&request)
+				if request.Agent != nil {
+					request.Agent.Topology = request.Topology
+				}
+			}
+			var err error
+			if invalid.mutate != nil {
+				_, err = grant.CommitAgentLifecycleTransition(ctx, request)
+			} else {
+				_, err = agentfixture.CommitStatic(fixtureTest, ctx, store, request)
+			}
 			var failure *runtimefailures.Error
 			if !errors.As(err, &failure) || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
 				t.Fatalf("invalid generation transition: %v, want lifecycle conflict", err)

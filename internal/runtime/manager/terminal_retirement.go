@@ -189,7 +189,7 @@ func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceS
 			c.mu.Unlock()
 			return nil, nil
 		}
-		if cell.execution == nil || (cell.phase == AgentLifecycleTerminated && cell.retirement == nil) {
+		if cell.execution == nil || (cell.view.Phase == AgentLifecycleTerminated && cell.retirement == nil) {
 			continue
 		}
 		if cell.terminalSet != nil {
@@ -201,7 +201,7 @@ func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceS
 		if self {
 			disposition = terminalSelfAuthor
 		}
-		if cell.retirement != nil && (cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed) {
+		if cell.retirement != nil && (cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed) {
 			disposition = terminalJoinExisting
 		}
 		set.members = append(set.members, terminalFlowMember{cell: cell, token: cell.execution.token, disposition: disposition, pendingTransition: cell.retirement != nil})
@@ -438,7 +438,7 @@ func (am *AgentManager) requestPanicRetirement(ctx context.Context, identity run
 	}
 	c.mu.Lock()
 	execution := cell.execution
-	exact := execution != nil && execution.token == token && cell.epoch == token.RuntimeEpoch && cell.generation == token.Generation
+	exact := execution != nil && execution.token == token && cell.view.RuntimeEpoch == token.RuntimeEpoch && cell.view.Generation == token.Generation
 	c.mu.Unlock()
 	if !exact {
 		cell.opMu.Unlock()

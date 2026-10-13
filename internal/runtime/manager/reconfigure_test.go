@@ -257,5 +257,5 @@ func lifecycleGenerationForTest(t *testing.T, am *AgentManager, agentID string) 
 	if cell == nil {
 		t.Fatalf("lifecycle cell %q is absent", agentID)
 	}
-	return cell.generation
+	return cell.view.Generation
 }

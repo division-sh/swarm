@@ -416,8 +416,8 @@ func validateDurableSourceSetLifecycleState(state AgentLifecycleState) (runtimea
 
 func lifecycleStateMatchesCell(state AgentLifecycleState, cell *agentLifecycleCell) bool {
 	return cell != nil && state.Identity.Normalize() == cell.identity.Normalize() &&
-		state.RuntimeEpoch == cell.epoch && state.Generation == cell.generation && state.Phase == cell.phase &&
-		state.ConfigRevision == cell.configRevision && state.RunMode == cell.runMode
+		state.RuntimeEpoch == cell.view.RuntimeEpoch && state.Generation == cell.view.Generation && state.Phase == cell.view.Phase &&
+		state.ConfigRevision == cell.view.ConfigRevision && state.RunMode == cell.view.RunMode
 }
 
 func sourceSetBindingIsAdjacent(predecessor, successor ProcessExecutionBinding) bool {
@@ -561,25 +561,25 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 			am.lifecycle.mu.Unlock()
 			return nil, fmt.Errorf("durable topology source-set rebind found nil lifecycle cell for %s", identity.Description())
 		}
-		if err := cell.topology.Validate(); err != nil {
+		if err := cell.view.Topology.Validate(); err != nil {
 			am.lifecycle.mu.Unlock()
 			return nil, fmt.Errorf("process-local lifecycle topology for %s: %w", identity.Description(), err)
 		}
-		if cell.topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+		if cell.view.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
 			continue
 		}
-		if err := cell.processBinding.Validate(); err != nil {
+		if err := cell.view.ProcessBinding.Validate(); err != nil {
 			am.lifecycle.mu.Unlock()
 			return nil, fmt.Errorf("process-local lifecycle binding for %s: %w", identity.Description(), err)
 		}
-		if cell.topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
-			owner := cell.topology.Authority.Static
-			if owner.BundleHash != cell.processBinding.BundleHash {
+		if cell.view.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
+			owner := cell.view.Topology.Authority.Static
+			if owner.BundleHash != cell.view.ProcessBinding.BundleHash {
 				am.lifecycle.mu.Unlock()
 				return nil, fmt.Errorf("process-local static topology and source binding disagree for %s", identity.Description())
 			}
 		}
-		if cell.processBinding.BundleHash == coordinate.BundleHash {
+		if cell.view.ProcessBinding.BundleHash == coordinate.BundleHash {
 			if cell.retirement != nil || cell.terminalSet != nil {
 				am.lifecycle.mu.Unlock()
 				return nil, fmt.Errorf("durable topology source-set rebind conflicts with pending retirement for %s", identity.Description())
@@ -602,7 +602,7 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		}
 		cell := processCells[identity]
 		if state.Phase == AgentLifecycleTerminated {
-			if cell != nil && cell.phase != AgentLifecycleTerminated {
+			if cell != nil && cell.view.Phase != AgentLifecycleTerminated {
 				return nil, fmt.Errorf("terminated durable lifecycle row has live process projection %s", identity.Description())
 			}
 			continue
@@ -618,7 +618,7 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		if !ok {
 			return nil, fmt.Errorf("durable topology source-set rebind is missing census row %s", identity.Description())
 		}
-		if cell.phase == AgentLifecycleTerminated {
+		if cell.view.Phase == AgentLifecycleTerminated {
 			if state.Phase != AgentLifecycleTerminated {
 				return nil, fmt.Errorf("terminated process projection has live durable row %s", identity.Description())
 			}
@@ -627,8 +627,8 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		if !lifecycleStateMatchesCell(state, cell) {
 			return nil, fmt.Errorf("durable and process lifecycle state disagree for %s", identity.Description())
 		}
-		targetTopology := cell.topology
-		switch cell.topology.Authority.Kind {
+		targetTopology := cell.view.Topology
+		switch cell.view.Topology.Authority.Kind {
 		case runtimeagenttopology.AuthorityStaticDeclarationPlan:
 			planIdentity, planErr := identity.Plan()
 			if planErr != nil {
@@ -645,23 +645,23 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 			return nil, fmt.Errorf("durable topology source-set rebind found unknown authority for %s", identity.Description())
 		}
 		if processProjectionBinding == nil {
-			binding := cell.processBinding
+			binding := cell.view.ProcessBinding
 			processProjectionBinding = &binding
-		} else if !cell.processBinding.Equal(*processProjectionBinding) {
+		} else if !cell.view.ProcessBinding.Equal(*processProjectionBinding) {
 			return nil, errors.New("durable topology source-set process projection is partially published")
 		}
 		if !currentIsSuccessor {
-			if !cell.processBinding.Equal(currentBinding) || !state.ProcessBinding.Equal(cell.processBinding) || !state.Topology.Equal(cell.topology) {
+			if !cell.view.ProcessBinding.Equal(currentBinding) || !state.ProcessBinding.Equal(cell.view.ProcessBinding) || !state.Topology.Equal(cell.view.Topology) {
 				return nil, fmt.Errorf("durable topology source-set predecessor evidence conflicts for %s", identity.Description())
 			}
 		} else {
-			if !cell.processBinding.Equal(predecessorBinding) && !cell.processBinding.Equal(currentBinding) {
+			if !cell.view.ProcessBinding.Equal(predecessorBinding) && !cell.view.ProcessBinding.Equal(currentBinding) {
 				return nil, fmt.Errorf("process-local source-set binding is not the exact predecessor or successor for %s", identity.Description())
 			}
-			if !state.ProcessBinding.Equal(cell.processBinding) && !state.ProcessBinding.Equal(currentBinding) {
+			if !state.ProcessBinding.Equal(cell.view.ProcessBinding) && !state.ProcessBinding.Equal(currentBinding) {
 				return nil, fmt.Errorf("durable source-set binding is not predecessor or successor for %s", identity.Description())
 			}
-			if state.ProcessBinding.Equal(cell.processBinding) && !state.Topology.Equal(cell.topology) {
+			if state.ProcessBinding.Equal(cell.view.ProcessBinding) && !state.Topology.Equal(cell.view.Topology) {
 				return nil, fmt.Errorf("durable predecessor topology disagrees with process projection for %s", identity.Description())
 			}
 			if state.ProcessBinding.Equal(currentBinding) && !state.Topology.Equal(targetTopology) {
@@ -673,7 +673,7 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 
 	identities := make([]runtimeagentidentity.Identity, 0, len(processCells))
 	for identity, cell := range processCells {
-		if cell.phase != AgentLifecycleTerminated {
+		if cell.view.Phase != AgentLifecycleTerminated {
 			identities = append(identities, identity)
 		}
 	}
@@ -706,9 +706,9 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		}
 		prepared.bindings = append(prepared.bindings, durableTopologySourceSetBinding{
 			identity: identity, identityKey: identityKey, cell: cell,
-			epoch: cell.epoch, generation: cell.generation, phase: cell.phase,
-			runMode: cell.runMode, revision: cell.configRevision,
-			currentTopology: cell.topology, targetTopology: targetTopology, currentBinding: cell.processBinding,
+			epoch: cell.view.RuntimeEpoch, generation: cell.view.Generation, phase: cell.view.Phase,
+			runMode: cell.view.RunMode, revision: cell.view.ConfigRevision,
+			currentTopology: cell.view.Topology, targetTopology: targetTopology, currentBinding: cell.view.ProcessBinding,
 		})
 	}
 	am.lifecycle.mu.Unlock()
@@ -802,7 +802,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 	if err != nil {
 		return err
 	}
-	committedBindings := make([]ProcessExecutionBinding, len(p.bindings))
+	committedViews := make([]AgentLifecycleState, len(p.bindings))
 	requests := make([]AgentLifecycleTransition, len(p.bindings))
 	for index, item := range p.bindings {
 		operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
@@ -841,7 +841,11 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 			result.RunMode != item.runMode || !result.Topology.Equal(item.targetTopology) || !result.ProcessBinding.Equal(targetBinding) {
 			return fmt.Errorf("rebind durable topology for %s returned conflicting lifecycle evidence", item.identity.Description())
 		}
-		committedBindings[index] = result.ProcessBinding
+		view, err := p.manager.lifecycle.committedAgentView(context.WithoutCancel(ctx), result)
+		if err != nil {
+			return fmt.Errorf("observe rebound durable row for %s: %w", item.identity.Description(), err)
+		}
+		committedViews[index] = view
 	}
 
 	p.manager.dynamicFlowReadinessMu.Lock()
@@ -855,16 +859,15 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 	p.manager.lifecycle.mu.Lock()
 	for _, item := range p.bindings {
 		cell := p.manager.lifecycle.cells[item.identity]
-		if cell != item.cell || cell.epoch != item.epoch || cell.generation != item.generation || cell.phase != item.phase ||
-			cell.configRevision != item.revision || cell.runMode != item.runMode ||
-			!cell.topology.Equal(item.currentTopology) || !cell.processBinding.Equal(item.currentBinding) {
+		if cell != item.cell || cell.view.RuntimeEpoch != item.epoch || cell.view.Generation != item.generation || cell.view.Phase != item.phase ||
+			cell.view.ConfigRevision != item.revision || cell.view.RunMode != item.runMode ||
+			!cell.view.Topology.Equal(item.currentTopology) || !cell.view.ProcessBinding.Equal(item.currentBinding) {
 			p.manager.lifecycle.mu.Unlock()
 			return fmt.Errorf("durable topology source-set rebind projection changed for %s", item.identity.Description())
 		}
 	}
 	for index, item := range p.bindings {
-		item.cell.topology = item.targetTopology
-		item.cell.processBinding = committedBindings[index]
+		item.cell.view = committedViews[index]
 	}
 	p.manager.lifecycle.mu.Unlock()
 	p.manager.mu.Lock()

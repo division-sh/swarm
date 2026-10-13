@@ -1471,14 +1471,14 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 
 	am.lifecycle.mu.Lock()
 	execution := cell.execution
-	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if execution == nil || execution.agent == nil || cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed {
 		am.lifecycle.mu.Unlock()
 		return replaceExecutionResult{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
 	}
 	current := snapshotExecution(execution)
-	currentPhase := cell.phase
-	currentRevision := cell.configRevision
-	currentTopology := cell.topology
+	currentPhase := cell.view.Phase
+	currentRevision := cell.view.ConfigRevision
+	currentTopology := cell.view.Topology
 	currentLoopLive := am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
 	am.lifecycle.mu.Unlock()
 	if expected != nil {

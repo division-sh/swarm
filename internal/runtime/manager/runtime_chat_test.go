@@ -155,8 +155,8 @@ func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent, runI
 		am.lifecycle.mu.Unlock()
 		t.Fatalf("directive test lifecycle cell %s is missing", identity.Description())
 	}
-	cell.phase = AgentLifecycleRunning
-	cell.runMode = AgentRunModeStandard
+	cell.view.Phase = AgentLifecycleRunning
+	cell.view.RunMode = AgentRunModeStandard
 	am.lifecycle.mu.Unlock()
 }
 

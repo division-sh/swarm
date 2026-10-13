@@ -6,6 +6,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
+func selfReleasePhaseOnly(req manager.AgentLifecycleTransition, previous manager.AgentLifecycleState) bool {
+	return previous.Phase == manager.AgentLifecycleRunning && req.TargetPhase == manager.AgentLifecycleRegistered &&
+		req.TargetEpoch == previous.RuntimeEpoch && req.TargetGeneration == previous.Generation &&
+		req.ConfigRevision == previous.ConfigRevision && req.RunMode == manager.AgentRunModeStopped &&
+		req.Agent == nil && req.Subordinate.Action == sessions.LifecycleMutationNone && previous.Topology.Equal(req.Topology)
+}
+
+func sourceSetReplacementShape(req manager.AgentLifecycleTransition) bool {
+	if req.TargetPhase == manager.AgentLifecycleRunning {
+		return req.Agent != nil
+	}
+	return req.TargetPhase == manager.AgentLifecycleRegistered && req.RunMode == manager.AgentRunModeStopped
+}
+
 // Generation and topology owners have already authorized the native writer in
 // the original transaction. This arm cannot replace execution or its resources.
 func sourceSetSurvivorRebind(req manager.AgentLifecycleTransition, previous manager.AgentLifecycleState, instanceRebind bool) bool {

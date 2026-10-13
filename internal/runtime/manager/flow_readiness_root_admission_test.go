@@ -25,15 +25,15 @@ func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 			cell := am.lifecycle.cells[identity]
 			switch variant {
 			case "foreign_run":
-				copy := *cell.topology.Authority.Readiness
+				copy := *cell.view.Topology.Authority.Readiness
 				copy.RunID = "88888888-8888-4888-8888-888888888888"
-				cell.topology.Authority.Readiness = &copy
+				cell.view.Topology.Authority.Readiness = &copy
 				wantError = "not an exact stopped preparation"
 			case "running_cell":
-				cell.phase = AgentLifecycleRunning
+				cell.view.Phase = AgentLifecycleRunning
 				wantError = "not an exact stopped preparation"
 			case "running_mode":
-				cell.runMode = AgentRunModeStandard
+				cell.view.RunMode = AgentRunModeStandard
 				wantError = "not an exact stopped preparation"
 			case "wrong_agent_route":
 				route, err := runtimeagentidentity.PresentRoute("foreign", "other", "foreign/other")

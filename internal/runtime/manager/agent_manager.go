@@ -213,7 +213,6 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	}
 	lifecycle := newAgentLifecycleCoordinator(
 		opts.LifecycleStore,
-		opts.SessionLifecycle,
 		opts.PersistenceRoles.AgentRoutes,
 		opts.PersistenceRoles.LifecycleState,
 		opts.PersistenceRoles.LifecycleEffects,

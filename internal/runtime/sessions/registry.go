@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -151,20 +148,6 @@ type LifecycleMutationOutcome struct {
 	Sessions []LifecycleSessionMutation `json:"sessions,omitempty"`
 }
 
-type LifecycleProjectionRequest struct {
-	OperationID string
-	RequestHash string
-	Expected    runtimeeffects.LifecycleToken
-	Target      runtimeeffects.LifecycleToken
-	TargetPhase string
-	Plan        LifecycleMutationPlan
-	Now         time.Time
-}
-
-type LifecycleProjection interface {
-	ApplyLifecycleProjection(context.Context, LifecycleProjectionRequest) (LifecycleMutationOutcome, bool, error)
-}
-
 func LifecycleSuccessorSessionID(operationID, previousSessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.TrimSpace(operationID)+"\x00"+strings.TrimSpace(previousSessionID))).String()
 }
@@ -189,26 +172,14 @@ type Record struct {
 	RotationOperationID  string
 }
 
-// InMemoryRegistry is the process-local implementation used when no persistent
-// runtime store is selected.
+// InMemoryRegistry owns transient session leases and history only. It never
+// authorizes or projects a managed agent lifecycle.
 type InMemoryRegistry struct {
-	mu                  sync.Mutex
-	byKey               map[agentmemory.Identity]*Record
-	history             map[agentmemory.Identity][]*Record
-	rotationReceipts    map[string]RotationReceipt
-	lifecycle           map[agentidentity.Identity]inMemoryLifecycleProjection
-	lifecycleOperations map[string]inMemoryLifecycleOperation
-	lockTTL             time.Duration
-}
-
-type inMemoryLifecycleProjection struct {
-	token runtimeeffects.LifecycleToken
-	phase string
-}
-
-type inMemoryLifecycleOperation struct {
-	requestHash string
-	outcome     LifecycleMutationOutcome
+	mu               sync.Mutex
+	byKey            map[agentmemory.Identity]*Record
+	history          map[agentmemory.Identity][]*Record
+	rotationReceipts map[string]RotationReceipt
+	lockTTL          time.Duration
 }
 
 func NewInMemoryRegistry(lockTTL time.Duration) *InMemoryRegistry {
@@ -216,12 +187,10 @@ func NewInMemoryRegistry(lockTTL time.Duration) *InMemoryRegistry {
 		lockTTL = 120 * time.Second
 	}
 	return &InMemoryRegistry{
-		byKey:               make(map[agentmemory.Identity]*Record),
-		history:             make(map[agentmemory.Identity][]*Record),
-		rotationReceipts:    make(map[string]RotationReceipt),
-		lifecycle:           make(map[agentidentity.Identity]inMemoryLifecycleProjection),
-		lifecycleOperations: make(map[string]inMemoryLifecycleOperation),
-		lockTTL:             lockTTL,
+		byKey:            make(map[agentmemory.Identity]*Record),
+		history:          make(map[agentmemory.Identity][]*Record),
+		rotationReceipts: make(map[string]RotationReceipt),
+		lockTTL:          lockTTL,
 	}
 }
 
@@ -249,9 +218,6 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Id
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "acquire"); err != nil {
-		return nil, err
-	}
 
 	now := time.Now()
 	key := registryKey(identity)
@@ -296,9 +262,6 @@ func (sr *InMemoryRegistry) Renew(ctx context.Context, lease *Lease) (*Lease, er
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	identity := lease.Identity.Normalize()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "renew"); err != nil {
-		return nil, err
-	}
 	rec := sr.byKey[registryKey(identity)]
 	now := time.Now()
 	if rec == nil || rec.Status != "active" || rec.SessionID != lease.SessionID || rec.LockOwner != lease.LockOwner || rec.GrantID != lease.GrantID || !rec.LockExpiresAt.After(now) {
@@ -349,9 +312,6 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, lease *Lease, rotation R
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "rotate"); err != nil {
-		return nil, err
-	}
 
 	key := registryKey(identity)
 	rec, ok := sr.byKey[key]
@@ -432,9 +392,6 @@ func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, lease *Lea
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "increment_turn"); err != nil {
-		return TurnIncrementResult{}, err
-	}
 	key := registryKey(identity)
 	if rec, ok := sr.byKey[key]; ok {
 		if rec.SessionID != lease.SessionID || rec.LockOwner != lease.LockOwner || rec.GrantID != lease.GrantID || !rec.LockExpiresAt.After(time.Now()) || rec.Status != "active" {
@@ -445,106 +402,6 @@ func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, lease *Lea
 		return TurnIncrementResult{Acknowledged: true}, nil
 	}
 	return TurnIncrementResult{}, fmt.Errorf("session for agent %s not found", identity.AgentID())
-}
-
-func (sr *InMemoryRegistry) requireCurrentLifecycleLocked(ctx context.Context, identity agentidentity.Identity, operation string) error {
-	identity = identity.Normalize()
-	projection, managed := sr.lifecycle[identity]
-	if !managed {
-		return nil
-	}
-	if _, ok := runtimeeffects.DifferentOwnerFromContext(ctx); ok {
-		return nil
-	}
-	token, ok := runtimeeffects.LifecycleTokenFromContext(ctx)
-	if ok && token == projection.token && projection.phase == "running" {
-		return nil
-	}
-	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_current", "in-memory-live-session-store", operation, map[string]any{
-		"agent_id": identity.AgentID(), "agent_identity": identity, "current_epoch": projection.token.RuntimeEpoch,
-		"current_generation": projection.token.Generation, "current_phase": projection.phase,
-	})
-}
-
-func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req LifecycleProjectionRequest) (LifecycleMutationOutcome, bool, error) {
-	if sr == nil {
-		return LifecycleMutationOutcome{}, false, fmt.Errorf("in-memory session registry is required")
-	}
-	plan, err := req.Plan.Normalize()
-	if err != nil {
-		return LifecycleMutationOutcome{}, false, err
-	}
-	if strings.TrimSpace(req.OperationID) == "" || strings.TrimSpace(req.RequestHash) == "" || !req.Target.Valid() || strings.TrimSpace(req.TargetPhase) == "" || req.Now.IsZero() {
-		return LifecycleMutationOutcome{}, false, fmt.Errorf("complete in-memory lifecycle projection request is required")
-	}
-	identity := req.Target.Identity.Normalize()
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	if prior, ok := sr.lifecycleOperations[req.OperationID]; ok {
-		if prior.requestHash != req.RequestHash {
-			return LifecycleMutationOutcome{}, true, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_operation_request_conflict", "in-memory-live-session-store", "lifecycle_projection", map[string]any{"operation_id": req.OperationID})
-		}
-		return prior.outcome, true, nil
-	}
-	current, exists := sr.lifecycle[identity]
-	if req.Expected.Valid() {
-		if !exists || current.token != req.Expected {
-			return LifecycleMutationOutcome{}, false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "in-memory-live-session-store", "lifecycle_projection", map[string]any{"agent_identity": identity})
-		}
-	} else if exists {
-		return LifecycleMutationOutcome{}, false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "in-memory-live-session-store", "lifecycle_projection", map[string]any{"agent_identity": identity})
-	}
-	outcome := LifecycleMutationOutcome{Action: plan.Action}
-	if plan.Action != LifecycleMutationNone {
-		keys := make([]agentmemory.Identity, 0, len(sr.byKey))
-		for key := range sr.byKey {
-			keys = append(keys, key)
-		}
-		sort.Slice(keys, func(left, right int) bool {
-			if keys[left].RunID != keys[right].RunID {
-				return keys[left].RunID < keys[right].RunID
-			}
-			return agentidentity.Less(keys[left], keys[right])
-		})
-		for _, key := range keys {
-			rec := sr.byKey[key]
-			if rec == nil || rec.Identity != identity || (rec.Status != "active" && rec.Status != "suspended") {
-				continue
-			}
-			previous := *rec
-			mutation := LifecycleSessionMutation{
-				PreviousSessionID: previous.SessionID, RunID: previous.Identity.RunID,
-				AgentIdentity: previous.Identity, FlowInstance: previous.Identity.FlowInstance(), PreviousStatus: previous.Status,
-			}
-			terminated := previous
-			terminated.Status = "terminated"
-			terminated.LockOwner = ""
-			terminated.GrantID = ""
-			terminated.LockExpiresAt = time.Time{}
-			terminated.TerminationReason = plan.TerminationReason.String()
-			terminated.TerminationDetail = plan.TerminationDetail
-			terminated.TerminatedAt = req.Now
-			terminated.LastUsedAt = req.Now
-			if plan.Action == LifecycleMutationRotateCurrentSet {
-				mutation.SuccessorSessionID = LifecycleSuccessorSessionID(req.OperationID, previous.SessionID)
-				mutation.SuccessorStatus = previous.Status
-				terminated.SuccessorSessionID = mutation.SuccessorSessionID
-				successor := &Record{
-					SessionID: mutation.SuccessorSessionID, Identity: previous.Identity, Status: previous.Status,
-					CheckpointSummary: plan.CheckpointSummary, RetriesFromSessionID: previous.SessionID,
-					LastUsedAt: req.Now, RotationOperationID: req.OperationID,
-				}
-				sr.byKey[key] = successor
-			} else {
-				delete(sr.byKey, key)
-			}
-			sr.history[key] = append(sr.history[key], &terminated)
-			outcome.Sessions = append(outcome.Sessions, mutation)
-		}
-	}
-	sr.lifecycle[identity] = inMemoryLifecycleProjection{token: req.Target, phase: strings.TrimSpace(req.TargetPhase)}
-	sr.lifecycleOperations[req.OperationID] = inMemoryLifecycleOperation{requestHash: req.RequestHash, outcome: outcome}
-	return outcome, false, nil
 }
 
 func (sr *InMemoryRegistry) Snapshot(identity agentmemory.Identity) (*Record, bool) {

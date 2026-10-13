@@ -68,7 +68,7 @@ func TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption(t *testing
 		t.Run(map[bool]string{false: "adoption", true: "spawn"}[persist], func(t *testing.T) {
 			store := newLifecyclePersistenceProbe()
 			owner := &runExecutionOwnerProbe{AgentLifecyclePersistence: store, disposition: RunExecutionForeign}
-			coordinator := newAgentLifecycleCoordinator(owner, nil, nil, nil, nil)
+			coordinator := newAgentLifecycleCoordinator(owner, nil, nil, nil)
 			record := lifecycleTestPersistedAgent(t)
 			ctx := testAuthorActivityContext(context.Background())
 			register := func() error {

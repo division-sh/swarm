@@ -186,7 +186,7 @@ func (p *terminalRetirementRouteProbe) RemoveAgentRoute(token runtimeeffects.Lif
 }
 
 func TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer(t *testing.T) {
-	c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil, nil)
+	c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
 	am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
@@ -202,7 +202,7 @@ func TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer(t *testing.T) {
 			token: lifecycleToken(identity, 1, 1), routeToken: lifecycleToken(identity, 1, 1),
 			loopDone: done, loopSettled: settled[i],
 		}
-		cell := &agentLifecycleCell{identity: identity, execution: execution}
+		cell := &agentLifecycleCell{identity: identity, execution: execution, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID()}}
 		set.retirements = append(set.retirements, retainAgentRetirement(cell, execution))
 	}
 	injected := errors.New("exact route retirement panicked")
@@ -269,7 +269,7 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 	for _, mode := range []string{"success", "existing_retirement", "middle_error", "middle_panic", "middle_fence_panic"} {
 		t.Run(mode, func(t *testing.T) {
 			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
-			c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 			ctx := testAuthorActivityContext(context.Background())
 			records := make([]PersistedAgent, 3)
 			plan := terminalFlowInstanceSideEffectPlan{}
@@ -374,7 +374,7 @@ func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
 	for _, origin := range []string{"missing", "replaced"} {
 		t.Run(origin, func(t *testing.T) {
 			probe := newLifecyclePersistenceProbe()
-			c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 			rec := lifecycleTestPersistedAgent(t)
 			ctx := testAuthorActivityContext(context.Background())
 			if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
@@ -407,7 +407,7 @@ func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
 			}
 			c.mu.Lock()
 			cell := c.cells[token.Identity.Normalize()]
-			unchanged := cell.phase == AgentLifecycleRunning && cell.execution.token == token && !cell.execution.fenced && cell.retirement == nil
+			unchanged := cell.view.Phase == AgentLifecycleRunning && cell.execution.token == token && !cell.execution.fenced && cell.retirement == nil
 			c.mu.Unlock()
 			if !unchanged || len(probe.requests) != before {
 				t.Fatal("refused panic changed successor authority or persisted a transition")
@@ -424,7 +424,7 @@ func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
 
 func TestTerminalPanicPersistenceFailureRetainsRetirement(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
@@ -469,7 +469,7 @@ func TerminalPanicFixtureContext() context.Context {
 
 func ProveTerminalPanicFinalization(t *testing.T, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, persist bool) {
 	t.Helper()
-	c := newAgentLifecycleCoordinator(persistence, nil, nil, reader, nil)
+	c := newAgentLifecycleCoordinator(persistence, nil, reader, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, persist); err != nil {
 		t.Fatal(err)
@@ -486,7 +486,7 @@ func ProveTerminalPanicFinalization(t *testing.T, persistence AgentLifecyclePers
 	}
 	c.mu.Lock()
 	pending := c.cells[token.Identity.Normalize()].retirement
-	phase := c.cells[token.Identity.Normalize()].phase
+	phase := c.cells[token.Identity.Normalize()].view.Phase
 	c.mu.Unlock()
 	if pending == nil || phase != AgentLifecycleFailed {
 		t.Fatalf("panic retirement lost exact pending completion: phase=%s pending=%v", phase, pending)
@@ -512,7 +512,7 @@ func ProveTerminalPanicFinalization(t *testing.T, persistence AgentLifecyclePers
 
 func ProveTerminalPanicMutationFailure(t *testing.T, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, failure string, finalizerFails bool) {
 	t.Helper()
-	c := newAgentLifecycleCoordinator(persistence, nil, nil, reader, nil)
+	c := newAgentLifecycleCoordinator(persistence, nil, reader, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, false); err != nil {
 		t.Fatal(err)
@@ -573,7 +573,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 	for _, mode := range []string{"success", "route_error", "route_panic"} {
 		t.Run(mode, func(t *testing.T) {
 			probe := newLifecyclePersistenceProbe()
-			c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 			rec := lifecycleTestPersistedAgent(t)
 			rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, rec.Config.ID, "lifecycle-test", "review", "inst-1", "review/inst-1")
 			rec.Config.FlowPath = "review/inst-1"
@@ -721,7 +721,7 @@ func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 
 func TestTerminalFlowFencesWholeSetBeforeRetirementJoin(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	rec := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
@@ -755,7 +755,7 @@ func TestTerminalFlowFencesWholeSetBeforeRetirementJoin(t *testing.T) {
 }
 
 func TestTerminalLoopRouteJoinReleasesSourceSetPublication(t *testing.T) {
-	c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil, nil)
+	c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	rec := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
@@ -790,7 +790,7 @@ func TestTerminalLoopRouteJoinReleasesSourceSetPublication(t *testing.T) {
 
 func TestTerminalRetirementReleasesOperationLockBeforeJoin(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 	ctx := testAuthorActivityContext(context.Background())
 	rec := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
@@ -824,7 +824,7 @@ func TestTerminalRetirementReleasesOperationLockBeforeJoin(t *testing.T) {
 func TestReplacementRetainsTransitionWithoutFinalizerDependencies(t *testing.T) {
 	for _, terminal := range []bool{false, true} {
 		t.Run(fmt.Sprintf("terminal_%t", terminal), func(t *testing.T) {
-			c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil, nil)
+			c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil)
 			rec := lifecycleTestPersistedAgent(t)
 			ctx := testAuthorActivityContext(context.Background())
 			if err := c.registerExecution(ctx, rec, true, &reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {

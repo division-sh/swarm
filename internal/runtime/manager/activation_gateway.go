@@ -13,7 +13,7 @@ func (am *AgentManager) ProveUnpublishedActivation(token effects.LifecycleToken)
 		am.lifecycle.mu.Lock()
 		defer am.lifecycle.mu.Unlock()
 		cell := am.lifecycle.cells[token.Identity]
-		if am.lifecycle.phase == runtimeLifecycleRunning && cell != nil && cell.phase == AgentLifecycleRunning && cell.execution != nil {
+		if am.lifecycle.phase == runtimeLifecycleRunning && cell != nil && cell.view.Phase == AgentLifecycleRunning && cell.execution != nil {
 			execution := cell.execution
 			if execution.token == token && !execution.fenced && execution.routeToken == (effects.LifecycleToken{}) && execution.route == nil && execution.loopDone != nil && execution.generationCtx != nil && execution.generationCtx.Err() == nil {
 				return nil
