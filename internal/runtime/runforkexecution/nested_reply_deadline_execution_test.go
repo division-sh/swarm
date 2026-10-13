@@ -447,6 +447,10 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
+			timeoutRows, err := storetest.ReadReplyContextRecords(wait, selected, staged.ForkRunID)
+			if err != nil || !reflect.DeepEqual(childRows, timeoutRows) {
+				t.Fatalf("selected timeout settled or changed an open reply level: before=%+v after=%+v error=%v", childRows, timeoutRows, err)
+			}
 			after, err := storetest.ReadReplyContextRecords(wait, selected, runID)
 			if err != nil || !reflect.DeepEqual(sourceRows, after) {
 				t.Fatalf("selected deadlines changed source replies: %+v error=%v", after, err)
