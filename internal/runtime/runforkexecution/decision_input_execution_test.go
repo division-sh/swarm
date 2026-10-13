@@ -202,11 +202,18 @@ func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner Select
 		t.Fatal(err)
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
-		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		ForkOperation: pendingDecisionStartInvocation(staged.ForkRunID, loaded, selection)})
 	if err != nil || !result.Activation.Activated {
 		t.Fatalf("activate the admitted pending-effect start cut: %+v error=%v", result, err)
 	}
 	return result
+}
+
+func pendingDecisionStartInvocation(sourceRun string, loaded LoadedSelectedContractSource, selection runfork.RunForkContractSelection) *runfork.ForkOperationRequest {
+	return &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "card-control-proof", IdempotencyKey: uuid.NewString(),
+		TransportHash: "card-control-proof", SourceRunID: sourceRun, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		AllowSourceFreeze: true, ContractSelection: selection}
 }
 
 func forkCardControlRequest(card decisioncard.Card, principal, method string) apiidempotency.Request {
