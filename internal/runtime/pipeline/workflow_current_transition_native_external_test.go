@@ -55,7 +55,7 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			coordinator := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}}, authorActivityTestSourceArtifactFact)
+			coordinator := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}}, fact)
 			bus.SetInterceptors(coordinator)
 			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}
 			entityID := flowidentity.EntityID(runID)
