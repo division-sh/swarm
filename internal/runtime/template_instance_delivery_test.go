@@ -877,14 +877,6 @@ opco.ceo_ready:
 	}
 }
 
-func seedRuntimeTestRun(t *testing.T, selected *store.PostgresStore) context.Context {
-	t.Helper()
-	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
-	ctx = runtimecorrelation.WithRunID(ctx, templateInstanceDeliveryRunID)
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-	return ctx
-}
-
 func runtimeTestSourceArtifactFact(t testing.TB, source semanticview.Source) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
 	bundle, found := semanticview.Bundle(source)
