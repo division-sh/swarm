@@ -426,33 +426,43 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 }
 
 func TestTerminalLoopSettlementRejectsForeignRetirementMember(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
-	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-	ctx := testAuthorActivityContext(context.Background())
-	rec := lifecycleTestPersistedAgent(t)
-	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
-		t.Fatal(err)
-	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
-	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := c.fenceTerminalFlow(terminalFlowInstanceSideEffectPlan{RunID: rec.Config.Identity.RunID, FlowPath: rec.Config.Identity.FlowInstance()})
-	if err != nil || set == nil || len(set.members) != 1 {
-		t.Fatalf("exact terminal owner: set=%+v err=%v", set, err)
-	}
-	before, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
-	if err != nil || !found {
-		t.Fatal(err)
-	}
-	set.members[0].token.Generation++
-	if err := releaseCoordinatorLoop(c, token, done); err == nil || !strings.Contains(err.Error(), "retained terminal owner") {
-		t.Fatalf("foreign terminal member bypassed exact settlement: %v", err)
-	}
-	after, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
-	if err != nil || !found || !sameAgentRowObservation(before, after) || len(probe.requestsFor("self_release")) != 0 {
-		t.Fatalf("foreign terminal owner changed durable state: before=%+v after=%+v err=%v", before, after, err)
+	for _, cut := range []string{"member_token", "retirement_token"} {
+		t.Run(cut, func(t *testing.T) {
+			probe := newLifecyclePersistenceProbe()
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
+			ctx := testAuthorActivityContext(context.Background())
+			rec := lifecycleTestPersistedAgent(t)
+			if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
+				t.Fatal(err)
+			}
+			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			set, err := c.fenceTerminalFlow(terminalFlowInstanceSideEffectPlan{RunID: rec.Config.Identity.RunID, FlowPath: rec.Config.Identity.FlowInstance()})
+			if err != nil || set == nil || len(set.members) != 1 {
+				t.Fatalf("exact terminal owner: set=%+v err=%v", set, err)
+			}
+			before, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+			if err != nil || !found {
+				t.Fatal(err)
+			}
+			if cut == "member_token" {
+				set.members[0].token.Generation++
+			} else {
+				cell := c.cells[rec.Config.Identity.Normalize()]
+				retirement := retainAgentRetirement(cell, cell.execution)
+				retirement.token.Generation++
+			}
+			if err := releaseCoordinatorLoop(c, token, done); err == nil || !strings.Contains(err.Error(), "retained terminal owner") {
+				t.Fatalf("foreign terminal member bypassed exact settlement: %v", err)
+			}
+			after, found, err := probe.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+			if err != nil || !found || !sameAgentRowObservation(before, after) || len(probe.requestsFor("self_release")) != 0 {
+				t.Fatalf("foreign terminal owner changed durable state: before=%+v after=%+v err=%v", before, after, err)
+			}
+		})
 	}
 }
 

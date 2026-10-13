@@ -173,6 +173,10 @@ func terminalLoopSettlementOwned(cell *agentLifecycleCell, token runtimeeffects.
 	if cell.terminalSet == nil {
 		return false, nil
 	}
+	if retirement := cell.retirement; retirement != nil &&
+		(retirement.cell != cell || retirement.execution != cell.execution || retirement.token != token) {
+		return false, errors.New("agent loop settlement differs from its retained terminal owner")
+	}
 	for _, member := range cell.terminalSet.members {
 		if member.cell == cell && member.token == token {
 			return true, nil
