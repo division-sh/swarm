@@ -35,7 +35,7 @@ func newClaudeStartupManager(t testing.TB) *runtimemanager.AgentManager {
 	}
 	return runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
 		LifecycleStore:    grant,
-		PersistenceRoles:  runtimemanager.PersistenceRoles{LifecycleState: session},
+		PersistenceRoles:  runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: session},
 		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        "claude_cli",
 		ReceiverExecution: eventreceiver.NormalExecution(),

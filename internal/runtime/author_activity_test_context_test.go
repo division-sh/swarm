@@ -61,11 +61,17 @@ type runtimeTestRetainedSession struct {
 	plan             runtimeagenttopology.SourceSetPlan
 	agents           map[string]runtimemanager.PersistedAgent
 	agentTransitions map[string]string
+	agentOutcomes    map[string]runtimeTestAgentOutcome
 	runs             map[string]runtimecorrelation.SourceArtifactFact
 	grants           map[string]string
 	callback         func(runtimestartupownership.TerminalResult)
 	grantTransition  func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
 	released         bool
+}
+
+type runtimeTestAgentOutcome struct {
+	request runtimemanager.AgentLifecycleTransition
+	result  runtimemanager.AgentLifecycleTransitionResult
 }
 
 // In-memory Runtime controls need immutable attribution, not a native lease.
@@ -225,7 +231,10 @@ func (*runtimeTestRetainedSession) RebindFlowReadinessSourceSet(context.Context,
 	return runtimemanager.FlowReadinessSourceSetRebindResult{}, errors.New("runtime test session has no readiness row")
 }
 
-func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	result := runtimemanager.AgentLifecycleTransitionResult{
 		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,
 		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch, PreviousGeneration: req.ExpectedGeneration,
@@ -239,6 +248,9 @@ func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Co
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if result, found, err := s.agentOutcomeLocked(req); err != nil || found {
+		return result, err
+	}
 	if s.agents == nil {
 		s.agents = map[string]runtimemanager.PersistedAgent{}
 	}
@@ -264,7 +276,38 @@ func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Co
 		s.agentTransitions = map[string]string{}
 	}
 	s.agentTransitions[key] = result.TransitionID
+	if s.agentOutcomes == nil {
+		s.agentOutcomes = map[string]runtimeTestAgentOutcome{}
+	}
+	s.agentOutcomes[req.OperationID] = runtimeTestAgentOutcome{request: req, result: result}
 	return result, nil
+}
+
+func (s *runtimeTestRetainedSession) ReadAgentLifecycleOutcome(ctx context.Context, request runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentOutcomeLocked(request)
+}
+
+func (s *runtimeTestRetainedSession) agentOutcomeLocked(request runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	stored, found := s.agentOutcomes[request.OperationID]
+	if !found {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, nil
+	}
+	origin, err := canonicaljson.Bytes(request.DiagnosticOrigin)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, err
+	}
+	previousOrigin, err := canonicaljson.Bytes(stored.request.DiagnosticOrigin)
+	if err != nil || request.Identity != stored.request.Identity || request.RequestHash != stored.request.RequestHash || string(origin) != string(previousOrigin) {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, errors.New("runtime unit outcome request differs from committed evidence")
+	}
+	result := stored.result
+	result.Replayed = true
+	return result, true, nil
 }
 
 func (s *runtimeTestRetainedSession) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
