@@ -1,5 +1,50 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Allocated Retirement Boundary Correction (S18)
+
+Hosted38379193464 at0ce86506c fails the unchanged cliapp accumulator verify
+fixture on list<DimensionScore>. The transferred D shape decoder also carried
+angle/atomic-list/long-form retirement policy, crossing LEAD6135975103's explicit
+G/D boundary. User-directed correction and pre-edit hunk handoff6143230968
+remove those retirement helpers/calls from G's transferred copy, not add a
+spelling-specific fallback or change the physical normalizer. D/#2648 retains
+the complete retirement/corpus/spec cut. Shape/style decoding and G's
+T[]/[]T refusal remain; no final-list-grammar closure is claimed here.
+
+| Row | Owner and consumers | Required proof |
+|---|---|---|
+| S18a prematurely retired node named-angle carriers | listDeclarationScalar -> projectNodeStateFieldValue/projectNodeStateFieldMappingValue -> unchanged NormalizeNodeStateFieldType | RED on scalar and explicit metadata list<DimensionScore>; GREEN with identical normalized type/default facts. The unchanged TestRunVerifyCommand_AllowsAccumulatorEntityProjection and complete cliapp package must pass. |
+| S18b staged decoder policy isolation | D singleton/style decoder; existing node metadata whitelist and scalar normalization | Preserve master lowercase-list refusal, List/LIST identities and unknown-of refusal, all canonical primitive/named carriers and B suffix/prefix/style negatives. Do not add long-form support or import D's global retirement/corpus. |
+
+S18 repairs the accidental composition, not a new owner or compatibility reader.
+The latest transferred decoder is no longer byte-identical only at the removed
+out-of-scope retirement hunks; physical projection/inspection bytes are unchanged.
+Run node-focused race controls, touched-package census/guards, full cliapp and
+clean no-argument preflight before the single push. Lifecycle/no extra units,
+no baseline/guard/deadline change, open parents and frozen C remain binding.
+
+## Review Cycle 3 Lookup Proof Boundary (S19)
+
+Binding review6143229883 proves that S17's nested helper assertions do not
+qualify executable-reader admission. Withdraw that supported-path credit and
+delete the new recursive path helper. The existing lookup path-domain owner
+consumes a resolved top-level payload field only, as on master; generic reader
+presence/type rules and runtime map traversal stay unchanged. Required JSON
+with default:fail must pass lookup and executable-reader checks plus actual
+verify. Dynamic/map/list descendants must refuse at the lookup owner and the
+full validation path; optional boolean must still fail the generic reader.
+
+| Row | Owner and consumer | Required proof |
+|---|---|---|
+| S19 helper-only nested lookup credit | policySheetLookupPathDomain plus existing executable_reader_expression_validation | RED for unsupported nested paths incorrectly admitted by the lookup helper; GREEN at both checker boundaries and public verify. Required top-level JSON/default remains valid. No nested grammar, presence fallback or generic-reader loosening. |
+
+S17's earlier nested consumption paragraph and claimed support below are
+superseded by S19. The first post-S18 race packet is retained as RED: it caught
+an incorrect new test expectation for lowercase list, which the unchanged
+physical normalizer already rejects. Correct the test, not production behavior.
+Cycle3 requires full cliapp/tools/workflowexpr plus focused race/census and
+preflight before the one batched push. No duplicate local tier or scope widening.
+
 ## Review Cycle 2 Bounded Amendment
 
 Binding review6142490124/checklist6142494003 on9f6c79514 verifies S12-S15

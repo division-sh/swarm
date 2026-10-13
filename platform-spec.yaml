@@ -2973,8 +2973,10 @@ type_system:
       because their structural representation is string-like. Scalar routing
       integer-to-numeric widening remains separate from map key eligibility.
       Policy-sheet lookup literal checking consumes the admitted flow-event
-      scalar kind, including aliased boolean exhaustiveness. Absent or undeclared
-      payload paths refuse. An admitted open/unknown domain, including json,
+      top-level payload field's scalar kind, including aliased boolean
+      exhaustiveness. Absent, undeclared or descendant lookup payload paths
+      refuse; the executable-reader owner separately enforces requiredness.
+      An admitted open/unknown top-level domain, including json,
       requires default: fail rather than being rejected for lacking a closed
       scalar kind; actual scalar matching and unsupported-value misses retain
       their canonical runtime/default behavior. Citation scalar/list elements

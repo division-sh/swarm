@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -144,28 +145,45 @@ func TestPolicySheetLookupOpenDomainDefaultAndMissingEvidence(t *testing.T) {
 	}
 }
 
-func TestPolicySheetLookupNestedAdmittedDomains(t *testing.T) {
+func TestPolicySheetLookupExecutablePathBoundary(t *testing.T) {
 	for _, tc := range []struct {
-		path string
-		want bool
+		name, kind, path string
+		required, want   bool
 	}{
-		{"payload.key.label", true}, {"payload.key.loose.code", true}, {"payload.key.items.code", true},
-		{"payload.key.absent", false}, {"payload.key.label.code", false}, {"payload.absent", false},
+		{"required-json", "json", "payload.key", true, true},
+		{"nested-json", "json", "payload.key.code", true, false},
+		{"nested-map", "map[text]json", "payload.key.code", true, false},
+		{"nested-list", "[text]", "payload.key.code", true, false},
+		{"optional-boolean", "boolean", "payload.key", false, false},
 	} {
-		t.Run(tc.path, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			handler := bootverifyLookupHandler(true, true)
 			lookup := handler.Rules[0].Compute.Lookup
 			lookup.On = []string{tc.path}
 			lookup.OnPaths = []paths.Path{paths.Parse(tc.path)}
 			lookup.Entries[0].Key = lookup.Entries[0].Key[:1]
 			bundle := &c.WorkflowContractBundle{
-				RootTypes: c.TypeCatalogDocument{Scalars: map[string]c.ScalarTypeDecl{"Label": {Base: "text"}}, Types: map[string]c.NamedTypeDecl{"Record": {Fields: map[string]c.TypeFieldSpec{"label": {Type: "Label"}, "loose": {Type: "json"}, "items": {Type: "map[text]json"}}}}},
-				Events:    map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: "Record"}}}}},
-				Nodes:     map[string]c.SystemNodeContract{"lookup": {EventHandlers: map[string]c.SystemNodeEventHandler{"requested": handler}}},
+				Events: map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: tc.kind}}}}},
+				Nodes:  map[string]c.SystemNodeContract{"lookup": {EventHandlers: map[string]c.SystemNodeEventHandler{"requested": handler}}},
 			}
-			findings := checkPolicySheetLookupValueRows(newCheckerContext(context.Background(), compileBootverifyRootSource(bundle), Options{}))
-			if (len(findings) == 0) != tc.want {
-				t.Fatalf("nested domain: %#v, want admitted=%v", findings, tc.want)
+			if tc.required {
+				entry := bundle.Events["requested"]
+				entry.Payload.Required = []string{"key"}
+				bundle.Events["requested"] = entry
+			} else {
+				lookup.Entries[0].Key = []c.ComputeLookupLiteral{{Kind: "bool", Value: true, Canonical: "bool:true"}}
+			}
+			checker := newCheckerContext(context.Background(), compileBootverifyRootSource(bundle), Options{})
+			lookupFindings := checkPolicySheetLookupValueRows(checker)
+			readerFindings := checkExecutableReaderExpressionValidation(checker)
+			if (len(lookupFindings) == 0 && len(readerFindings) == 0) != tc.want {
+				t.Fatalf("full path: lookup=%#v reader=%#v, want admitted=%v", lookupFindings, readerFindings, tc.want)
+			}
+			if strings.Contains(tc.path, ".code") && !bootverifyLookupFindingContains(lookupFindings, "no admitted") {
+				t.Fatalf("unsupported descendant gained lookup authority: %#v", lookupFindings)
+			}
+			if !tc.required && len(readerFindings) == 0 {
+				t.Fatal("optional key bypassed executable-reader presence check")
 			}
 		})
 	}
