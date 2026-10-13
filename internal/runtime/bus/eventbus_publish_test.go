@@ -1226,11 +1226,6 @@ func assertSortedStringsEqual(t *testing.T, got, want []string) {
 	}
 }
 
-func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, agentID string) runtimeagentidentity.Identity {
-	t.Helper()
-	return seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, agentID, authorActivityTestSourceArtifactFact)
-}
-
 func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selected storetest.AgentFixtureStore, runID, agentID string, source runtimecorrelation.SourceArtifactFact) runtimeagentidentity.Identity {
 	t.Helper()
 	identity := runtimebustest.IdentityForRun(t, runID, agentID, "")
