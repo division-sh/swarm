@@ -128,6 +128,13 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			if _, err := domain.ApplyDeferralForTest(stale, decisioncard.DeferRequest{CardID: card.CardID, PrincipalID: principal.ID, Until: at.Add(time.Hour), Now: time.Now().UTC()}); err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") {
 				t.Fatalf("non-current native grant did not refuse before mutation: %v", err)
 			}
+			answerAt := time.Now().UTC()
+			if _, err := domain.PreviewInputTextForTest(stale, draft.ID, principal.ID, "fork-only feedback", answerAt); err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") {
+				t.Fatalf("non-current preview did not refuse before input progress: %v", err)
+			}
+			if _, err := domain.AdvanceInputTextForTest(stale, draft.ID, principal.ID, "fork-only feedback", answerAt); err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") {
+				t.Fatalf("non-current input write did not refuse before progress: %v", err)
+			}
 			if _, err := domain.BeginInputForTest(owned, decisioncard.BeginInputRequest{CardID: sourceCard.CardID, Verdict: "revise", PrincipalID: principal.ID, Now: time.Now().UTC()}); err == nil || !strings.Contains(err.Error(), "selected decision control cannot act on a run without its own selected binding") {
 				t.Fatalf("fork context did not refuse its independently active source: %v", err)
 			}
@@ -144,10 +151,65 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			if err != nil || changeErr != nil || !reflect.DeepEqual(beforeCard, afterCard) || !reflect.DeepEqual(beforeChanges, afterChanges) {
 				t.Fatalf("refused controls changed card/history: %v/%v", err, changeErr)
 			}
+			use, isSelected, err = owner.AcquireSelectedDecisionCardControl(ctx, child, runfork.ControlMailboxDecide)
+			if err != nil || !isSelected || use == nil {
+				t.Fatalf("acquire current text turn: selected=%t error=%v", isSelected, err)
+			}
+			preview, err := domain.PreviewInputTextForTest(use.WorkContext(), draft.ID, principal.ID, "fork-only feedback", answerAt)
+			if err != nil || !preview.Complete || preview.AcceptedField != "feedback" || preview.NextFieldIndex != 1 {
+				t.Fatalf("preview current fork input: %+v error=%v", preview, err)
+			}
+			previewChanges, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
+			if err != nil || !reflect.DeepEqual(beforeChanges, previewChanges) {
+				t.Fatalf("read-only input preview changed history: %v", err)
+			}
+			progress, err := domain.AdvanceInputTextForTest(use.WorkContext(), draft.ID, principal.ID, "fork-only feedback", answerAt)
+			if err != nil || !reflect.DeepEqual(preview, progress) {
+				t.Fatalf("current fork text did not commit exact preview: %+v error=%v", progress, err)
+			}
+			if _, err := domain.PreviewInputTextForTest(use.WorkContext(), draft.ID, principal.ID, "second feedback", answerAt); err == nil || !strings.Contains(err.Error(), "no next field") {
+				t.Fatalf("completed draft progress was not durable: %v", err)
+			}
+			if err := use.Close(); err != nil {
+				t.Fatal(err)
+			}
 			request = forkCardControlRequest(card, principal.ID, "mailbox.cancel_input")
 			mutation = pipeline.NewDecisionCardInputCancellation(decisioncard.CancelInputRequest{CardID: card.CardID, InputDraftID: draft.ID, PrincipalID: principal.ID, Now: request.Now})
 			if _, replayed, isSelected, err := owner.CommitSelectedDecisionCardMutation(ctx, child, request, mutation); err != nil || replayed || !isSelected {
 				t.Fatalf("fork cancel_input: selected=%t replay=%t error=%v", isSelected, replayed, err)
+			}
+			request = forkCardControlRequest(card, principal.ID, "mailbox.begin_input")
+			mutation = pipeline.NewDecisionCardInputBegin(decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "reject", PrincipalID: principal.ID, Now: request.Now}, card.CardContentHash)
+			raw, replayed, isSelected, err = owner.CommitSelectedDecisionCardMutation(ctx, child, request, mutation)
+			if err != nil || replayed || !isSelected || json.Unmarshal(raw, &draft) != nil || draft.ID == "" {
+				t.Fatalf("fork optional-field begin_input: raw=%s selected=%t replay=%t error=%v", raw, isSelected, replayed, err)
+			}
+			use, isSelected, err = owner.AcquireSelectedDecisionCardControl(ctx, child, runfork.ControlMailboxDecide)
+			if err != nil || !isSelected || use == nil {
+				t.Fatalf("acquire current skip turn: selected=%t error=%v", isSelected, err)
+			}
+			progress, err = domain.AdvanceInputSkipForTest(use.WorkContext(), draft.ID, principal.ID, time.Now().UTC())
+			if err != nil || !progress.Complete || !progress.Skipped || progress.AcceptedField != "reason" || progress.NextFieldIndex != 1 || progress.Fields.Len() != 0 {
+				t.Fatalf("current fork optional skip: %+v error=%v", progress, err)
+			}
+			if _, err := domain.PreviewInputTextForTest(use.WorkContext(), draft.ID, principal.ID, "late reason", time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "no next field") {
+				t.Fatalf("completed skip was not durable: %v", err)
+			}
+			if err := use.Close(); err != nil {
+				t.Fatal(err)
+			}
+			changes, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var progressChanges []decisioncard.Change
+			for _, change := range changes {
+				if change.CardID == card.CardID && change.ChangeType == decisioncard.ChangeDraftProgressed {
+					progressChanges = append(progressChanges, change)
+				}
+			}
+			if len(progressChanges) != 2 || progressChanges[0].RunID != child || progressChanges[1].RunID != child {
+				t.Fatalf("input text/skip did not produce exactly two child-local progress facts: %+v", progressChanges)
 			}
 			request = forkCardControlRequest(card, principal.ID, "mailbox.defer")
 			until := request.Now.Add(10 * time.Minute)
