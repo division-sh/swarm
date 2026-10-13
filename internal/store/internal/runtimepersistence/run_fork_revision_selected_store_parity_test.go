@@ -738,7 +738,11 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_turns (turn_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,session_id,flow_instance,memory_enabled,capability_surface_id,tool_calls,emitted_events,turn_blocks,parse_ok,latency_ms,retry_count,agent_frame_bytes,completion_attempt_id,execution_mode,completion_evidence,created_at) VALUES ($1,$2,'revision-matrix-agent','store-test-fixture','runtime_created','root','','',$3,'',TRUE,$4,$5,$5,$5,TRUE,1,0,$6,$7,'mock',$9,$8)`, f.turnID, f.runID, f.sessionID, f.surfaceID, `[]`, []byte("matrix-frame"), f.attemptID, f.at, string(completionEvidence))
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_conversation_audits (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,turn_count,runtime_state,status,created_at,updated_at) VALUES ($1,$2,'revision-matrix-audit','store-test-fixture','runtime_created','root','','','',FALSE,0,$3,'active',$4,$4)`, f.auditID, f.runID, `{}`, f.at)
 	if includeEventDelivery {
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO reply_contexts (reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at,source_run_id,source_request_event_id,source_run_owner_key) VALUES ($1,$2,$3,'requester','out','reply','provider','in','out',$4,'matrix-correlation','open',$5,$5,$2,$3,`+replyFixtureRunOwnerKey("$2", postgres)+`)`, f.replyID, f.runID, f.eventID, `{}`, f.at)
+		origin, err := json.Marshal(events.RouteIdentity{FlowID: "requester", FlowInstance: "requester"})
+		if err != nil {
+			t.Fatalf("encode revision matrix entityless requester origin: %v", err)
+		}
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO reply_contexts (reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at,source_run_id,source_request_event_id,source_run_owner_key) VALUES ($1,$2,$3,'requester','out','reply','provider','in','out',$4,'matrix-correlation','open',$5,$5,$2,$3,`+replyFixtureRunOwnerKey("$2", postgres)+`)`, f.replyID, f.runID, f.eventID, string(origin), f.at)
 	}
 }
 
