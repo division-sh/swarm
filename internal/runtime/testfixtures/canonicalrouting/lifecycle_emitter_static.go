@@ -242,18 +242,16 @@ router:
     request:
       on_success: {emit: audit}
       rules:
-        routed: {else: true, emit: routed}
+        - {else: true, emit: routed}
 template:
   execution_type: system_node
   event_handlers:
     request:
       emit: {event: specialized}
       rules:
-        high:
-          when: payload.score > 0
+        - when: payload.score > 0
           emit: {fields: {bucket: "high"}}
-        low:
-          else: true
+        - else: true
           emit: {fields: {bucket: "low"}}
 dispatcher:
   execution_type: system_node
@@ -269,8 +267,7 @@ rule-dispatcher:
   event_handlers:
     request:
       rules:
-        dispatch:
-          else: true
+        - else: true
           fan_out:
             items_from: payload.items
             as: element
@@ -281,15 +278,13 @@ completion:
   event_handlers:
     request:
       on_complete:
-        - id: completed
-          emit: direct
+        - emit: direct
 completion-dispatcher:
   execution_type: system_node
   event_handlers:
     request:
       on_complete:
-        - id: dispatch
-          fan_out:
+        - fan_out:
             items_from: payload.items
             as: element
             identity: element
