@@ -132,7 +132,45 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				})
 				root := filepath.Join(repoRootForTest(), "internal/releasee2e/testdata/full_lifecycle/standing_telegram")
 				workflowCase := sourceCase == "workflow_timer" || sourceCase == "adopted_workflow_timer"
-				if !workflowCase {
+				if workflowCase {
+					fixture := t.TempDir()
+					copyReleaseFixtureTree(t, root, fixture)
+					root = fixture
+					// Native timer coordinates use microsecond precision: 1ns is
+					// due at construction, without sleeping or editing store rows.
+					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/schema.yaml"), `name: telegram-ingress
+stages:
+  warming:
+    timers:
+      - id: warmup
+        after: 1ns
+        advances_to: review
+  review:
+    gate:
+      decision: lifecycle_ready
+      title: Confirm lifecycle readiness
+      outcomes:
+        approve:
+          label: Continue
+          advances_to: serving
+        reject:
+          label: Retire
+          advances_to: retired
+  serving: {}
+  retired:
+    final: true
+pins:
+  inputs:
+    - inbound.telegram
+  outputs:
+    - inbound.telegram.text_message
+ingress:
+  alias: chat
+  providers:
+    - provider: telegram
+      signing_secret: webhook_signing.telegram
+`)
+				} else {
 					root = canonicalrouting.CopyClockDeployment(t, sourceCase == "child_clock")
 					barrier.eventType = "poll.tick"
 					if sourceCase == "child_clock" {
@@ -267,6 +305,11 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 						t.Fatalf("initial/adopted registration omitted durable timer: %+v err=%v", dormant, err)
 					}
 					for _, timer := range dormant {
+						wantDue := timer.CreatedAt.Add(time.Nanosecond).UTC().Truncate(time.Microsecond)
+						if !timer.FireAt.Equal(wantDue) || timer.FireAt.After(time.Now()) || timer.Status != "active" {
+							t.Fatalf("standing fixture must construct exact already-due work: timer=%+v want_due=%s", timer, wantDue)
+						}
+						t.Logf("standing occurrence due before startup: activation=%s created=%s due=%s", timer.Ref.ActivationID, timer.CreatedAt, timer.FireAt)
 						proof.WatchID(timeridentity.WorkflowTimerOccurrenceEventID(timeridentity.WorkflowTimerOccurrenceRef{Activation: timer.Ref, DueAt: timer.FireAt}))
 					}
 				}
@@ -301,7 +344,7 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					if workflowCase {
 						for _, original := range dormant {
 							current, found, err := timerReader.LoadWorkflowTimerActivation(ctx, original.Ref.ActivationID)
-							if err != nil || !found || current.Ref != original.Ref || !current.FireAt.Equal(original.FireAt) || current.Status != original.Status {
+							if err != nil || !found || current.Ref != original.Ref || !current.FireAt.Equal(original.FireAt) || current.FireAt.After(time.Now()) || current.Status != original.Status {
 								t.Fatalf("held standing registration changed due work: before=%+v after=%+v found=%t err=%v", original, current, found, err)
 							}
 						}
@@ -358,6 +401,14 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					t.Fatal("standing timer did not retain future execution authority")
 				}
 				barrier.unblock()
+				if workflowCase {
+					if err := candidate.runtime.Scheduler.Wait(witnessCtx); err != nil {
+						t.Fatalf("join exact standing timer callback: %v", err)
+					}
+					if err := proof.CheckPublished(timeridentity.WorkflowTimerOccurrenceEventID(dormant[0].Occurrence())); err != nil {
+						t.Fatal(err)
+					}
+				}
 			})
 		}
 	}
