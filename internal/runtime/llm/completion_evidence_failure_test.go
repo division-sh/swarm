@@ -72,6 +72,43 @@ func TestCompletion2270ContributorUnicodeStrictness(t *testing.T) {
 	}
 }
 
+func TestCompletion2270TokenProtocolKeysAreExact(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		invalid   bool
+		cache     bool
+	}{
+		{name: "token-case-override", raw: `{"input_tokens":12,"INPUT_TOKENS":999,"output_tokens":3}`},
+		{name: "token-case-type-conflict", raw: `{"input_tokens":12,"INPUT_TOKENS":false,"output_tokens":3}`},
+		{name: "wrong-case-only", raw: `{"INPUT_TOKENS":12,"OUTPUT_TOKENS":3}`, invalid: true},
+		{name: "cache-case-override", raw: `{"input_tokens":12,"output_tokens":3,"cache_creation_input_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":2,"EPHEMERAL_5M_INPUT_TOKENS":false,"ephemeral_1h_input_tokens":3,"EPHEMERAL_1H_INPUT_TOKENS":999}}`, cache: true},
+		{name: "wrong-case-cache-container", raw: `{"input_tokens":12,"output_tokens":3,"CACHE_CREATION":{"ephemeral_5m_input_tokens":99}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usage, err := claudeCompletionUsageFromRaw([]byte(`{"type":"result","model":"exact-terminal","usage":` + tc.raw + `,"total_cost_usd":0.3}`))
+			if (err != nil) != tc.invalid || usage.ResolvedModel != "exact-terminal" || usage.ProviderReportedCostUSD == nil || *usage.ProviderReportedCostUSD != 0.3 {
+				t.Fatalf("token key admission lost independent evidence: %+v, %v", usage, err)
+			}
+			if tc.invalid {
+				if usage.Exactness != runtimeeffects.CompletionUsageUnavailable || usage.InputTokens != nil || usage.OutputTokens != nil || len(usage.Evidence.Problems) != 1 {
+					t.Fatalf("wrong-case-only fields fabricated exact counts: %+v", usage)
+				}
+				return
+			}
+			if usage.Exactness != runtimeeffects.CompletionUsageExact || usage.InputTokens == nil || *usage.InputTokens != 12 || usage.OutputTokens == nil || *usage.OutputTokens != 3 {
+				t.Fatalf("metadata replaced exact protocol counts: %+v", usage)
+			}
+			if tc.cache {
+				if usage.CacheCreation5mInputTokens == nil || *usage.CacheCreation5mInputTokens != 2 || usage.CacheCreation1hInputTokens == nil || *usage.CacheCreation1hInputTokens != 3 {
+					t.Fatalf("metadata replaced exact cache counts: %+v", usage)
+				}
+			} else if usage.CacheCreation5mInputTokens != nil || usage.CacheCreation1hInputTokens != nil {
+				t.Fatalf("wrong-case cache fields fabricated observations: %+v", usage)
+			}
+		})
+	}
+}
+
 func TestCompletion2270CLIExitRetainsEvidence(t *testing.T) {
 	for _, format := range []string{"json", "stream-json"} {
 		t.Run(format, func(t *testing.T) {
