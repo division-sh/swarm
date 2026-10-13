@@ -53,6 +53,7 @@ func TestListSpellingRetirementTypedFields(t *testing.T) {
 			"map[text]list<ProbeItem>", "'[list<ProbeItem>]'", "{type: '[list<ProbeItem>]'}",
 			"{type: list}", "{type: 'list?', of: ProbeItem}", "{<<: &base {type: list, of: ProbeItem}}",
 			"'[ProbeItem]'", `"[ProbeItem]"`, "['ProbeItem']", `["ProbeItem"]`,
+			"'  [ProbeItem]  '", "|-\n  [ProbeItem]", ">-\n  [ProbeItem]",
 			"[]", "[ProbeItem, ProbeItem]", "[1]", "[true]", "[!!str ProbeItem]",
 		} {
 			t.Run(surface+"/"+source, func(t *testing.T) {
