@@ -2957,6 +2957,33 @@ type_system:
       field presence is governed by entity_contracts: bare roots may be
       progressively unassigned; supplied named records remain complete.
   restrictions:
+    reference_admission: |
+      The catalog reference owner resolves the exact visible declaration scope
+      before structural compilation or consumer projection. Admit every authored
+      named declaration, entity field and event field, including unused and
+      flow-local declarations. Unknown or empty references and self/mutual
+      recursion fail with a typed source-located error; recursion through list
+      elements, map values or named fields cannot become an empty-object
+      placeholder. Shared nonrecursive declaration reuse remains valid.
+      Built-in scalar aliases keep their declared value domain. Singleton and
+      template admission, schema projection, refinement eligibility/equality
+      and durable file-text eligibility consume this common reference evidence
+      while retaining their distinct collection, enum/format and role rules.
+      Text aliases remain text; UUID, timestamp and enums are not file text just
+      because their structural representation is string-like. Scalar routing
+      integer-to-numeric widening remains separate from map key eligibility.
+    list_spelling_presence: |
+      T[] and []T are invalid on authored presence, including nested positions;
+      the typed verification error names [T] as the supported replacement.
+      Retirement of the separate list<T> and long type:list/of:T forms belongs
+      to the independently governed duplicate-form census, not a compatibility
+      path or new support in this admission repair.
+    rejected_map_key_kinds: |
+      Integer, numeric and boolean map key declarations fail typed admission
+      before describe, compilation or execution. Text scalar aliases resolve
+      through the same catalog owner. The existing enum/UUID key and contained
+      normalization contract remains unchanged by this policy-independent
+      admission repair; no text-only key rule is inferred here.
     retired:
     - jsonb as an author-declared contract type
     - Inline type: object without declared inner shape
