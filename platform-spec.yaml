@@ -42316,7 +42316,8 @@ llm_completion_execution_authority:
       observations, not certification of a pinned concrete model. Mock work never manufactures provider labels or billing.
       CLI evidence follows the last exact type=result candidate, independently of dimension validation. A malformed or
       contradictory later result never certifies an earlier result's facts. Case-variant metadata does not override
-      exact protocol keys. Contributor key lexemes undergo strict Unicode admission before decoding; invalid surrogate
+      exact protocol keys, including token totals and nested cache counts; wrong-case-only fields never establish
+      exact usage. Contributor key lexemes undergo strict Unicode admission before decoding; invalid surrogate
       escapes do not become replacement-character model labels, and valid sibling contributors remain independent.
       Process exit, cancellation, observation acknowledgment and heartbeat failures carry owned terminal observations
       through the existing failure settlement without successful session/head adoption or automatic replay.

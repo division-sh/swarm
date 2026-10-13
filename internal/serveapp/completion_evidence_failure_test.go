@@ -42,6 +42,22 @@ func TestServedCompletion2270InvalidFinalCLIResultBothStores(t *testing.T) {
 	}
 }
 
+func TestServedCompletion2270CLIProtocolKeysBothStores(t *testing.T) {
+	for _, backendName := range []string{"sqlite", "postgres"} {
+		t.Run(backendName, func(t *testing.T) {
+			backend, actor, _ := completion2270NativeCLIResult(t, backendName, "stream-json", "case_variant_usage", runtimemanager.ReceiptStatusProcessed)
+			turn := completion2270NativeCLIPublicTurn(t, backend, actor)
+			if turn.Failure != nil || turn.ResolvedModel != "exact-terminal" || turn.Tokens == nil || turn.Tokens.Input != 12 || turn.Tokens.Output != 3 || turn.CompletionEvidence.ProviderReportedCostUSD == nil || *turn.CompletionEvidence.ProviderReportedCostUSD != 0.3 || len(turn.CompletionEvidence.Problems) != 0 {
+				t.Fatalf("native settlement adopted case-variant usage metadata: %+v", turn)
+			}
+			usage, err := backend.store.(operatorread.AgentUsageReader).LoadOperatorAgentUsage(backend.context(), claudeAttemptProofAgentConfig().Identity, operatorread.OperatorAgentUsageOptions{})
+			if err != nil || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.ProviderReportedCostUSD != 0.3 {
+				t.Fatalf("exact token repair changed native price/cardinality: %+v, %v", usage, err)
+			}
+		})
+	}
+}
+
 func completion2270NativeCLIResult(t *testing.T, backendName, format, mode string, want runtimemanager.ReceiptStatus) (claudeAttemptProofBackend, string, string) {
 	t.Helper()
 	backend := newClaudeAttemptProofBackend(t, backendName)
