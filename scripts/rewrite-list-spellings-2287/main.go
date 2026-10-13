@@ -66,7 +66,7 @@ func scalarEdit(body string, value yamlsource.Value, replacement string) (edit, 
 }
 
 func bareReference(raw string) string {
-	if strings.HasSuffix(raw, "?") || strings.HasPrefix(raw, "[[") {
+	if strings.HasSuffix(raw, "?") || strings.HasPrefix(raw, "[[") || strings.Contains(raw, ",") {
 		return "{type: " + strconv.Quote(raw) + "}"
 	}
 	return raw
@@ -116,6 +116,51 @@ func mappings(value yamlsource.Value) []yamlsource.MappingField {
 	return fields
 }
 
+func mappingValue(value yamlsource.Value, name string) yamlsource.Value {
+	for _, field := range mappings(value) {
+		if field.Name == name {
+			return field.Value
+		}
+	}
+	return yamlsource.Value{}
+}
+
+func recordFields(root yamlsource.Value, eventMetadata bool) []yamlsource.Value {
+	var values []yamlsource.Value
+	for _, record := range mappings(root) {
+		for _, field := range mappings(record.Value) {
+			if !strings.HasPrefix(field.Name, "_") && (!eventMetadata || (field.Name != "key" && field.Name != "description")) {
+				values = append(values, field.Value)
+			}
+		}
+	}
+	return values
+}
+
+func declarationValues(root yamlsource.Value, kind string) []yamlsource.Value {
+	switch kind {
+	case "types.yaml":
+		return recordFields(mappingValue(root, "types"), false)
+	case "entities.yaml":
+		return recordFields(root, false)
+	case "events.yaml":
+		return recordFields(root, true)
+	case "nodes.yaml":
+		var values []yamlsource.Value
+		for _, node := range mappings(root) {
+			fields := mappingValue(mappingValue(node.Value, "state_schema"), "fields")
+			for _, field := range mappings(fields) {
+				values = append(values, field.Value)
+			}
+			if items, err := fields.Sequence(); err == nil {
+				values = append(values, items...)
+			}
+		}
+		return values
+	}
+	return nil
+}
+
 func family(root yamlsource.Value) string {
 	for _, field := range mappings(root) {
 		if field.Name == "types" || field.Name == "scalars" || field.Name == "enums" {
@@ -147,38 +192,8 @@ func rewriteYAML(body, kind string) string {
 		kind = family(root)
 	}
 	var edits []edit
-	for _, outer := range mappings(root) {
-		switch kind {
-		case "types.yaml":
-			if outer.Name == "types" {
-				for _, record := range mappings(outer.Value) {
-					for _, field := range mappings(record.Value) {
-						if !strings.HasPrefix(field.Name, "_") {
-							rewriteField(body, field.Value, &edits)
-						}
-					}
-				}
-			}
-		case "entities.yaml", "events.yaml":
-			for _, field := range mappings(outer.Value) {
-				if !strings.HasPrefix(field.Name, "_") && field.Name != "key" && field.Name != "description" {
-					rewriteField(body, field.Value, &edits)
-				}
-			}
-		case "nodes.yaml":
-			for _, item := range mappings(outer.Value) {
-				if item.Name != "state_schema" {
-					continue
-				}
-				for _, group := range mappings(item.Value) {
-					if group.Name == "fields" {
-						for _, field := range mappings(group.Value) {
-							rewriteField(body, field.Value, &edits)
-						}
-					}
-				}
-			}
-		}
+	for _, value := range declarationValues(root, kind) {
+		rewriteField(body, value, &edits)
 	}
 	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
 	for _, change := range edits {
@@ -208,6 +223,68 @@ func sourceFamily(call *ast.CallExpr) string {
 	return ""
 }
 
+func sourceKeyFamily(key ast.Expr) string {
+	if ident, ok := key.(*ast.Ident); ok {
+		switch ident.Name {
+		case "TypesYAML":
+			return "types.yaml"
+		case "EntitiesYAML":
+			return "entities.yaml"
+		case "EventsYAML":
+			return "events.yaml"
+		case "NodesYAML":
+			return "nodes.yaml"
+		}
+	}
+	if lit, ok := key.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		name, _ := strconv.Unquote(lit.Value)
+		if strings.HasSuffix(name, ".yaml") {
+			return filepath.Base(name)
+		}
+	}
+	return ""
+}
+
+func enclosingSourceFamily(lit *ast.BasicLit, parents map[ast.Node]ast.Node) string {
+	for parent := parents[lit]; parent != nil; parent = parents[parent] {
+		switch parent := parent.(type) {
+		case *ast.KeyValueExpr:
+			if kind := sourceKeyFamily(parent.Key); kind != "" {
+				return kind
+			}
+		case *ast.CallExpr:
+			if kind := sourceFamily(parent); kind != "" {
+				return kind
+			}
+		}
+	}
+	return ""
+}
+
+func rewriteGoLiteral(lit *ast.BasicLit, parents map[ast.Node]ast.Node) (string, bool) {
+	text, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	next := text
+	if entry, ok := parents[lit].(*ast.KeyValueExpr); ok {
+		if key, ok := entry.Key.(*ast.Ident); ok && (key.Name == "Type" || key.Name == "resultType") {
+			next = canonical(text)
+		}
+	}
+	if strings.Contains(text, "\n") {
+		next = rewriteYAML(text, enclosingSourceFamily(lit, parents))
+	}
+	if next == text {
+		return "", false
+	}
+	rendered := strconv.Quote(next)
+	if strings.HasPrefix(lit.Value, "`") && !strings.Contains(next, "`") {
+		rendered = "`" + next + "`"
+	}
+	return rendered, true
+}
+
 func rewriteGo(path, body string) string {
 	fset := token.NewFileSet()
 	tree, err := parser.ParseFile(fset, path, body, 0)
@@ -233,57 +310,7 @@ func rewriteGo(path, body string) string {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		text, err := strconv.Unquote(lit.Value)
-		if err != nil {
-			return true
-		}
-		next := text
-		if entry, ok := parents[lit].(*ast.KeyValueExpr); ok {
-			if key, ok := entry.Key.(*ast.Ident); ok && (key.Name == "Type" || key.Name == "resultType") {
-				next = canonical(text)
-			}
-		}
-		if strings.Contains(text, "\n") {
-			kind := ""
-			for p := parents[lit]; p != nil; p = parents[p] {
-				if entry, ok := p.(*ast.KeyValueExpr); ok {
-					if key, ok := entry.Key.(*ast.Ident); ok {
-						switch key.Name {
-						case "TypesYAML":
-							kind = "types.yaml"
-						case "EntitiesYAML":
-							kind = "entities.yaml"
-						case "EventsYAML":
-							kind = "events.yaml"
-						case "NodesYAML":
-							kind = "nodes.yaml"
-						}
-						if kind != "" {
-							break
-						}
-					}
-					if key, ok := entry.Key.(*ast.BasicLit); ok {
-						name, _ := strconv.Unquote(key.Value)
-						if strings.HasSuffix(name, ".yaml") {
-							kind = filepath.Base(name)
-							break
-						}
-					}
-				}
-				if call, ok := p.(*ast.CallExpr); ok {
-					kind = sourceFamily(call)
-					if kind != "" {
-						break
-					}
-				}
-			}
-			next = rewriteYAML(text, kind)
-		}
-		if next != text {
-			rendered := strconv.Quote(next)
-			if strings.HasPrefix(lit.Value, "`") && !strings.Contains(next, "`") {
-				rendered = "`" + next + "`"
-			}
+		if rendered, changed := rewriteGoLiteral(lit, parents); changed {
 			edits = append(edits, edit{fset.Position(lit.Pos()).Offset, fset.Position(lit.End()).Offset, rendered})
 		}
 		return true
