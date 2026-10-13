@@ -385,7 +385,7 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 	}
 	if named, ok := catalog.Types[typeRef]; ok {
 		if _, cycle := resolving[typeRef]; cycle {
-			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("recursive catalog type %q is unsupported in Wave 1", typeRef))
+			return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("recursive catalog type %q is unsupported", typeRef))
 		}
 		resolving[typeRef] = struct{}{}
 		defer delete(resolving, typeRef)
