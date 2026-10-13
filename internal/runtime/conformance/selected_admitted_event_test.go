@@ -20,7 +20,7 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, explicit := range []bool{false, true} {
 			t.Run(backend+"/"+map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
-				f := selectedDeploymentResourceFixture(t, backend, "singleton")
+				f := selectedDeploymentResourceFixture(t, backend, "root")
 				f.runtime.fanOutServing.Close()
 				sourceRun := uuid.NewString()
 				eventID := publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, sourceRun, selectedDeploymentEvent, map[string]any{"account_id": "event-source", "document": map[string]any{}})
