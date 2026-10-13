@@ -192,7 +192,7 @@ func ReadForkJoinInventoryTx(ctx context.Context, attempt *mutationprotocol.Atte
 			if err != nil {
 				return err
 			}
-			if actual.Command.RunID != childRunID || actual.ForkJoinOrigin == nil {
+			if actual.Command.RunID != childRunID || actual.ForkJoinOrigin == nil && actual.ForkOneShotOrigin == nil {
 				return fmt.Errorf("fork join inventory lacks exact inherited child ownership")
 			}
 			inventory = append(inventory, actual)

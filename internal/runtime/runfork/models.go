@@ -286,6 +286,7 @@ type RunForkPlan struct {
 	ReplyContexts             []replycontext.Record                           `json:"-"`
 	WorkflowTimers            []timerobligation.WorkflowTimerActivationRecord `json:"-"`
 	JoinSchedules             []genericschedule.Activation                    `json:"-"`
+	OneShotSchedules          []genericschedule.Activation                    `json:"-"`
 	TransferredJoins          []genericschedule.TransferredJoinOccurrence     `json:"-"`
 	EventCountAtFork          int                                             `json:"event_count_at_fork"`
 	ReconstructedEntityCount  int                                             `json:"reconstructed_entity_count"`

@@ -114,6 +114,15 @@ func readRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationproto
 	if err != nil {
 		return nil, err
 	}
+	arrivals := make([]genericschedule.Activation, 0, len(actual))
+	for _, row := range actual {
+		if row.ForkJoinOrigin != nil {
+			arrivals = append(arrivals, row)
+		} else if row.ForkOneShotOrigin == nil || len(plan.OneShotSchedules) == 0 {
+			return nil, fmt.Errorf("inherited generic inventory contains an unaccounted schedule variant")
+		}
+	}
+	actual = arrivals
 	if err := requireExactRunForkArrivalJoinInventory(requests, actual, phase); err != nil {
 		return nil, err
 	}

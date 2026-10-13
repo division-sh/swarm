@@ -9149,6 +9149,19 @@ engine:
         admission and restoration. Mode, schedule_key, and event_type are required. action, context, delay_seconds, once, @every-in-cron, omitted
         mode, and cross-mode timing fields are rejected rather than normalized. Relative delay remains a typed DelayDue until
         selected-store admission stamps its first due coordinate after exact-replay lookup.
+      selected_one_shot_restoration: >
+        Fixed-cut restoration of an admitted agent one-shot uses this same activation owner, never the arrival-join
+        adapter or a second scheduler. The child retains the exact delay-or-absolute command, payload, execution mode
+        and original initial/current due coordinate; only run/actor/producer ownership and a captured reply-context
+        reference are projected through their canonical owners. A separate typed one-shot origin records the immediate
+        source activation/run and exact fork point in the existing timer lineage fields. Its source_armed_at is the
+        authenticated original due-basis coordinate, including through repeated forks, not child birth or execution
+        authority. Decode, retry and complete native readback derive initial due from that coordinate and still require
+        the actual child admitted_at. Arrival origins retain their separate arrival-only validation. Restoration admits
+        only unprepared pending one-shot work or its proven cancellation/failure disposition; prepared/published/fired
+        work, recurrence and clock suspension require their existing supported continuation or a fail-closed refusal
+        before partial child mutation. Physical materialization and retained lineage never authorize firing: activation,
+        wakeup reconciliation and successor recovery still require the current selected child authority.
       wakeup: >
         Persistence commits before registration. A wakeup contains only activation identity and current due coordinate,
         reloads durable facts before execution, and is fenced by lifecycle-owned bounded/coalesced recovery. Process-local

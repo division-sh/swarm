@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
@@ -51,10 +52,17 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if err != nil {
 		return admission, err
 	}
+	var oneShots []genericschedule.Activation
+	if len(plan.OneShotSchedules) != 0 {
+		oneShots, err = readRunForkOneShotInventory(ctx, attempt, plan, childRunID, bornAt, arrival, phase)
+		if err != nil {
+			return admission, err
+		}
+	}
 	if !materializable {
 		return admission, nil
 	}
-	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules, plan.TransferredJoins...)
+	inventory, err := runForkPlanTimerRecordInventory(plan)
 	if err != nil {
 		return admission, err
 	}
@@ -68,21 +76,25 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if err != nil {
 		return admission, err
 	}
-	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals)+len(transferred) != len(inventory.ArrivalScheduleIDs)+len(inventory.TransferredPublicationIDs) {
+	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals)+len(transferred) != len(inventory.ArrivalScheduleIDs)+len(inventory.TransferredPublicationIDs) || len(oneShots) != len(inventory.OneShotScheduleIDs) {
 		return admission, fmt.Errorf("timer history readback omitted an inherited family")
 	}
 	applied, err := runForkTimerAppliedCertificate(pending, childRunID, bornAt, projected, arrivals, published, transferred...)
 	if err != nil {
 		return admission, err
 	}
+	applied, err = includeRunForkOneShotAppliedCertificate(applied, childRunID, oneShots)
+	if err != nil {
+		return admission, err
+	}
 	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
 		return admission, err
 	}
-	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals)+len(transferred))
+	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals)+len(transferred)+len(oneShots))
 }
 
 func hasRunForkTimerHistory(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) bool {
-	if len(plan.WorkflowTimers)+len(plan.JoinSchedules)+len(plan.TransferredJoins) != 0 {
+	if len(plan.WorkflowTimers)+len(plan.JoinSchedules)+len(plan.TransferredJoins)+len(plan.OneShotSchedules) != 0 {
 		return true
 	}
 	for _, blocker := range admission.UnsupportedBlockers {

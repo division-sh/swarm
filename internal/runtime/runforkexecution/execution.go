@@ -296,6 +296,18 @@ func admitSelectedEventPointOwedSchedule(plan runfork.RunForkPlan) error {
 		}
 		return plan.ForkPoint.Validate()
 	}
+	for _, schedule := range plan.OneShotSchedules {
+		if schedule.Status != genericschedule.StatusActive {
+			continue
+		}
+		if err := schedule.ValidateForkOneShotRestorationSource(); err != nil {
+			return err
+		}
+		if schedule.Command.RunID != plan.SourceRunID {
+			return fmt.Errorf("selected-contract one-shot belongs to another source run")
+		}
+		return plan.ForkPoint.Validate()
+	}
 	return fmt.Errorf("selected-contract event-point execution requires selected frontier events or an exact owed schedule")
 }
 
