@@ -258,6 +258,16 @@ func (p *terminalSetPersistenceProbe) LoadAgentLifecycleState(ctx context.Contex
 	return member.LoadAgentLifecycleState(ctx, identity)
 }
 
+func (p *terminalSetPersistenceProbe) ReadAgentLifecycleOutcome(ctx context.Context, request AgentLifecycleTransition) (AgentLifecycleTransitionResult, bool, error) {
+	p.mu.Lock()
+	member := p.agents[request.Identity]
+	p.mu.Unlock()
+	if member == nil {
+		return AgentLifecycleTransitionResult{}, false, nil
+	}
+	return member.ReadAgentLifecycleOutcome(ctx, request)
+}
+
 func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	p.mu.Lock()
 	member := p.agents[req.Identity]
