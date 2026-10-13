@@ -43,7 +43,9 @@ func (s *agentRowResponseLoss) CommitAgentLifecycleTransition(ctx context.Contex
 	if err != nil {
 		return result, err
 	}
-	s.commits++
+	if !result.Replayed {
+		s.commits++
+	}
 	s.lastRequest = request
 	if s.loseNext {
 		s.loseNext = false

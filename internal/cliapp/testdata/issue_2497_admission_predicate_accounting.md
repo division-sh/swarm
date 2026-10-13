@@ -54,6 +54,21 @@ packet at pre-rebase checkpoint9b16764ff exercised all349 roots and571 child
 passes without failure/skip; its source provenance is retained rather than
 relabeled as post-rebase qualification.
 
+Cycle-1 creator correction keeps the same caller boundary. Executable registration
+now retains the exact creator request/prepared code before native commit; outcome
+reconciliation consumes the immutable owner and current-row last transition plus
+original process binding. Known COMMIT readback is independent of caller
+cancellation. Outcome absence returns to fresh admission, preserving readiness
+retry with a new attachment attempt; it is not row-existence adoption. Factory
+publication rechecks the captured Manager phase/run occurrence. Execution proofs:
+`TestAgentRowNativeLostAckCacheAdoptionBothStores` now separately names initial
+and terminated-reintroduction lost-ACK/cancel/read-error cuts, conflict/historical/
+retired-process negatives, rollback, completed-shutdown factory and joined actual
+Manager Run/Shutdown. `TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary`
+retains the partial-agent retry control. The existing missing-row-owner negative
+also refuses a missing immutable-outcome owner before creator mutation. Root
+Runtime hydration/timer/recovery ordering is still unchanged.
+
 The persistence authority generator retires73 stale findings and classifies66
 replacement findings. Two typed process-local declarations are the serialized
 Agent candidate callback and immutable-outcome reader. Two typed public-facade

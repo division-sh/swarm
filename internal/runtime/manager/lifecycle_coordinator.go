@@ -367,6 +367,7 @@ type agentLifecycleCoordinator struct {
 	retryDone           <-chan struct{}
 	sourceSetTransition SourceSetTransitionAdmission
 	cells               map[runtimeagentidentity.Identity]*agentLifecycleCell
+	registrations       map[runtimeagentidentity.Identity]*agentRegistration
 	routes              AgentRouteBus
 	executionPosture    executionposture.Posture
 	terminalErr         error
@@ -930,6 +931,14 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
+	if persist && c.outcomeReader == nil {
+		return errors.New("agent registration requires its immutable outcome owner")
+	}
+	if pending := c.registrations[identity]; pending != nil {
+		if resolved, err := c.resumeAgentRegistrationLocked(ctx, rec, revision, pending, readinessOwner); resolved {
+			return err
+		}
+	}
 	existingCell := c.cells[identity]
 	if existingCell != nil && existingCell.view.Phase != AgentLifecycleTerminated {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
@@ -950,6 +959,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	}
 	// Keep publication serialization, but let candidate factories inspect the
 	// manager without holding its cell-map mutex.
+	preparedPhase, preparedRun := c.phase, c.runGeneration
 	c.mu.Unlock()
 	var agent Agent
 	var buildErr error
@@ -960,7 +970,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if buildErr != nil {
 		return buildErr
 	}
-	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	if c.phase != preparedPhase || c.runGeneration != preparedRun || c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
 	current, currentFound, err := c.loadAgentView(ctx, identity)
@@ -1027,41 +1037,32 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 				Topology: topology, Now: now,
 			}
 		}
-		result, err := c.commitLifecycleTransition(ctx, store, transition)
+		transition, err = c.lifecycleTransitionWithDiagnostic(ctx, transition)
 		if err != nil {
 			return err
 		}
-		view, err = c.committedAgentView(ctx, result)
+		binding, err := registrationProcessBinding(store)
+		if err != nil {
+			return err
+		}
+		pending := &agentRegistration{request: transition, agent: agent, binding: binding, phase: preparedPhase, run: preparedRun,
+			admission: admission, standingOwner: registrationStandingOwner(ctx)}
+		if c.registrations == nil {
+			c.registrations = map[runtimeagentidentity.Identity]*agentRegistration{}
+		}
+		c.registrations[identity] = pending
+		result, err := store.CommitAgentLifecycleTransition(ctx, transition)
+		if err != nil {
+			return err
+		}
+		view, err = c.committedAgentView(context.WithoutCancel(ctx), result)
 		if err != nil {
 			return err
 		}
 	} else if !found || !lifecycleProjectionEqual(view.ConfigRevision, view.Topology, revision, topology) {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_hydration_view_mismatch", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
 	}
-	epoch, generation = view.RuntimeEpoch, view.Generation
-	generationCtx, cancelGeneration := context.WithCancel(c.context())
-	var standingOwner *worklifetime.StandingOccurrence
-	if owner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
-		standingOwner, _ = worklifetime.StandingProjection(owner)
-	}
-	startedAt := rec.StartedAt
-	if startedAt.IsZero() {
-		startedAt = time.Now()
-	}
-	execution := &agentExecutionProjection{
-		agent: agent, config: rec.Config, admission: admission, startedAt: startedAt,
-		token: lifecycleToken(identity, epoch, generation), standingOwner: standingOwner,
-		generationCtx: generationCtx, cancelGeneration: cancelGeneration,
-	}
-	execution.subscriptions = admittedSubscriptionEventTypes(admission)
-	c.cells[identity] = &agentLifecycleCell{
-		identity: identity, view: view, execution: execution,
-	}
-	if readinessOwner != nil {
-		cell := c.cells[identity]
-		cell.routeTransitions++
-		*readinessOwner = cell
-	}
+	c.publishRegisteredExecutionLocked(rec, agent, admission, registrationStandingOwner(ctx), view, readinessOwner)
 	return nil
 }
 
@@ -1456,6 +1457,7 @@ func (c *agentLifecycleCoordinator) completeResetTransition(transition *runtimeL
 	transition.complete = true
 	if clearCells {
 		c.cells = map[runtimeagentidentity.Identity]*agentLifecycleCell{}
+		c.registrations = nil
 	}
 	c.phase = runtimeLifecycleStopped
 	c.runMode = AgentRunModeStopped

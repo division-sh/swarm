@@ -19,54 +19,128 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			var selected storetest.AgentFixtureStore
-			var reopen func() manager.AgentLifecycleStateReader
-			if backend == "postgres" {
-				location := testutil.StartPostgresDSN(t)
-				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
-				reopen = func() manager.AgentLifecycleStateReader {
-					owner, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
-					return owner
+		for _, cut := range []string{"replacement", "lost_ack", "cancel_after_commit", "read_after_commit", "historical", "retired_process", "rollback", "shutdown_during_factory", "reintroduction_lost_ack", "reintroduction_cancel_after_commit", "reintroduction_read_after_commit"} {
+			t.Run(backend+"/"+cut, func(t *testing.T) {
+				var selected storetest.AgentFixtureStore
+				var reopen func() manager.AgentLifecycleStateReader
+				if backend == "postgres" {
+					location := testutil.StartPostgresDSN(t)
+					selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+					reopen = func() manager.AgentLifecycleStateReader {
+						owner, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+						return owner
+					}
+				} else {
+					location := filepath.Join(t.TempDir(), "agent-row.db")
+					selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
+					reopen = func() manager.AgentLifecycleStateReader {
+						owner, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
+						return owner
+					}
 				}
-			} else {
-				location := filepath.Join(t.TempDir(), "agent-row.db")
-				selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
-				reopen = func() manager.AgentLifecycleStateReader {
-					owner, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
-					return owner
+				ctx := manager.TerminalPanicFixtureContext()
+				record := manager.ReconfigureMemoryNativeFixture(t, false)
+				if cut != "replacement" {
+					storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), record.Config.Identity.RunID, time.Now().UTC())
+					identity, err := record.Config.Identity.Plan()
+					if err != nil {
+						t.Fatal(err)
+					}
+					revision, err := manager.AgentConfigPlanRevision(record.Config, identity)
+					if err != nil {
+						t.Fatal(err)
+					}
+					coordinate := agenttopology.SourceCoordinate{BundleHash: sourceartifactfixture.BundleHash}
+					plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, []agenttopology.DesiredAgent{{Identity: identity, ConfigRevision: revision, Source: coordinate}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.HasPrefix(cut, "reintroduction_") {
+						spawned, err := agentfixture.CommitStatic(t, ctx, selected, manager.AgentLifecycleTransition{
+							OperationID: uuid.NewString(), RequestHash: uuid.NewString(), OperationKind: "spawn", Trigger: "spawn",
+							Identity: record.Config.Identity, AgentID: record.Config.ID, Agent: &record,
+							TargetEpoch: 1, TargetGeneration: 1, TargetPhase: manager.AgentLifecycleRegistered,
+							ConfigRevision: revision, RunMode: manager.AgentRunModeStopped, Now: time.Now().UTC(),
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := agentfixture.CommitStatic(t, ctx, selected, manager.AgentLifecycleTransition{
+							OperationID: uuid.NewString(), RequestHash: uuid.NewString(), OperationKind: "teardown", Trigger: "teardown",
+							Identity: record.Config.Identity, AgentID: record.Config.ID,
+							ExpectedEpoch: spawned.RuntimeEpoch, ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
+							TargetEpoch: spawned.RuntimeEpoch, TargetGeneration: spawned.Generation + 1, TargetPhase: manager.AgentLifecycleTerminated,
+							ConfigRevision: revision, RunMode: manager.AgentRunModeStopped, Now: time.Now().UTC(),
+						}); err != nil {
+							t.Fatal(err)
+						}
+						process, err := agentfixture.ProcessCapability(t, ctx, selected)
+						if err != nil {
+							t.Fatal(err)
+						}
+						current, _, err := process.CurrentSourceSet(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := process.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
+					if err != nil {
+						t.Fatal(err)
+					}
+					record.Topology, err = agenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, agenttopology.LifetimeDurableManaged)
+					if err != nil {
+						t.Fatal(err)
+					}
+					manager.ProveAgentRowNativeSpawnAdoption(t, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
+						value, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+						if err != nil {
+							t.Fatal(err)
+						}
+						return value
+					}, func() {
+						process, err := agentfixture.ProcessCapability(t, ctx, selected)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := process.Release(ctx); err != nil {
+							t.Fatal(err)
+						}
+					}, cut)
+					return
 				}
-			}
-			ctx := manager.TerminalPanicFixtureContext()
-			record := manager.ReconfigureMemoryNativeFixture(t, false)
-			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
-			view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
-			if err != nil || !found {
-				t.Fatalf("native row: found=%v err=%v", found, err)
-			}
-			record.Topology = view.Topology
-			proveNativeAgentRowCAS(t, selected, reopen(), record)
-			outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
-			if !ok {
-				t.Fatal("selected store lacks the native immutable-outcome owner")
-			}
-			manager.ProveAgentRowNativeLostAckCacheAdoption(t, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
-				snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
-				if err != nil {
-					t.Fatal(err)
+				storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+				view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
+				if err != nil || !found {
+					t.Fatalf("native row: found=%v err=%v", found, err)
 				}
-				return snapshot
-			}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
-				return admitNativeReconfigureCandidate(t, selected, candidate)
-			}, func(controller agentcontrol.Controller) {
-				proveNativeAgentRestartAPICompletionLoss(t, selected, record.Config, controller)
+				record.Topology = view.Topology
+				proveNativeAgentRowCAS(t, selected, reopen(), record)
+				outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
+				if !ok {
+					t.Fatal("selected store lacks the native immutable-outcome owner")
+				}
+				manager.ProveAgentRowNativeLostAckCacheAdoption(t, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
+					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return snapshot
+				}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
+					return admitNativeReconfigureCandidate(t, selected, candidate)
+				}, func(controller agentcontrol.Controller) {
+					proveNativeAgentRestartAPICompletionLoss(t, selected, record.Config, controller)
+				})
 			})
-		})
+		}
 	}
 }
 

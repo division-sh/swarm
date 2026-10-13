@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -788,6 +789,8 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 		BaseContext:      testAuthorActivityContextForSource(context.Background(), fact),
 		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState:      pg,
+			LifecycleOutcome:    pg,
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -799,7 +802,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 		}
 	})
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), fact), runID)
-	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	return manager
 }
 

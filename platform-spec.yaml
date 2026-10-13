@@ -41227,6 +41227,19 @@ agent_lifecycle_authority:
       Confirming a committed successor fences predecessor admission immediately,
       while preserving its accepted-work settlement and resource joins. Exact retry
       adopts that outcome without reissuing the native mutation.
+      Initial registration and terminated-agent reintroduction retain their exact
+      creator request and prepared code before calling the native owner. Lost
+      acknowledgment or independent committed-row read failure keeps that completion
+      responsibility; exact retry resolves the immutable outcome and current row
+      under the original process binding, without another factory or distinct
+      operation. Known successful commit readback is owned independently of caller
+      cancellation. Historical outcomes and changed process/source authority cannot
+      publish execution. Candidate factories run outside the cell-map lock, but
+      publication revalidates the captured Manager phase and run occurrence after
+      construction, so completed shutdown cannot admit a late candidate.
+      Proven immutable-outcome absence discards the uncommitted preparation and
+      returns to ordinary fresh candidate/row admission; it neither adopts an
+      existing row nor blocks a new readiness attachment attempt.
       Until that adoption finishes, a predecessor-configuration no-op refuses rather
       than reporting obsolete state as current; it cannot construct a candidate or
       change durable evidence.
