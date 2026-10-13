@@ -381,7 +381,14 @@ func validateCurrentPlan(plan testplanning.RunPlan, cfg config) error {
 }
 
 func ghRead(ctx context.Context, path string) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", "api", path).Output()
+	command := exec.CommandContext(ctx, "gh", "api", path)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	raw, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh api %s: %w; stderr: %s", path, err, strings.TrimSpace(stderr.String()))
+	}
+	return raw, nil
 }
 
 func gitTree(ctx context.Context, sha string) (string, error) {

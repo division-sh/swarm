@@ -24126,7 +24126,12 @@ test_specification:
       observation: >-
         Run-to-ledger readback preserves the declared run_attempt and every attempt from one through that count.
         Missing first, middle or final attempts, or an absent count, remain incomplete/unknown exposure, not complete
-        green or non-PR-only history. Rejected plan validation supplies no authority to any failure. Exact source and
+        green or non-PR-only history. Completeness requires the exact sequence 1..run_attempt, independent of input
+        order; it never infers a missing declared count from the observed maximum. The failures CLI preserves its
+        text and requested JSON report, then exits unsuccessfully when any run is incompletely observed. Raw job
+        logs use the shared gh api reader without version-specific flags; transport errors retain endpoint and
+        stderr diagnostics separately from log bytes, and failed transport output cannot become native evidence.
+        Rejected plan validation supplies no authority to any failure. Exact source and
         platform come from each job's validated command or native analyzer artifact, never the global planner OS,
         a job-name guess or an author-head alias for a merge checkout. Missing or contradictory job evidence stays
         unknown. The native unused identity reader is shared with its qualification owner; identity does not grant

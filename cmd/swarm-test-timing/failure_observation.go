@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -94,7 +93,7 @@ func readFailureAttemptJobs(ctx context.Context, path string) ([]testtiming.Acti
 func observeFailureJob(ctx context.Context, failure testtiming.ObservedFailure) []testtiming.ObservedFailure {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	raw, err := exec.CommandContext(readCtx, "gh", "api", "--allow-escape-sequences", fmt.Sprintf("repos/division-sh/swarm/actions/jobs/%d/logs", failure.JobID)).Output()
+	raw, err := ghRead(readCtx, fmt.Sprintf("repos/division-sh/swarm/actions/jobs/%d/logs", failure.JobID))
 	if err != nil {
 		failure.Problem = joinFailureProblem(failure.Problem, "log unavailable: "+err.Error())
 		return []testtiming.ObservedFailure{failure}

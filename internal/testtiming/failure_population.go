@@ -85,6 +85,8 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 }
 
 func completeFailureHistory(run FailureRun) bool {
+	// Exact cardinality plus unique numbers in this range requires every attempt
+	// from 1 through the declared latest attempt, regardless of input order.
 	if run.RunAttempt <= 0 || len(run.Attempts) != run.RunAttempt {
 		return false
 	}
