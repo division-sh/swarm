@@ -56,6 +56,8 @@ func TestFailureObservationRetainsNativeBoundaries(t *testing.T) {
 	checkFailureAPIAttemptCount(t)
 	checkFailurePortableLogReadback(t)
 	checkFailurePopulationCLIHistory(t)
+	checkFailureAllObservationIntegrity(t)
+	checkFailureNonPRLiveIntegrity(t)
 }
 
 func checkFailurePortableLogReadback(t *testing.T) {
