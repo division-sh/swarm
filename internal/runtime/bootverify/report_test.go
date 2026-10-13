@@ -3614,13 +3614,13 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[partial].emit") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[1].emit") {
 		t.Fatalf("expected on_complete payload completeness error, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected missing scan_id error for underspecified on_complete branch, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[complete].emit") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[0].emit") {
 		t.Fatalf("unexpected payload completeness error for fully specified on_complete branch, got %#v", report.Errors())
 	}
 }
