@@ -10,10 +10,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -91,6 +93,113 @@ func TestS6DifferentStoryAgentOrderJoinDiagnosticBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("native commit order=%v; scan order=%v; delivery timestamps=%v,%v; equal event timestamp=%v; no pre-claim event/delivery activity sequence for StoryDifferent", []string{ids[1], ids[0]}, []string{first.Items[0].DeliveryID, second.Items[0].DeliveryID}, first.Items[0].Snapshot.CreatedAt, second.Items[0].Snapshot.CreatedAt, at)
+		})
+	}
+}
+
+func TestS6AuthoredAgentReadyCursorJoinDiagnosticBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openManagerNativeDelivery(t, backend)
+			ctx := fixture.Context
+			owner := fixture.Store.(managerNativeDeliveryOwner)
+			runID := uuid.NewString()
+			fixture.RequireRun(t, runID)
+			identity := agentidentitytest.RootRuntimeForRun(t, runID, "s6-ready-order", "s6.audit")
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+			eventByDelivery := map[string]events.Event{}
+			var ids []string
+			at := time.Now().UTC().Truncate(time.Microsecond)
+			for _, eventID := range []string{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"} {
+				event := eventtest.ExistingRunRootIngress(eventID, "s6.authored.requested", "source", "", nil, 0, runID, events.EventEnvelope{}, at)
+				id, err := deliverylifecycle.DeliveryID(event.ID(), route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, id)
+				eventByDelivery[id] = event
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				event := eventByDelivery[id]
+				scope := authoractivity.BundleScope(event.ID(), fixture.Authority.SourceArtifact().BundleHash())
+				descriptor := authoractivity.EventDescriptor{EventType: string(event.Type()), Disposition: authoractivity.StoryAuthored}
+				catalog, err := owner.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{descriptor})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(catalog.Release)
+				publication, err := owner.PipelineObligations().ClaimPublication(ctx, event.ID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				ledger, err := events.NewConnectEvaluationLedger(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := owner.CommitPublication(ctx, runtimebus.PublicationCommand{
+					Commit: runtimebus.CommitPublishRequest{
+						Event: storetest.AdmitNativeDeliveryEvent(t, event), RouteSettlement: settlement,
+						DeliveryRoutes: []events.DeliveryRoute{route}, DeliveryAuthority: fixture.Authority,
+						ReplayScope: pipelineobligation.ScopeSubscribed, PipelineClaim: publication,
+					},
+					AuthorScope: scope, HasAuthorScope: true, AuthorDescriptor: descriptor, HasAuthorDescriptor: true,
+				})
+				releaseErr := owner.PipelineObligations().Release(context.WithoutCancel(ctx), publication)
+				if err != nil || releaseErr != nil || !committed.Acknowledged {
+					t.Fatalf("authored native publication: acknowledged=%t err=%v release=%v", committed.Acknowledged, err, releaseErr)
+				}
+			}
+			activity := s6OrderDiagnosticActivity(t, ctx, owner, runID, eventByDelivery[ids[0]].ID(), eventByDelivery[ids[1]].ID())
+			sequences := map[string]int64{}
+			for _, occurrence := range activity {
+				if occurrence.Kind == authoractivity.KindEventEmitted && occurrence.SourceOwner == "events" {
+					sequences[occurrence.SourceIdentity] = occurrence.Sequence
+				}
+			}
+			if len(sequences) != 2 || sequences[eventByDelivery[ids[0]].ID()] <= 0 || sequences[eventByDelivery[ids[0]].ID()] >= sequences[eventByDelivery[ids[1]].ID()] {
+				t.Fatalf("exact authored event sequence join: %+v", sequences)
+			}
+			var cursor deliverylifecycle.ContinuationCursor
+			for _, id := range []string{ids[1], ids[0]} {
+				work, err := owner.PipelineObligations().ClaimEvent(ctx, eventByDelivery[id].ID(), pipelineobligation.PurposeRecovery)
+				if err != nil {
+					t.Fatal(err)
+				}
+				outcome, err := owner.PipelineObligations().Settle(ctx, work.Claim, pipelineobligation.Acknowledged("processed"))
+				if err != nil || !outcome.Committed() || !outcome.DeliveryHandoffCommitted() {
+					t.Fatalf("held readiness handoff: outcome=%+v err=%v", outcome, err)
+				}
+				if id == ids[1] {
+					page, err := owner.ScanDeliveryContinuations(ctx, fixture.Authority, deliverylifecycle.ContinuationCursor{}, 1)
+					if err != nil || len(page.Items) != 1 || page.Items[0].DeliveryID != ids[1] || page.Items[0].Disposition != deliverylifecycle.ClaimAcquired {
+						t.Fatalf("later authored event should be the sole ready delivery: page=%+v err=%v", page, err)
+					}
+					_, _, _, started := page.Next.Position()
+					if !started {
+						t.Fatal("ready scan did not retain its typed cursor")
+					}
+					cursor = page.Next
+				}
+			}
+			past, err := owner.ScanDeliveryContinuations(ctx, fixture.Authority, cursor, 2)
+			if err != nil || len(past.Items) != 0 || !past.Exhausted {
+				t.Fatalf("earlier newly-ready delivery crossed an exclusive later cursor: page=%+v err=%v", past, err)
+			}
+			fresh, err := owner.ScanDeliveryContinuations(ctx, fixture.Authority, deliverylifecycle.ContinuationCursor{}, 2)
+			if err != nil || len(fresh.Items) != 2 || fresh.Items[0].DeliveryID != ids[0] || fresh.Items[1].DeliveryID != ids[1] {
+				t.Fatalf("fresh pass did not recover exact oldest-ready order: page=%+v err=%v", fresh, err)
+			}
+			for _, item := range fresh.Items {
+				if item.Disposition != deliverylifecycle.ClaimAcquired || item.Snapshot.Status != deliverylifecycle.StatusPending || item.Snapshot.ClaimVersion != 0 {
+					t.Fatalf("read-only selection changed an unclaimed pending row: %+v", item)
+				}
+			}
+			t.Logf("authored native sequence join=%v; later event alone READY while earlier handoff held; advanced cursor misses earlier newly-ready row, fresh pass sees both pending/v0; not a dispatcher repair", sequences)
 		})
 	}
 }
