@@ -2639,20 +2639,13 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 }
 
 func (e *Executor) stepActivity(frame *executionFrame) error {
-	activitySpec := selectedActivitySpec(frame.req.Handler, frame.rule, frame.ruleSource)
+	site := selectedActivitySite(frame)
+	activitySpec := site.Spec
 	if activitySpec.Empty() {
 		return nil
 	}
 	if e.deps.Source == nil {
 		return fmt.Errorf("%w: activity semantic source is required", ErrInvalidConfig)
-	}
-	kind, ruleIndex := runtimecontracts.ActivitySiteHandler, -1
-	if frame.rule != nil {
-		kind, ruleIndex = runtimecontracts.ActivitySiteRule, frame.ruleIndex
-	}
-	site := runtimecontracts.ActivitySite{
-		Node: frame.req.Node, HandlerEventKey: frame.req.HandlerEventKey,
-		Kind: kind, RuleIndex: ruleIndex, Spec: activitySpec,
 	}
 	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(site)
 	if err != nil {
@@ -3388,11 +3381,16 @@ func selectedDeclarativeEmitSpecs(handler runtimecontracts.SystemNodeEventHandle
 	return out
 }
 
-func selectedActivitySpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActivitySpec {
-	if source == handlerRuleSourceRules && rule != nil && !rule.Activity.Empty() {
-		return rule.Activity
+func selectedActivitySite(frame *executionFrame) runtimecontracts.ActivitySite {
+	site := runtimecontracts.ActivitySite{
+		Node: frame.req.Node, HandlerEventKey: frame.req.HandlerEventKey,
+		Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1, Spec: frame.req.Handler.Activity,
 	}
-	return handler.Activity
+	if frame.ruleSource == handlerRuleSourceRules && frame.rule != nil && !frame.rule.Activity.Empty() {
+		site.Kind, site.RuleIndex, site.Spec = runtimecontracts.ActivitySiteRule, frame.ruleIndex, frame.rule.Activity
+		site.RuleRef, _ = frame.rule.DeclarationIdentity()
+	}
+	return site
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
