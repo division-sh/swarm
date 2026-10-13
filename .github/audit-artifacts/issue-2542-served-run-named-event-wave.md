@@ -124,3 +124,20 @@ Docker/M01/D3/M07, drain, overlay, immutable-history provisioning (including
 this4e337ff8d source), integrated and landing holds remain unwaived. No local
 tier is rerun. Preflight is required before any eventual clean/rebased authorized
 push; rebase remains directed once after #2617 and orchestration handoff.
+
+## Review Delta F1
+
+Reviewer-b independently reproduced the omitted finite/idempotence root RED:
+main_test.go still expected1496 recipes. The19-root receipt above is a pass
+of that named selection, not a complete recipe-inventory qualification; it
+omitted TestReviewedSnapshotsAreFiniteAndIdempotent. The review's expanded
+aggregate was RED, not a pass.
+
+Authorized repair changes only that exact equality to1497. No row, historical
+Before, loop, mutation check, source assertion or policy is removed/relaxed.
+Exact candidate command, GOFLAGS empty/Go1.26.8/GOMAXPROCS2/-p1/count1/2m:
+TestReviewedSnapshotsAreFiniteAndIdempotent PASS4.456s, one root/all1497 row
+children, no failure or skip. Receipt served-event-count-recipe-count-repair.jsonl.
+Unaffected runtime, ownership, unused, complexity and real ratchet receipts carry
+as authorized; no duplicate tier, census or broad review. Future affected-corpus
+commands whenever recipes change must include this root. Debt stays6799/4573.
