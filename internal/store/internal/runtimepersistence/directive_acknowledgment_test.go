@@ -14,7 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -58,6 +57,7 @@ type directiveIntegrationStore interface {
 	runtimebus.KeyedActiveFlowInstanceDescriptorLister
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
+	runtimemanager.AgentLifecycleOutcomeReader
 	agentfixture.Store
 	runtimemanager.AgentDirectiveRunTargetResolver
 	runtimemanager.EventExistenceReader
@@ -529,8 +529,11 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		LifecycleStore:   agentfixture.Lifecycle(t, backend.store),
 		WorkOwner:        storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState:      backend.store,
+			LifecycleOutcome:    backend.store,
 			EventExistence:      faults,
 			DirectiveOperations: faults,
 			DirectiveTargets:    faults,
@@ -561,19 +564,12 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	if err := agentfixture.UpsertStatic(t, testAuthorActivityContext(), backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
 	}
-	if agent.effects != nil {
-		state, found, err := backend.store.LoadAgentLifecycleState(testAuthorActivityContext(), identity)
-		if err != nil || !found {
-			t.Fatalf("hydrate exact provider fixture lifecycle: found=%t err=%v", found, err)
-		}
-		rec.LifecycleEpoch, rec.LifecycleGeneration, rec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
-		rec.LifecycleRunMode, rec.ProcessBinding = state.RunMode, state.ProcessBinding
+	state, found, err := backend.store.LoadAgentLifecycleState(testAuthorActivityContext(), identity)
+	if err != nil || !found {
+		t.Fatalf("hydrate exact directive fixture lifecycle: found=%t err=%v", found, err)
 	}
-	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
-	if err != nil {
-		t.Fatalf("construct directive execution topology: %v", err)
-	}
-	rec.Status = "ephemeral"
+	rec.LifecycleEpoch, rec.LifecycleGeneration, rec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
+	rec.LifecycleRunMode, rec.ProcessBinding, rec.Topology = state.RunMode, state.ProcessBinding, state.Topology
 	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	if err := manager.MaterializeAdmittedAgentForExecution(materializationCtx, rec); err != nil {
 		t.Fatalf("register agent: %v", err)
@@ -612,12 +608,20 @@ func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
 		return h.agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		LifecycleStore:   agentfixture.Lifecycle(t, h.backend.store),
 		WorkOwner:        storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState: h.backend.store, LifecycleOutcome: h.backend.store,
 			EventExistence: h.faults, DirectiveOperations: h.faults, DirectiveTargets: h.faults,
 		},
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, h.faults))
+	state, found, err := h.backend.store.LoadAgentLifecycleState(testAuthorActivityContext(), h.agentRecord.Config.Identity)
+	if err != nil || !found {
+		t.Fatalf("reload exact directive fixture lifecycle: found=%t err=%v", found, err)
+	}
+	h.agentRecord.LifecycleEpoch, h.agentRecord.LifecycleGeneration, h.agentRecord.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
+	h.agentRecord.LifecycleRunMode, h.agentRecord.ProcessBinding, h.agentRecord.Topology = state.RunMode, state.ProcessBinding, state.Topology
 	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), h.request.RunID)
 	if err := h.manager.MaterializeAdmittedAgentForExecution(materializationCtx, h.agentRecord); err != nil {
 		t.Fatalf("restart directive agent: %v", err)
