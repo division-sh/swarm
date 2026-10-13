@@ -108,7 +108,7 @@ func runForkReplyCapturedChildPlan(t *testing.T, source runfork.RunForkPlan, chi
 	}
 	entities := make([]runfork.RunForkEntityState, 0, len(source.Entities))
 	for _, entity := range source.Entities {
-		constructor, err := projectRunForkConstructionReceipt(source, childRun, entity, time.Unix(200, 0).UTC())
+		constructor, err := ProjectRunForkConstructionReceipt(source, childRun, entity, time.Unix(200, 0).UTC())
 		if err != nil {
 			t.Fatal(err)
 		}
