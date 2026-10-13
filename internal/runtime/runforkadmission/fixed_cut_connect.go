@@ -1,0 +1,237 @@
+package runforkadmission
+
+import (
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+type fixedCutConstructor struct {
+	instance flowidentity.Instance
+	receipt  pipeline.FlowConstructionReceipt
+}
+
+type fixedCutConstructionIndex struct {
+	byPath map[string]fixedCutConstructor
+	byFlow map[string][]fixedCutConstructor
+}
+
+func indexFixedCutConstructions(source semanticview.Source, cut runfork.RunForkPlan) (fixedCutConstructionIndex, error) {
+	index := fixedCutConstructionIndex{byPath: make(map[string]fixedCutConstructor, len(cut.Entities)), byFlow: make(map[string][]fixedCutConstructor)}
+	for _, entity := range cut.Entities {
+		receipt, err := fixedConstructionReceipt(cut, entity)
+		if err != nil {
+			return fixedCutConstructionIndex{}, err
+		}
+		instance, _, found, err := FixedConstructionForRoute(source, cut, receipt.Identity.Route())
+		if err != nil {
+			return fixedCutConstructionIndex{}, err
+		}
+		if !found {
+			return fixedCutConstructionIndex{}, fmt.Errorf("fixed receiver lost captured constructor")
+		}
+		entry := fixedCutConstructor{instance: instance, receipt: receipt}
+		index.byPath[instance.InstancePath] = entry
+		index.byFlow[instance.TemplateID] = append(index.byFlow[instance.TemplateID], entry)
+	}
+	return index, nil
+}
+
+func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, eventID string, routing events.RoutingSource, receiver pinrouting.ConnectRoutePlan) ([]events.RouteIdentity, bool, error) {
+	event, found, err := cut.HistoricalRouteSelector(eventID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !found {
+		return nil, true, nil
+	}
+	readback := receiver.Readback()
+	admission, admitted := event.PayloadAdmission()
+	if !admitted || event.RoutingSource() != routing || readback.ProducerEvent == nil ||
+		admission.Binding().FlowID() != readback.ProducerEvent.FlowPath ||
+		admission.Binding().EventKey() != readback.ProducerEvent.EventName ||
+		admission.Binding().SchemaDigest() != readback.ProducerEvent.AcceptanceSchemaDigest {
+		return nil, false, fmt.Errorf("selected keyed receiver selector %s contradicts its captured source/schema: captured=%s/%s/%s selected=%+v", eventID,
+			admission.Binding().FlowID(), admission.Binding().EventKey(), admission.Binding().SchemaDigest(), readback.ProducerEvent)
+	}
+	if receiver.InstanceKey() == nil || receiver.InstanceKey().RequiresDeliveryProjection() {
+		// Minted/event-sourced key projection is a separate admitted occurrence.
+		return nil, true, nil
+	}
+	parent, err := fixedCutConnectParent(source, cut, constructors, event, receiver)
+	if err != nil {
+		return nil, false, err
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+		return nil, false, err
+	}
+	resolved, err := receiver.ResolvedInstanceKey(payload, event.ID())
+	if err != nil {
+		return nil, false, err
+	}
+	bundle, _ := semanticview.Bundle(source)
+	contract, err := receiver.ReceiverTemplate(bundle)
+	if err != nil {
+		return nil, false, err
+	}
+	keys, err := contract.CanonicalKeyMaterial(map[string]any{receiver.InstanceKey().Field().Path(): resolved})
+	if err != nil {
+		return nil, false, err
+	}
+	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
+	var matches []flowidentity.Instance
+	for _, constructor := range constructors.byFlow[readback.Receiver.FlowID] {
+		instance, receipt := constructor.instance, constructor.receipt
+		if instance.ParentRoute != parentRoute {
+			continue
+		}
+		fields := make(map[string]string, len(receipt.Persisted.Fields))
+		for field, value := range receipt.Persisted.Fields {
+			fields["entity."+field] = fmt.Sprint(value)
+		}
+		descriptor := pinrouting.Descriptor{FlowID: instance.TemplateID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, AddressFields: fields}
+		if pinrouting.ConnectInstanceKeyDescriptorMatches(keys, descriptor) {
+			if receipt.BundleHash != admission.Binding().BundleHash() {
+				return nil, false, fmt.Errorf("fixed constructor and selector have foreign source bundles")
+			}
+			if receiver.InstanceKey().Mode() == contracts.FlowInputResolutionModeCreate && receipt.CreatingInput.EventID != eventID {
+				return nil, false, fmt.Errorf("historical create selector does not own the captured constructor")
+			}
+			matches = append(matches, instance)
+		}
+	}
+	if len(matches) != 1 {
+		return nil, false, fmt.Errorf("selected captured receiver requires one exact key/parent match; got %d", len(matches))
+	}
+	switch receiver.InstanceKey().Mode() {
+	case contracts.FlowInputResolutionModeCreate, contracts.FlowInputResolutionModeSelect, contracts.FlowInputResolutionModeSelectOrCreate:
+	default:
+		return nil, false, fmt.Errorf("selected captured receiver has unsupported key resolution mode")
+	}
+	// This is the lifecycle owner's selector-only leaf: exact keys plus stored
+	// construction and parent. The generic descriptor materializer infers a
+	// single-level scope from the path, which cannot describe nested constructors.
+	return []events.RouteIdentity{receiver.ReceiverRoute(matches[0].InstancePath, matches[0].EntityID)}, true, nil
+}
+
+// Walk only captured ancestry and canonical keyless descendants. A keyed
+// ancestor not selected by this exact source cannot be chosen from a census.
+func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, event events.Event, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return flowidentity.Instance{}, fmt.Errorf("fixed receiver requires admitted construction tree")
+	}
+	view, found := bundle.FlowViewByID(receiver.ReceiverEndpoint().Readback().FlowID)
+	if !found || view.Parent == nil {
+		return flowidentity.Instance{}, fmt.Errorf("fixed receiver lacks structural parent")
+	}
+	owners := constructors.byPath
+	route := event.RoutingSource().Route()
+	path := route.FlowInstance
+	if path == "" {
+		path = cut.SourceRunID
+	}
+	entry, found := owners[path]
+	owner := entry.instance
+	if !found || (route.FlowInstance != "" && (owner.TemplateID != route.FlowID || owner.EntityID != route.EntityID)) ||
+		(route.FlowInstance == "" && (owner.TemplateID != semanticview.RootExecutionFlowID(source) || owner.EntityID != flowidentity.EntityID(cut.SourceRunID) || route.EntityID != "" && route.EntityID != owner.EntityID)) {
+		return flowidentity.Instance{}, fmt.Errorf("fixed selector has no exact constructed source")
+	}
+	lexical := receiver.Readback().FlowPath
+	for steps := 0; owner.TemplateID != lexical; steps++ {
+		if steps >= len(owners) || owner.ParentRoute.Empty() {
+			return flowidentity.Instance{}, fmt.Errorf("fixed selector lacks exact lexical constructor")
+		}
+		entry, found := owners[owner.ParentRoute.FlowInstance]
+		parent := entry.instance
+		if !found || parent.TemplateID != owner.ParentRoute.FlowID || parent.EntityID != owner.ParentRoute.EntityID {
+			return flowidentity.Instance{}, fmt.Errorf("fixed selector has conflicting constructor ancestry")
+		}
+		owner = parent
+	}
+	var descendants []string
+	for cursor := view.Parent; cursor.Paths.FlowPath != owner.TemplateID; cursor = cursor.Parent {
+		if cursor.Parent == nil {
+			return flowidentity.Instance{}, fmt.Errorf("fixed receiver lies outside selected lexical constructor")
+		}
+		descendants = append(descendants, cursor.Paths.FlowPath)
+	}
+	for i := len(descendants) - 1; i >= 0; i-- {
+		child, err := flowidentity.KeylessChild(source, owner, descendants[i])
+		if err != nil {
+			return flowidentity.Instance{}, err
+		}
+		entry, found := owners[child.InstancePath]
+		stored := entry.instance
+		if !found || stored != child {
+			return flowidentity.Instance{}, fmt.Errorf("fixed receiver lacks exact keyless ancestor")
+		}
+		owner = stored
+	}
+	return owner, nil
+}
+
+func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, dynamic []string, history []runfork.RunForkSelectedContractRouteEvent) ([]runfork.ConstructedRouteEvidence, error) {
+	var out []runfork.ConstructedRouteEvidence
+	eventsByID := make(map[string]runfork.RunForkSelectedContractRouteEvent, len(history))
+	for _, event := range history {
+		eventsByID[event.SourceEventID] = event
+	}
+	for _, path := range dynamic {
+		constructor, found := constructors.byPath[path]
+		if !found {
+			return nil, fmt.Errorf("fixed topology lost captured constructor")
+		}
+		receipt := constructor.receipt
+		selector, found, err := cut.HistoricalRouteSelector(receipt.CreatingInput.EventID)
+		if err != nil {
+			return nil, err
+		}
+		if !found || receipt.CreatingInput.Input == "" {
+			continue
+		}
+		admission, _ := selector.PayloadAdmission()
+		if receipt.BundleHash != admission.Binding().BundleHash() {
+			return nil, fmt.Errorf("fixed constructor and selector have foreign source bundles")
+		}
+		sourceEvent, err := pinrouting.AdmitSourceEvent(selector.Type(), selector.RoutingSource())
+		if err != nil {
+			return nil, err
+		}
+		constructorMatched := false
+		for _, receiver := range graph.MatchingSourceEvent(sourceEvent) {
+			endpoint := receiver.ReceiverEndpoint().Readback()
+			constructorMatched = constructorMatched || endpoint.FlowID == receipt.Identity.TemplateID && endpoint.LocalEvent == receipt.CreatingInput.Input
+		}
+		if !constructorMatched {
+			return nil, fmt.Errorf("fixed constructor input differs from selected receiver")
+		}
+		event, found := eventsByID[selector.ID()]
+		if !found || event.Disposition == runfork.RunForkSelectedContractDispositionFailClosed {
+			continue
+		}
+		var recipients []runfork.RunForkContractFrontierRecipient
+		for _, recipient := range event.DerivedRecipients {
+			if recipient.Path == path {
+				recipients = append(recipients, recipient)
+			}
+		}
+		if len(recipients) == 0 {
+			continue
+		}
+		bound, err := cut.BindConstructedRouteEvidence(receipt.EntityID, selector.ID(), recipients, frontier)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, bound)
+	}
+	return out, nil
+}

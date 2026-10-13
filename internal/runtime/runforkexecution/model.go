@@ -291,6 +291,24 @@ func selectedContractDynamicRouteTopologyProofs(frontier runfork.RunForkContract
 	evidence := selectedContractDynamicTopologyEvidence(frontier, routeAdmission)
 	proofs := make([]runfork.RunForkSelectedContractDynamicTopologyProof, 0, len(instances))
 	for _, instance := range instances {
+		var constructed *runfork.RunForkSelectedContractDynamicTopologyProof
+		for _, binding := range routeAdmission.ConstructedRouteEvidence {
+			proof, found, err := binding.ProofFor(instance, routeAdmission)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
+			if constructed != nil {
+				return nil, fmt.Errorf("duplicate fixed-cut topology proof for %s", instance)
+			}
+			constructed = &proof
+		}
+		if constructed != nil {
+			proofs = append(proofs, *constructed)
+			continue
+		}
 		item, ok := evidence[instance]
 		if !ok || !item.hasFrontierFlowInstance || len(item.recipients) == 0 || len(item.eventNames) == 0 {
 			continue

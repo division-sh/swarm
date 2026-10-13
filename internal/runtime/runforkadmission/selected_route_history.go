@@ -43,16 +43,24 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
+	constructors, err := indexFixedCutConstructions(req.Source, req.Plan)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteAdmission{}, err
+	}
 	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
 	connectIssues := connectGraph.Issues()
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission), instances)
+	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan, constructors, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission), instances)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	dynamicFlowInstances, err := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteAdmission{}, err
+	}
+	constructedEvidence, err := fixedCutConstructedRouteEvidence(req.Source, req.Plan, constructors, connectGraph, req.FrontierAdmission, dynamicFlowInstances, routeEvents)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -79,6 +87,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		ContractSelection:              selection,
 		SelectedRouteEvents:            routeEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
+		ConstructedRouteEvidence:       constructedEvidence,
 		FrontierAdmissionOwner:         req.FrontierAdmission.Owner,
 		FrontierEventCount:             frontierEventCount,
 		FrontierSourceEventIDs:         frontierSourceEventIDs,
@@ -148,7 +157,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, plan runfork.RunForkPlan, history []selectedRouteHistoryEvent, instances []runtimeflowidentity.Instance) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, plan runfork.RunForkPlan, constructors fixedCutConstructionIndex, history []selectedRouteHistoryEvent, instances []runtimeflowidentity.Instance) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
 	runID := plan.SourceRunID
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(history))
 	incomplete := false
@@ -157,7 +166,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 		if err != nil {
 			return nil, false, err
 		}
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, runID, event.eventName, event.routingSource, instances, reply)
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, plan, constructors, event.sourceEventID, event.eventName, event.routingSource, instances, reply)
 		if err != nil {
 			return nil, false, err
 		}

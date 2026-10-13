@@ -21329,7 +21329,14 @@ run_model:
       runtime.run_fork.selected_contract_route_topology. It may clear selected_contract_dynamic_route_topology_unproven
       only when each dynamic flow-instance topology item is proven from fork-local selected-contract evidence:
       selected-source route derivation, contract frontier evidence, route-admission evidence, and fork-local
-      flow-instance identity/topology evidence. If proof is incomplete, dynamic topology remains fail-closed. This
+      flow-instance identity/topology evidence. An already-constructed receiver may instead bind its complete
+      fixed-cut construction receipt and parent to its exact committed creating publication and admitted schema/key
+      selector through these same owners. This evidence is retained from the existing event and construction
+      families, not read from current source rows; it must identify the canonical keyed receiver and complete
+      selected derived recipients, with an immutable fixed-cut fingerprint. It does not require an unrelated pending
+      dynamic frontier occurrence, invent a constructor, copy executable source recipients or authorize execution.
+      Missing or contradictory cut, run, parent, selector, schema, bundle or constructor evidence remains fail-closed.
+      If proof is incomplete, dynamic topology remains fail-closed. This
       owner MUST NOT copy source routing_rules or materialized flow-instance route rows, persist fork-local route rows,
       derive executable recipients outside runtime.run_fork.selected_contract_recipient_planning, invoke delivery
       writes, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
@@ -21940,7 +21947,10 @@ run_model:
         flow-instance route topology is proven by runtime.run_fork.selected_contract_dynamic_route_topology as a
         non-mutating extension of runtime.run_fork.selected_contract_route_topology. Dynamic proof is valid only when
         selected-source route derivation and frontier/route-admission evidence identify fork-local flow-instance
-        topology and derived recipients for every dynamic instance. Missing, stale, source-row-only, or partial proof
+        topology and derived recipients for every dynamic instance. Already-constructed receivers may consume the
+        exact fixed-cut creating selector and complete immutable construction/parent receipt through that same owner,
+        without fabricating pending dynamic frontier work. This binding retains admitted schema/key/bundle and exact
+        cut identity; it is evidence only, never permission to construct or execute. Missing, stale, source-row-only, or partial proof
         keeps selected_contract_dynamic_route_topology_unproven fail-closed. This owner does not persist routes,
         copy source routing rows, create deliveries, run handlers, reconstruct timers/sessions/turns, change
         source-advanced policy, own contract-swap behavior, or own UI/API execution state.'
