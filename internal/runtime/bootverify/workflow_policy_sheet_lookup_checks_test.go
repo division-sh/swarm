@@ -64,17 +64,20 @@ func TestPolicySheetLookupValueRowsRejectsOwnLookupKeyAsConsumer(t *testing.T) {
 
 func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testing.T) {
 	tests := []struct {
-		name   string
-		mutate func(*runtimecontracts.SystemNodeEventHandler)
+		name    string
+		wantRow string
+		mutate  func(*runtimecontracts.SystemNodeEventHandler)
 	}{
 		{
-			name: "query executes before compute",
+			name:    "query executes before compute",
+			wantRow: "lookup row rules[0]: lookup",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
 				handler.Query = &runtimecontracts.QuerySpec{Source: "computed.template_path"}
 			},
 		},
 		{
-			name: "earlier policy compute row",
+			name:    "earlier policy compute row",
+			wantRow: "lookup row rules[1]: lookup",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
 				earlier := bootverifyLookupConsumerRule("earlier", "computed.earlier", "computed.template_path")
 				handler.Rules = append([]runtimecontracts.HandlerRuleEntry{earlier}, handler.Rules...)
@@ -86,7 +89,7 @@ func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testin
 			handler := bootverifyLookupHandler(true, false)
 			tc.mutate(&handler)
 			findings := bootverifyLookupFindings(handler)
-			if !findingContainsAll(findings, policySheetLookupCheckID, "lookup row scaffold_paths", "is not consumed") {
+			if !findingContainsAll(findings, policySheetLookupCheckID, tc.wantRow, "is not consumed") {
 				t.Fatalf("lookup findings = %#v, want pre-binding reader excluded from scaffold_paths consumers", findings)
 			}
 		})
@@ -97,7 +100,7 @@ func TestPolicySheetLookupValueRowsAcceptsLaterComputeConsumer(t *testing.T) {
 	handler := bootverifyLookupHandler(true, false)
 	handler.Rules = append(handler.Rules, bootverifyLookupConsumerRule("later", "computed.later", "computed.template_path"))
 	findings := bootverifyLookupFindings(handler)
-	if findingContainsAll(findings, policySheetLookupCheckID, "lookup row scaffold_paths", "is not consumed") {
+	if findingContainsAll(findings, policySheetLookupCheckID, "lookup row rules[0]: lookup", "is not consumed") {
 		t.Fatalf("lookup findings = %#v, want later compute row accepted as scaffold_paths consumer", findings)
 	}
 }
