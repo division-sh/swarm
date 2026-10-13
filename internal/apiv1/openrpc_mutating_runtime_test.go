@@ -33,6 +33,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -971,6 +972,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.mailbox = newMutatingProbeMailboxStore(state)
 	state.decisionCards = newMutatingProbeDecisionCardStore(state)
 	state.workflowStore = &mutatingProbeDecisionWorkflowStore{state: state, cards: state.decisionCards, events: state.events}
+	completionInput, completionOutput := int64(3), int64(2)
 	state.forks = &fakeConversationForkLifecycleStore{
 		createResult: runfork.OperatorConversationForkSession{
 			ForkID:          "00000000-0000-0000-0000-000000000301",
@@ -1013,10 +1015,11 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 				SourceRunID:     runID,
 				SourceAgentID:   "agent-a",
 				SourceTurn: runfork.ConversationForkSourceTurn{
-					TurnID:     "00000000-0000-0000-0000-000000000401",
-					TurnIndex:  1,
-					SelectedAt: now,
-					CreatedAt:  now,
+					CompletionEvidence: completion2270APIMockHistory(),
+					TurnID:             "00000000-0000-0000-0000-000000000401",
+					TurnIndex:          1,
+					SelectedAt:         now,
+					CreatedAt:          now,
 				},
 				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
 				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
@@ -1040,6 +1043,9 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 				RequestPayload:  []byte(`{"message":"inspect fork"}`),
 				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect fork"}`),
 				ParseOK:         true,
+				Completions: []operatorread.OperatorConversationCompletion{{AttemptID: "00000000-0000-4000-8000-000000000403", Ordinal: 1, ExecutionMode: "live",
+					Usage: runtimeeffects.CompletionUsage{ResolvedModel: "schema-probe-model", Exactness: runtimeeffects.CompletionUsageExact,
+						InputTokens: &completionInput, OutputTokens: &completionOutput, Evidence: *readOnlyProbeCompletionEvidence(t, "anthropic", "schema-probe-model")}}},
 			},
 			Snapshot: runfork.ConversationForkSnapshot{
 				ForkID:          "00000000-0000-0000-0000-000000000301",
@@ -1047,10 +1053,11 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 				SourceRunID:     runID,
 				SourceAgentID:   "agent-a",
 				SourceTurn: runfork.ConversationForkSourceTurn{
-					TurnID:     "00000000-0000-0000-0000-000000000401",
-					TurnIndex:  1,
-					SelectedAt: now,
-					CreatedAt:  now,
+					CompletionEvidence: completion2270APIMockHistory(),
+					TurnID:             "00000000-0000-0000-0000-000000000401",
+					TurnIndex:          1,
+					SelectedAt:         now,
+					CreatedAt:          now,
 				},
 				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
 				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
