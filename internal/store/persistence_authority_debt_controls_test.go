@@ -395,6 +395,36 @@ func TestPersistenceAuthorityDebtCensusOwnedSourceBeforeLoading(t *testing.T) {
 }
 
 func TestPersistenceAuthorityDebtExcludedWindowsAndUnknownDeclarations(t *testing.T) {
+	t.Run("preflight-platform-uses-common-execution-owner", func(t *testing.T) {
+		const path = "cmd/swarm-test/preflight_process_other.go"
+		source, err := os.ReadFile(filepath.Join("../..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, test := range []struct {
+			name, source string
+			want         int
+		}{
+			{"current-literal-capability", string(source), 0},
+			{"previous-executable-refusal", `package main
+import("context";"fmt";"io")
+func runPreflightProcess(context.Context, []string, io.Writer, io.Writer) (preflightProcessTiming, error) {
+ return preflightProcessTiming{}, fmt.Errorf("preflight descendant ownership is unsupported on this platform")
+}
+`, 1},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				file, err := parser.ParseFile(token.NewFileSet(), path, test.source, parser.ParseComments)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sites := authorityDebtSites(debtExcludedSourceFindings(t, path, file, &types.Info{}))
+				if got := authorityDebtCount(sites); got != test.want {
+					t.Fatalf("excluded preflight authority: got %d want %d sites=%+v", got, test.want, sites)
+				}
+			})
+		}
+	})
 	root := t.TempDir()
 	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
 	debtWriteModuleSource(t, root, "active.go", "package probe;func harmless()string{return \"safe\"}\n")
