@@ -115,12 +115,6 @@ func (p *Proof) checkLocked(kind, id string) {
 	}
 }
 
-func (p *Proof) ObserveExecutionAttempt(id string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.checkLocked("callback attempt", id)
-}
-
 type Observation struct {
 	Partial, ContinuationScans           int
 	RecoverySettled, ContinuationSettled bool
@@ -241,6 +235,8 @@ func (p *Proof) CheckPublished(id string) error {
 func (p *Proof) Wait(ctx context.Context, barrier *Barrier) error {
 	select {
 	case <-barrier.Entered:
+		return p.CheckWithheld()
+	case <-p.Published:
 		return p.CheckWithheld()
 	case <-ctx.Done():
 		return errors.Join(errors.New("startup handoff witness not reached"), ctx.Err())
