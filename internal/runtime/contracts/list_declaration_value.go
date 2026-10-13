@@ -9,7 +9,7 @@ import (
 
 func rejectAlternateListReference(raw, context string) error {
 	base := strings.TrimSuffix(strings.TrimSpace(raw), "?")
-	if strings.EqualFold(base, "list") || strings.Contains(strings.ToLower(base), "list<") {
+	if base == "list" || strings.Contains(strings.ToLower(base), "list<") {
 		return fmt.Errorf("%w: %s list type %q is not supported; use [T]", ErrInvalidField, context, raw)
 	}
 	return nil
