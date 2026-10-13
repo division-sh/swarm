@@ -22,6 +22,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Native canonical writer/readback and schema acceptance of an admitted
@@ -116,6 +118,68 @@ func TestC4F40TypedStartTimerNativeComponentBothStores(t *testing.T) {
 					retained.SourceTimerID != source.Ref.ActivationID || retained.ForkedFromRunID != source.RunID ||
 					!retained.SourceArmedAt.Equal(source.CreatedAt) || !retained.FireAt.Equal(source.FireAt) || !retained.CreatedAt.Equal(bornAt) {
 					t.Fatalf("native typed point reset original timer coordinates: %+v", retained)
+				}
+				if kind == runfork.RunForkPointRunStart {
+					probe := f.pipeline.(interface {
+						ProbeC4TypedStartTimerConstraintsTxForTest(context.Context, *mutationprotocol.Attempt, pipeline.WorkflowTimerActivation) error
+					})
+					for _, tc := range []struct {
+						name    string
+						foreign bool
+						edit    func(*pipeline.WorkflowTimerActivation)
+					}{
+						{"null_kind", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromPointKind = "" }},
+						{"null_revision", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromPointRevision = 0 }},
+						{"negative_revision", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromPointRevision = -1 }},
+						{"null_arm", false, func(a *pipeline.WorkflowTimerActivation) { a.SourceArmedAt = time.Time{} }},
+						{"null_owner", false, func(a *pipeline.WorkflowTimerActivation) { a.ReconstructionOwner = "" }},
+						{"null_source_timer", false, func(a *pipeline.WorkflowTimerActivation) { a.SourceTimerID = "" }},
+						{"null_source_run", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromRunID = "" }},
+						{"unknown_point", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromPointKind = "foreign" }},
+						{"start_with_event", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromEventID = uuid.NewString() }},
+						{"event_without_event", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromPointKind = forkpoint.Event }},
+						{"self_run", false, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromRunID = a.RunID }},
+						{"self_timer", false, func(a *pipeline.WorkflowTimerActivation) { a.SourceTimerID = a.Ref.ActivationID }},
+						{"arm_after_birth", false, func(a *pipeline.WorkflowTimerActivation) { a.SourceArmedAt = a.CreatedAt.Add(time.Second) }},
+						{"due_before_arm", false, func(a *pipeline.WorkflowTimerActivation) { a.FireAt = a.SourceArmedAt.Add(-time.Second) }},
+						{"foreign_run", true, func(a *pipeline.WorkflowTimerActivation) { a.ForkedFromRunID = uuid.NewString() }},
+						{"foreign_timer", true, func(a *pipeline.WorkflowTimerActivation) { a.SourceTimerID = uuid.NewString() }},
+						{"foreign_event", true, func(a *pipeline.WorkflowTimerActivation) {
+							a.ForkedFromPointKind, a.ForkedFromEventID = forkpoint.Event, uuid.NewString()
+						}},
+					} {
+						t.Run("native_constraint/"+tc.name, func(t *testing.T) {
+							bad := retained.Canonical()
+							bad.Ref.ActivationID = uuid.NewString()
+							tc.edit(&bad)
+							result := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runfork.RunForkReplayResumeAdmission, error) {
+								return runfork.RunForkReplayResumeAdmission{}, probe.ProbeC4TypedStartTimerConstraintsTxForTest(ctx, attempt, bad)
+							})
+							if result.Acknowledged() {
+								t.Fatal("native timer constraint admitted inconsistent typed lineage")
+							}
+							if dialect == "postgres" {
+								want := pq.ErrorCode("23514")
+								if tc.foreign {
+									want = "23503"
+								}
+								var native *pq.Error
+								if !errors.As(result.Err(), &native) || native.Code != want {
+									t.Fatalf("expected physical constraint %s, not decoder refusal: %v", want, result.Err())
+								}
+							} else {
+								want := 275 // SQLITE_CONSTRAINT_CHECK
+								if tc.foreign {
+									want = 787 // SQLITE_CONSTRAINT_FOREIGNKEY
+								}
+								var native interface{ Code() int }
+								if !errors.As(result.Err(), &native) || native.Code() != want {
+									t.Fatalf("expected physical constraint %d, not decoder refusal: %v", want, result.Err())
+								}
+							}
+							read(1)
+						})
+					}
 				}
 				for _, tc := range []struct {
 					name string
