@@ -9,7 +9,7 @@ func TestLeadReview7PredicateAliasScope(t *testing.T) {
 	schema := testEntityFilterSchema()
 	schema.Contract.Types.Types["Metadata"] = rc.NamedTypeDecl{Fields: map[string]rc.TypeFieldSpec{
 		"region": {Type: "text", IsOptional: true},
-		"notes":  {Type: "list<Note>"},
+		"notes":  {Type: "[Note]"},
 		"labels": {Type: "map[text]text"},
 	}}
 	schema.Contract.Types.Types["Note"] = rc.NamedTypeDecl{Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}

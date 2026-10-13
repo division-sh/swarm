@@ -11,7 +11,7 @@ import (
 
 func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *testing.T) {
 	contract := entityruntime.Contract{Entity: contracts.EntityContract{Fields: map[string]contracts.EntityFieldDecl{
-		"values": {Type: "map[text]json"}, "items": {Type: "list<json>"},
+		"values": {Type: "map[text]json"}, "items": {Type: "[json]"},
 	}}}
 	for _, existing := range []any{"scalar", []any{int64(8)}, map[string]any{"old": float64(8)}} {
 		metadata := map[string]any{"values": map[string]any{"key": existing}, "items": []any{int64(8)}}

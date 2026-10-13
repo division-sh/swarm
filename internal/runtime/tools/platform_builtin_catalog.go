@@ -744,7 +744,7 @@ func deliveryUUIDType(contract entityruntime.Contract, typeRef string) bool {
 
 func deliveryListType(typeRef string) bool {
 	typeRef = strings.TrimSpace(typeRef)
-	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
+	return strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
 		strings.HasSuffix(typeRef, "[]") ||
 		strings.HasPrefix(typeRef, "[]")
 }

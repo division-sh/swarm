@@ -472,7 +472,7 @@ func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 		{name: "enum numeric operator", resultType: "Decision", expression: `join.results.exists(r, r > 1)`, wantErr: true},
 		{name: "scalar alias", resultType: "Score", expression: `join.results.exists(r, r > 1)`},
 		{name: "scalar alias mismatch", resultType: "Score", expression: `join.results.exists(r, r.startsWith("1"))`, wantErr: true},
-		{name: "list", resultType: "list<Score>", expression: `join.results.exists(r, r.exists(v, v > 1))`},
+		{name: "list", resultType: "[Score]", expression: `join.results.exists(r, r.exists(v, v > 1))`},
 		{name: "map", resultType: "map[text]Score", expression: `join.results.exists(r, r[?"a"].orValue(0) > 1)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

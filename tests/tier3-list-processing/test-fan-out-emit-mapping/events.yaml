@@ -1,5 +1,5 @@
 batch.submitted:
-  items: "[FanOutItem]"
+  items: [FanOutItem]
 routed.a:
   item: FanOutItem?
   item_id: text?

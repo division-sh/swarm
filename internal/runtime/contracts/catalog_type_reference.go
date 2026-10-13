@@ -271,6 +271,9 @@ func (r CatalogTypeReference) ResolveReference(typeRef string) (ResolvedCatalogT
 }
 
 func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, resolving map[string]struct{}) (ResolvedCatalogType, error) {
+	if err := rejectAlternateListReference(typeRef, "catalog type"); err != nil {
+		return ResolvedCatalogType{}, err
+	}
 	if typeRef == "" {
 		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
 	}

@@ -3202,7 +3202,7 @@ rules:
 func TestEntityFieldDeclDecode_PreservesMaterializeFromProjection(t *testing.T) {
 	var field EntityFieldDecl
 	if err := decodeNodeTestYAML([]byte(`
-type: list<DimensionVerdict>
+type: '[DimensionVerdict]'
 materialize_from: scoring-node.dimensions_received
 project:
   dimension: source.dimension

@@ -74,7 +74,7 @@ func TestJSONEntityIsolationAndHostileValues(t *testing.T) {
 
 func TestJSONEntityOperationCapabilities(t *testing.T) {
 	contract := Contract{Entity: contracts.EntityContract{Fields: map[string]contracts.EntityFieldDecl{
-		"value": {Type: "json"}, "object": {Type: "object"}, "list": {Type: "list<json>"}, "map": {Type: "map[text]json"},
+		"value": {Type: "json"}, "object": {Type: "object"}, "list": {Type: "[json]"}, "map": {Type: "map[text]json"},
 	}}}
 	field, err := ResolveFieldPath(contract, "value")
 	if err != nil || field.LeafKind != "json" {

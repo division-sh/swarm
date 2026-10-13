@@ -77,7 +77,7 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"review": {
 			SchemaYAML:   "name: review\nstages:\n  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n",
-			EntitiesYAML: "case:\n  status: text\n  items: list<text>\n  labels: map[text]text\n  protected: text\n",
+			EntitiesYAML: "case:\n  status: text\n  items: [text]\n  labels: map[text]text\n  protected: text\n",
 			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  entity_writes:\n    case:\n      save: [status, items, labels]\n",
 		},
 	})
@@ -258,7 +258,7 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: list<text>\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: [text]\n")
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, unmanagedToolTestContext())

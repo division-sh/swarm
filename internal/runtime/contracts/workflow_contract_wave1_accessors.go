@@ -227,8 +227,6 @@ func singletonCoordinatorMapTypeParts(typeRef string) (string, string, bool) {
 func singletonCoordinatorListItemType(typeRef string) string {
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
-	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
-		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
 	case strings.HasSuffix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[:len(typeRef)-2])
 	case strings.HasPrefix(typeRef, "[]"):
@@ -346,8 +344,7 @@ func templateInstanceIsUUIDType(types TypeCatalogDocument, typeRef string) bool 
 
 func templateInstanceIsListType(typeRef string) bool {
 	typeRef = strings.TrimSpace(typeRef)
-	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
-		strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
+	return strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
 		strings.HasSuffix(typeRef, "[]") ||
 		strings.HasPrefix(typeRef, "[]")
 }

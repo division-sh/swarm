@@ -326,7 +326,7 @@ pins:
   outputs:
     - item.completed
 `,
-		"entities.yaml": "join_state:\n  expected: \"[text]\"\n",
+		"entities.yaml": "join_state:\n  expected: [text]\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
 		"events.yaml":   "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
 		"nodes.yaml": `dispatcher:

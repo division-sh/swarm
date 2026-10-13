@@ -306,8 +306,7 @@ func criteriaCitationBaseType(raw string) string {
 
 func criteriaCitationIsList(raw string) bool {
 	raw = strings.TrimSpace(raw)
-	return strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">") ||
-		strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") ||
+	return strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") ||
 		strings.HasSuffix(raw, "[]") ||
 		strings.HasPrefix(raw, "[]")
 }
@@ -315,8 +314,6 @@ func criteriaCitationIsList(raw string) bool {
 func criteriaCitationListItem(raw string) string {
 	raw = strings.TrimSpace(raw)
 	switch {
-	case strings.HasPrefix(raw, "list<") && strings.HasSuffix(raw, ">"):
-		return strings.ToLower(strings.TrimSpace(raw[len("list<") : len(raw)-1]))
 	case strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]"):
 		return strings.ToLower(strings.TrimSpace(raw[1 : len(raw)-1]))
 	case strings.HasSuffix(raw, "[]"):

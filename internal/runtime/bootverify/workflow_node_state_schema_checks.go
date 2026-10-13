@@ -222,8 +222,6 @@ func nodeStateListNamedType(typeRef string, types runtimecontracts.TypeCatalogDo
 func nodeStateListItemType(typeRef string) string {
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
-	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
-		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
 	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
 		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	case strings.HasSuffix(typeRef, "[]"):
