@@ -141,12 +141,18 @@ func bindSelectedDecisionCaller(caller, owned context.Context) (context.Context,
 		ctx, releaseDeadline = context.WithDeadline(ctx, deadline)
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(caller, func() { cancel(context.Cause(caller)) })
+	joined := make(chan struct{})
+	stop := context.AfterFunc(caller, func() {
+		defer close(joined)
+		cancel(context.Cause(caller))
+	})
 	if err := caller.Err(); err != nil {
 		cancel(context.Cause(caller))
 	}
 	return ctx, func() {
-		stop()
+		if !stop() {
+			<-joined
+		}
 		cancel(context.Canceled)
 		releaseDeadline()
 	}
