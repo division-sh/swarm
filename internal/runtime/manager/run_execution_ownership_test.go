@@ -48,6 +48,10 @@ func (p *runExecutionOwnerProbe) LoadAgentLifecycleState(ctx context.Context, id
 	return p.AgentLifecyclePersistence.(AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, identity)
 }
 
+func (p *runExecutionOwnerProbe) ReadAgentLifecycleOutcome(ctx context.Context, request AgentLifecycleTransition) (AgentLifecycleTransitionResult, bool, error) {
+	return p.AgentLifecyclePersistence.(AgentLifecycleOutcomeReader).ReadAgentLifecycleOutcome(ctx, request)
+}
+
 func (p *runExecutionOwnerProbe) InspectRunExecutionOwnership(context.Context, string) (RunExecutionOwnership, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
