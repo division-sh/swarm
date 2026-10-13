@@ -59,7 +59,8 @@ before the unchanged native DSN opener.
 
 Newest exact inverse composes before channel-intent and earlier historical
 generators. Old immutable manifests remain unchanged. Corpus1479 ->1494,
-783 ->798 transitions: 15 new rows, 11 exact existing After updates, no dropped
+783 ->798 transitions: 15 new rows; recipes have ten exact After updates and
+one Successor update, while transitions have eleven After updates. No dropped
 rows or changed Before, E-reserved entries unchanged. Transition digest
 e4f1d21208a12f8f15df724ea8ba914ebd7e2adae0fec05456a994d7fa9ebaa4.
 

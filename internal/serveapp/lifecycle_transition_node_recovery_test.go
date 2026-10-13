@@ -92,7 +92,9 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/cap_%t", backend, escape), func(t *testing.T) {
 				opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
 				var runtime *runtimepkg.Runtime
-				opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtime = rt }
+				opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+					runtime = rt
+				}
 				var armed, recovering atomic.Bool
 				var entries atomic.Int64
 				observed := make(chan lifecycleNodeRecoveryEntry, 4)
@@ -109,8 +111,6 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					if recovering.Load() {
 						return nil
 					}
-					// Interrupt a real claimed attempt before its mutation. Startup
-					// must reclaim this same delivery, not republish a new event.
 					<-ctx.Done()
 					return ctx.Err()
 				}
@@ -196,7 +196,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "ordinary.repeated", 1)
 				if escape {
 					requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
-					requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "sink/", "done")
 				} else {
 					snapshot := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					refused := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": published.EventID, "idempotency_key": "node-only-refusal"})

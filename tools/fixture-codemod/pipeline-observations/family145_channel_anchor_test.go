@@ -39,6 +39,7 @@ func family145ChannelAnchorPrevious(t *testing.T, file, function, current string
 }
 
 func family145ChannelAnchorCallerInverse(function, current string) string {
+	current = family145WorkflowStateCallerInverse(function, current)
 	pins, err := channelanchor.Decode(family145ChannelAnchorBytes)
 	if err != nil {
 		panic(err)

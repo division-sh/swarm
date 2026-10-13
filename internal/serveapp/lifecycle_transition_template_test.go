@@ -337,7 +337,7 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 				t.Fatal("same-key template verdict replay mutated persisted history/state")
 			}
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.finished", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-driver-finish"})
-			requireLifecycleFlowEntity(t, rt, runID, "", "done")
+			requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, "", "done")
 		})
 	}
 }

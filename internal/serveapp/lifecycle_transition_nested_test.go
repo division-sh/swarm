@@ -17,12 +17,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 	for _, variant := range []struct {
 		backend servedparity.Backend
 		mode    string
-	}{
-		{servedparity.BackendDefaultSQLite, "normal"},
-		{servedparity.BackendDefaultSQLite, "held_diagnostic"},
-		{servedparity.BackendExplicitPostgres, "normal"},
-		{servedparity.BackendExplicitPostgres, "held_diagnostic"},
-	} {
+	}{{servedparity.BackendDefaultSQLite, "normal"}, {servedparity.BackendDefaultSQLite, "held_diagnostic"}, {servedparity.BackendExplicitPostgres, "normal"}, {servedparity.BackendExplicitPostgres, "held_diagnostic"}} {
 		backend, mode := variant.backend, variant.mode
 		t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 			probe := lifecycletest.New(t)
@@ -32,18 +27,16 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var unblock func()
 			if mode == "held_diagnostic" {
 				release := make(chan struct{})
-				unblock = sync.OnceFunc(func() { close(release) })
+				unblock = sync.OnceFunc(func() {
+					close(release)
+				})
 				t.Cleanup(unblock)
 				entered = make(chan string, 1)
 				rt.Runtime.Bus.SetLoggerHook(&snapshotPublicationLogBarrier{logger: rt.Runtime.Logger, entered: entered, release: release})
 			}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
 			runID := seed.RunID
-			wantStages := map[string]string{
-				runID: "pending", "outer": "pending",
-				"outer/left": "waiting", "outer/left/sink": "waiting", "outer/left/sink/final": "waiting",
-				"outer/right": "waiting", "outer/right/sink": "waiting", "outer/right/sink/final": "waiting",
-			}
+			wantStages := map[string]string{runID: "pending", "outer": "pending", "outer/left": "waiting", "outer/left/sink": "waiting", "outer/left/sink/final": "waiting", "outer/right": "waiting", "outer/right/sink": "waiting", "outer/right/sink/final": "waiting"}
 			rows, err := rt.DB.Query(`SELECT f.instance_path,f.current_state,r.phase FROM flow_instances f
 				JOIN flow_instance_runtime_readiness r ON r.run_id=f.run_id AND r.instance_path=f.instance_path
 				WHERE f.run_id=$1 ORDER BY f.instance_path`, runID)
@@ -86,10 +79,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 					t.Fatal("original publication diagnostic did not enter the barrier")
 				}
-				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "right.work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed",
-				})
+				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "right.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed"})
 				if other.RunID == seed.RunID || other.EventID == seed.EventID {
 					t.Fatal("negative control reused the original publication")
 				}
@@ -122,29 +112,29 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var gateEntities []string
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
+				entityID := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
 				}
 				started := publish("loop.start", "start", map[string]any{"seed": true})
-				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
 					loop := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
-					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), admit.EventID, "drafting", "review")
 					repeated := publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 					state := "drafting"
 					if attempt == 2 {
 						state = "escaped"
 					}
-					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, state)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), repeated.EventID, "review", state)
 				}
 				closed := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
-				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
+				gateEntity := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/", "review")
 				gateEntities = append(gateEntities, gateEntity)
 				var entity operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": gateEntity}, &entity)
@@ -195,8 +185,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			for index, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "approved")
-				final := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/final/", "done")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/", "approved")
+				final := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/final/", "done")
 				var entity operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
 				if entity.Fields["result"] != side {

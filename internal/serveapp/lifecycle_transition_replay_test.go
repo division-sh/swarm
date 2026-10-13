@@ -34,11 +34,9 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
-			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
+			requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
-			// The public replay endpoint requires agent delivery history. Do not
-			// manufacture that history for this real node-only execution.
 			replay := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": repeated.EventID, "idempotency_key": "repeat-replay"})
 			if replay.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" {
 				t.Fatalf("node-only replay=%#v", replay)
@@ -111,7 +109,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				if history[0].To != "escaped" || compiled.Edge().Source != "loop.escape" {
 					t.Fatal("escape winner lost exact cause")
 				}
-				requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "sink/", "done")
 			} else {
 				if history[0].To != "done" || string(compiled.Edge().LoopOperation) != "close" {
 					t.Fatalf("close winner lost exact cause=%#v", compiled)

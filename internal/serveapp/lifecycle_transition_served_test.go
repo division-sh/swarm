@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -32,20 +31,18 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 						t.Run(handler+"/"+choice, func(t *testing.T) {
 							key := handler + "/" + choice
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
-							// One root input reaches all four flows through explicit
-							// connections; it grants no private API endpoint.
 							recipients := []string{"", "child/", "sibling/", "child/nested/"}
 							for _, recipient := range recipients {
-								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "waiting")
+								requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "waiting")
 							}
 							params := map[string]any{"event_name": "work." + handler, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"choice": choice}, "idempotency_key": key}
 							selected := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							for _, recipient := range recipients {
-								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "done")
 							}
 							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 							for _, recipient := range recipients {
-								entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								entityID := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "done")
 								history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 								if len(history) != 1 || history[0].From != "active" || history[0].To != "done" {
 									t.Fatalf("history=%#v", history)
@@ -92,7 +89,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 	}
 }
 
-func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runID, prefix, state string) string {
+func requireLifecycleFlowEntity(t *testing.T, reader receiverProofStateReader, runID, prefix, state string) string {
 	t.Helper()
 	instance := strings.TrimSuffix(prefix, "/")
 	if instance == "" {
@@ -100,16 +97,21 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 	}
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var entityID string
-		err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND current_state=$3`, runID, instance, state).Scan(&entityID)
-		if err == nil {
-			return entityID
-		}
-		if err != sql.ErrNoRows {
+		var found bool
+		err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			entityID, found, err = storetest.ReadWorkflowStateEntityStorage(ctx, reader, runID, instance, state)
+			return err
+		})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if found {
+			return entityID
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
+	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedInspectionRunDebugSummary(reader, runID))
 	return ""
 }
 

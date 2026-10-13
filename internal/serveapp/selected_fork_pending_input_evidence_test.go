@@ -22,8 +22,13 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+fault, func(t *testing.T) {
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
-				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+					selected = owner
+					return previous(owner)
+				}
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputOriginal))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -75,7 +80,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 					if executed != 0 {
 						t.Fatal("stale input reached fork delivery")
 					}
-					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 					return
 				}
 				switch fault {

@@ -25,8 +25,13 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			var selected *selectedStoreOwner
 			previous := projectRuntimePersistenceForServe
-			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+				selected = owner
+				return previous(owner)
+			}
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
+			})
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputMixedCompletion)
 			childStarted := make(chan struct{}, 1)
 			release := make(chan struct{})
@@ -48,7 +53,11 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 				}
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, hook)
-			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			t.Cleanup(func() {
+				once.Do(func() {
+					close(release)
+				})
+			})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			input := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "mixed-input"})
@@ -110,11 +119,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if response.Error == nil {
 				t.Fatal("historical non-agent delivery replay was enabled")
 			}
-			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-				AgentRuntime: rt.ForkRuntime,
-			})
+			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, AgentRuntime: rt.ForkRuntime})
 			if refusal == nil || refusal.Error() != "selected-contract fork execution materialization blocked: non_agent_delivery_replay_unsupported" {
 				t.Fatalf("historical replay refusal changed: %v", refusal)
 			}
@@ -133,10 +138,12 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 					t.Fatalf("refused historical replay changed table %s", table)
 				}
 			}
-			once.Do(func() { close(release) })
+			once.Do(func() {
+				close(release)
+			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
-			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "done", 2)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "archived", 1)
 		})
 	}
 }
