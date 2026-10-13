@@ -267,7 +267,9 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 				!reflect.DeepEqual(projected.Members, source.Members) || !reflect.DeepEqual(projected.Outputs, source.Outputs) ||
 				projected.Status != source.Status || projected.CloseReason != source.CloseReason || projected.TimerCancelled != source.TimerCancelled ||
 				projected.OutcomePending != source.OutcomePending || projected.OutcomeFired != source.OutcomeFired ||
-				projected.CompletionEvent != source.CompletionEvent || !projected.ArmedAt.Equal(source.ArmedAt) || !projected.FireAt.Equal(source.FireAt) {
+				projected.TimerEventType() != source.TimerEventType() || projected.JoinRef().Declaration() != source.JoinRef().Declaration() ||
+				!reflect.DeepEqual(projected.MemberCount, source.MemberCount) || !projected.DeadlineAt.Equal(source.DeadlineAt) ||
+				!projected.ArmedAt.Equal(source.ArmedAt) || !projected.FireAt.Equal(source.FireAt) {
 				t.Fatalf("retained join evidence changed: source=%+v child=%+v", source, projected)
 			}
 		}
