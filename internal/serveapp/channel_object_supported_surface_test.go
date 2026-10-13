@@ -43,7 +43,9 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				h.opts.SourceRoot = writeObjectChannelSource(t, h.opts.ConfigPath)
 				h.opts.AbandonActiveRuns = false
 				h.start(t)
-				t.Cleanup(func() { h.stop(t) })
+				t.Cleanup(func() {
+					h.stop(t)
+				})
 				driver := "sqlite"
 				if backend == servedparity.BackendExplicitPostgres {
 					driver = "postgres"
@@ -52,12 +54,11 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = db.Close() })
+				t.Cleanup(func() {
+					_ = db.Close()
+				})
 				var begun channelonboarding.Result
-				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
-					"provider": "mock", "verb": "connect", "provider_credential": "object-provider-secret",
-					"save_proof": true, "client_language": "fr",
-				}, &begun)
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{"provider": "mock", "verb": "connect", "provider_credential": "object-provider-secret", "save_proof": true, "client_language": "fr"}, &begun)
 				if begun.IdentityOperation == nil {
 					t.Fatalf("public connect lacks its real identity ceremony: %+v", begun)
 				}
@@ -67,18 +68,13 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				if callback == "" || signing == "" {
 					t.Fatal("public connect did not execute registration")
 				}
-				objectChannelIngress(t, callback, signing, "claim-1", map[string]any{
-					"text": begun.IdentityOperation.Challenge, "principal": "operator-a", "room": "queue-a",
-					"scope": scope, "message": map[string]any{"id": "claim-1"},
-				})
+				objectChannelIngress(t, callback, signing, "claim-1", map[string]any{"text": begun.IdentityOperation.Challenge, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "claim-1"}})
 				claimed := getChannelOnboardingRPC(t, h, begun.Operation.OperationID)
 				if claimed.IdentityOperation == nil || claimed.IdentityOperation.State != "awaiting_confirmation" {
 					t.Fatalf("real object claim not admitted: %+v", claimed)
 				}
 				var confirmed map[string]any
-				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.confirm", map[string]any{
-					"operation_id": claimed.IdentityOperation.OperationID, "expected_revision": claimed.IdentityOperation.Revision, "approve": true,
-				}, &confirmed)
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.confirm", map[string]any{"operation_id": claimed.IdentityOperation.OperationID, "expected_revision": claimed.IdentityOperation.Revision, "approve": true}, &confirmed)
 				ready := retryChannelOnboardingRPC(t, h, begun.Operation.OperationID, "")
 				if ready.Readiness == nil || !ready.Readiness.Ready {
 					t.Fatalf("learned object connect cannot complete confirmation/publication/native qualification: %+v", ready)
@@ -110,33 +106,24 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					t.Fatalf("public learned confirmation/native install did not execute: %s", diagnostic)
 				}
 				assertObjectNativeReads(t, provider, read, scope)
-				for _, probe := range []struct{ id, principal, address string }{
-					{"wrong-member", "customer-b", "mock_bot"}, {"wrong-address", "operator-a", "other_bot"},
-				} {
-					objectChannelIngress(t, callback, signing, probe.id, map[string]any{
-						"text": "/" + command, "principal": probe.principal, "room": "queue-a", "scope": scope,
-						"message": map[string]any{"id": probe.id}, "entry": map[string]any{"reference": command, "address": probe.address},
-					})
+				for _, probe := range []struct{ id, principal, address string }{{"wrong-member", "customer-b", "mock_bot"}, {"wrong-address", "operator-a", "other_bot"}} {
+					objectChannelIngress(t, callback, signing, probe.id, map[string]any{"text": "/" + command, "principal": probe.principal, "room": "queue-a", "scope": scope, "message": map[string]any{"id": probe.id}, "entry": map[string]any{"reference": command, "address": probe.address}})
 					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentText, probe.id), "entry_rejected")
 				}
 				var identity apiv1.RuntimeIdentityResult
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
-					"payload": map[string]any{"detail": strings.Repeat("object-owned detail;", 60)}, "idempotency_key": "object-card",
-				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash, "payload": map[string]any{"detail": strings.Repeat("object-owned detail;", 60)}, "idempotency_key": "object-card"})
+				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				message := waitObjectCardReceipt(t, db, card)
-				objectChannelIngress(t, callback, signing, "native-entry-1", map[string]any{
-					"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "entry-1"},
-					"entry": map[string]any{"reference": command, "address": "mock_bot"},
-				})
+				objectChannelIngress(t, callback, signing, "native-entry-1", map[string]any{"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "entry-1"}, "entry": map[string]any{"reference": command, "address": "mock_bot"}})
 				postAction := func(id, reference, token string) {
 					t.Helper()
 					fact := map[string]any{"token": token, "cursor": id, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": reference}}
 					objectChannelIngress(t, callback, signing, id, fact)
 					objectChannelIngress(t, callback, signing, id, fact)
-					waitObjectChannelEffect(t, provider, "/v2/ack", func(input map[string]any) bool { return input["cursor"] == id })
+					waitObjectChannelEffect(t, provider, "/v2/ack", func(input map[string]any) bool {
+						return input["cursor"] == id
+					})
 				}
 				pages := proveObjectChannelPages(t, db, provider, card, message, postAction)
 				more := waitObjectMessageControl(t, provider, message, "More choices")
@@ -167,10 +154,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				provider.mu.Lock()
 				callback, signing = provider.callback, provider.signing
 				provider.mu.Unlock()
-				objectChannelIngress(t, callback, signing, "answer-1", map[string]any{
-					"text": "private-object-reason", "principal": "operator-a", "room": "queue-a", "scope": scope,
-					"message": map[string]any{"id": "answer-1"}, "reply": map[string]any{"id": message},
-				})
+				objectChannelIngress(t, callback, signing, "answer-1", map[string]any{"text": "private-object-reason", "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "answer-1"}, "reply": map[string]any{"id": message}})
 				waitUncertainCopyDecision(t, db, card)
 				waitObjectMessageText(t, provider, message, "Decision: reject")
 				for _, restart := range []bool{false, true} {
@@ -188,10 +172,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					objectChannelIngress(t, callback, signing, id, stale)
 					objectChannelIngress(t, callback, signing, id, stale)
 					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentAction, id), "stale", "rejected")
-					objectChannelIngress(t, callback, signing, id+"-text", map[string]any{
-						"text": "obsolete-private-answer", "principal": "operator-a", "room": "queue-a", "scope": scope,
-						"message": map[string]any{"id": id + "-text"}, "reply": map[string]any{"id": message},
-					})
+					objectChannelIngress(t, callback, signing, id+"-text", map[string]any{"text": "obsolete-private-answer", "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": id + "-text"}, "reply": map[string]any{"id": message}})
 					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentText, id+"-text"), "teaching")
 				}
 				var decisions int
@@ -217,10 +198,8 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	p.mu.Lock()
 	p.loseNextCard = true
 	p.mu.Unlock()
-	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-		"event_name": "work.requested", "bundle_hash": bundle, "payload": map[string]any{"detail": strings.Repeat("uncertain object detail;", 60)}, "idempotency_key": "object-recovery-card",
-	})
-	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundle, "payload": map[string]any{"detail": strings.Repeat("uncertain object detail;", 60)}, "idempotency_key": "object-recovery-card"})
+	card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 	waitUncertainCopyPlan(t, db, card)
 	p.mu.Lock()
 	callback, signing := p.callback, p.signing
@@ -230,9 +209,7 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	if lostReference == "" {
 		t.Fatal("object provider did not apply the deliberately unacknowledged send")
 	}
-	objectChannelIngress(t, callback, signing, "recover-entry", map[string]any{
-		"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "recover-entry"}, "entry": map[string]any{"reference": command, "address": "mock_bot"},
-	})
+	objectChannelIngress(t, callback, signing, "recover-entry", map[string]any{"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "recover-entry"}, "entry": map[string]any{"reference": command, "address": "mock_bot"}})
 	deadline := time.Now().Add(15 * time.Second)
 	var reference, token string
 	for token == "" {
@@ -264,7 +241,7 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	post("fresh-choices", fresh, more)
 	approve := waitObjectMessageControl(t, p, fresh, "approve")
 	post("fresh-approve", fresh, approve)
-	waitChannelAnchorDecision(t, db, card)
+	waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 	waitObjectMessageText(t, p, fresh, "Decision: approve")
 	var copies, uncertain, decisions int
 	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {

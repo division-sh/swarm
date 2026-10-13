@@ -17,23 +17,16 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
 				intentIdentity := captureChannelIntentIdentity(t, h)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
-				})
-				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				gateMessage := waitChannelAnchorReceipt(t, db, gate)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed"})
+				gate := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				gateMessage := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), gate)
 				deadline := time.Now().UTC().Add(time.Hour)
 				if transition == "expire_restart" {
 					deadline = time.Now().UTC().Add(10 * time.Second)
 				}
-				requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
-					"payload":         map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)},
-					"idempotency_key": "temporal-human",
-				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask, "observers")
-				message := waitChannelAnchorReceipt(t, db, card)
+				requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)}, "idempotency_key": "temporal-human"})
+				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindHumanTask, "observers")
+				message := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 				token, found := telegramCallbackToken(h.provider.Delivery(message-1), "Approve")
 				if !found {
 					t.Fatal("actual human card lacks its initial action")
@@ -48,10 +41,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 				var response map[string]any
 				switch transition {
 				case "defer_restart":
-					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
-						"card_id": card, "until": time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano),
-						"idempotency_key": "temporal-defer",
-					}, &response)
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{"card_id": card, "until": time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano), "idempotency_key": "temporal-defer"}, &response)
 					waitChannelReceiptText(t, h, message, fragment, terminal)
 					h.stop(t)
 					h.start(t)
@@ -63,9 +53,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					h.start(t)
 					fragment, terminal = "The decision expired. No action was taken.", true
 				case "stop_supersedes":
-					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{
-						"run_id": seed.RunID, "idempotency_key": "temporal-stop",
-					}, &response)
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "temporal-stop"}, &response)
 					fragment, terminal = "The flow moved on. No action was taken.", true
 					waitChannelReceiptText(t, h, gateMessage, fragment, terminal)
 				}
@@ -82,13 +70,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 				}
 				if terminal {
 					callback, signing, _ := h.provider.Registration()
-					if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{
-						"update_id": 839000 + message, "callback_query": map[string]any{
-							"id": "temporal-stale-" + card, "from": map[string]any{"id": 7000},
-							"message": map[string]any{"message_id": message, "chat": map[string]any{"id": 1001, "type": "private"}},
-							"data":    token,
-						},
-					}); len(names) != 0 {
+					if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 839000 + message, "callback_query": map[string]any{"id": "temporal-stale-" + card, "from": map[string]any{"id": 7000}, "message": map[string]any{"message_id": message, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token}}); len(names) != 0 {
 						t.Fatalf("stale human action escaped into business events: %v", names)
 					}
 					reader := openChannelAnchorObservation(t, h)

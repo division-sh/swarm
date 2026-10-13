@@ -47,10 +47,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 				}
 				providerCalls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"model": "claude-test", "usage": map[string]int{"input_tokens": 1_000_000, "output_tokens": 1},
-					"content": []any{map[string]any{"type": "text", "text": "Observed."}},
-				})
+				_ = json.NewEncoder(w).Encode(map[string]any{"model": "claude-test", "usage": map[string]int{"input_tokens": 1_000_000, "output_tokens": 1}, "content": []any{map[string]any{"type": "text", "text": "Observed."}}})
 			}))
 			t.Cleanup(llm.Close)
 			redirectExternalHosts(t, map[string]string{"api.anthropic.com": llm.URL})
@@ -67,12 +64,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 			defer h.stop(t)
 			runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", "budget-token", 1001, "private", 0)
 			callback, signing, _ := h.provider.Registration()
-			postChannelTelegramUpdate(t, callback, signing, map[string]any{
-				"update_id": 839001, "message": map[string]any{
-					"message_id": 839001, "from": map[string]any{"id": 2001},
-					"chat": map[string]any{"id": 2001, "type": "private"}, "text": "Observe budget evidence",
-				},
-			})
+			postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 839001, "message": map[string]any{"message_id": 839001, "from": map[string]any{"id": 2001}, "chat": map[string]any{"id": 2001, "type": "private"}, "text": "Observe budget evidence"}})
 			driver := "sqlite"
 			if backend == servedparity.BackendExplicitPostgres {
 				driver = "postgres"
@@ -100,7 +92,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 			if entity != "" || priority != "critical" || producer != "runtime" || eventName != "platform.budget_threshold_crossed" || !strings.Contains(summary, "scope=system") {
 				t.Fatalf("actual budget notice lost global/critical provenance: entity=%q priority=%q producer=%q event=%q summary=%q", entity, priority, producer, eventName, summary)
 			}
-			messageID := waitChannelAnchorReceipt(t, db, noticeID)
+			messageID := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), noticeID)
 			message := h.provider.Delivery(messageID - 1)
 			if fmt.Sprint(message["chat_id"]) != "1001" || !strings.Contains(fmt.Sprint(message["text"]), summary) {
 				t.Fatalf("actual budget notice did not reach the selected operator: %v", message)

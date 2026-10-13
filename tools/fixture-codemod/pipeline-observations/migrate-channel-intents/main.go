@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelanchor"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
 )
 
@@ -117,6 +118,10 @@ func filePins(path string) []pin {
 	afterBytes, err := os.ReadFile(path)
 	must(err)
 	before, after := declarations(path, beforeBytes), declarations(path, afterBytes)
+	for key, current := range after {
+		after[key], err = channelanchor.ReadPrevious(path, key, current)
+		must(err)
+	}
 	keys := map[string]bool{}
 	for key := range before {
 		keys[key] = true

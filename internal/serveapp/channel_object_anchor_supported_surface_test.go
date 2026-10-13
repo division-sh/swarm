@@ -45,22 +45,16 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					if kind == decisioncard.AnchorKindHumanTask {
 						flowInstance = "observers"
 					}
-					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
-						"idempotency_key": "object-anchor-" + string(kind),
-					})
-					waitObjectCardReceipt(t, db, waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
+					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-anchor-" + string(kind)})
+					waitObjectCardReceipt(t, db, waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
 						if kind == decisioncard.AnchorKindProposedEffect {
 							event = "effect.requested"
 						}
-						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-							"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
-							"payload": map[string]any{"seed": true}, "idempotency_key": "object-producer-" + string(kind),
-						})
+						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "object-producer-" + string(kind)})
 					}
-					card := waitChannelAnchorCard(t, db, seed.RunID, kind, flowInstance)
+					card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, kind, flowInstance)
 					receipt := waitObjectCardReceipt(t, db, card)
 					label := "Approve"
 					if kind == decisioncard.AnchorKindStageGate {
@@ -75,7 +69,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					occurrence := fmt.Sprintf("anchor-approve-%d", index)
 					postObjectInputAction(t, p, occurrence, receipt, approve)
 					waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, occurrence), "applied")
-					waitChannelAnchorDecision(t, db, card)
+					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 					if arrived != nil {
 						select {
 						case <-arrived:

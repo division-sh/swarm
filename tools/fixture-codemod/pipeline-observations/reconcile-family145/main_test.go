@@ -4,6 +4,7 @@ import "testing"
 
 func TestHelperRenamesRequireExactReviewedPathAndName(t *testing.T) {
 	for _, entry := range []struct{ path, before, after string }{
+		{"internal/store/storetest/event.go", "InsertCanonicalEventRecord", "InsertNativeCanonicalEventRecord"},
 		{"internal/runtime/template_instance_delivery_test.go", "waitRuntimeDBCount", "waitRuntimeStorageCount"},
 		{"internal/runtime/template_instance_delivery_test.go", "waitRuntimeEventID", "waitRuntimeStoredEventID"},
 		{"internal/runtime/template_instance_delivery_test.go", "assertRuntimeDBCount", "assertRuntimeStorageCount"},
@@ -22,7 +23,7 @@ func TestHelperRenamesRequireExactReviewedPathAndName(t *testing.T) {
 		}
 		assertUnreviewedHelperRenameRefuses(t, entry.path, entry.before, nil)
 	}
-	if len(renamedHelpers) != 2 || len(renamedHelpers["internal/runtime/template_instance_delivery_test.go"]) != 3 || len(renamedHelpers["internal/runtime/artifact_action_result_delivery_test.go"]) != 1 {
+	if len(renamedHelpers) != 3 || len(renamedHelpers["internal/store/storetest/event.go"]) != 1 || len(renamedHelpers["internal/runtime/template_instance_delivery_test.go"]) != 3 || len(renamedHelpers["internal/runtime/artifact_action_result_delivery_test.go"]) != 1 {
 		t.Fatal("exact helper rename inventory changed")
 	}
 }

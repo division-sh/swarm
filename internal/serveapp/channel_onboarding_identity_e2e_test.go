@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -414,14 +415,15 @@ func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 }
 
 type channelOnboardingE2EHarness struct {
-	opts           cliapp.ServeOptions
-	provider       *channelOnboardingTelegramProvider
-	telegram       *httptest.Server
-	credentialPath string
-	backend        servedparity.Backend
-	storeDSN       string
-	endpoint       string
-	process        *serveRuntimeTestProcess
+	opts              cliapp.ServeOptions
+	provider          *channelOnboardingTelegramProvider
+	telegram          *httptest.Server
+	credentialPath    string
+	backend           servedparity.Backend
+	storeDSN          string
+	endpoint          string
+	process           *serveRuntimeTestProcess
+	anchorObservation storetest.ChannelObservation
 }
 
 func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, publicIngress bool) *channelOnboardingE2EHarness {
@@ -465,7 +467,15 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 	}
 	opts.StoreModeSet = true
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
-	return &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath, backend: backend, storeDSN: storeDSN}
+	h := &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath, backend: backend, storeDSN: storeDSN}
+	t.Cleanup(func() {
+		if h.anchorObservation != nil {
+			if err := h.anchorObservation.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	return h
 }
 
 func (h *channelOnboardingE2EHarness) start(t *testing.T) {

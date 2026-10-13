@@ -25,12 +25,9 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
-				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				message := waitChannelAnchorReceipt(t, db, cardID)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed"})
+				cardID := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				message := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cardID)
 				initial := readChannelHistoricalRender(t, db, cardID)
 				reject, found := telegramCallbackToken(h.provider.Delivery(message-1), "reject")
 				if !found {
@@ -77,9 +74,7 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.decide", params, &response)
 					cardStatus, decisions = "decided", 1
 				case "run_stop":
-					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{
-						"run_id": seed.RunID, "idempotency_key": "draft-run-stop",
-					}, &response)
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "draft-run-stop"}, &response)
 					cardStatus = "superseded"
 				}
 				waitChannelDraftStatus(t, db, cardID, draftStatus)

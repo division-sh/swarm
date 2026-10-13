@@ -44,11 +44,13 @@ func TestChannelDeliveryRecoveryNoticePublicJourney(t *testing.T) {
 				persistence.deps.BudgetSpendStore = channelRecoveryUnavailableSpend{Store: persistence.deps.BudgetSpendStore}
 				return persistence
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			// Only the retained budget read fails. The actual startup failure producer,
-			// selected-store notice/plan transaction, and later delivery are unchanged.
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
+			})
 			failed := startServeRuntimeTestProcess(t, h.opts)
-			t.Cleanup(func() { _ = failed.stop() })
+			t.Cleanup(func() {
+				_ = failed.stop()
+			})
 			code, exited := failed.waitForExit(20 * time.Second)
 			if !exited || code == 0 || !strings.Contains(failed.outputString(), "retained budget read unavailable") {
 				t.Fatalf("actual manager recovery did not fail closed: code=%d exited=%t\n%s", code, exited, failed.outputString())
@@ -72,7 +74,7 @@ func TestChannelDeliveryRecoveryNoticePublicJourney(t *testing.T) {
 				t.Fatalf("recovery notice lost global/critical provenance: entity=%q severity=%q producer=%q payload=%s", entity, severity, producer, payload)
 			}
 			h.start(t)
-			messageID := waitChannelAnchorReceipt(t, db, noticeID)
+			messageID := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), noticeID)
 			message := h.provider.Delivery(messageID - 1)
 			if fmt.Sprint(message["chat_id"]) != "1001" || !strings.Contains(fmt.Sprint(message["text"]), summary) {
 				t.Fatalf("retained actual recovery notice was not delivered: %v", message)

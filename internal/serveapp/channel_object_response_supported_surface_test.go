@@ -44,12 +44,8 @@ func createObjectUncertainCards(t *testing.T, h *channelOnboardingE2EHarness, db
 		p.mu.Lock()
 		p.loseNextCard = true
 		p.mu.Unlock()
-		seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-			"event_name": "work.requested", "bundle_hash": hash,
-			"payload":         map[string]any{"detail": strings.Repeat("uncertain recovery detail;", 60)},
-			"idempotency_key": fmt.Sprintf("multi-recovery-%d", index),
-		})
-		cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+		seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"detail": strings.Repeat("uncertain recovery detail;", 60)}, "idempotency_key": fmt.Sprintf("multi-recovery-%d", index)})
+		cards[index] = waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 		waitUncertainCopyPlan(t, db, cards[index])
 	}
 	return cards

@@ -32,6 +32,7 @@ func eventNamePins(t *testing.T) []eventname.Pin {
 }
 
 func family145EventNameCallerInverse(function, current string) string {
+	current = family145ChannelAnchorCallerInverse(function, current)
 	pins, err := eventname.Decode(family145EventNameBytes)
 	if err != nil {
 		panic(err)

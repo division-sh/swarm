@@ -28,8 +28,8 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
-				waitChannelAnchorReceipt(t, db, standingCard)
+				standingCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), standingCard)
 				waitChannelDeliverySendsSettled(t, db, backend)
 				var arrived <-chan int
 				var release func()
@@ -72,13 +72,10 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					})
 					t.Cleanup(release)
 				}
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "delivery-crash-seed",
-				})
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "delivery-crash-seed"})
 				seedRunID = seed.RunID
 				close(seedAdmitted)
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				messageID := 0
 				if arrived != nil {
 					select {
@@ -90,7 +87,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 						t.Fatalf("provider barrier selected a different source: %#v", h.provider.Delivery(messageID-1))
 					}
 				} else {
-					messageID = waitChannelAnchorReceipt(t, db, card)
+					messageID = waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 				}
 				state := "settled"
 				if cut == "launched" {
@@ -136,8 +133,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					readErr := db.QueryRow(`SELECT p.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),''),
 						(SELECT COUNT(*) FROM channel_delivery_receipts WHERE effect_operation_id=$2)
 						FROM channel_delivery_plans p WHERE p.source_id=$1`, card, operation).Scan(&retainedState, &retainedCurrent, &receipts)
-					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s",
-						cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
+					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s", cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
 				}
 				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&afterInput, &afterHash); err != nil {
 					t.Fatal(err)
@@ -155,13 +151,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					t.Fatalf("startup replayed a %s delivery: before=%d after=%d", cut, before, count)
 				}
 				callback, signing, _ := h.provider.Registration()
-				postChannelTelegramUpdate(t, callback, signing, map[string]any{
-					"update_id": 940000 + messageID, "callback_query": map[string]any{
-						"id": "crash-control-" + card, "from": map[string]any{"id": 7000},
-						"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
-						"data":    token,
-					},
-				})
+				postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 940000 + messageID, "callback_query": map[string]any{"id": "crash-control-" + card, "from": map[string]any{"id": 7000}, "message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token}})
 				if cut == "launched" {
 					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(940000+messageID)), "stale", "rejected")
 					var count int
@@ -169,7 +159,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 						t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
 					}
 				} else {
-					waitChannelAnchorDecision(t, db, card)
+					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 				}
 				if err := intentReader.Close(); err != nil {
 					t.Fatal(err)

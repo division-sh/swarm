@@ -24,14 +24,10 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			var cards [2]string
 			var messages [2]int
 			for index := range cards {
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
-				})
-				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index)})
+				cards[index] = waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				messages[index] = waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cards[index])
 			}
-			// Negative fault injection only: neither source cards nor authority are fabricated.
 			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancelInjection()
 			conn, err := db.Conn(injectionCtx)
@@ -40,7 +36,6 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			}
 			defer conn.Close()
 			if backend == servedparity.BackendDefaultSQLite {
-				// The served writer may hold SQLite's lock; configure only this fault-injection connection.
 				if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
 					t.Fatal(err)
 				}
@@ -57,10 +52,7 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 				t.Fatal(err)
 			}
 			var deferred map[string]any
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
-				"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
-				"idempotency_key": "scan-isolation-defer",
-			}, &deferred)
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano), "idempotency_key": "scan-isolation-defer"}, &deferred)
 			deadline := time.Now().Add(20 * time.Second)
 			for {
 				updated := false

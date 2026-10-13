@@ -1262,7 +1262,6 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			t.Cleanup(telegram.Close)
 			sourceRoot := writeMixedStandingTelegramServeFixture(t, telegram.URL)
 			configureStandingLifecycleCredentials(t)
-
 			var (
 				db            *sql.DB
 				postgresStore *store.PostgresStore
@@ -1272,13 +1271,9 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				db, postgresStore, sqliteStore = selectedRuntimeStoreForTest(t, persistence)
 			})
 			runtimes := make(chan *runtimepkg.Runtime, 2)
-			opts := cliapp.ServeOptions{
-				SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-				SelfCheck: true, Verbose: true,
-				TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-				TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) { runtimes <- rt },
-			}
+			opts := cliapp.ServeOptions{SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) {
+				runtimes <- rt
+			}}
 			selectedStore := ""
 			if backend == "sqlite" {
 				sqlitePath := filepath.Join(t.TempDir(), "mixed-standing.sqlite")
@@ -1305,15 +1300,15 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				opts.StoreModeSet = true
 				selectedStore = "postgres:" + dsn
 			}
-
 			first := startServeRuntimeTestProcess(t, opts)
 			first.waitForReadyLine()
 			firstRuntime := waitForStandingRuntime(t, runtimes, backend, "first boot")
 			if db == nil {
 				t.Fatalf("%s mixed standing database was not captured", backend)
 			}
-			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-ingress")
-			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-stopped")
+			anchorReader := openChannelAnchorStorageAtLocation(t, backend, strings.TrimPrefix(selectedStore, "postgres:"))
+			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, anchorReader, backend, "telegram-ingress")
+			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, anchorReader, backend, "telegram-stopped")
 			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.ServiceID != healthyService || binding.RunID != healthyRun || binding.Generation != healthyGeneration {
 				t.Fatalf("%s healthy standing service returned wrong binding before restart: %+v", backend, binding)
@@ -1325,7 +1320,6 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			if code := first.stop(); code != 0 {
 				t.Fatalf("%s first mixed standing serve exit = %d", backend, code)
 			}
-
 			enableServeRuntimeRecovery(t, opts.ConfigPath)
 			second := startServeRuntimeTestProcess(t, opts)
 			second.waitForReadyLine()
@@ -1393,14 +1387,11 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 	}
 }
 
-func loadServedStandingOwnerByFlow(t testing.TB, db *sql.DB, backend, flowID string) (serviceID, runID string, generation int64) {
+func loadServedStandingOwnerByFlow(t testing.TB, reader storetest.ChannelAnchorObservation, backend, flowID string) (serviceID, runID string, generation int64) {
 	t.Helper()
-	query := `SELECT service_id, current_run_id, current_generation FROM standing_services WHERE flow_path = ?`
-	args := []any{flowID}
-	if backend == "postgres" {
-		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services WHERE flow_path = $1`
-	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&serviceID, &runID, &generation); err != nil {
+	owner, err := reader.ReadStandingFlowStorage(context.Background(), flowID)
+	serviceID, runID, generation = owner.ServiceID, owner.RunID, owner.Generation
+	if err != nil {
 		t.Fatalf("%s load standing owner for flow %s: %v", backend, flowID, err)
 	}
 	return serviceID, runID, generation

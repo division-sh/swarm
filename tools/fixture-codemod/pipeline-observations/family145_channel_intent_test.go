@@ -31,6 +31,7 @@ func channelIntentPins(t *testing.T) []channelintent.Pin {
 }
 
 func family145ChannelIntentCallerInverse(function, current string) string {
+	current = family145ChannelAnchorCallerInverse(function, current)
 	pins, err := channelintent.Decode(family145ChannelIntentBytes)
 	if err != nil {
 		panic(err)
@@ -45,6 +46,7 @@ func family145ChannelIntentCallerInverse(function, current string) string {
 
 func family145CheckChannelIntentWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145ChannelAnchorPrevious(t, file, function, current)
 	for _, pin := range channelIntentPins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -69,7 +71,7 @@ func TestFamily145ChannelIntentOriginal34CallsAndCompleteSiblingRepairsAreSource
 		if err != nil {
 			t.Fatal(err)
 		}
-		if intentDeclaration(t, raw, pin.Function) != pin.After {
+		if family145ChannelAnchorPrevious(t, pin.File, pin.Function, intentDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("intent current body escaped finite rule:", key)
 		}
 		verifyIntentPredecessor(t, pin)

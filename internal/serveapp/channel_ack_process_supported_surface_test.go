@@ -23,12 +23,9 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
 				waitChannelDeliverySendsSettled(t, db, backend)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
-					"idempotency_key": "ack-crash-seed",
-				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				messageID := waitChannelAnchorReceipt(t, db, card)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "ack-crash-seed"})
+				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				messageID := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
 				if !ok {
 					t.Fatal("real gate has no callback control")
@@ -60,7 +57,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 						t.Fatal("callback did not reach actual provider response barrier")
 					}
 				} else {
-					waitChannelAnchorDecision(t, db, card)
+					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 				}
 				operation := waitChannelAcknowledgmentAttempt(t, db, cut)
 				before := len(h.provider.Acknowledgments())
@@ -86,7 +83,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				if after := waitChannelAcknowledgmentAttempt(t, db, want); after != operation {
 					t.Fatal("restart replaced original acknowledgment operation")
 				}
-				waitChannelAnchorDecision(t, db, card)
+				waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 				result, found, err := intentReader.ObserveChannelIntent(context.Background(), intentQuery)
 				if err != nil || !found || result.State != "settled" || result.Disposition != "applied" {
 					t.Fatalf("restart did not atomically complete exact action %+v: %+v found=%t %v", intentQuery, result, found, err)

@@ -203,13 +203,13 @@ func readChannelDeliveryDiagnosticRows(ctx context.Context, db *sql.DB, query st
 func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			_, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
+			h, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
 			var runID string
 			if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
-			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "telegram-ingress")
-			waitChannelAnchorReceipt(t, db, card)
+			card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), runID, "stage_gate", "telegram-ingress")
+			waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 			waitChannelDeliverySendsSettled(t, db, backend)
 			var deliveryID string
 			if err := db.QueryRow(`SELECT CAST(delivery_id AS TEXT) FROM channel_delivery_plans
@@ -220,10 +220,7 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(evidence["plan_source_default"].([]map[string]string)) != 1 ||
-				len(evidence["activations"].([]map[string]string)) == 0 ||
-				len(evidence["receipts"].([]map[string]string)) == 0 ||
-				len(evidence["operations"].([]map[string]any)) == 0 {
+			if len(evidence["plan_source_default"].([]map[string]string)) != 1 || len(evidence["activations"].([]map[string]string)) == 0 || len(evidence["receipts"].([]map[string]string)) == 0 || len(evidence["operations"].([]map[string]any)) == 0 {
 				t.Fatal("diagnostic omitted actual plan/default/activation/receipt/operation evidence")
 			}
 		})

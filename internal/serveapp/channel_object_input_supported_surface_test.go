@@ -208,11 +208,8 @@ func postObjectInputAction(t *testing.T, p *objectChannelProvider, id, receipt, 
 
 func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash string, index int) (string, string, string) {
 	t.Helper()
-	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"detail": strings.Repeat("input-owned detail;", 60)},
-		"idempotency_key": fmt.Sprintf("input-card-%d", index),
-	})
-	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"detail": strings.Repeat("input-owned detail;", 60)}, "idempotency_key": fmt.Sprintf("input-card-%d", index)})
+	card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 	receipt := waitObjectCardReceipt(t, db, card)
 	for page := 0; page < 2; page++ {
 		more := waitObjectMessageControl(t, p, receipt, "More choices")

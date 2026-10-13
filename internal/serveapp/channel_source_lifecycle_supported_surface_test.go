@@ -26,21 +26,20 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
 				var deliveryReader servedRunDeliveryReader
-				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+					deliveryReader = p.deps.DeliveryStore.SummarizeRun
+				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				var standingRun string
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
-				waitChannelAnchorReceipt(t, db, standingCard)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
-					"idempotency_key": "source-lifecycle-seed",
-				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				messageID := waitChannelAnchorReceipt(t, db, card)
+				standingCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), standingCard)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "source-lifecycle-seed"})
+				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				messageID := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
 				if !ok {
 					t.Fatal("source-lifecycle card lacks frozen control")
@@ -75,7 +74,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						var detail map[string]any
 						requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}, &detail)
 						postChannelSourceControl(t, callback, signing, card, token, messageID)
-						waitChannelAnchorDecision(t, db, card)
+						waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 					} else {
 						h.stop(t)
 						h.start(t)
@@ -102,22 +101,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				case "retained_reset", "source_reset":
 					clear := operation == "source_reset"
 					command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
-					postChannelTelegramUpdate(t, callback, signing, map[string]any{
-						"update_id": 978001, "message": map[string]any{
-							"message_id": 978001, "from": map[string]any{"id": 7000},
-							"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command,
-						},
-					})
+					postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 978001, "message": map[string]any{"message_id": 978001, "from": map[string]any{"id": 7000}, "chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command}})
 					waitNativeIntentCount(t, db, "entry", 1)
 					waitNativeInboxDeliveries(t, h, "1001", 1)
 					rejectedToken := uuid.NewString()
-					postChannelTelegramUpdate(t, callback, signing, map[string]any{
-						"update_id": 978002, "callback_query": map[string]any{
-							"id": "reset-history-refusal", "from": map[string]any{"id": 7000},
-							"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
-							"data":    rejectedToken,
-						},
-					})
+					postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 978002, "callback_query": map[string]any{"id": "reset-history-refusal", "from": map[string]any{"id": 7000}, "message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": rejectedToken}})
 					reader := openChannelAnchorObservation(t, h)
 					waitObjectChannelDisposition(t, reader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, "978002"), "stale", "rejected")
 					if err := reader.Close(); err != nil {
@@ -133,15 +121,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					beforeNative := readChannelNativeHistory(t, db)
 					beforeHistory := readChannelPreservedHistory(t, db)
 					writes := len(h.provider.CommandWrites())
-					dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{
-						"dry_run": true, "include_source_artifacts": clear, "idempotency_key": uuid.NewString(),
-					})
+					dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{"dry_run": true, "include_source_artifacts": clear, "idempotency_key": uuid.NewString()})
 					if dry.Error != nil || readChannelNativeHistory(t, db) != beforeNative || readChannelPreservedHistory(t, db) != beforeHistory {
 						t.Fatalf("dry-run changed native identity or populated history: %+v", dry.Error)
 					}
-					params := map[string]any{
-						"include_source_artifacts": clear, "idempotency_key": uuid.NewString(),
-					}
+					params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 					reset := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params)
 					if reset.Error != nil {
 						var record string
@@ -149,11 +133,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatalf("public reset failed: %+v record=%s read=%v\n%s", reset.Error, record, readErr, h.process.outputString())
 					}
 					var oldRun, activations, artifacts int
-					for query, target := range map[string]*int{
-						`SELECT COUNT(*) FROM runs WHERE run_id=$1`:                               &oldRun,
-						`SELECT COUNT(*) FROM connected_channel_activations WHERE bundle_hash=$1`: &activations,
-						`SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash=$1`:              &artifacts,
-					} {
+					for query, target := range map[string]*int{`SELECT COUNT(*) FROM runs WHERE run_id=$1`: &oldRun, `SELECT COUNT(*) FROM connected_channel_activations WHERE bundle_hash=$1`: &activations, `SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash=$1`: &artifacts} {
 						arg := hash
 						if target == &oldRun {
 							arg = seed.RunID
@@ -174,9 +154,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
 						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
 						t.Cleanup(restore)
-						code := executeCLI(context.Background(), []string{
-							"--config", h.opts.ConfigPath, "secrets", "set", "webhook_signing.telegram", "--stdin",
-						}, stdout, stderr, nil)
+						code := executeCLI(context.Background(), []string{"--config", h.opts.ConfigPath, "secrets", "set", "webhook_signing.telegram", "--stdin"}, stdout, stderr, nil)
 						restore()
 						if code != 0 {
 							t.Fatalf("provision retained-source ingress credential: code=%d %s", code, stderr.String())
@@ -187,15 +165,14 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
 							t.Fatal(err)
 						}
-						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+						freshCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
 						if freshCard == standingCard {
 							t.Fatal("retained reset reused predecessor standing card")
 						}
 						deadline := time.Now().Add(15 * time.Second)
 						for {
 							var state, render, receipt string
-							err := db.QueryRow(`SELECT delivery_id,state,COALESCE(CAST(current_render_id AS TEXT),''),COALESCE(CAST(current_receipt_operation_id AS TEXT),'') FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, freshCard).
-								Scan(&successorPlan, &state, &render, &receipt)
+							err := db.QueryRow(`SELECT delivery_id,state,COALESCE(CAST(current_render_id AS TEXT),''),COALESCE(CAST(current_receipt_operation_id AS TEXT),'') FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, freshCard).Scan(&successorPlan, &state, &render, &receipt)
 							if err == nil {
 								if state != "planned" || render != "" || receipt != "" {
 									t.Fatal("successor card dispatched without a current activation")
@@ -223,13 +200,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					postChannelSourceControl(t, callback, signing, card, token, messageID)
 					for index, text := range []string{"obsolete answer", "/" + command} {
-						status := postChannelSourceUpdate(t, callback, signing, map[string]any{
-							"update_id": 978003 + index, "message": map[string]any{
-								"message_id": 978003 + index, "from": map[string]any{"id": 7000},
-								"chat": map[string]any{"id": 1001, "type": "private"}, "text": text,
-								"reply_to_message": map[string]any{"message_id": messageID},
-							},
-						})
+						status := postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 978003 + index, "message": map[string]any{"message_id": 978003 + index, "from": map[string]any{"id": 7000}, "chat": map[string]any{"id": 1001, "type": "private"}, "text": text, "reply_to_message": map[string]any{"message_id": messageID}}})
 						if status != http.StatusNotFound {
 							t.Fatalf("reset retained obsolete text/native ingress: status=%d text=%q", status, text)
 						}
@@ -238,9 +209,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("reset retained deleted card execution authority")
 					}
 					if clear {
-						response := requestServedJSONRPC(t, h.rpcEndpoint(), "event.publish", map[string]any{
-							"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
-						})
+						response := requestServedJSONRPC(t, h.rpcEndpoint(), "event.publish", map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})
 						if response.Error == nil || response.Error.Data["code"] != apiv1.BundleUnavailableCode {
 							t.Fatalf("source-inclusive reset revived execution: %+v", response.Error)
 						}
@@ -249,9 +218,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, originalSource) {
 							t.Fatalf("retained reset changed source bytes: %v", err)
 						}
-						later := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-							"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
-						})
+						later := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})
 						if later.RunID == seed.RunID {
 							t.Fatal("retained reset reused predecessor run identity")
 						}
@@ -280,10 +247,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": uuid.NewString()})
-					frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
-						"payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
-					})
+					frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})
 					params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
 					var fork apiv1.RunForkExecutionResult
 					response := requestServedJSONRPC(t, h.rpcEndpoint(), "run.fork", params)
@@ -307,7 +271,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if supersessionCount != 1 || exactLineageCount != supersessionCount {
 						t.Fatalf("fork stage exit lost its selected frontier: supersessions=%d exact=%d", supersessionCount, exactLineageCount)
 					}
-					child := waitChannelAnchorCardInState(t, db, fork.ForkRunID, decisioncard.AnchorKindStageGate, "reviews", decisioncard.StatusPending)
+					child := waitChannelAnchorCardInState(t, channelAnchorStorageObservation(t, h), fork.ForkRunID, decisioncard.AnchorKindStageGate, "reviews", decisioncard.StatusPending)
 					var retiredEvent []byte
 					if err := db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&retiredEvent); err != nil {
 						t.Fatal(err)
@@ -331,16 +295,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 						t.Fatalf("fork acquired ordinary card mutation authority: %+v", refusal)
 					}
-					for method, args := range map[string]map[string]any{
-						"mailbox.defer":        {"card_id": child, "until": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), "idempotency_key": uuid.NewString()},
-						"mailbox.begin_input":  {"card_id": child, "verdict": "reject", "observed_content_hash": decision["observed_content_hash"], "idempotency_key": uuid.NewString()},
-						"mailbox.cancel_input": {"card_id": child, "input_draft_id": uuid.NewString(), "idempotency_key": uuid.NewString()},
-					} {
+					for method, args := range map[string]map[string]any{"mailbox.defer": {"card_id": child, "until": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), "idempotency_key": uuid.NewString()}, "mailbox.begin_input": {"card_id": child, "verdict": "reject", "observed_content_hash": decision["observed_content_hash"], "idempotency_key": uuid.NewString()}, "mailbox.cancel_input": {"card_id": child, "input_draft_id": uuid.NewString(), "idempotency_key": uuid.NewString()}} {
 						if err := requireServedJSONRPCError(t, h.rpcEndpoint(), method, args); err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 							t.Fatalf("%s did not preserve upstream fork refusal: %+v", method, err)
 						}
 					}
-					childMessage := waitChannelAnchorReceipt(t, db, child)
+					childMessage := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), child)
 					childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "approve")
 					if !found || childToken == token {
 						t.Fatal("fork delivery reused parent control identity")
@@ -378,17 +338,15 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatalf("fork callback bypassed selected control refusal: status=%s err=%v", status, err)
 					}
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
-					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
-					})
-					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "reviews")
-					ordinaryMessage := waitChannelAnchorReceipt(t, db, ordinaryCard)
+					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})
+					ordinaryCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), ordinary.RunID, decisioncard.AnchorKindStageGate, "reviews")
+					ordinaryMessage := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), ordinaryCard)
 					ordinaryToken, ok := telegramCallbackToken(h.provider.Delivery(ordinaryMessage-1), "approve")
 					if !ok {
 						t.Fatal("normal run lost decision control")
 					}
 					postChannelSourceControl(t, callback, signing, ordinaryCard, ordinaryToken, ordinaryMessage)
-					waitChannelAnchorDecision(t, db, ordinaryCard)
+					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), ordinaryCard)
 					waitChannelDeliverySendsSettled(t, db, backend)
 					h.stop(t)
 					h.start(t)

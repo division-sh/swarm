@@ -21,12 +21,9 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
-				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed"})
+				cardID := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				oldMessage := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cardID)
 				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
 				if !found {
 					t.Fatal("actual gate card lacks the required-input reject action")
