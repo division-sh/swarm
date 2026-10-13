@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
@@ -44,7 +45,7 @@ func runFailures(args []string, output io.Writer) error {
 			modes++
 		}
 	}
-	if modes != 1 || options.run < 0 || options.last > 150 || flags.NArg() != 0 {
+	if modes != 1 || options.run < 0 || options.last < 0 || options.last > 150 || flags.NArg() != 0 {
 		return fmt.Errorf("usage: swarm-test-timing failures (-run ID | -last N | -population FILE) [-json FILE]")
 	}
 	file, err := os.Open(options.ledger)
@@ -85,11 +86,20 @@ func runFailures(args []string, output io.Writer) error {
 			}
 		}
 	}
-	fmt.Fprintf(output, "PR population=%d; runs with RED attempts=%d; PR-owned-only=%d; reviewed non-PR-only=%d; unknown-only=%d; mixed=%d; in-flight=%d; cancelled=%d; earlier RED now green=%d\n", summary.PRRuns, summary.RedRuns, summary.PRAttributable, summary.NonPROnly, summary.UnknownOnly, summary.Mixed, summary.InFlight, summary.Cancelled, summary.EarlierRedNowGreen)
+	fmt.Fprintf(output, "PR population=%d; runs with RED attempts=%d; PR-owned-only=%d; reviewed non-PR-only=%d; unknown-only=%d; mixed=%d; in-flight=%d; cancelled=%d; incompletely observed=%d; earlier RED now green=%d\n", summary.PRRuns, summary.RedRuns, summary.PRAttributable, summary.NonPROnly, summary.UnknownOnly, summary.Mixed, summary.InFlight, summary.Cancelled, summary.Incomplete, summary.EarlierRedNowGreen)
 	if summary.RedRuns == 0 {
 		fmt.Fprintln(output, "reviewed non-PR RED share: unmeasured (zero RED-run denominator)")
 	} else {
 		fmt.Fprintf(output, "reviewed non-PR-only RED share lower bound: %d/%d (%.2f%%); unknown/mixed observations are not exonerated\n", summary.NonPROnly, summary.RedRuns, 100*float64(summary.NonPROnly)/float64(summary.RedRuns))
+	}
+	var kinds []string
+	for kind := range summary.ByPhenomenon {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		count := summary.ByPhenomenon[kind]
+		fmt.Fprintf(output, "  %s: RED runs=%d; runs with reviewed non-PR evidence=%d; unknown observations=%d (overlapping classes, not additive)\n", kind, count.RedRuns, count.ReviewedNonPRRuns, count.UnknownObservations)
 	}
 	if options.output != "" {
 		return writeJSON(options.output, struct {
@@ -106,9 +116,12 @@ func printFailureMatch(output io.Writer, match testtiming.FailureMatch) {
 	if id == "" {
 		id = "not in active ledger"
 	}
-	fmt.Fprintf(output, "%d/%d job=%d %s %s/%s: %s; attribution=%s; source=%s\n", match.RunID, match.Attempt, match.JobID, match.Job, match.Package, match.Test, id, match.Attribution, match.Source)
+	fmt.Fprintf(output, "%d/%d job=%d %s %s/%s: %s; outcome=%s; phenomenon=%s; attribution=%s; source=%s\n", match.RunID, match.Attempt, match.JobID, match.Job, match.Package, match.Test, id, match.Conclusion, match.Phenomenon, match.Attribution, match.Source)
 	if match.Problem != "" {
 		fmt.Fprintf(output, "  incomplete evidence: %s\n", match.Problem)
+	}
+	if match.Record != "" {
+		fmt.Fprintf(output, "  tracking=%s; status=%s; repair=%s\n", match.Tracking, match.Status, match.Repair)
 	}
 	if match.Rate != nil {
 		fmt.Fprintf(output, "  historical scoped rate=%d/%d; %s; %s\n", match.Rate.Failures, match.Rate.Attempts, match.Rate.Context, match.Rate.Evidence)

@@ -98,15 +98,20 @@ func runPreflight(ctx context.Context) int {
 	}
 	raw, marshalErr := json.MarshalIndent(receipt, "", "  ")
 	err = errors.Join(err, marshalErr, os.WriteFile(filepath.Join(directory, "receipt.json"), append(raw, '\n'), 0600))
-	if receipt.Seconds > 300 {
-		fmt.Fprintln(os.Stderr, "preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed")
-	}
-	fmt.Fprintf(os.Stderr, "preflight: complete=%t %.3fs; source=%s go=%s selection=%s receipts=%s\n", receipt.Complete && err == nil, receipt.Seconds, head, plan.BuildContext.GOVERSION, plan.Digest, directory)
+	receipt.Complete = receipt.Complete && err == nil
+	printPreflightReceipt(os.Stderr, receipt, directory)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+func printPreflightReceipt(output io.Writer, receipt preflightReceipt, directory string) {
+	if receipt.Seconds > 300 {
+		fmt.Fprintln(output, "preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed")
+	}
+	fmt.Fprintf(output, "preflight: complete=%t %.3fs; source=%s go=%s selection=%s receipts=%s\n", receipt.Complete, receipt.Seconds, receipt.Plan.HeadSHA, receipt.Plan.BuildContext.GOVERSION, receipt.Plan.Digest, directory)
 }
 
 func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.PreflightPlan, error) {
@@ -201,13 +206,13 @@ func checkPreflightSource(ctx context.Context, plan testplanning.PreflightPlan) 
 	return nil
 }
 
-func executePreflightPhase(ctx context.Context, directory string, phase preflightPhase, admission *testpostgres.RunAdmission, capacity int) error {
+func executePreflightPhase(ctx context.Context, directory string, phase preflightPhase, admission *testpostgres.RunAdmission, capacity int) (err error) {
 	path := filepath.Join(directory, strings.ReplaceAll(phase.Name, "/", "_")+".log")
 	log, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
-	defer log.Close()
+	defer func() { err = errors.Join(err, log.Close()) }()
 	if phase.Package != nil {
 		err = runPreflightProcess(ctx, phase.Args, log, os.Stderr, admission, capacity)
 	} else {

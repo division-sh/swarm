@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
@@ -106,4 +108,44 @@ func TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution(t *testi
 	if run([]string{"preflight", "--run", "^$"}) != 2 {
 		t.Fatal("local preflight admitted a filtered selection")
 	}
+	t.Run("static-child-cancellation", func(t *testing.T) {
+		t.Setenv(modeEnv, "hold")
+		pidPath := filepath.Join(t.TempDir(), "static.pid")
+		t.Setenv(signalFixturePIDEnv, pidPath)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() {
+			result <- runPreflightStaticProcess(ctx, []string{os.Args[0], "-test.run=^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}, io.Discard, io.Discard)
+		}()
+		pid := waitForSignalFixturePID(t, pidPath)
+		cancel()
+		select {
+		case err := <-result:
+			if err == nil {
+				t.Fatal("canceled static command became success")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("static cancellation was not joined")
+		}
+		waitForProcessAbsent(t, pid)
+	})
+	t.Run("source-mutation-refuses-command", func(t *testing.T) {
+		repo, head := completionRepo(t)
+		t.Chdir(repo)
+		if err := os.WriteFile("new-guard.go", []byte("package proof\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := checkPreflightSource(context.Background(), testplanning.PreflightPlan{HeadSHA: head}); err == nil {
+			t.Fatal("source mutation reached guard execution")
+		}
+	})
+	t.Run("soft-target-is-not-a-deadline", func(t *testing.T) {
+		var output bytes.Buffer
+		receipt := preflightReceipt{Seconds: 301, Complete: true}
+		printPreflightReceipt(&output, receipt, "retained")
+		if !strings.Contains(output.String(), "soft target exceeded") || !strings.Contains(output.String(), "complete=true") || !receipt.Complete {
+			t.Fatalf("soft target changed execution outcome: %s", output.String())
+		}
+	})
 }

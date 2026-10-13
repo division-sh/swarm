@@ -1,11 +1,16 @@
 package testtiming
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
 
 func TestFailureLedgerFrozen2353SourceIndex(t *testing.T) {
@@ -47,7 +52,7 @@ func failureLedgerFixture() (FailureLedger, ObservedFailure) {
 }
 
 func TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence(t *testing.T) {
-	for _, name := range []string{"duplicate-source", "missing-source", "unknown-kind", "unreviewed", "invalid-rate", "flaky-exclusion", "duplicate-record", "ambiguous-match"} {
+	for _, name := range []string{"duplicate-source", "missing-source", "unknown-kind", "unreviewed", "invalid-rate", "flaky-exclusion", "duplicate-record", "ambiguous-match", "false-review-url"} {
 		t.Run(name, func(t *testing.T) {
 			ledger, failure := failureLedgerFixture()
 			switch name {
@@ -59,6 +64,8 @@ func TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence(t *testing.T) {
 				ledger.Records[0].Phenomenon = "probably-load"
 			case "unreviewed":
 				ledger.Records[0].Review = ""
+			case "false-review-url":
+				ledger.Records[0].Review = "https://github.com/division-sh/swarm/issues/not-a-review"
 			case "invalid-rate":
 				ledger.Records[0].Rate = &FailureRate{Failures: 1, Attempts: 0}
 			case "flaky-exclusion":
@@ -79,6 +86,36 @@ func TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence(t *testing.T) {
 	if _, err := ReadFailureLedger(strings.NewReader(`{"version":1,"unknown":true}`)); err == nil {
 		t.Fatal("accepted unknown ledger field")
 	}
+	t.Run("finite-whole-root-exclusion", func(t *testing.T) {
+		ledger, _ := failureLedgerFixture()
+		ledger.Records[0].Phenomenon, ledger.Records[0].ExcludePreflight = "flake", true
+		plan := testplanning.PreflightPlan{Version: 1, HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), BuildContext: testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.26.8"}, Packages: []testplanning.PreflightPackage{{Package: "proof", Run: "^(TestGuard)$", Required: []testplanning.RequiredTest{{TestRoot: testplanning.TestRoot{Package: "proof", Name: "TestGuard"}}}}}}
+		bind := func() {
+			plan.Digest = ""
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(raw)
+			plan.Digest = hex.EncodeToString(sum[:])
+		}
+		bind()
+		if err := ValidatePreflightEligibility(plan, ledger); err == nil {
+			t.Fatal("known flaky child did not exclude the whole root")
+		}
+		plan.BuildContext.GOOS = "darwin"
+		bind()
+		if err := ValidatePreflightEligibility(plan, ledger); err != nil {
+			t.Fatal(err)
+		}
+		ledger.Records[0].ExcludePreflight = false
+		ledger.Records[0].Phenomenon = "timing-budget"
+		plan.BuildContext.GOOS = "linux"
+		bind()
+		if err := ValidatePreflightEligibility(plan, ledger); err != nil {
+			t.Fatalf("unknown/timing record became a blanket exclusion: %v", err)
+		}
+	})
 }
 
 func TestFailureLedgerMatchingNeverAdoptsForeignAttribution(t *testing.T) {
@@ -122,7 +159,7 @@ func TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts(t *testing.T) {
 		{Number: 1, Conclusion: "failure", Failures: []ObservedFailure{failure}}, {Number: 2, Conclusion: "success"},
 	}}}
 	summary, err := ledger.Summarize(runs)
-	if err != nil || summary.NonPROnly != 1 || summary.RedRuns != 1 || summary.EarlierRedNowGreen != 1 {
+	if err != nil || summary.NonPROnly != 1 || summary.RedRuns != 1 || summary.EarlierRedNowGreen != 1 || summary.ByPhenomenon["unknown-variance"].ReviewedNonPRRuns != 1 {
 		t.Fatalf("earlier reviewed RED vanished: %+v / %v", summary, err)
 	}
 	unknown := failure
@@ -132,10 +169,16 @@ func TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts(t *testing.T) {
 	if err != nil || summary.Mixed != 1 || summary.NonPROnly != 0 {
 		t.Fatalf("unknown was excluded from population: %+v / %v", summary, err)
 	}
+	if summary.ByPhenomenon["unknown-variance"].UnknownObservations != 1 {
+		t.Fatalf("class summary lost the unmatched leaf: %+v", summary)
+	}
 	runs = append(runs, FailureRun{ID: 2, Event: "pull_request", HeadSHA: failure.HeadSHA, Status: "queued"}, FailureRun{ID: 3, Event: "pull_request", HeadSHA: failure.HeadSHA, Status: "completed", Conclusion: "cancelled"})
 	summary, err = ledger.Summarize(runs)
 	if err != nil || summary.PRRuns != 3 || summary.InFlight != 1 || summary.Cancelled != 1 {
 		t.Fatalf("missing exposure accounting: %+v / %v", summary, err)
+	}
+	if summary.Incomplete != 1 {
+		t.Fatalf("missing attempts were counted as complete population evidence: %+v", summary)
 	}
 	runs[0].Attempts[0].Failures[0].Attempt = 3
 	if _, err := ledger.Summarize(runs); err == nil {

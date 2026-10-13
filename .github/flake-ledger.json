@@ -528,14 +528,14 @@
       "first_seen": "2026-10-11",
       "goos": "linux",
       "id": "CI-2353-docker-transport",
-      "job": "Go proof conformance-2394-pressure",
+      "job": "Go proof broad-10",
       "last_seen": "2026-10-11",
       "observations": [],
       "package": "",
       "phenomenon": "runner-infra",
       "repair": "reviewed Docker Hub transport observation; no test result",
       "review": "https://github.com/division-sh/swarm/pull/2612#issuecomment-6114647735",
-      "signature": "502",
+      "signature": "provision runner-owned Postgres: pull postgres:16: exit status 1 output=Error response from daemon: received unexpected HTTP status: 502 Bad Gateway",
       "sources": [
         "review-6114647735"
       ],
