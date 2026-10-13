@@ -103,7 +103,10 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 	sort.Strings(handlerKeys)
 	out := []ActivitySite{}
 	for _, handlerEventKey := range handlerKeys {
-		handler := handlers[handlerEventKey]
+		handler, err := QualifySystemNodeHandlerRuleRefsForEvent(node, handlerEventKey, handlers[handlerEventKey])
+		if err != nil {
+			return nil
+		}
 		if !handler.Activity.Empty() {
 			out = append(out, ActivitySite{
 				Node:            node,
