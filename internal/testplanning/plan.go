@@ -98,6 +98,10 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		return RunPlan{}, fmt.Errorf("CI-Units cannot select local execution")
 	}
 	unitIDs := append(slices.Clone(profilePolicy.Units), extraUnits...)
+	unitIDs, err = policy.composeCatalogCanaries(unitIDs)
+	if err != nil {
+		return RunPlan{}, err
+	}
 	profileEnvironment, err := environmentForVenue(profilePolicy.EnvironmentID, profilePolicy.EnvironmentIDs, option.Venue)
 	if err != nil {
 		return RunPlan{}, fmt.Errorf("profile %s: %w", profile, err)
@@ -226,6 +230,9 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			RequiredChildren: specialUnit.RequiredChildren,
 		}
 		weightProfile := profile
+		if wholeCatalogUnit(id) {
+			weightProfile = ProfileFull
+		}
 		weight, measured := model.UnitSeconds(weightProfile, unit)
 		if !measured {
 			weight = policy.Planning.UnknownPackageSeconds

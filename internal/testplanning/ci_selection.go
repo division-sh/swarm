@@ -150,28 +150,30 @@ func (p RunPlan) validateExtraUnits() error {
 }
 
 func unitWorkloadProfile(tier string, extras []string, id string) string {
-	if slices.Contains(extras, id) {
+	if slices.Contains(extras, id) || wholeCatalogUnit(id) {
 		return ProfileFull
 	}
 	return tier
 }
 
-// The retained full census owns supplemental completion obligations, including
-// parity children whose minimum tier is higher than the aggregate's base tier.
-func bindExtraUnitObligations(plan *RunPlan, full RunPlan) error {
+// Whole catalog units and supplements keep the full census's exact obligations,
+// including parity children above the aggregate's base tier.
+func bindFullUnitObligations(plan *RunPlan, full RunPlan) error {
 	for i := range plan.Units {
 		unit := &plan.Units[i]
-		if !slices.Contains(plan.ExtraUnits, unit.ID) {
+		if !slices.Contains(plan.ExtraUnits, unit.ID) && !wholeCatalogUnit(unit.ID) {
 			continue
 		}
 		original, err := full.Unit(unit.ID)
 		if err != nil {
 			return err
 		}
-		if !slices.Equal(unit.SelectedRoots, original.SelectedRoots) || !slices.Equal(unit.DeferredTests, original.DeferredTests) {
-			return fmt.Errorf("supplement %s differs from its canonical full-root contract", unit.ID)
+		if unit.WorkloadProfile != ProfileFull || MeasureUnit(*unit, 0).Selection != MeasureUnit(original, 0).Selection ||
+			!slices.Equal(unit.SelectedRoots, original.SelectedRoots) || !slices.Equal(unit.DeferredTests, original.DeferredTests) {
+			return fmt.Errorf("whole unit %s differs from its canonical full-root contract", unit.ID)
 		}
 		unit.RequiredTests = slices.Clone(original.RequiredTests)
+		unit.RequiredChildren = original.RequiredChildren
 	}
 	return nil
 }

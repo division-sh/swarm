@@ -67,7 +67,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		{"core-plus-burst", ProfileCore, []string{"hitl-releasee2e-burst-1"}},
 		{"lifecycle-plus-bursts", ProfileLifecycle, []string{"hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2"}},
 		{"lifecycle-plus-invocation", ProfileLifecycle, []string{"hitl-releasee2e-invocation-1"}},
-		{"lifecycle-overlapping-catalog", ProfileLifecycle, []string{"catalog-replay-1", "catalog-runtime"}},
+		{"lifecycle-plus-catalog-replay", ProfileLifecycle, []string{"catalog-replay-2-3"}},
 	} {
 		t.Run(selection.name, func(t *testing.T) {
 			profile := selection.profile
@@ -76,12 +76,6 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				t.Fatal(err)
 			}
 			bindErr := BindExecution(&plan, inventory, proofs, policy)
-			if selection.name == "lifecycle-overlapping-catalog" {
-				if bindErr == nil || !strings.Contains(bindErr.Error(), "primary owners") {
-					t.Fatalf("overlapping full units did not refuse: %v", bindErr)
-				}
-				return
-			}
 			if bindErr != nil {
 				t.Fatal(bindErr)
 			}
@@ -344,7 +338,7 @@ func assertCatalogOracleCoverage(t *testing.T, plan RunPlan) {
 			t.Errorf("%s requires %d owners for %s, want exactly one", plan.Profile, owners, name)
 		}
 	}
-	if plan.Profile == ProfileFull {
+	if plan.Profile != ProfileCore {
 		return
 	}
 	unit, err := plan.Unit("catalog-oracle-guards")
