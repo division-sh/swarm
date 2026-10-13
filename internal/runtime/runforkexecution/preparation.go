@@ -136,6 +136,11 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	if err := validateSelectedFiniteFeedRecoveryRequest(req); err != nil {
 		return nil, err
 	}
+	forkOperation, err := detachedSelectedForkOperation(req.ForkOperation)
+	if err != nil {
+		return nil, fmt.Errorf("capture selected fork operation: %w", err)
+	}
+	req.ForkOperation = forkOperation
 	ports, err := o.require()
 	if err != nil {
 		return nil, err
@@ -228,6 +233,10 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
 	}
+	forkOperation, err = bindPreparedSelectedForkOperation(forkOperation, plan)
+	if err != nil {
+		return nil, err
+	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return nil, err
@@ -287,6 +296,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	prepared.originalSource = owned.originalSource
 	prepared.originalLoopCarriage = original
 	prepared.plan, prepared.frontier, prepared.routeAdmission = plan, frontier, routeAdmission
+	prepared.forkOperation = forkOperation
 	prepared.routeTopology, prepared.model = routeTopology, model
 	prepared.owner = o
 	prepared.agentRuntime, prepared.readiness = agentRuntime, readiness
@@ -334,10 +344,14 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 	if err := decoder.Decode(&detached); err != nil {
 		return runforkreadiness.MaterializeRequest{}, err
 	}
+	forkOperation, err := detachedSelectedForkOperation(p.forkOperation)
+	if err != nil {
+		return runforkreadiness.MaterializeRequest{}, err
+	}
 	return runforkreadiness.MaterializeRequest{
-		ForkOperation:        p.forkOperation,
+		ForkOperation:        forkOperation,
 		OriginalLoopCarriage: p.originalLoopCarriage,
-		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.EventID,
+		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
 		EffectiveSourceIdentity: p.loadedSource.EffectiveSourceIdentity, FrontierAdmission: detached.Frontier,
 		RouteTopology: detached.Routes, RecipientPlanning: detached.Recipients, Readiness: p.readiness,
