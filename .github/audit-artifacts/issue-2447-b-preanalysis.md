@@ -1,5 +1,68 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## S25 Shadowed Declaration Admission: Ruled Namespace Repair
+
+Reviewer-g6150314805 and inline4261285982 identify an unvalidated unused
+named body at3c0fafcb7. projectTypeCatalogDocument admits category maps
+separately; mergeTypeCatalogDocuments overrides within each category but
+does not resolve cross-category names. validateFlowCatalogReferences collects
+names, then validates each through Resolve, whose scalar/enum precedence can
+prevent traversal of a same-named types body. Repeatedly checking that name
+does not validate the hidden body. This is reviewer-confirmed source evidence,
+not a new G execution receipt or proof that the body is valid.
+
+Spec review: type_system.description (2831-2835) defines bundle/flow scope;
+type_system.vocabulary (2836-2850) defines scalar/named/enum categories;
+type_system.restrictions.reference_admission (2957-2990) requires every
+declaration, including unused ones, to be admitted and unknown/recursive
+references to refuse. None specifies cross-category uniqueness, supported
+shadowing or category precedence after root/flow composition. The lexical
+duplicate-effective-key rule at spec_authority.pack_platform_source_admission
+does not define a cross-category type-name namespace. Rule-set and policy
+override clauses govern different owners and cannot supply this permission.
+
+LEAD6150810213, ratified by the user on2026-10-13, now rules one unique name
+namespace per visible catalog across scalars/enums/types and the six exact
+built-in scalar names. Reject cross-category and built-in shadowing with a
+typed source-located refusal naming both declarations; same-category root/flow
+overrides stay valid. Every body remains validated. This supersedes the earlier
+silent-spec question6150402087; collision precedence is not a supported option.
+Implement through visible-catalog admission and admitted YAML locations, update
+the authoritative spec, and preserve all other admission/decoder behavior.
+
+| Row | Producer, canonical owner and consumer | Required proof after ruling |
+|---|---|---|
+| S25a scalar/named shadowed unused body | Authored scalars/types -> typed decoder -> visible root/flow merge -> all-declarations admission/Resolve -> loaded bundle and verify/boot | Unknown and recursive unused bodies must not be admitted through scalar precedence; cover same document and root/flow composition in both directions, with source-located refusal. |
+| S25b enum/named shadowed unused body | Authored enums/types -> same composition/admission and supported consumers | Same counterexamples for enum precedence; an enum's valid members/default do not validate the hidden named body. |
+| S25c cross-category namespace | Visible catalog admission and scalar/enum/named resolution | Prove all three category pairs even when both bodies are valid, across local and root/flow scopes; refuse before reference selection, with both declarations and their actual source locations. |
+| S25d legitimate same-category override controls | Existing root/flow category merge -> resolved references, retained source and public verify/boot | Preserve scalar/scalar, enum/enum and named/named overrides and valid noncolliding reuse; do not absorb D's separate list retirement or Part C extraction. |
+| S25e built-in scalar shadowing | Existing six built-in declarations plus authored visible-catalog names -> same admission owner | Refuse all six exact built-in names in every authored category at root and flow, naming built-in and authored declarations without fabricating a built-in YAML line. Public verify/boot negatives cover each category. |
+| S25f every-body validation | Namespace admission -> direct scalar/enum/named-body traversal in each scope -> existing field-reference owner | Retain unknown and recursive unused-body refusal, including invalid root bodies overwritten by valid same-category flow bodies and invalid flow overrides of valid roots. Prove unused named bodies are checked independently of a declaration name looking like list/map reference syntax; this does not add a name-grammar restriction. No alternative body may be selected to supply validation. |
+
+The fixed-plan diagnostic delta is accepted; hosted38430297587 remains
+qualification-in-progress, not S25 proof or merge permission. Record S25 in
+the existing B/watchlist node; no new issue or closure claim. B accounting is
+S01-S25 plus K/subrows, with S25 execution still pending.
+Parents2447/2407/2349 and the binding2647 ->2648 ->C stay open/unchanged.
+
+Read-only migration census at immutable3c0fafcb7 and mastera7d296655 finds
+zero in-scope cross-category collisions; affected checked-in paths: none.
+All1664 YAML files,5731/5714 Go files and other-text/JSON carriers are swept;
+19 physical catalogs on each revision have no local collision or ancestor
+types-file pair. Head97 embedded YAML carriers/fragments and130 typed
+constructions/assignments (master84/115) have no scoped collision. Root/flow
+producers, aliases/merges, helper inputs,12 dynamic-looking sites and7 partial/
+non-catalog parse carriers are inspected, not silently omitted. Repeated
+Cycle/Key/Score spellings belong to unrelated catalogs. Six known local-merge/
+composed controls prove the scanner discriminates all three category pairs.
+This implies zero known checked-in migrations, not private-source absence,
+grammar permission, runtime qualification or S25 repair credit.
+The same retained inventory also contains no authored declarations using the
+six exact built-in names. No checked-in fixture migration is needed for that
+additional rule; new purpose-built negative fixtures are required. Before the
+single push run loaded-bundle/public counterexamples, same-category controls,
+complete runtime and contracts, touched guards and clean no-argument preflight.
+
 ## Failure-Only Selected-Fork Qualification Diagnostic
 
 Reviewer-g6149702692 authorizes a retained diagnostic on the existing fixed-plan

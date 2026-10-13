@@ -696,10 +696,11 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDG].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDG].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeNamespacePublicAdmissionBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
     required_children:
       TestCatalogTypeAdmissionPublicRestartBothStores: [sqlite, postgres]
       TestCatalogTypeAdmissionTemplateRoutingBothStores: [sqlite, postgres]
+      TestCatalogTypeNamespacePublicAdmissionBothStores: [sqlite, postgres]
       TestCatalogTypeDetachmentPublicRestartBothStores: [sqlite, postgres]
       TestDeclaredClockFiniteAndPublicReadbackBothStores: [sqlite, postgres]
       TestDeclaredClockNestedBinaryDeliveryBothStores: [sqlite, postgres]
