@@ -66,7 +66,7 @@ func derivedStaticTargetObservation(t *testing.T, source semanticview.Source, fa
 		run.Origin, err = runlifecycle.ForkMaterializationRunOrigin(sourceRun, runlifecycle.ForkOriginPointDeploymentRevision, 2, "")
 		if err == nil {
 			observation, err = AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, HistoricalFlowInstanceConstruction{
-				Identity: identity, SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: identity.Route()}, SourceRevision: 2,
+				Identity: identity, SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: identity.Route()}, SourceRevision: 2, WorkflowVersion: instance.WorkflowVersion,
 			}, nil)
 		}
 	} else {

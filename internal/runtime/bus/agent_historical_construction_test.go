@@ -28,7 +28,7 @@ func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 	}
 	historical, err := pipeline.AdmitHistoricalFlowInstanceObservation(native.Selection(), instance,
 		runlifecycle.Snapshot{RunID: busInternalTestRunID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: native.SourceFact().BundleHash(), StartedAt: instance.CreatedAt},
-		1, pipeline.HistoricalFlowInstanceConstruction{Identity: identity, SourceRevision: 1, SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: flowidentity.StoredRoute(".", sourceRun, sourceRun)}}, nil)
+		1, pipeline.HistoricalFlowInstanceConstruction{Identity: identity, SourceRevision: 1, WorkflowVersion: instance.WorkflowVersion, SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: flowidentity.StoredRoute(".", sourceRun, sourceRun)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

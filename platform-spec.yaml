@@ -6108,6 +6108,12 @@ engine:
         persisted_truth: Constructed instance existence and immutable parent/key selection belong to the native
           `flow_instances` index, admitted against the exact run source and provenance-specific native or historical
           construction evidence. The immutable compiled graph and input-producer resolver select declaration dependencies;
+          Native headers require the current admitted source version. Historical headers instead retain the exact
+          version recorded in immutable fixed-cut header/config evidence, authenticated by the captured construction
+          owner before observation admission; current selected-contract compatibility is a separate check. A missing
+          native receipt never selects historical provenance, and neither arm may rewrite or ignore crossed versions.
+          Desired attachment/readiness belongs to the current selected executable source and keeps that source's
+          version and artifact, independently of the historical header's captured version.
           operation-local admitted observations instantiate their recipients. No mutable or persisted per-instance route
           membership proves existence, construction, source authority or executable readiness. Declaration applicability
           is not concrete existence, and existence is not attachment permission.
@@ -14846,6 +14852,9 @@ flow_model:
           Target-owner planning consumes the same graph-scoped instance-index observations as receiver selection, including exact source, declaration, run, construction provenance and readiness. It does not merge an active-flow descriptor reader with a separate target-owner inventory. A declaration with no admitted construction yields no existing target; terminal construction remains observable but grants no execution. Declaration identity comes from the admitted observation, never from parsing its stored instance path. Native corruption, foreign or duplicate coordinates and independent read failures fail closed rather than becoming absence or a full-run lookup. Prepared construction remains a separately admitted proposal until its existing commit owner acknowledges publication.
           A parent-local return selects the constructed lexical owner. Its structural parent is read by exact recorded run/path/entity through the same instance index, not by descending to an ancestor or inferring a parent from a sender address. An authored input pin does not change this ownership; schema-only and pinned parent-local endpoints consume the same recorded ancestry.
           Explicit private receiver targets require exact selected-source/run construction evidence before executable selection. Absent receivers and mismatched stored entities refuse publication without event, delivery, receipt, or diagnostic mutation. A constructed terminal receiver with keyless ancestry authorized by an ordinary compiled connection instead records target_unreachable_terminated with the exact target in its blocked connect evaluation, one canonical pre-delivery dead letter and one pipeline settlement; it creates no executable delivery or unrelated dispatch. The targetless journal remains a projection of zero deliveries. Exact duplicate admission consumes the persisted blocked evaluation to verify the original requested target and never reselects a receiver; a different target refuses without mutation. Keyed selection, reply correlation and explicit-create conflicts retain their existing owners and cannot be replaced by this diagnostic.
+          Keyed selection propagates terminal and terminated receiver refusals, including joined independent failures,
+          before publication mutation. It MUST NOT convert an unavailable keyed owner into a blocked zero-delivery
+          success. Immutable construction evidence does not override the receiver's current lifecycle or stage.
         modes:
           create:
             status: runnable_in_1835_pr1

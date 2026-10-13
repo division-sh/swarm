@@ -217,7 +217,12 @@ func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, state.WorkflowVersion)
+	metadata := state.History.MaterializationMetadata
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	if err != nil {
+		return nil, fmt.Errorf("read selected-contract captured header version: %w", err)
+	}
+	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, recorded.WorkflowVersion())
 	if err != nil {
 		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
 	}
@@ -414,7 +419,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
 	record := runtimepipeline.WorkflowEngineStateRecord{
-		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: state.WorkflowVersion,
+		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: construction.WorkflowVersion(),
 		ParentInstance: construction.ParentRoute().FlowInstance, InstanceKey: metadata.InstanceKey,
 		Mode: state.Mode, Status: "active", CurrentState: history.CurrentState, StageDefined: metadata.StageDefined,
 		EntityType: state.EntityType, Slug: metadata.Slug, Name: metadata.Name, Config: config,

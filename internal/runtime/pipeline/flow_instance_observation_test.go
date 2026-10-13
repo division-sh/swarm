@@ -77,7 +77,7 @@ func TestFlowInstanceObservationHistoricalAbsenceIsNotNativeFallback(t *testing.
 	}
 	run.Origin = origin
 	historical := HistoricalFlowInstanceConstruction{
-		Identity: receipt.Identity, SourceRevision: 2,
+		Identity: receipt.Identity, SourceRevision: 2, WorkflowVersion: instance.WorkflowVersion,
 		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRunID, Route: flowidentity.StoredRoute(".", sourceRunID, sourceRunID)},
 	}
 	observation, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, nil)
@@ -103,6 +103,45 @@ func TestFlowInstanceObservationHistoricalAbsenceIsNotNativeFallback(t *testing.
 	historical.SourceRevision = 1
 	if _, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, nil); err == nil {
 		t.Fatal("history accepted a different cut")
+	}
+}
+
+func TestFlowInstanceObservationHistoricalVersionUsesFixedCut(t *testing.T) {
+	request, instance, run, receipt, readiness := instanceObservationTestFixture(t)
+	sourceRunID := uuid.NewString()
+	origin, err := runlifecycle.ForkMaterializationRunOrigin(sourceRunID, runlifecycle.ForkOriginPointDeploymentRevision, 2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Origin = origin
+	instance.WorkflowVersion = "captured-v0"
+	historical := HistoricalFlowInstanceConstruction{
+		Identity: receipt.Identity, SourceRevision: 2, WorkflowVersion: instance.WorkflowVersion,
+		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRunID, Route: flowidentity.StoredRoute(".", sourceRunID, sourceRunID)},
+	}
+	observation, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, nil)
+	if err != nil || !observation.Valid() {
+		t.Fatalf("captured historical version was replaced by selected execution version: %+v %v", observation, err)
+	}
+	stored, err := observation.WorkflowInstance()
+	if err != nil || stored.WorkflowVersion != instance.WorkflowVersion {
+		t.Fatalf("historical readback rewrote captured version: %+v %v", stored, err)
+	}
+	if _, err := AdmitNativeFlowInstanceObservation(request, instance, run, 3, receipt, readiness); err == nil {
+		t.Fatal("native construction accepted a foreign source version")
+	}
+	if _, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, &readiness); err != nil {
+		t.Fatalf("current selected readiness contradicted captured historical header version: %v", err)
+	}
+	readiness.Plan.WorkflowVersion = instance.WorkflowVersion
+	if _, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, &readiness); err == nil {
+		t.Fatal("captured header version substituted for current selected execution readiness")
+	}
+	for _, version := range []string{"", request.Source().WorkflowVersion(), "foreign-fixed-version"} {
+		historical.WorkflowVersion = version
+		if _, err := AdmitHistoricalFlowInstanceObservation(request, instance, run, 3, historical, nil); err == nil {
+			t.Fatalf("historical header accepted crossed or absent fixed version %q", version)
+		}
 	}
 }
 

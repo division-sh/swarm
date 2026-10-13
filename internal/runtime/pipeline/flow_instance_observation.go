@@ -27,14 +27,18 @@ type FlowInstanceObservation struct {
 // The private historical owner produces these facts from stored origin and the
 // exact fixed cut. Requests cannot choose provenance with a flag or public plan.
 type HistoricalFlowInstanceConstruction struct {
-	Identity       flowidentity.Instance
-	InstanceKey    string
-	SourceOwner    flowidentity.RunScopedFlowInstance
-	SourceRevision int64
+	Identity        flowidentity.Instance
+	InstanceKey     string
+	SourceOwner     flowidentity.RunScopedFlowInstance
+	SourceRevision  int64
+	WorkflowVersion string
 }
 
 func AdmitNativeFlowInstanceObservation(request FlowInstanceLookupRequest, instance WorkflowInstance, run runlifecycle.Snapshot, revision int64, receipt FlowConstructionPublicationEvidence, readiness DynamicFlowRuntimeReadiness) (FlowInstanceObservation, error) {
-	observation, err := admitFlowInstanceObservation(request, instance, run, revision)
+	if !request.Valid() {
+		return FlowInstanceObservation{}, fmt.Errorf("native instance observation requires its admitted request")
+	}
+	observation, err := admitFlowInstanceObservation(request, instance, run, revision, request.Source().WorkflowVersion())
 	if err != nil {
 		return FlowInstanceObservation{}, err
 	}
@@ -54,7 +58,7 @@ func AdmitNativeFlowInstanceObservation(request FlowInstanceLookupRequest, insta
 }
 
 func AdmitHistoricalFlowInstanceObservation(request FlowInstanceLookupRequest, instance WorkflowInstance, run runlifecycle.Snapshot, revision int64, historical HistoricalFlowInstanceConstruction, readiness *DynamicFlowRuntimeReadiness) (FlowInstanceObservation, error) {
-	observation, err := admitFlowInstanceObservation(request, instance, run, revision)
+	observation, err := admitFlowInstanceObservation(request, instance, run, revision, historical.WorkflowVersion)
 	if err != nil {
 		return FlowInstanceObservation{}, err
 	}
@@ -76,11 +80,11 @@ func AdmitHistoricalFlowInstanceObservation(request FlowInstanceLookupRequest, i
 	return observation, nil
 }
 
-func admitFlowInstanceObservation(request FlowInstanceLookupRequest, instance WorkflowInstance, run runlifecycle.Snapshot, revision int64) (FlowInstanceObservation, error) {
+func admitFlowInstanceObservation(request FlowInstanceLookupRequest, instance WorkflowInstance, run runlifecycle.Snapshot, revision int64, workflowVersion string) (FlowInstanceObservation, error) {
 	if !request.Valid() || run.Validate() != nil || run.RunID != request.runID || run.BundleHash != request.fact.BundleHash() || revision <= 0 {
 		return FlowInstanceObservation{}, fmt.Errorf("instance observation requires its exact source, run and revision")
 	}
-	if instance.WorkflowName != request.flowID || instance.WorkflowVersion != request.source.WorkflowVersion() ||
+	if workflowVersion == "" || instance.WorkflowName != request.flowID || instance.WorkflowVersion != workflowVersion ||
 		instance.Revision <= 0 || instance.CurrentState == "" || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
 		return FlowInstanceObservation{}, fmt.Errorf("instance observation has incomplete or crossed header facts")
 	}
@@ -146,7 +150,7 @@ func (o *FlowInstanceObservation) admitReadiness(readiness DynamicFlowRuntimeRea
 	owner, err := readiness.Plan.FlowIdentity()
 	if err != nil || owner.Key() != o.Owner().Key() || readiness.Plan.Identity != o.identity ||
 		!readiness.OwningRunSource.Matches(o.request.fact) || readiness.Plan.BundleHash != o.request.fact.BundleHash() ||
-		readiness.Plan.WorkflowVersion != o.instance.WorkflowVersion || readiness.RunStatus != string(o.runState) ||
+		readiness.Plan.WorkflowVersion != o.request.source.WorkflowVersion() || readiness.RunStatus != string(o.runState) ||
 		readiness.InstanceStatus != o.instance.Status || !readiness.InstanceTerminatedAt.Equal(o.instance.TerminatedAt) {
 		return fmt.Errorf("instance observation contradicts its exact desired attachment")
 	}

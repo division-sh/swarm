@@ -112,11 +112,15 @@ func (cut historicalFlowInstanceConstructionCut) project(run runlifecycle.Snapsh
 	}
 	header, err := instance.ConstructionIdentity(flowidentity.RunScopedFlowInstance{RunID: run.RunID, Route: projected.Route()})
 	metadata := cut.plan.Entities[0].MaterializationMetadata
-	if err != nil || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType {
+	if err != nil {
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: err}
+	}
+	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(fixed.Route(), metadata.FlowConfig)
+	if err != nil || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType || instance.WorkflowVersion != recorded.WorkflowVersion() {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: errors.Join(fmt.Errorf("header contradicts its exact projected historical construction"), err)}
 	}
 	return pipeline.HistoricalFlowInstanceConstruction{
-		Identity: projected, InstanceKey: cut.key, SourceRevision: cut.plan.ForkPoint.Revision,
+		Identity: projected, InstanceKey: cut.key, SourceRevision: cut.plan.ForkPoint.Revision, WorkflowVersion: recorded.WorkflowVersion(),
 		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: cut.plan.SourceRunID, Route: fixed.Route()},
 	}, true, nil
 }

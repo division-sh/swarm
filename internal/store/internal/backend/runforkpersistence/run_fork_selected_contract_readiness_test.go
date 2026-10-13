@@ -96,7 +96,7 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variant := range []string{"nested_keyless", "root_parent", "missing_history", "partial_parent", "crossed_child"} {
+	for _, variant := range []string{"nested_keyless", "root_parent", "changed_version", "missing_history", "partial_parent", "crossed_child"} {
 		t.Run(variant, func(t *testing.T) {
 			const flow = "outer/left/sink/final"
 			const path = "outer/left/sink/revision/final"
@@ -129,6 +129,9 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 			if variant == "crossed_child" {
 				state.Route = "outer/right/sink/revision/final"
 			}
+			if variant == "changed_version" {
+				state.WorkflowVersion = "selected-v2"
+			}
 			plan, _, _, planErr := selectedContractWorkflowReadiness(artifact, state)
 			encoded, configErr := selectedContractWorkflowStateConfig(state)
 			if variant == "missing_history" || variant == "partial_parent" || variant == "crossed_child" {
@@ -149,6 +152,9 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 			recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), encoded)
 			if err != nil || recorded.ParentRoute() != identity.ParentRoute {
 				t.Fatalf("config lost exact parent: parent=%+v err=%v", recorded.ParentRoute(), err)
+			}
+			if recorded.WorkflowVersion() != "v1" || plan.WorkflowVersion != state.WorkflowVersion {
+				t.Fatalf("historical header and selected readiness versions collapsed: header=%q plan=%q", recorded.WorkflowVersion(), plan.WorkflowVersion)
 			}
 
 		})
