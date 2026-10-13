@@ -23,7 +23,6 @@ type HandlerAdvanceCarrier struct {
 	Terminate  bool
 	Rule       HandlerRuleEntry
 	RuleIndex  int
-	RuleID     string
 	RuleRef    runtimeidentity.DeclarationIdentity
 }
 
@@ -84,7 +83,6 @@ func handlerAdvanceCarriers(
 				Terminate:  rule.Terminate,
 				Rule:       rule,
 				RuleIndex:  idx,
-				RuleID:     strings.TrimSpace(rule.ID),
 				RuleRef:    ruleRef,
 			})
 		}
