@@ -28,12 +28,15 @@ func TestEntityToolLeafSelectorNames_GuardsRecursiveNamedTypes(t *testing.T) {
 		},
 	}
 
-	got := entityToolLeafSelectorNames(contract)
-	if len(got) != 2 {
-		t.Fatalf("entityToolLeafSelectorNames() = %#v, want 2 selectors", got)
+	if _, err := (runtimecontracts.CatalogTypeReference{Type: "node", Catalog: contract.Types}).Resolve(); err == nil {
+		t.Fatal("recursive named type acquired admitted structural evidence")
 	}
-	if got[0] != "node.label" || got[1] != "status" {
-		t.Fatalf("entityToolLeafSelectorNames() = %#v, want [node.label status]", got)
+	if got := entityToolLeafSelectorNames(contract); !reflect.DeepEqual(got, []string{"status"}) {
+		t.Fatalf("recursive named type exposed partial selectors: %v", got)
+	}
+	delete(contract.Types.Types["node"].Fields, "next")
+	if got := entityToolLeafSelectorNames(contract); !reflect.DeepEqual(got, []string{"node.label", "status"}) {
+		t.Fatalf("finite named type lost exact selectors: %v", got)
 	}
 }
 
