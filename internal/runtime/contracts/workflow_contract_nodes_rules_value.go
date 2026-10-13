@@ -151,6 +151,11 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 			return HandlerRuleEntry{}, err
 		}
 		out.Condition = strings.TrimSpace(out.Condition)
+		predicate, err := condition.Scalar()
+		if err != nil {
+			return HandlerRuleEntry{}, err
+		}
+		out.predicateDisplay = "condition " + strings.TrimSpace(predicate.Value)
 	}
 	out.Terminate, err = projectTransitionTerminate(fields, out.AdvancesTo)
 	if err != nil {
@@ -212,6 +217,11 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 			return err
 		}
 		out.Condition = strings.TrimSpace(when)
+		predicate, err := fields["when"].Scalar()
+		if err != nil {
+			return err
+		}
+		out.predicateDisplay = "when " + strings.TrimSpace(predicate.Value)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
 	case "else", "default":
 		allowed, err := nodeValueBool(fields[selected], "rule."+selected)
@@ -219,6 +229,7 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 			return fmt.Errorf("POLICY-SHEET-ROW: %s at %s must be true", selected, fields[selected].Location())
 		}
 		out.Condition = "else"
+		out.predicateDisplay = "else"
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 	case "case":
 		out.Condition, out.PolicyRow, err = projectNodePolicyCaseValue(fields[selected])
@@ -232,6 +243,12 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 	}
 	if err != nil {
 		return nodeValueError(fields[selected], err)
+	}
+	if selected == "case" || selected == "range" {
+		out.predicateDisplay, err = admittedRulePredicateDisplay(selected, fields[selected])
+		if err != nil {
+			return nodeValueError(fields[selected], err)
+		}
 	}
 	return nil
 }
