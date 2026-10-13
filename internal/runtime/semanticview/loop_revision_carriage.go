@@ -219,7 +219,7 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 			}
 			operations[key] = role
 			if operation.Kind != contracts.LoopOperationStart {
-				if !input.HasSchema || !contracts.RequiresLoopRevision(input.Entry.Payload, role.field) {
+				if !requiresLoopRevision(source, input, role.field) {
 					return nil, fmt.Errorf("original loop input %s must require text field %s", input.Canonical, role.field)
 				}
 				inputKey := loopInputScope{plan.FlowID, input.Canonical}
@@ -290,11 +290,20 @@ func (c *originalLoopCarriage) addOutput(source Source, node identity.Executable
 	proof := ResolveFlowEventProof(source, node.FlowPath(), eventType)
 	if role != (LoopRevisionRole{}) {
 		value, present := fields[role.field]
-		if !proof.HasSchema || !contracts.RequiresLoopRevision(proof.Entry.Payload, role.field) || !present || !contracts.CarriesLoopRevision(value) {
+		if !requiresLoopRevision(source, proof, role.field) || !present || !contracts.CarriesLoopRevision(value) {
 			return fmt.Errorf("original loop output %s must carry declared text field %s from loop.revision_id", proof.Canonical, role.field)
 		}
 	}
 	key := loopOutputScope{node, handler, proof.Canonical}
 	c.outputs[key] = append(c.outputs[key], loopOutputMeaning{role: role})
 	return nil
+}
+
+func requiresLoopRevision(source Source, proof FlowEventProof, field string) bool {
+	bundle, ok := Bundle(source)
+	if !ok || !proof.HasSchema {
+		return false
+	}
+	ref, found := contracts.ResolveEventFieldType(bundle, proof.FlowID, proof.Authored, field)
+	return found && contracts.RequiresLoopRevision(proof.Entry.Payload, field, ref)
 }

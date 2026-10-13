@@ -1,5 +1,52 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Review Cycle 1 Consumer Amendment
+
+Binding repair authorization: PR2647 review6141280928 and checklist6141284374,
+on signed33ab624b8. The previous systematic-consumption/class-elimination claim
+is withdrawn: the reviewed head canonicalizes touched seams but leaves three
+raw event-field classifiers and confuses optional join evidence with authored
+presence. These are four distinct B manifestations, not C extraction work.
+Lifecycle/no extra units remains binding; C stays frozen until B merges.
+
+| Row | Canonical evidence and touched consumers | Required counterexample and corrected proof |
+|---|---|---|
+| S12 optional join result | CatalogTypeReference.Resolve still refuses real empty/invalid authored references; workflowexpr.workflowJoinStructuralType owns optional JoinResultType omission | Existing five captured-loop members, literal and pipeline adapter fail on33ab. Explicit omission uses the existing dynamic result; supplied unknown/recursive/retired references refuse. Whole workflowexpr package must pass. |
+| S13 policy lookup aliases | Flow-scoped admitted event structural evidence, consumed by bootverify.policySheetLookupPathDomain and validatePolicySheetLookupKeyTypes | Text/number/bool aliases validate correct literals and reject wrong ones; boolean no-default tables require both values. Unknown/non-scalar domains refuse even with a default. |
+| S14 citation aliases | CatalogTypeReference on the admitted field and exact ResolvedTypeCatalogForFlow plus resolved PlainText role; contracts.validateEventCriteriaCitationFields | Direct and loaded-flow scalar/list text aliases pass; enum/UUID/timestamp/non-text and invalid references refuse without dropping criteria/class checks. Retire raw citation list/spelling helpers. |
+| S15 revision carriage aliases | ResolveEventFieldType retains exact flow-domain evidence plus contracts.RequiresLoopRevision required-field law; semanticview.compileLoopCarriage/addOutput | Text aliases retain original loop roles through verify/fork compilation; non-text, optional, absent property and missing/wrong mapping still refuse. No generation/correlation-law change. |
+
+Before editing these consumers, repeat the raw event-field classifier sweep in
+runtime/contracts, bootverify and semanticview and classify presentation-only
+strings, resolved-type switches, entity/node-state domains and D-owned list
+decoding separately. No additional reference interpreter, permissive fallback,
+list retirement, baseline increase or new framework is authorized. The existing
+maintenance and semantic-correctness watchlist nodes gain S12-S15; #2447/#2407/
+#2349 remain open. New rows receive explicit execution proof before re-review.
+
+The cycle1 repo-wide sweep covers switches/equality on Type/TypeRef, text/string
+literal classifiers and all Payload.Properties/EventFieldSpec readers. Remaining
+matches are classified: eventschema validation/inhabitation and tool-schema
+relation consume admitted JSON schema; CEL providers and pin/fan-out switches
+consume resolved kinds; criteria/machine-input and stage-gate input vocabularies
+are distinct finite role owners. Authoring views and node-state counterpart lint
+retain spelling for presentation/diagnosis, not acceptance. Entity runtime
+normalization resolves aliases via typeName before its leaf predicate. Accumulator
+materialize_from's named-list law is node/entity owned; its event typed view
+already consumes ResolveEventSchema/StructuralCatalogTypeAssignable. Its list
+grammar remains D/#2287's allocation. Platform array lowering, entity selectors,
+refinement and file-text consumers are already S03/S09/S10/S11. No additional raw
+event-field semantic classifier was found beyond the three review findings.
+
+The correction uses admitted structural kind for lookup literal domains, and
+retains exact flow-scoped CatalogTypeReference evidence for citation/carriage
+domain rules (JSON structural shape alone does not preserve enum/format identity).
+The optional join boundary only treats an exactly absent type token as omission;
+whitespace, unknown, recursive and retired supplied references still refuse.
+Dynamic result evidence grants neither closed-record field access nor unsafe
+list indexing. Both-store retained fork source preparation now uses a declared
+RevisionText alias, preserving all source/child/mapping/history assertions.
+
 ## Final Allocated D Named-Identity Correction
 
 D handoff6140309410 allocates the exact latest list_declaration_value.go from

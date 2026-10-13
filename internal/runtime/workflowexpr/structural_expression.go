@@ -102,9 +102,14 @@ func workflowJoinStructuralType(opts ValueExpressionOptions) (runtimecontracts.R
 		}
 		fields = append(fields, runtimecontracts.ResolvedCatalogField{Name: "total", Type: integer}, runtimecontracts.ResolvedCatalogField{Name: "dispositions", Type: dispositions})
 	} else {
-		result, err := opts.JoinResultType.Resolve()
-		if err != nil {
-			return runtimecontracts.ResolvedCatalogType{}, err
+		// Omitted expression evidence is not an authored empty declaration.
+		result := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeDynamic}
+		if opts.JoinResultType.Type != "" {
+			resolved, err := opts.JoinResultType.Resolve()
+			if err != nil {
+				return runtimecontracts.ResolvedCatalogType{}, err
+			}
+			result = resolved
 		}
 		fields = append(fields,
 			runtimecontracts.ResolvedCatalogField{Name: "expected", Type: integer},
