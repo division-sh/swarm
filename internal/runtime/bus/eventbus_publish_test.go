@@ -1190,8 +1190,13 @@ func assertSortedStringsEqual(t *testing.T, got, want []string) {
 
 func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
+	return seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, agentID, authorActivityTestSourceArtifactFact)
+}
+
+func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selected storetest.AgentFixtureStore, runID, agentID string, source runtimecorrelation.SourceArtifactFact) runtimeagentidentity.Identity {
+	t.Helper()
 	identity := runtimebustest.IdentityForRun(t, runID, agentID, "")
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
@@ -1206,7 +1211,7 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
 	return identity

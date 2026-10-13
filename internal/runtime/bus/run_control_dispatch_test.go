@@ -10,17 +10,22 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
 func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
-	eb, err := newScopedTestEventBus(pg)
+	source := runControlPublicationSource(t)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -32,10 +37,10 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	pausedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	for _, runID := range []string{pausedRunID, otherRunID} {
-		seedRunControlTestRun(t, ctx, pg, runID)
+		seedRunControlPublicationRoot(t, ctx, pg, eb, source, runID)
 	}
-	pausedIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, pausedRunID, agentID)
-	otherIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, otherRunID, agentID)
+	pausedIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, pausedRunID, agentID, testSourceArtifactFact(source))
+	otherIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, otherRunID, agentID, testSourceArtifactFact(source))
 	pausedCh := runtimebustest.SubscribeForRun(t, eb, pausedRunID, agentID, eventType)
 	otherCh := runtimebustest.SubscribeForRun(t, eb, otherRunID, agentID, eventType)
 	defer runtimebustest.UnsubscribeIdentity(eb, pausedIdentity)
@@ -101,8 +106,9 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 
 func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
-	eb, err := newScopedTestEventBus(pg)
+	source := runControlPublicationSource(t)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -112,8 +118,8 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	agentID := "agent-run-control-acked"
 	eventType := events.EventType("custom.run_control.acked")
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, pg, runID)
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	seedRunControlPublicationRoot(t, ctx, pg, eb, source, runID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, agentID, testSourceArtifactFact(source))
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
@@ -162,7 +168,8 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 
 func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
+	source := runControlPublicationSource(t)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	eventType := events.EventType("custom.run_control.intercepted")
 	deferredType := events.EventType("custom.run_control.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -170,7 +177,8 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		deferredType: deferredType,
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{recorder},
+		ContractBundle: source,
+		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -180,8 +188,8 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 
 	agentID := "agent-run-control-interceptor"
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, pg, runID)
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	seedRunControlPublicationRoot(t, ctx, pg, eb, source, runID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, agentID, testSourceArtifactFact(source))
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
@@ -230,7 +238,8 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 
 func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
+	source := runControlPublicationSource(t)
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	eventType := events.EventType("custom.run_control.postcommit")
 	deferredType := events.EventType("custom.run_control.postcommit.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -238,7 +247,8 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		deferredType: deferredType,
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{recorder},
+		ContractBundle: source,
+		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -248,8 +258,8 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 
 	agentID := "agent-run-control-postcommit"
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, pg, runID)
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	seedRunControlPublicationRoot(t, ctx, pg, eb, source, runID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, agentID, testSourceArtifactFact(source))
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
@@ -300,6 +310,26 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if got := countPipelineReceiptsForEvent(t, ctx, pg, intent.Event.ID()); got != 1 {
 		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
 	}
+}
+
+func runControlPublicationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyRunControlPublication(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected interface {
+	storetest.RunFixtureStore
+	componentFlowConstructionStore
+}, bus *runtimebus.EventBus, source semanticview.Source, runID string) {
+	t.Helper()
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})
+	identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+	seedCompleteEventDispatchRoot(t, runtimecorrelation.WithRunID(ctx, runID), selected, bus, source, identity, time.Now().UTC())
 }
 
 func seedRunControlTestRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string) {
