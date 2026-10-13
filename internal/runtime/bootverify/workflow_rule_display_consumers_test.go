@@ -12,7 +12,7 @@ import (
 
 func TestRuleDisplayWriteAndPayloadConsumersPreserveExactSites(t *testing.T) {
 	writes := []runtimecontracts.WorkflowDataWrite{
-		{Operation: runtimecontracts.WorkflowDataOperationSet, TargetRef: "entity.score", SourceField: "payload.score"},
+		{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.score"},
 		{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.verticals.active_jobs", Key: runtimecontracts.LiteralExpression("north"), Value: runtimecontracts.RefExpression("payload.job")},
 	}
 	for _, tc := range []struct {
@@ -49,7 +49,7 @@ func TestRuleDisplayWriteAndPayloadConsumersPreserveExactSites(t *testing.T) {
 				if ref := contained[i]; ref.Kind != label || !ref.Node.Equal(owner) || ref.EventType != "job.received" || ref.WriteIndex != 1 || !reflect.DeepEqual(ref.Write, writes[1]) {
 					t.Fatalf("contained site[%d] lost display or execution coordinates: %#v", i, ref)
 				}
-				if ref := targets[i]; ref.Kind != label || !ref.Node.Equal(owner) || ref.EventType != "job.received" || !ref.HasWriteIndex || ref.WriteIndex != 0 || ref.Target != "entity.score" || ref.Operation != runtimecontracts.WorkflowDataOperationSet {
+				if ref := targets[i]; ref.Kind != label || !ref.Node.Equal(owner) || ref.EventType != "job.received" || !ref.HasWriteIndex || ref.WriteIndex != 0 || ref.Target != "entity.score" || ref.Operation != runtimecontracts.WorkflowDataOperationClear {
 					t.Fatalf("direct write site[%d] lost display or execution coordinates: %#v", i, ref)
 				}
 				if site := payload[i]; site.Scope != label || !site.Node.Equal(owner) || site.EventType != "job.received" || !reflect.DeepEqual(site.Accumulation.Writes, writes) {
@@ -66,7 +66,7 @@ func TestRuleDisplayWriteAndPayloadConsumersPreserveExactSites(t *testing.T) {
 
 func TestRuleDisplayJoinWriteConsumersKeepSingularContexts(t *testing.T) {
 	writes := []runtimecontracts.WorkflowDataWrite{
-		{Operation: runtimecontracts.WorkflowDataOperationSet, TargetRef: "entity.score", Value: runtimecontracts.LiteralExpression(1)},
+		{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.score"},
 		{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.verticals.active_jobs", Value: runtimecontracts.RefExpression("payload.job")},
 	}
 	row := runtimecontracts.HandlerRuleEntry{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}}
