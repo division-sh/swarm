@@ -9,11 +9,10 @@ import (
 
 func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
 	if value.Presence() != yamlsource.PresenceSequence && value.Presence() != yamlsource.PresenceEmptySequence {
-		code := "DIALECT-RULES-ORDER"
 		if context == handlerRuleDecodeContextOnComplete {
-			code = "DIALECT-OC-ORDER"
+			return nil, nodeValueError(value, fmt.Errorf("DIALECT-OC-ORDER: on_complete at %s must be an ordered list of rule rows; write on_complete: [{condition: payload.ready, emit: done}]", value.Location()))
 		}
-		return nil, nodeValueError(value, fmt.Errorf("%s: %s must be an ordered list of rule mappings; write %s: [{emit: done}]", code, context, context))
+		return nil, nodeValueError(value, fmt.Errorf("DIALECT-RULES-ORDER: %s at %s must be an ordered list of rule rows, evaluated top to bottom.\n  %s:\n    - when: payload.kind == 'a'\n      emit: routed.a\n    - else: true\nA mapping keyed by rule name, a single row without \"- \", or a row \"id:\" is not accepted; rows are identified by position.", context, value.Location(), context))
 	}
 	items, err := value.Sequence()
 	if err != nil {
