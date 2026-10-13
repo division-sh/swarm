@@ -467,7 +467,10 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: flowID, HandlerEventKey: "review.inspect",
 		ActivityID: "inspect", Tool: "provider.read", Attempt: 1}
 	eventID := activityidentity.RequestEventID(fact)
-	results := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: "review.inspect", Spec: runtimecontracts.ActivitySpec{ID: "inspect", Tool: "provider.read"}})
+	results, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: "review.inspect", Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1, Spec: runtimecontracts.ActivitySpec{ID: "inspect", Tool: "provider.read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": input,
 		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),

@@ -72,7 +72,10 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 				for key, value := range request.Payload {
 					payload[key] = value
 				}
-				result := runtimecontracts.ActivityResultEventsForSite(site)
+				result, err := runtimecontracts.ActivityResultEventsForSite(site)
+				if err != nil {
+					t.Fatal(err)
+				}
 				payload["activity_id"], payload["success_event"], payload["failure_event"] = result.ActivityID, result.SuccessEvent, result.FailureEvent
 				payload["revision_event"], payload["rejected_event"] = result.RevisionRequested, result.Rejected
 				restore := p.remintRequest(ctx, request, payload)

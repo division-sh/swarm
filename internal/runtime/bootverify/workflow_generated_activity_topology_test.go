@@ -87,7 +87,10 @@ func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 		t.Fatalf("activity sites = %#v", sites)
 	}
 	for _, site := range sites {
-		results := runtimecontracts.ActivityResultEventsForSite(site)
+		results, err := runtimecontracts.ActivityResultEventsForSite(site)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, eventType := range []string{results.SuccessEvent, results.FailureEvent} {
 			if _, ok := names[eventidentity.Normalize(eventType)]; !ok {
 				t.Fatalf("generated names = %#v, missing %s", names, eventType)
