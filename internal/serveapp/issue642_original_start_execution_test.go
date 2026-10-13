@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/google/uuid"
 )
 
 func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
@@ -63,9 +64,15 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
 			baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
+			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 			result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: started.RunID, AtStart: true, ExpectedBundleHash: rt.BundleHash,
-				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				ContractSelection: selection,
+				ForkOperation: &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "original-first-turn-proof", IdempotencyKey: uuid.NewString(),
+					TransportHash: "original-first-turn-proof", SourceRunID: started.RunID, AtStart: true,
+					TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+				},
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 					RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 				}, AgentRuntime: rt.ForkRuntime,
