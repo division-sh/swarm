@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
-	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -71,7 +70,10 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		WorkOwner:        storeTestWorkOwner(t),
+		LifecycleStore:   agentfixture.Lifecycle(t, pg),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState:      pg,
+			LifecycleOutcome:    pg,
 			EventExistence:      pg,
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
@@ -105,10 +107,12 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	executionRec := rec
-	executionRec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
-	if err != nil {
-		t.Fatalf("build ephemeral topology admission: %v", err)
+	state, found, err := pg.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+	if err != nil || !found {
+		t.Fatalf("hydrate exact directive fixture lifecycle: found=%t err=%v", found, err)
 	}
+	executionRec.LifecycleEpoch, executionRec.LifecycleGeneration, executionRec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
+	executionRec.LifecycleRunMode, executionRec.ProcessBinding, executionRec.Topology = state.RunMode, state.ProcessBinding, state.Topology
 	if err := manager.MaterializeAdmittedAgentForExecution(ctx, executionRec); err != nil {
 		t.Fatalf("MaterializeAdmittedAgentForExecution: %v", err)
 	}

@@ -17,6 +17,7 @@ type r52DirectiveSuccessorPin struct {
 }
 
 var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
+	{"native-execution-construction-tail", "TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning", "04d19d5ff20ef8cf41e53bc1fe05448c3bb3bf4e7a78744ee39620d0ae8f822e", "8eb848f0e723a1237c047a1d28dc40491ee2a724eb152574660c1947a3d536cf", "33b3728c4c020ce9c5ea9a247c3538ad1aee6eed5b9ecf7b1e4f2d5a3e94d798"},
 	{"native-api-adjacent-physical-counter", "TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay", "e8d989054244da2f565a981f2216df53f0d452b4711bc57cacfa0e0487141185", "066cc1e33cb20476729a7747bbb55eebdcb038557c26249945eb935362a5bffe", "95215bdf6e95a85244925a8e15df23dc226586cde25f329fec899ce87f71af1f"},
 	{"native-run-setup-family144", "TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact", "c0eaf89bc345b262f37e11cc05167e28265aca31d9b410fdcee8b38bdd7b9062", "26ad327def48912c3491bc904123ec5b006057f6e3b3f06df01cc0463ff8ea96", "8ebb5ec37d9696aed6360fc029546ab4f8a234241282004856659569e4951f94"},
 	{"native-shared-coordinator-authority", "TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect", "7347cf0251892924de72a0c6b4690a62d0c905e5dded04032e46a4afd46b86ae", "cc1b95c98cc97dd7328a2a19969b10860af079adb54a7a1432e245fb23747009", "80fb0aecd3a5382d16e40f8256e43bfcef9af610a9da881eef83132d9777035b"},
@@ -29,11 +30,14 @@ var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
 	{"native-run-setup-family144", "TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive", "b55ec843499608332eee94465a98fd277ba83910d51b4b9b89c25a86cb614444", "0463a4018e692254aea945f97420d5d8930df6c821e251690f7e24d14d42a4f7", "01589fdfd342ba7d6f303b8c2b515d73c2c3b5b48b7d322085765faf561bd4f7"},
 }
 
-// Finite endpoints authorized by reviewer-b6145065880/6145833450/6146134392.
+// Finite endpoints authorized by reviewer-b6145065880/6145833450/6146134392/6150892514.
 func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
 	wantFile := "internal/apiv1/operator_agent_control_test.go"
 	if pin.family == "native-shared-coordinator-authority" {
 		wantFile = "internal/runtime/template_instance_delivery_test.go"
+	}
+	if pin.family == "native-execution-construction-tail" {
+		wantFile = "internal/store/internal/runtimepersistence/destructive_reset_directive_integration_test.go"
 	}
 	shutdown := strings.HasPrefix(pin.function, "TestRuntimeShutdown")
 	if shutdown {
@@ -60,7 +64,12 @@ func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuc
 		return fmt.Errorf("directive source differs from its successor")
 	}
 	var reversed string
-	if shutdown {
+	if pin.family == "native-execution-construction-tail" {
+		reversed, err = reverseR52NativeDirectiveAdoption(current)
+		if err != nil {
+			return err
+		}
+	} else if shutdown {
 		block := "lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)\n\tbusRoles := runtimeTestManagerBusRoles(bus)\n\tbusRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome\n\t"
 		if strings.Count(current, block) != 1 || strings.Count(current, "LifecycleStore: lifecycle, ") != 1 || strings.Count(current, "PersistenceRoles: busRoles") != 1 {
 			return fmt.Errorf("shutdown lifecycle wiring cardinality changed")
@@ -88,6 +97,37 @@ func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuc
 		return fmt.Errorf("directive reversal changed other setup or assertions")
 	}
 	return nil
+}
+
+func reverseR52NativeDirectiveAdoption(current string) (string, error) {
+	hydration := "state, found, err := pg.LoadAgentLifecycleState(ctx, rec.Config.Identity)\n\tif err != nil || !found {\n\t\tt.Fatalf(\"hydrate exact directive fixture lifecycle: found=%t err=%v\", found, err)\n\t}\n\texecutionRec.LifecycleEpoch, executionRec.LifecycleGeneration, executionRec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase\n\texecutionRec.LifecycleRunMode, executionRec.ProcessBinding, executionRec.Topology = state.RunMode, state.ProcessBinding, state.Topology"
+	prior := "executionRec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), \"runtime_shard\")\n\tif err != nil {\n\t\tt.Fatalf(\"build ephemeral topology admission: %v\", err)\n\t}"
+	for _, splice := range [][2]string{
+		{"LifecycleStore: agentfixture.Lifecycle(t, pg), ", ""},
+		{"LifecycleState: pg, LifecycleOutcome: pg, ", ""},
+		{hydration, prior},
+	} {
+		if strings.Count(current, splice[0]) != 1 {
+			return "", fmt.Errorf("native directive wiring cardinality changed")
+		}
+		current = strings.Replace(current, splice[0], splice[1], 1)
+	}
+	return current, nil
+}
+
+func r52NativeExecutionCurrentBody(row recipe, actual string) (string, error) {
+	if row.Successor == "" {
+		return row.After, nil
+	}
+	for _, pin := range r52DirectiveSuccessorPins {
+		if pin.family == "native-execution-construction-tail" && row.Family == pin.family && row.Function == pin.function {
+			if err := reverseR52DirectiveSuccessor(row, actual, pin); err != nil {
+				return "", err
+			}
+			return row.Successor, nil
+		}
+	}
+	return "", fmt.Errorf("unlisted native-execution successor")
 }
 
 func r52SharedCoordinatorCurrentBody(row recipe, actual string) (string, error) {
@@ -207,6 +247,20 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 					"missing_roles":  strings.Replace(actual, "externalRuntimeTestManagerLifecycleRoles(bus, pg)", "externalRuntimeTestManagerBusRoles(bus)", 1),
 					"assertion":      strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
 					"unrelated_body": strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
+				}
+			}
+			if pin.family == "native-execution-construction-tail" {
+				mutants = map[string]string{
+					"foreign_store":   strings.Replace(actual, "LifecycleState:      pg", "LifecycleState:      foreign", 1),
+					"foreign_writer":  strings.Replace(actual, "agentfixture.Lifecycle(t, pg)", "agentfixture.Lifecycle(t, foreign)", 1),
+					"missing_writer":  strings.Replace(actual, "agentfixture.Lifecycle(t, pg)", "nil", 1),
+					"missing_state":   strings.Replace(actual, "LifecycleState:      pg,", "", 1),
+					"missing_outcome": strings.Replace(actual, "LifecycleOutcome:    pg,", "", 1),
+					"native_identity": strings.Replace(actual, "pg.LoadAgentLifecycleState(ctx, rec.Config.Identity)", "pg.LoadAgentLifecycleState(ctx, foreignIdentity)", 1),
+					"missing_row":     strings.Replace(actual, "err != nil || !found", "err != nil", 1),
+					"native_topology": strings.Replace(actual, "state.ProcessBinding, state.Topology", "state.ProcessBinding, foreignTopology", 1),
+					"assertion":       strings.Replace(actual, "state=executing", "state=idle", 1),
+					"unrelated_body":  strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
 				}
 			}
 			if strings.HasPrefix(pin.function, "TestRuntimeShutdown") {
