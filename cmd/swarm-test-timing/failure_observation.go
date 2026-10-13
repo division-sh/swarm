@@ -36,12 +36,7 @@ func observeFailureAttempt(ctx context.Context, run failureRunMetadata, number i
 		attempt.Problems = append(attempt.Problems, err.Error())
 		return attempt
 	}
-	primary := false
-	for _, job := range jobs {
-		if (job.Conclusion == "failure" || job.Conclusion == "timed_out") && !failureAggregateJob(job.Name) {
-			primary = true
-		}
-	}
+	primary := hasPrimaryFailure(jobs)
 	seen := map[int64]bool{}
 	for _, job := range jobs {
 		if job.RunID != run.ID || job.RunAttempt != number || job.HeadSHA != run.HeadSHA || seen[job.ID] {
@@ -70,6 +65,15 @@ func observeFailureAttempt(ctx context.Context, run failureRunMetadata, number i
 		attempt.Failures = append(attempt.Failures, observeFailureJob(ctx, failure)...)
 	}
 	return attempt
+}
+
+func hasPrimaryFailure(jobs []testtiming.ActionJob) bool {
+	for _, job := range jobs {
+		if (job.Conclusion == "failure" || job.Conclusion == "timed_out") && !failureAggregateJob(job.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func readFailureAttemptJobs(ctx context.Context, path string) ([]testtiming.ActionJob, error) {
@@ -161,6 +165,10 @@ func nativeFailureEvents(raw []byte, job testtiming.ObservedFailure) ([]testtimi
 		job.Detail = string(raw)
 		return []testtiming.ObservedFailure{job}, nil
 	}
+	return nativeFailureLeaves(failed), nil
+}
+
+func nativeFailureLeaves(failed map[string]testtiming.ObservedFailure) []testtiming.ObservedFailure {
 	var failures []testtiming.ObservedFailure
 	for key, failure := range failed {
 		parent := false
@@ -176,5 +184,5 @@ func nativeFailureEvents(raw []byte, job testtiming.ObservedFailure) ([]testtimi
 	sort.Slice(failures, func(i, j int) bool {
 		return failures[i].Package+failures[i].Test < failures[j].Package+failures[j].Test
 	})
-	return failures, nil
+	return failures
 }

@@ -57,24 +57,7 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 			continue
 		}
 		summary.PRRuns++
-		incomplete := len(run.Attempts) == 0 && run.Status == "completed"
-		for _, attempt := range run.Attempts {
-			summary.CancelledJobs += len(attempt.CancelledJobs)
-			summary.UnstartedJobs += len(attempt.UnstartedJobs)
-			incomplete = incomplete || len(attempt.Problems) != 0
-			for _, failure := range attempt.Failures {
-				incomplete = incomplete || failure.Problem != "" || !hexIdentity(failure.Source, 20)
-			}
-		}
-		if incomplete {
-			summary.Incomplete++
-		}
-		if run.Status != "completed" {
-			summary.InFlight++
-		}
-		if run.Conclusion == "cancelled" {
-			summary.Cancelled++
-		}
+		countFailureExposure(run, &summary)
 		classes, red, err := l.failureRunClasses(run)
 		if err != nil {
 			return summary, err
@@ -98,6 +81,27 @@ func (l FailureLedger) Summarize(runs []FailureRun) (FailurePopulation, error) {
 		}
 	}
 	return summary, nil
+}
+
+func countFailureExposure(run FailureRun, summary *FailurePopulation) {
+	incomplete := len(run.Attempts) == 0 && run.Status == "completed"
+	for _, attempt := range run.Attempts {
+		summary.CancelledJobs += len(attempt.CancelledJobs)
+		summary.UnstartedJobs += len(attempt.UnstartedJobs)
+		incomplete = incomplete || len(attempt.Problems) != 0
+		for _, failure := range attempt.Failures {
+			incomplete = incomplete || failure.Problem != "" || !hexIdentity(failure.Source, 20)
+		}
+	}
+	if incomplete {
+		summary.Incomplete++
+	}
+	if run.Status != "completed" {
+		summary.InFlight++
+	}
+	if run.Conclusion == "cancelled" {
+		summary.Cancelled++
+	}
 }
 
 // Class counts can overlap within a run. They are not additive probabilities or

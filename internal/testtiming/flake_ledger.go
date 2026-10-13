@@ -161,6 +161,10 @@ func (r FailureRecord) validate(sources map[string]bool) error {
 	if r.Rate != nil && (r.Rate.Attempts <= 0 || r.Rate.Failures < 0 || r.Rate.Failures > r.Rate.Attempts || r.Rate.Context == "" || !reviewURL(r.Rate.Evidence)) {
 		return fmt.Errorf("invalid or unscoped observed rate")
 	}
+	return r.validateObservations()
+}
+
+func (r FailureRecord) validateObservations() error {
 	seen := map[string]bool{}
 	for _, observation := range r.Observations {
 		key := fmt.Sprintf("%d/%d/%d", observation.RunID, observation.Attempt, observation.JobID)
