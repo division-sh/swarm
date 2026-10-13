@@ -52,11 +52,11 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		// One forbidden constructor-name literal in the debt guard's retired map.
 		"internal/store/persistence_authority_debt_test.go": 1,
 		// Exact retired-test selector/reference lines introduced by core promotion.
-		".github/test-proof-plan.yaml":                          1,
-		"internal/testplanning/static_authority_guards_test.go": 1,
-		"internal/testcatalog/inventory_test.go":                1,
-		"openrpc.json":                                          2,
-		"platform-spec.yaml":                                    50,
+		".github/test-proof-plan.yaml":                     1,
+		"internal/testplanning/static_authority_guards.go": 1,
+		"internal/testcatalog/inventory_test.go":           1,
+		"openrpc.json":                                     2,
+		"platform-spec.yaml":                               50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
 		// Exact historical provider-request probe names, not the retired product.
@@ -279,7 +279,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 		}
 	}
 	for _, selectorPath := range []string{
-		".github/test-proof-plan.yaml", "internal/testplanning/static_authority_guards_test.go", "internal/testcatalog/inventory_test.go",
+		".github/test-proof-plan.yaml", "internal/testplanning/static_authority_guards.go", "internal/testcatalog/inventory_test.go",
 	} {
 		t.Run(selectorPath, func(t *testing.T) {
 			body, err := os.ReadFile(filepath.Join(repoRootForTest(), selectorPath))
