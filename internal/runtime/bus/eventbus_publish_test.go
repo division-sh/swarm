@@ -176,6 +176,16 @@ func busPublicationFailureSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
+func busPublicationClaimsSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyBusPublicationClaims(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) context.Context {
 	return eventBusTestRunContextForSource(t, selected, nil)
 }
@@ -2048,18 +2058,22 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 
 func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
+	source := busPublicationClaimsSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	const eventID = "11111111-1111-1111-1111-111111111136"
 	const agentID = "agent-acknowledged-publish"
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, eventBusTestRunID, agentID, testSourceArtifactFact(source))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
+		ContractBundle: source,
+		Interceptors:   []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, events.EventType("task.completed"))
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
@@ -2129,6 +2143,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 type foregroundClaimFixtureStore interface {
 	runtimebus.EventStore
 	storetest.RunFixtureStore
+	componentFlowConstructionStore
 }
 
 func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgres(t *testing.T) {
@@ -2151,17 +2166,25 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
+			source := busPublicationClaimsSource(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			storetest.RequireRun(t, context.Background(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+				t.Fatal(err)
+			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})
 			started := make(chan struct{}, 1)
 			release := make(chan struct{})
 			foreground, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
-				Interceptors: []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
+				ContractBundle: source,
+				Interceptors:   []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sibling, err := newScopedTestEventBus(selected)
+			root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+			seedCompleteEventDispatchRoot(t, ctx, selected, foreground, source, root, time.Now().UTC())
+			sibling, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2179,7 +2202,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			publisher.Add(1)
 			go func() {
 				defer publisher.Done()
-				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.ExistingRunRootIngress(
+				publishDone <- foreground.PublishAcknowledged(ctx, eventtest.ExistingRunRootIngress(
 					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()))
 			}()
@@ -2188,7 +2211,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 				t.Fatal(err)
 			}
 
-			if result, err := sibling.SweepPipelineObligations(context.Background(), 10); err != nil || result.Settled != 0 {
+			if result, err := sibling.SweepPipelineObligations(ctx, 10); err != nil || result.Settled != 0 {
 				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", result.Settled, err)
 			}
 			releaseDispatch()
@@ -2197,7 +2220,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			if err := foreground.WaitForQuiescence(waitCtx); err != nil {
 				t.Fatalf("wait foreground completion: %v", err)
 			}
-			if result, err := sibling.SweepPipelineObligations(context.Background(), 10); err != nil || result.Settled != 0 {
+			if result, err := sibling.SweepPipelineObligations(ctx, 10); err != nil || result.Settled != 0 {
 				t.Fatalf("sibling sweep after foreground settlement = %d, %v; want 0, nil", result.Settled, err)
 			}
 		})
@@ -2259,16 +2282,17 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 	for _, form := range []string{"synchronous", "acknowledged"} {
 		t.Run(form, func(t *testing.T) {
 			pg := storetest.StartPostgresRuntimeStore(t)
+			source := busPublicationClaimsSource(t)
 			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), pg); err != nil {
 				t.Fatal(err)
 			}
 
-			bus, err := newScopedTestEventBus(pg)
+			bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(testAuthorActivityContextForSource(context.Background(), source), 15*time.Second)
 			defer cancel()
 			var workers sync.WaitGroup
 			defer func() {
@@ -2282,7 +2306,10 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			for i := 0; i < poolSize; i++ {
 				eventIDs[i] = uuid.NewString()
 				runIDs[i] = uuid.NewString()
-				storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i]})
+				runCtx := runtimecorrelation.WithRunID(ctx, runIDs[i])
+				storetest.RequireRun(t, runCtx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: testSourceArtifactFact(source).BundleHash()})
+				root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runIDs[i])
+				seedCompleteEventDispatchRoot(t, runCtx, pg, bus, source, root, time.Now().UTC())
 				eventID := eventIDs[i]
 				runID := runIDs[i]
 				workers.Add(1)
@@ -2514,21 +2541,25 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 
 func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
+	source := busPublicationClaimsSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	eventID := "11111111-1111-1111-1111-111111111111"
 	agentID := "agent-post-commit-publish"
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, eventBusTestRunID, agentID, testSourceArtifactFact(source))
 	called := make(chan struct{}, 1)
 	interceptor := &postCommitTxAbsentInterceptor{
 		t: t, store: pg, eventID: eventID, called: called,
 		wantRecipients: []string{agentID}, wantScope: runtimepipelineobligation.ScopeSubscribed,
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{interceptor},
+		ContractBundle: source,
+		Interceptors:   []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, events.EventType("task.completed"))
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
@@ -2605,16 +2636,20 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 
 func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
+	source := busPublicationClaimsSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	eventID := "11111111-1111-1111-1111-111111111112"
 	wantErr := errors.New("post-commit interceptor failure")
 	interceptor := &postCommitErrorInterceptor{t: t, store: pg, eventID: eventID, err: wantErr}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{interceptor},
+		ContractBundle: source,
+		Interceptors:   []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
 	err = eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
