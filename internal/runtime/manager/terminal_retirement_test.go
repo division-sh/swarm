@@ -656,9 +656,13 @@ func ProveTerminalPanicMutationFailure(t *testing.T, persistence AgentLifecycleP
 type terminalReadinessRouteProbe struct {
 	err           error
 	panicOnRetire bool
+	onRetire      func()
 }
 
 func (p terminalReadinessRouteProbe) RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error {
+	if p.onRetire != nil {
+		p.onRetire()
+	}
 	if p.panicOnRetire {
 		panic(p.err)
 	}
@@ -670,7 +674,7 @@ func (p terminalReadinessRouteProbe) Retire() error {
 }
 
 func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
-	for _, mode := range []string{"success", "route_error", "route_panic"} {
+	for _, mode := range []string{"success", "route_error", "route_panic", "release_at_route_retirement"} {
 		t.Run(mode, func(t *testing.T) {
 			probe := newLifecyclePersistenceProbe()
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
@@ -688,9 +692,19 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			}
 			injected := errors.New("readiness route retirement failure")
 			route := terminalReadinessRouteProbe{}
-			if mode != "success" {
+			failedRoute := mode == "route_error" || mode == "route_panic"
+			if failedRoute {
 				route.err = injected
 				route.panicOnRetire = mode == "route_panic"
+			}
+			loopReleased := false
+			if mode == "release_at_route_retirement" {
+				route.onRetire = func() {
+					if err := releaseCoordinatorLoop(c, token, done); err != nil {
+						t.Fatal(err)
+					}
+					loopReleased = true
+				}
 			}
 			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
 			lease, err := am.beginWork(ctx, "test readiness topology retirement")
@@ -710,7 +724,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			// The finalizer is intentionally not started until the readiness
 			// attempt returns. An inline join recreates its dependency cycle.
 			err = prepared.retire(flow)
-			if (err != nil) != (mode != "success") || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
+			if (err != nil) != failedRoute || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
 				t.Fatalf("readiness retirement result: %v", err)
 			}
 			if !prepared.transferred {
@@ -724,8 +738,13 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			if pending == nil || !fenced {
 				t.Fatal("readiness returned without exact fenced retirement")
 			}
-			if err := releaseCoordinatorLoop(c, token, done); err != nil {
-				t.Fatal(err)
+			if !loopReleased {
+				if err := releaseCoordinatorLoop(c, token, done); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if requests := probe.requestsFor("self_release"); len(requests) != 1 {
+				t.Fatalf("process-only retirement lost ordinary loop self-release: %+v", requests)
 			}
 			probe.mu.Lock()
 			for _, request := range probe.requests {
@@ -735,7 +754,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 				}
 			}
 			probe.mu.Unlock()
-			if err := prepared.wait(); (err != nil) != (mode != "success") || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
+			if err := prepared.wait(); (err != nil) != failedRoute || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
 				t.Fatalf("exact readiness retirement result: %v", err)
 			}
 			if err := c.waitForWork(ctx); err != nil {

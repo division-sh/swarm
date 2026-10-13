@@ -59,7 +59,11 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 	}
 	am := p.manager
 	plan := terminalFlowInstanceSideEffectPlan{RunID: flow.RunID, FlowPath: flow.Route.InstancePath}
-	set, err := am.lifecycle.fenceTerminalFlow(plan)
+	trigger := "teardown"
+	if terminal {
+		trigger = "flow_instance_terminal"
+	}
+	set, err := am.lifecycle.fenceFlowExecutions(plan, trigger)
 	if err != nil && set == nil {
 		return err
 	}
@@ -71,7 +75,6 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 	if terminal {
 		retireErr = errors.Join(retireErr, am.lifecycle.commitTerminalFlow(context.WithoutCancel(p.lease.Context()), set))
 	} else {
-		set.trigger = "teardown"
 		retireErr = errors.Join(retireErr, am.lifecycle.fenceProcessFlowExecutions(context.WithoutCancel(p.lease.Context()), set))
 	}
 	p.transferred = true
@@ -186,8 +189,12 @@ func terminalLoopSettlementOwned(cell *agentLifecycleCell, token runtimeeffects.
 }
 
 func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceSideEffectPlan) (*terminalFlowRetirement, error) {
+	return c.fenceFlowExecutions(plan, "flow_instance_terminal")
+}
+
+func (c *agentLifecycleCoordinator) fenceFlowExecutions(plan terminalFlowInstanceSideEffectPlan, trigger string) (*terminalFlowRetirement, error) {
 	c.mu.Lock()
-	set := &terminalFlowRetirement{runID: plan.RunID, flowPath: plan.FlowPath, trigger: "flow_instance_terminal"}
+	set := &terminalFlowRetirement{runID: plan.RunID, flowPath: plan.FlowPath, trigger: trigger}
 	identities := make([]runtimeagentidentity.Identity, 0)
 	for identity, cell := range c.cells {
 		if identity.RunID == plan.RunID && identity.FlowInstance() == plan.FlowPath && cell != nil && cell.execution != nil {
