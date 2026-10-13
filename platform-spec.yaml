@@ -4037,6 +4037,12 @@ handler_specification:
   authored_rule_element_identity:
     canonical_owner: platform-spec.yaml#filesystem_source_model.authored_identity
     rule: Handler, rule, transition, fan-out, join, loop, gate, and timer declaration identity derives from flow path, family, and semantic path. Authored element UUIDs are retired.
+    presentation: >-
+      Handler rules and ordinary completion rows share one presentation projection of context, position and admitted
+      authored predicate text. Admission captures full predicate spelling once, including multiline, alias and merge
+      sources; validators, authoring views and execution diagnostics consume it without reconstructing lowered CEL.
+      Else/default displays else, and predicate-less/value-only rows retain position and admitted kind without invented
+      else semantics. Presentation is neither declaration identity nor activity naming authority.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
   handler_fields:
