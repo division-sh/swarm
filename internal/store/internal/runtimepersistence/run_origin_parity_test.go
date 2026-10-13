@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -66,7 +67,8 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					uuid.NewString(), "origin.trigger", "ingress", "", json.RawMessage(`{}`), 0,
 					runID, "", events.EventEnvelope{}, at,
 				)
-				if err := commitSemanticEventFixture(ctx, fixture.store, trigger); err != nil {
+				admitted := c4AdmitCreatingInput(t, trigger, runLifecycleCandidateParityBundleHash)
+				if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeDirect); err != nil {
 					t.Fatalf("commit run-creating event: %v", err)
 				}
 				want, err := runtimerunlifecycle.EventRunOrigin(trigger.ID(), string(trigger.Type()))
@@ -74,6 +76,14 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, trigger.ID())
+				c4RequireRevisionCount(t, ctx, fixture.store, runID, 1)
+				if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeDirect); err != nil {
+					t.Fatalf("replay run-creating event: %v", err)
+				}
+				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, trigger.ID())
+				c4RequireRevisionCount(t, ctx, fixture.store, runID, 1)
 
 				later := eventtest.ExistingRunRootIngress(
 					uuid.NewString(), "origin.later", "ingress", "", json.RawMessage(`{}`), 0,
@@ -83,6 +93,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					t.Fatalf("commit later event: %v", err)
 				}
 				requireRunOriginHeader(t, ctx, reader, runID, want, 2)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, trigger.ID())
 			})
 
 			t.Run("scenario_origin_survives_publication_and_lifecycle", func(t *testing.T) {
@@ -102,6 +113,8 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				}
 				want := runtimerunlifecycle.ScenarioSetupRunOrigin()
 				requireRunOriginHeader(t, ctx, reader, runID, want, 0)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
+				c4RequireRevisionCount(t, ctx, fixture.store, runID, 1)
 				requireListedRunOrigin(t, ctx, reader, runID, want)
 
 				later := eventtest.ExistingRunRootIngress(
@@ -112,6 +125,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					t.Fatalf("commit scenario event: %v", err)
 				}
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 
 				replacement := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
 				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil ||
@@ -120,6 +134,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				}
 				ctx = testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 				for _, state := range []runtimerunlifecycle.State{
 					runtimerunlifecycle.StatePaused,
 					runtimerunlifecycle.StateRunning,
@@ -129,6 +144,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 						t.Fatalf("transition scenario run to %s = %s/%v", state, disposition, err)
 					}
 					requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+					c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 				}
 				if _, disposition, err := terminalizeRunLifecycleCandidateParity(
 					fixture, ctx, runID, runtimerunlifecycle.StateCancelled, at.Add(2*time.Minute),
@@ -136,6 +152,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					t.Fatalf("cancel scenario run = %s/%v", disposition, err)
 				}
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 			})
 		})
 	}
@@ -181,6 +198,8 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("create standing generation: %v", err)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
+			c4RequireExclusiveStart(t, ctx, selected, fresh.RunID, firstHash, "")
+			c4RequireRevisionCount(t, ctx, selected, fresh.RunID, 1)
 			replayedFresh, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("replay standing generation creation: %v", err)
@@ -189,8 +208,11 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("replayed standing generation = %#v, want run %s generation %d", replayedFresh, fresh.RunID, fresh.Generation)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
+			c4RequireExclusiveStart(t, ctx, selected, fresh.RunID, firstHash, "")
+			c4RequireRevisionCount(t, ctx, selected, fresh.RunID, 1)
 			commitStandingOriginIngress(t, selected, firstHash, fresh.RunID, "fresh")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
+			c4RequireExclusiveStart(t, ctx, selected, fresh.RunID, firstHash, "")
 
 			reset, err := workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{
 				ServiceID: serviceID, Actor: "origin-parity",
@@ -199,8 +221,10 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("reset standing generation: %v", err)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
+			c4RequireExclusiveStart(t, ctx, selected, reset.RunID, firstHash, "")
 			commitStandingOriginIngress(t, selected, firstHash, reset.RunID, "reset")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
+			c4RequireExclusiveStart(t, ctx, selected, reset.RunID, firstHash, "")
 
 			wrongServiceID := uuid.NewString()
 			wrongOrigin, err := runtimerunlifecycle.StandingGenerationRunOrigin(wrongServiceID, 2)
