@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -31,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -222,6 +225,67 @@ func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, s
 	return eventID
 }
 
+func startRunStatusReceiverDeliveries(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, source runtimecorrelation.SourceArtifactFact, identity agentidentity.Identity) {
+	t.Helper()
+	ctx := runStatusAuthorActivityContext(source)
+	state, found, err := pg.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || state.Identity != identity || state.Phase != runtimemanager.AgentLifecycleRunning ||
+		state.RunMode != runtimemanager.AgentRunModeStandard || state.ProcessBinding.Validate() != nil || state.ProcessBinding.BundleHash != source.BundleHash() {
+		t.Fatalf("run-status receiver lacks its exact admitted generation: state=%+v found=%t err=%v", state, found, err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("run-status receiver lost its complete source plan: found=%t err=%v", found, err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, plan, agenttopology.SourceCoordinate{BundleHash: source.BundleHash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.Evidence()
+	if err != nil || evidence.GrantID != state.ProcessBinding.GenerationGrantID || evidence.RuntimeGeneration != state.ProcessBinding.RuntimeGeneration {
+		t.Fatalf("run-status admission replaced the receiver grant: evidence=%+v err=%v", evidence, err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, state.ProcessBinding.GenerationGrantID, state.ProcessBinding.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pg.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatalf("activate run-status receiver generation: %v", err)
+	}
+	if err := bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatalf("bind run-status publication to receiver generation: %v", err)
+	}
+	coordinator, err := deliverycontinuation.New(pg, pg, authority, workOwner, bus, func(_ context.Context, err error) {
+		t.Errorf("run-status delivery continuation: %v", err)
+	})
+	if err != nil {
+		t.Fatalf("construct run-status delivery coordinator: %v", err)
+	}
+	if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := coordinator.Retire(ctx); err != nil {
+			t.Errorf("retire run-status delivery coordinator: %v", err)
+		}
+	})
+}
+
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, eventID string) {
 	t.Helper()
 	var runID, bundleHash string
@@ -365,6 +429,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	installServeTestExactAgentReadiness(t, eb, config.Identity)
+	startRunStatusReceiverDeliveries(t, pg, eb, workOwner, source, config.Identity)
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
@@ -491,6 +556,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	installServeTestExactAgentReadiness(t, eb, config.Identity)
+	startRunStatusReceiverDeliveries(t, pg, eb, workOwner, source, config.Identity)
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
