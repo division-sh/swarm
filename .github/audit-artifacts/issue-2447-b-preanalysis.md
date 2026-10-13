@@ -1,5 +1,9 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Binding Coding Amendment
+
+Reviewer-g gate6136734774 approves POLICY-INDEPENDENT coding only: S01/S03/S05/S06/S07, list-spelling S08, S02 plain-text alias, S04 non-key preservation, integer/numeric/boolean-key S08 early refusal, and S09-S11 common-reference consumption. Preserve enum/UUID key behavior and map_key_normalization exactly; no text-only key teaching message while LEAD reconciliation is open. Complete B closure/merge is not approved. This amendment supersedes the blanket B coding freeze below only for these rows. C remains frozen. Focused deferred race controls and final repo-wide census/guard sweep are required before the single implementation push. No closure-bearing PR without the complete key ruling or an explicit staged-plan decision.
+
 READ-ONLY analysis on actual merged master `4cf156b74e0cd5c22ff4caa1af636db30aa32efb`, Go `go1.26.8`. A/#2644 is MERGED: reviewed `a4d58f447`, lifecycle run38331786710 attempt1 SUCCESS. Its detachment repair is the current baseline, not B admission proof. B/C production edits remain closed. The earlier 49-file structural and 24-file refinement/copy census at6498082c5 is retained; targeted consumer/source/spec deltas only, not a broad re-census. A changed copy bodies in the shared reference/accessor owners, not their B admission rules. All 67 observations below were freshly rerun with a compiled binary from this merged master; no pre-A executable receipt is relabeled.
 
 ## Class And Governing Context
