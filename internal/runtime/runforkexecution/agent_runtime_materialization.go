@@ -604,7 +604,7 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 	if err := admitActivations(); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	for _, rec := range req.AgentRuntime.Records {
+	for recordIndex, rec := range req.AgentRuntime.Records {
 		if rec.Topology.Authority.Kind == runtimeagenttopology.AuthorityFlowReadinessPlan {
 			identity, err := rec.Config.ConcreteIdentity()
 			if err != nil {
@@ -626,8 +626,14 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 				return nil, managedexecution.Admission{}, errors.New("selected flow agent has no admitted activation attempt")
 			}
 		}
-		if err := manager.MaterializeAdmittedAgent(ctx, rec); err != nil {
-			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
+		var materializeErr error
+		if req.Prepared.recoveryFromExecutionID != "" && rec.Topology.Authority.Kind == runtimeagenttopology.AuthoritySelectedForkDeclarationPlan {
+			materializeErr = manager.MaterializeSelectedDeclarationAgentForRecovery(ctx, rec)
+		} else {
+			materializeErr = manager.MaterializeAdmittedAgent(ctx, rec)
+		}
+		if err := materializeErr; err != nil {
+			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s (record %d/%d, authority %s): %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), recordIndex+1, len(req.AgentRuntime.Records), rec.Topology.Authority.Kind, err)
 		}
 		identity, err := rec.Config.ConcreteIdentity()
 		if err != nil {

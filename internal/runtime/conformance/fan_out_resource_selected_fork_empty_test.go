@@ -96,10 +96,14 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				old := f.runtime
 				join := beginServingLifetimeJoin(old, nil)
 				assertServingJoinComplete(t, join, old, nil)
-				if err := f.topology.capability.Release(context.Background()); err != nil {
+				predecessorCapability := f.topology.capability
+				if err := predecessorCapability.Release(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 				f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+				if err := predecessorCapability.ProveCurrent(context.WithoutCancel(f.ctx)); err == nil {
+					t.Fatal("empty successor did not fence its retired predecessor")
+				}
 				f.boot(t)
 				f.runtime.fanOutServing.Wake()
 				recoveredOwner, recovery := deploymentForkOwner(t, f)
