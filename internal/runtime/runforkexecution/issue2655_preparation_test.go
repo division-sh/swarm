@@ -145,3 +145,50 @@ func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
 		t.Fatalf("event without operation minted an invocation: operation=%+v err=%v", operation, err)
 	}
 }
+
+func TestIssue2655PreparedOperationOriginalSelectorCorrespondence(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		for _, resolved := range []bool{false, true} {
+			t.Run(map[bool]string{false: "omitted", true: "explicit"}[explicit]+"/"+map[bool]string{false: "unresolved", true: "resolved"}[resolved], func(t *testing.T) {
+				plan := runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{
+					Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 3,
+				}}
+				if explicit {
+					plan.ForkPoint.Input = plan.ForkPoint.EventID
+				}
+				operation := runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request", SourceRunID: plan.SourceRunID,
+					ForkEventID: plan.ForkPoint.Input, TargetBundleHash: runForkTestBundleHash, ContractSelection: testContractSelection(),
+				}
+				if resolved {
+					point := plan.ForkPoint
+					operation.ResolvedPoint = &point
+				}
+				_, hash, err := operation.Canonical()
+				if err != nil {
+					t.Fatal(err)
+				}
+				bound, err := bindPreparedSelectedForkOperation(&operation, plan)
+				if err != nil || bound.ResolvedPoint == nil || *bound.ResolvedPoint != plan.ForkPoint || bound.ForkEventID != operation.ForkEventID {
+					t.Fatalf("matched original selector refused or rewritten: bound=%+v err=%v", bound, err)
+				}
+				_, boundHash, err := bound.Canonical()
+				if err != nil || hash != boundHash {
+					t.Fatalf("matched selector binding changed request hash: before=%s after=%s err=%v", hash, boundHash, err)
+				}
+				if explicit {
+					operation.ForkEventID = ""
+				} else {
+					operation.ForkEventID = plan.ForkPoint.EventID
+				}
+				before := operation
+				if _, err := bindPreparedSelectedForkOperation(&operation, plan); err == nil {
+					t.Fatal("same resolved event admitted a different original operation selector")
+				}
+				if !reflect.DeepEqual(operation, before) {
+					t.Fatal("refusal rewrote caller operation")
+				}
+			})
+		}
+	}
+}

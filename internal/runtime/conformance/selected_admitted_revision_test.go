@@ -61,6 +61,8 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			sourceRun := startDeploymentResourceRun(t, f, server, "--data", "task.assigned="+path)
+			atCutVersion := issue2655RunPinnedVersion(t, f, sourceRun)
+			postCutEvent := uuid.NewString()
 			var calls atomic.Int64
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -74,7 +76,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 				if backend == "postgres" {
 					dialect = authoractivityfixture.DialectPostgres
 				}
-				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, uuid.NewString(), runID, "task.assigned", eventtest.Producer(events.EventProducerExternal, "admitted-revision-proof"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC())
+				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, postCutEvent, runID, "task.assigned", eventtest.Producer(events.EventProducerExternal, "admitted-revision-proof"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC())
 			}
 			owner := selectedExternalOwnerWithCut(t, f, &selectedExternalEffectCut{}, probe)
 			forkServer := selectedExternalForkServer(t, f, owner, provider.URL)
@@ -108,6 +110,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			if err != nil || binding.ForkPoint != probe.point || binding.BindingID != record.BindingID {
 				t.Fatalf("binding lost the admitted point: %+v err=%v", binding, err)
 			}
+			assertIssue2655ChildCutContents(t, f.ctx, f, sourceRun, result.ForkRunID, probe.point, postCutEvent, atCutVersion)
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls=%d want one", calls.Load())
 			}
@@ -121,6 +124,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			if len(replayErr) != 0 || !reflect.DeepEqual(replayed, result) || calls.Load() != 1 {
 				t.Fatalf("permanent replay changed the child/cut: result=%+v replay=%+v error=%s calls=%d", result, replayed, replayErr, calls.Load())
 			}
+			assertIssue2655ChildCutContents(t, f.ctx, f, sourceRun, replayed.ForkRunID, probe.point, postCutEvent, atCutVersion)
 		})
 	}
 }

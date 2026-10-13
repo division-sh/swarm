@@ -244,13 +244,25 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// Its explicit-empty reporter regression also proves exact no-write settlement.
 	// #2438 2c adds the receiver-configuration carrier restoration guard.
 	// #2438 A9 adds the exact-owner construction-receipt fixture control.
-	want := []int{168, 14, 5, 1, 1}
+	// #2655 adds fixed-point handoff and original-selector correspondence proofs.
+	admittedPointRoots := []string{
+		"TestIssue2655EventSelectorsKeepPreparedRevisionBothStores",
+		"TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores",
+		"TestIssue2655StagedRevisionRefusalAndRetryBothStores",
+		"TestIssue2655EventOperationSelectorCorrespondenceBothStores",
+	}
+	want := []int{168 + len(admittedPointRoots), 14, 5, 1, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
 		}
 		for _, name := range group {
 			t.Logf("%s\t%s", conformance2394Units[i], name)
+		}
+	}
+	for _, name := range admittedPointRoots {
+		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
+			t.Fatalf("general conformance partition omitted reviewed #2655 root %s", name)
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
@@ -362,7 +374,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if !reflect.DeepEqual(groups[4], []string{"TestIssue2394ReporterFiveHundredServingWindowBothStores"}) {
 		t.Fatalf("serving-window owner changed: %v", groups[4])
 	}
-	t.Log("complete disjoint census:192 =168 general +14 core +5 pressure +1 stress +1 window +3 long file-row roots in conformance-1")
+	t.Log("complete disjoint census:196 =172 general +14 core +5 pressure +1 stress +1 window +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfileFull} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
