@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestListRewritePreservesDataAndDeclarationOrder(t *testing.T) {
@@ -54,6 +56,34 @@ func TestListRewriteGeneratedFragmentsHaveFiniteSourceScope(t *testing.T) {
 			if got := rewriteGo("data.go", body); got != body {
 				t.Fatalf("unclassified data borrowed a generated source role: %s", got)
 			}
+		}
+	}
+}
+
+func TestListRewriteNestedDeclarationsRemainValidYAML(t *testing.T) {
+	for _, ref := range []string{"[map[text]text]", "[[text]]", "[numeric(5,2)]"} {
+		before := "work:\n  items: " + strconv.Quote(ref) + "\n"
+		want := "work:\n  items: {type: " + strconv.Quote(ref) + "}\n"
+		got := rewriteYAML(before, "entities.yaml")
+		if got != want || rewriteYAML(got, "entities.yaml") != got {
+			t.Fatalf("nested declaration %s is not exact/idempotent: %s", ref, got)
+		}
+		if _, err := yamlsource.Load([]byte(got)); err != nil {
+			t.Fatalf("rewritten declaration %s is invalid YAML: %v", ref, err)
+		}
+	}
+}
+
+func TestListRewriteConstructorTypeSlotsHaveFiniteSourceScope(t *testing.T) {
+	path := "internal/runtime/bootverify/flow_constructor_test.go"
+	for _, ref := range []string{"list<map[text]text>", "[map[text]text]"} {
+		before := "package fixture\nvar target = " + strconv.Quote(ref) + "\n"
+		want := "package fixture\nvar target = " + strconv.Quote("{type: \"[map[text]text]\"}") + "\n"
+		if got := rewriteGo(path, before); got != want || rewriteGo(path, got) != got {
+			t.Fatalf("constructor declaration slot is not exact/idempotent: %s", got)
+		}
+		if got := rewriteGo("data.go", before); got != before {
+			t.Fatalf("unclassified string borrowed the constructor declaration role: %s", got)
 		}
 	}
 }
