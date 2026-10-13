@@ -1,11 +1,14 @@
 package runforkpersistence
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -24,6 +27,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		}
 	}
 	deliveryKeys := make(map[string]struct{}, len(snapshot.Deliveries))
+	pipelineReceipts := make(map[string]struct{}, len(snapshot.Receipts))
 	out := make([]runfork.RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
 	for _, delivery := range snapshot.Deliveries {
 		durable := delivery.Snapshot
@@ -57,6 +61,9 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		out = append(out, item)
 	}
 	for _, receipt := range snapshot.Receipts {
+		if receipt.SubscriberType == "platform" && receipt.SubscriberID == "pipeline" {
+			pipelineReceipts[receipt.EventID] = struct{}{}
+		}
 		key := runForkRevisionSubscriberKey(receipt.EventID, receipt.SubscriberType, receipt.SubscriberID)
 		if _, ok := deliveryKeys[key]; ok {
 			continue
@@ -88,6 +95,24 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 			item.Classification = runfork.RunForkPendingClassificationDeliveredCompleted
 		}
 		out = append(out, item)
+	}
+	// Platform activity publication is itself owed pipeline work. At its
+	// publication cut there is no terminal receipt and no node delivery yet.
+	for _, event := range snapshot.Events {
+		if _, owned := runfork.RunForkSelectedContractPlatformRuntimeOwner(event.EventName); !owned {
+			continue
+		}
+		if _, settled := pipelineReceipts[event.EventID]; settled {
+			continue
+		}
+		if _, delivered := deliveryKeys[runForkRevisionSubscriberKey(event.EventID, "platform", "pipeline")]; delivered {
+			continue
+		}
+		out = append(out, runfork.RunForkPendingWork{
+			EventID: event.EventID, EventName: event.EventName, FlowInstance: event.FlowInstance, RoutingSource: event.RoutingSource,
+			SubscriberType: "platform", SubscriberID: "pipeline", Status: "pending",
+			Classification: runfork.RunForkPendingClassificationPending, CreatedAt: event.CreatedAt,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left := runForkRevisionSubscriberKey(out[i].EventID, out[i].SubscriberType, out[i].SubscriberID) + "/" + out[i].DeliveryID
@@ -126,25 +151,17 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	if err := admitRunForkTerminalBarrierHistory(snapshot, fanOut, pending); err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
-	relevantTimer := false
-	entityIDs := stringSliceSet(facts.EntityIDs)
-	flowInstances := stringSliceSet(facts.FlowInstances)
-	for _, timer := range snapshot.Timers {
-		if _, owned := ownedSchedules[timer.TimerID]; owned {
-			continue
-		}
-		if timer.RunID == snapshot.RunID {
-			relevantTimer = true
-			break
-		}
-		if _, ok := entityIDs[strings.TrimSpace(timer.EntityID)]; ok && strings.TrimSpace(timer.EntityID) != "" {
-			relevantTimer = true
-			break
-		}
-		if _, ok := flowInstances[strings.TrimSpace(timer.FlowInstance)]; ok && strings.TrimSpace(timer.FlowInstance) != "" {
-			relevantTimer = true
-			break
-		}
+	arrivals, err := loadRunForkArrivalJoinSchedules(snapshot, entities)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	if err := attachRunForkPublishedArrivals(snapshot, entities, arrivals); err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	transferred := runForkTransferredJoins(entities)
+	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules, arrivals, transferred...)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
 	}
 	activeSessions := map[string]struct{}{}
 	for _, session := range snapshot.Sessions {
@@ -164,19 +181,99 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	openReplyContext := false
 	for _, replyContext := range snapshot.ReplyContexts {
-		if strings.TrimSpace(replyContext.State) == "open" {
+		if replyContext.Record.State == "open" {
 			openReplyContext = true
 			break
 		}
 	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
-		RelevantTimer:           relevantTimer,
+		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.TransferredPublicationIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
+		TimerHistory:            timerHistory,
+		JoinSchedules:           arrivals,
+		TransferredJoins:        transferred,
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
 		ActiveTurn:              activeTurn,
 		OpenReplyContext:        openReplyContext,
 	}, nil
+}
+
+func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}, arrivals []genericschedule.Activation, transferred ...genericschedule.TransferredJoinOccurrence) (runForkTimerHistoryInventory, error) {
+	entityIDs, flowInstances := stringSliceSet(facts.EntityIDs), stringSliceSet(facts.FlowInstances)
+	seen := make(map[string]struct{}, len(snapshot.Timers))
+	var records []pipeline.WorkflowTimerActivationPersistenceRecord
+	var unresolved []string
+	arrivalByID := make(map[string]genericschedule.Activation, len(arrivals))
+	for _, arrival := range arrivals {
+		if _, duplicate := arrivalByID[arrival.ID]; duplicate {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("arrival inventory repeats source activation")
+		}
+		arrivalByID[arrival.ID] = arrival
+	}
+	for _, timer := range snapshot.Timers {
+		if _, owned := ownedSchedules[timer.TimerID]; owned {
+			continue
+		}
+		_, entityRelevant := entityIDs[strings.TrimSpace(timer.EntityID)]
+		_, flowRelevant := flowInstances[strings.TrimSpace(timer.FlowInstance)]
+		if timer.RunID != snapshot.RunID && !(entityRelevant && strings.TrimSpace(timer.EntityID) != "") && !(flowRelevant && strings.TrimSpace(timer.FlowInstance) != "") {
+			continue
+		}
+		if timer.TimerID == "" || timer.TimerID != strings.TrimSpace(timer.TimerID) {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("relevant timer history requires exact row identity")
+		}
+		if _, duplicate := seen[timer.TimerID]; duplicate {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("relevant timer history repeats row identity %s", timer.TimerID)
+		}
+		seen[timer.TimerID] = struct{}{}
+		if arrival, owned := arrivalByID[timer.TimerID]; owned {
+			if err := requireRunForkArrivalSourceRecord(snapshot, timer, arrival); err != nil {
+				return runForkTimerHistoryInventory{}, err
+			}
+			delete(arrivalByID, timer.TimerID)
+			continue
+		}
+		if timer.TaskType != "workflow_timer" || timer.RunID != snapshot.RunID {
+			unresolved = append(unresolved, timer.TimerID)
+			continue
+		}
+		activation, err := workflowTimerActivationFromSnapshot(timer.TimerSnapshot)
+		if err != nil {
+			return runForkTimerHistoryInventory{}, err
+		}
+		records = append(records, activation.PersistenceRecord())
+	}
+	if len(arrivalByID) != 0 {
+		return runForkTimerHistoryInventory{}, fmt.Errorf("arrival inventory omits its physical source row")
+	}
+	inventory, err := runForkTimerRecordInventory(snapshot.RunID, records, arrivals, transferred...)
+	if err != nil {
+		return runForkTimerHistoryInventory{}, err
+	}
+	sort.Strings(unresolved)
+	inventory.Complete, inventory.UnresolvedTimerIDs = true, unresolved
+	return inventory, nil
+}
+
+func requireRunForkArrivalSourceRecord(snapshot *runForkRevisionSnapshot, timer runForkRevisionTimer, arrival genericschedule.Activation) error {
+	actual, err := projectRunForkGenericActivation(timer)
+	if err != nil {
+		return err
+	}
+	want, err := arrival.EvidenceDigest()
+	if err != nil {
+		return err
+	}
+	got, err := actual.EvidenceDigest()
+	if err != nil || got != want {
+		return fmt.Errorf("arrival inventory differs from its exact source row")
+	}
+	if arrival.Status == genericschedule.StatusFired {
+		_, err := runForkPublishedJoinEvidence(snapshot, arrival)
+		return err
+	}
+	return nil
 }
 
 func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) runForkSourceFacts {

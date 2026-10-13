@@ -94,7 +94,7 @@ func TestCandidateHandoffResetAttemptReleasesPreRegistrationBarrier(t *testing.T
 	if err := handoff.Prepare(coordinator, retryCandidate()); err != nil {
 		t.Fatal(err)
 	}
-	barrier := coordinator.entries[handoffTestBundleHash].pendingZero
+	barrier := coordinator.entries[runlifecycle.CandidateScope{BundleHash: handoffTestBundleHash}].pendingZero
 	if err := handoff.ResetAttempt(); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestCandidateHandoffResetAttemptReturnsCancellationFailure(t *testing.T) {
 	if err := handoff.Prepare(coordinator, retryCandidate()); err != nil {
 		t.Fatal(err)
 	}
-	barrier := coordinator.entries[handoffTestBundleHash].pendingZero
+	barrier := coordinator.entries[runlifecycle.CandidateScope{BundleHash: handoffTestBundleHash}].pendingZero
 	admission := &retryCancelFailure{err: failure}
 	handoff.handoffs = append(handoff.handoffs, candidateHandoff{admission: admission})
 	if err := handoff.ResetAttempt(); !errors.Is(err, failure) {

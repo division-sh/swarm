@@ -14,26 +14,29 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
+	"github.com/google/uuid"
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, *genericschedule.JoinContinuation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
 }
 
 type forkDeploymentCarriage struct {
-	inherit       bool
-	cursor        int
-	status        fanoutobligation.Status
-	blockedReason string
-	outcomes      []fanoutobligation.Outcome
-	pending       []runfork.RunForkFanOutPendingReplay
+	inherit           bool
+	cursor            int
+	status            fanoutobligation.Status
+	blockedReason     string
+	outcomes          []fanoutobligation.Outcome
+	pendingDeployment []runfork.RunForkDeploymentPendingEvent
+	sourceRunID       string
 }
 
 func projectForkDeploymentCarriage(obligation runfork.RunForkFanOutObligation, target runtimedata.PinnedSource) (forkDeploymentCarriage, error) {
@@ -56,7 +59,8 @@ func projectForkDeploymentCarriage(obligation runfork.RunForkFanOutObligation, t
 	}
 	return forkDeploymentCarriage{
 		inherit: true, cursor: intent.Cursor, status: intent.Status, blockedReason: intent.BlockedReason,
-		outcomes: obligation.Outcomes, pending: obligation.PendingReplays,
+		outcomes: obligation.Outcomes, pendingDeployment: obligation.PendingDeployment,
+		sourceRunID: intent.Request.Key.RunID,
 	}, nil
 }
 
@@ -83,7 +87,7 @@ func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runt
 	return nil
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
 	var intentCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='handler'`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
@@ -104,7 +108,10 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if err != nil {
 			return err
 		}
-		planRef := planRefs[sourceIntent.Request.PlanRef.ElementRef]
+		planRef, ok := planRefs[sourceIntent.Request.Key]
+		if !ok {
+			return fmt.Errorf("fork fan-out plan proof missing for %s", sourceIntent.Request.Key.String())
+		}
 		var (
 			bundleHash, semanticDigest, sourceKind, sourceField, status, blockedReason string
 			sourceEvent, sourceRun, sourceEntity, sourceMutation                       sql.NullString
@@ -180,7 +187,16 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if err != nil {
 			return fmt.Errorf("load materialized fork fan-out outcomes: %w", err)
 		}
-		index := 0
+		terminal := make(map[int]fanoutobligation.Outcome, len(obligation.Outcomes))
+		pending := make(map[int]runfork.RunForkFanOutPendingReplay, len(obligation.PendingReplays))
+		bound := make(map[int]runForkContinuedOutcomeRow, len(obligation.PendingReplays))
+		for _, outcome := range obligation.Outcomes {
+			terminal[outcome.Ordinal] = outcome
+		}
+		for _, replay := range obligation.PendingReplays {
+			pending[replay.Ordinal] = replay
+		}
+		seen := make(map[int]bool)
 		for rows.Next() {
 			var ordinal int
 			var kind string
@@ -196,11 +212,21 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 				_ = rows.Close()
 				return fmt.Errorf("decode materialized fork fan-out outcome created_at: %w", err)
 			}
-			if index >= len(obligation.Outcomes) {
+			if seen[ordinal] || !present || createdAt.IsZero() {
 				_ = rows.Close()
-				return fmt.Errorf("fork materialization %s has excess fan-out outcomes", forkRunID)
+				return fmt.Errorf("fork materialization %s has duplicate or undated fan-out outcome %d", forkRunID, ordinal)
 			}
-			want := obligation.Outcomes[index]
+			seen[ordinal] = true
+			if _, continuing := pending[ordinal]; continuing {
+				bound[ordinal] = runForkContinuedOutcomeRow{kind: kind, eventID: eventID, sourceEventID: sourceEventID,
+					disposition: inheritedDisposition, failurePresent: failure != nil, createdAt: createdAt}
+				continue
+			}
+			want, expected := terminal[ordinal]
+			if !expected {
+				_ = rows.Close()
+				return fmt.Errorf("fork materialization %s has excess fan-out outcome %d", forkRunID, ordinal)
+			}
 			wantSourceEventID := strings.TrimSpace(want.SourceEventID)
 			if strings.TrimSpace(want.EventID) != "" {
 				wantSourceEventID = strings.TrimSpace(want.EventID)
@@ -210,15 +236,22 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 				_ = rows.Close()
 				return fmt.Errorf("fork materialization %s fan-out outcome %d conflicts with fixed plan", forkRunID, ordinal)
 			}
-			index++
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("read materialized fork fan-out outcomes: %w", err)
 		}
 		_ = rows.Close()
-		if index != len(obligation.Outcomes) {
-			return fmt.Errorf("fork materialization %s has %d fan-out outcomes, want %d", forkRunID, index, len(obligation.Outcomes))
+		for ordinal := range terminal {
+			if !seen[ordinal] {
+				return fmt.Errorf("fork materialization %s is missing fan-out outcome %d", forkRunID, ordinal)
+			}
+		}
+		for _, replay := range obligation.PendingReplays {
+			row, present := bound[replay.Ordinal]
+			if err := requireRunForkContinuedPublicationReadback(ctx, tx, postgres, forkRunID, plan, replay, row, present); err != nil {
+				return err
+			}
 		}
 	}
 	return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, postgres, forkRunID, targetBundleHash, data, plan, pins)
@@ -235,22 +268,18 @@ func equalOptionalJSON(left, right []byte) bool {
 	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
-func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs []runtimecontracts.FanOutPlanRef) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
-	targetBundleHash = strings.TrimSpace(targetBundleHash)
-	proofByElement := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(proofs))
-	for _, proof := range proofs {
-		if _, err := proof.ElementRef.DeclarationIdentity(); err != nil {
-			return nil, fmt.Errorf("selected fan-out plan proof: %w", err)
-		}
-		if strings.TrimSpace(proof.BundleHash) != targetBundleHash || strings.TrimSpace(proof.SemanticDigest) == "" {
-			return nil, fmt.Errorf("selected fan-out plan proof must belong to target bundle %s", targetBundleHash)
-		}
-		if prior, duplicate := proofByElement[proof.ElementRef]; duplicate && prior != proof {
-			return nil, fmt.Errorf("selected fan-out plan proof is contradictory for %s", fanOutElementLabel(proof.ElementRef))
-		}
-		proofByElement[proof.ElementRef] = proof
+func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs semanticview.FanOutPlanCarriage) (map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, error) {
+	requirements, err := runfork.FanOutContinuationRequirements(plan)
+	if err != nil {
+		return nil, err
 	}
-	resolved := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
+	targetBundleHash = strings.TrimSpace(targetBundleHash)
+	if !proofs.IsZero() {
+		if err := proofs.RequireSource(targetBundleHash); err != nil {
+			return nil, err
+		}
+	}
+	resolved := make(map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
 		if err := obligation.Intent.Request.ValidateSourceProjection(); err != nil {
 			return nil, fmt.Errorf("pending fan-out source/plan agreement: %w", err)
@@ -262,28 +291,25 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 			continue
 		}
 		source := obligation.Intent.Request.PlanRef
-		if source.BundleHash == targetBundleHash {
-			if proof, present := proofByElement[source.ElementRef]; present {
-				if proof.SemanticDigest != source.SemanticDigest {
-					return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
-				}
-				resolved[source.ElementRef] = proof
-			} else {
-				resolved[source.ElementRef] = source
-			}
+		if !requirements[obligation.Intent.Request.Key] {
+			resolved[obligation.Intent.Request.Key] = source
 			continue
 		}
-		proof, ok := proofByElement[source.ElementRef]
-		if !ok {
-			return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
+		if proofs.IsZero() {
+			if source.BundleHash != targetBundleHash {
+				return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
+			}
+			resolved[obligation.Intent.Request.Key] = source
+			continue
 		}
-		if proof.SemanticDigest != source.SemanticDigest {
-			return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
+		proof, semantics, err := proofs.Resolve(source.ElementRef)
+		if err != nil {
+			return nil, err
 		}
-		resolved[source.ElementRef] = proof
-	}
-	if len(proofByElement) != 0 && len(proofByElement) != len(resolved) {
-		return nil, fmt.Errorf("selected fan-out plan proof contains elements outside the fixed fork plan")
+		if err := obligation.Intent.Request.AdmitSelectedPlan(proof, semantics); err != nil {
+			return nil, err
+		}
+		resolved[obligation.Intent.Request.Key] = proof
 	}
 	return resolved, nil
 }
@@ -296,7 +322,7 @@ func materializeRunForkFanOutObligations(
 	barriers runForkFanOutBarrierOwner,
 	forkRunID string,
 	plan runfork.RunForkPlan,
-	planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef,
+	planRefs map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef,
 	original semanticview.OriginalLoopCarriage,
 	targetBundleHash string,
 	data *storedurabledata.Owner,
@@ -304,6 +330,10 @@ func materializeRunForkFanOutObligations(
 	now time.Time,
 ) (int, error) {
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		return 0, err
+	}
+	snapshot, barrierSchedules, err := loadRunForkBarrierMaterializationEvidence(ctx, tx, plan)
+	if err != nil {
 		return 0, err
 	}
 	for _, obligation := range plan.FanOutObligations {
@@ -316,7 +346,7 @@ func materializeRunForkFanOutObligations(
 			return 0, err
 		}
 		intent.Request.Capsule = capsuleProjection
-		planRef, ok := planRefs[intent.Request.PlanRef.ElementRef]
+		planRef, ok := planRefs[intent.Request.Key]
 		if !ok {
 			return 0, fmt.Errorf("fork fan-out plan proof missing for %s", intent.Request.Key.String())
 		}
@@ -405,13 +435,8 @@ func materializeRunForkFanOutObligations(
 				return 0, err
 			}
 		}
-		if obligation.Barrier != nil {
-			if barriers == nil {
-				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
-			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
-				return 0, err
-			}
+		if err := materializeRunForkObligationBarrier(ctx, attempt, barriers, forkRunID, snapshot, barrierSchedules, obligation.Barrier, planRef, generation, now); err != nil {
+			return 0, err
 		}
 	}
 	count, err := materializeRunForkDeploymentFeeds(ctx, tx, postgres, attempt, barriers, data, forkRunID, targetBundleHash, plan, pins, now)
@@ -419,6 +444,48 @@ func materializeRunForkFanOutObligations(
 		return 0, err
 	}
 	return len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + count, nil
+}
+
+func loadRunForkBarrierMaterializationEvidence(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan) (*runForkRevisionSnapshot, map[string]genericschedule.Activation, error) {
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Barrier == nil || obligation.Barrier.Status != fanoutbarrier.StatusClosedPending {
+			continue
+		}
+		snapshot, err := loadRunForkPointSnapshot(ctx, tx, plan.SourceRunID, plan.ForkPoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		schedules, err := loadRunForkPendingBarrierSchedules(snapshot, plan)
+		return snapshot, schedules, err
+	}
+	return nil, nil, nil
+}
+
+func materializeRunForkObligationBarrier(ctx context.Context, attempt *mutationprotocol.Attempt, owner runForkFanOutBarrierOwner, childRun string, snapshot *runForkRevisionSnapshot, schedules map[string]genericschedule.Activation, barrier *fanoutbarrier.Barrier, selected runtimecontracts.FanOutPlanRef, generation *loopruntime.ForkChildReference, at time.Time) error {
+	if barrier == nil {
+		return nil
+	}
+	if owner == nil {
+		return fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
+	}
+	var schedule *genericschedule.Activation
+	if captured, found := schedules[barrier.ScheduleActivationID]; found {
+		schedule = &captured
+	}
+	var published *genericschedule.JoinContinuation
+	if barrier.Status == fanoutbarrier.StatusClosedPending && (barrier.TransferredOccurrence != nil || (schedule != nil && schedule.Status == genericschedule.StatusFired)) {
+		var continuation genericschedule.JoinContinuation
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			continuation, _, err = prepareRunForkBarrierTransfer(ctx, tx, snapshot, *barrier, childRun, selected, generation, at)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		published = &continuation
+	}
+	return owner.MaterializeRunForkFanOutBarrierTx(ctx, attempt, childRun, *barrier, schedule, published, selected, generation, at)
 }
 
 func countRunForkSourceDeploymentFeeds(plan runfork.RunForkPlan) int {
@@ -574,67 +641,219 @@ func bindRunForkFanOutPendingReplays(
 	}
 	for _, obligation := range plan.FanOutObligations {
 		if obligation.Intent.Request.Deployment != nil {
-			if err := bindRunForkDeploymentPendingReplays(ctx, tx, attempt, forkRunID, obligation, now); err != nil {
-				return err
-			}
 			continue
 		}
 		for _, replay := range obligation.PendingReplays {
-			forkEventID := deterministicRunForkReplayEventID(forkRunID, replay.SourceEventID)
-			var replayCount int
-			if err := tx.QueryRowContext(ctx, `
-				SELECT COUNT(*)
-				FROM run_fork_delivery_event_replays
-				WHERE fork_run_id=$1 AND source_event_id=$2 AND fork_event_id=$3
-			`, forkRunID, replay.SourceEventID, forkEventID).Scan(&replayCount); err != nil {
-				return err
-			}
-			if replayCount == 0 {
-				return fmt.Errorf("fork fan-out pending ordinal %d has no child-local replay for source event %s", replay.Ordinal, replay.SourceEventID)
-			}
-			result, err := tx.ExecContext(ctx, `
-				INSERT INTO fan_out_outcomes (
-					run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
-					ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
-				) VALUES ($1,$2,$3,$4,$5,$6,'committed',$7,NULL,NULL,NULL,$8)
-				ON CONFLICT (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal) DO NOTHING
-			`, forkRunID, obligation.Intent.Request.Key.TriggeringDeliveryID,
-				obligation.Intent.Request.Key.ElementRef.FlowPath, obligation.Intent.Request.Key.ElementRef.Family, obligation.Intent.Request.Key.ElementRef.SemanticPath,
-				replay.Ordinal, forkEventID, now.UTC())
-			if err != nil {
-				return fmt.Errorf("bind fork fan-out pending ordinal %d: %w", replay.Ordinal, err)
-			}
-			inserted, err := rowsAffected(result)
+			forkEventID, err := requireRunForkFanOutReplayMembershipTx(ctx, tx, plan.SourceRunID, forkRunID, replay)
 			if err != nil {
 				return err
 			}
-			if inserted {
-				key := obligation.Intent.Request.Key
-				key.RunID = forkRunID
-				ref, err := runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)
-				if err != nil {
-					return err
-				}
-				if err := attempt.AddFacts(forkRunID, ref); err != nil {
-					return err
-				}
-			}
-			var ownedEvent, sourceEvent, inherited sql.NullString
-			if err := tx.QueryRowContext(ctx, `
-				SELECT event_id, source_event_id, inherited_disposition
-				FROM fan_out_outcomes
-				WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal=$6
-			`, forkRunID, obligation.Intent.Request.Key.TriggeringDeliveryID,
-				obligation.Intent.Request.Key.ElementRef.FlowPath, obligation.Intent.Request.Key.ElementRef.Family, obligation.Intent.Request.Key.ElementRef.SemanticPath,
-				replay.Ordinal).Scan(&ownedEvent, &sourceEvent, &inherited); err != nil {
+			key := obligation.Intent.Request.Key
+			key.RunID = forkRunID
+			if err := bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, forkEventID, now); err != nil {
 				return err
-			}
-			if strings.TrimSpace(ownedEvent.String) != forkEventID || sourceEvent.Valid || inherited.Valid {
-				return fmt.Errorf("fork fan-out pending ordinal %d conflicts with child-local replay", replay.Ordinal)
 			}
 		}
 	}
 	return nil
+}
+
+func requireRunForkFanOutReplayMembershipTx(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID string, replay runfork.RunForkFanOutPendingReplay) (string, error) {
+	if tx == nil || sourceRunID == forkRunID || len(replay.SourceDeliveryIDs) == 0 {
+		return "", fmt.Errorf("fork fan-out pending ordinal %d requires exact replay membership", replay.Ordinal)
+	}
+	wantSources, err := expectedRunForkFanOutReplaySources(sourceRunID, forkRunID, replay)
+	if err != nil {
+		return "", err
+	}
+	forkEventID := deterministicRunForkReplayEventID(forkRunID, replay.SourceEventID)
+	wantChildren, err := readRunForkFanOutReplayLineageTx(ctx, tx, sourceRunID, forkRunID, forkEventID, replay, wantSources)
+	if err != nil {
+		return "", err
+	}
+	if err := requireRunForkFanOutChildMembershipTx(ctx, tx, forkRunID, forkEventID, replay.Ordinal, wantChildren); err != nil {
+		return "", err
+	}
+	return forkEventID, nil
+}
+
+func expectedRunForkFanOutReplaySources(sourceRunID, forkRunID string, replay runfork.RunForkFanOutPendingReplay) (map[string]bool, error) {
+	for _, id := range append([]string{sourceRunID, forkRunID, replay.SourceEventID}, replay.SourceDeliveryIDs...) {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id {
+			return nil, fmt.Errorf("fork fan-out pending ordinal %d has noncanonical replay identity", replay.Ordinal)
+		}
+	}
+	wantSources := make(map[string]bool, len(replay.SourceDeliveryIDs))
+	for _, id := range replay.SourceDeliveryIDs {
+		if _, duplicate := wantSources[id]; duplicate {
+			return nil, fmt.Errorf("fork fan-out pending ordinal %d repeats source delivery %s", replay.Ordinal, id)
+		}
+		wantSources[id] = false
+	}
+	return wantSources, nil
+}
+
+func readRunForkFanOutReplayLineageTx(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, forkEventID string, replay runfork.RunForkFanOutPendingReplay, wantSources map[string]bool) (map[string]bool, error) {
+	// Do not filter away a contradictory source run or a second event for the
+	// source publication. Every lineage row for either publication must agree.
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(r.fork_run_id AS TEXT),CAST(r.source_run_id AS TEXT),
+		CAST(r.source_event_id AS TEXT),CAST(r.source_delivery_id AS TEXT),
+		CAST(r.fork_event_id AS TEXT),CAST(r.fork_delivery_id AS TEXT),
+		CAST(d.run_id AS TEXT),CAST(d.event_id AS TEXT)
+		FROM run_fork_delivery_event_replays r
+		LEFT JOIN event_deliveries d ON d.delivery_id=r.fork_delivery_id
+		WHERE (r.fork_run_id=$1 AND r.source_event_id=$2) OR r.fork_event_id=$3`,
+		forkRunID, replay.SourceEventID, forkEventID)
+	if err != nil {
+		return nil, fmt.Errorf("read fork fan-out replay membership: %w", err)
+	}
+	defer rows.Close()
+	wantChildren := make(map[string]bool, len(wantSources))
+	for rows.Next() {
+		var childRun, sourceRun, sourceEvent, sourceDelivery, childEvent, childDelivery string
+		var deliveryRun, deliveryEvent sql.NullString
+		if err := rows.Scan(&childRun, &sourceRun, &sourceEvent, &sourceDelivery, &childEvent, &childDelivery, &deliveryRun, &deliveryEvent); err != nil {
+			return nil, fmt.Errorf("scan fork fan-out replay membership: %w", err)
+		}
+		seen, wanted := wantSources[sourceDelivery]
+		if !wanted || seen || childRun != forkRunID || sourceRun != sourceRunID || sourceEvent != replay.SourceEventID ||
+			childEvent != forkEventID || childDelivery == "" || !deliveryRun.Valid || !deliveryEvent.Valid ||
+			deliveryRun.String != forkRunID || deliveryEvent.String != forkEventID {
+			return nil, fmt.Errorf("fork fan-out pending ordinal %d has contradictory replay lineage for source delivery %s", replay.Ordinal, sourceDelivery)
+		}
+		if _, duplicate := wantChildren[childDelivery]; duplicate {
+			return nil, fmt.Errorf("fork fan-out pending ordinal %d repeats child delivery %s", replay.Ordinal, childDelivery)
+		}
+		wantSources[sourceDelivery] = true
+		wantChildren[childDelivery] = false
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read fork fan-out replay membership: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for id, seen := range wantSources {
+		if !seen {
+			return nil, fmt.Errorf("fork fan-out pending ordinal %d omits source delivery %s", replay.Ordinal, id)
+		}
+	}
+	return wantChildren, nil
+}
+
+func requireRunForkFanOutChildMembershipTx(ctx context.Context, tx *sql.Tx, forkRunID, forkEventID string, ordinal int, wantChildren map[string]bool) error {
+	children, err := tx.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(run_id AS TEXT),CAST(event_id AS TEXT)
+		FROM event_deliveries WHERE event_id=$1`, forkEventID)
+	if err != nil {
+		return fmt.Errorf("read fork fan-out child deliveries: %w", err)
+	}
+	defer children.Close()
+	for children.Next() {
+		var id, runID, eventID string
+		if err := children.Scan(&id, &runID, &eventID); err != nil {
+			return err
+		}
+		seen, wanted := wantChildren[id]
+		if !wanted || seen || runID != forkRunID || eventID != forkEventID {
+			return fmt.Errorf("fork fan-out pending ordinal %d has contradictory child delivery %s", ordinal, id)
+		}
+		wantChildren[id] = true
+	}
+	if err := children.Err(); err != nil {
+		return err
+	}
+	for id, seen := range wantChildren {
+		if !seen {
+			return fmt.Errorf("fork fan-out pending ordinal %d omits child delivery %s", ordinal, id)
+		}
+	}
+	return nil
+}
+
+// Callers prove publication and recipient authority before binding. This writer
+// records only the continued ordinal fact; it never creates delivery history.
+func bindRunForkContinuedOutcomeTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, childKey fanoutobligation.IntentKey, replay runfork.RunForkFanOutPendingReplay, forkEventID string, now time.Time) error {
+	if tx == nil || attempt == nil {
+		return fmt.Errorf("fork fan-out continuation requires its mutation transaction")
+	}
+	if now.IsZero() {
+		return fmt.Errorf("fork fan-out continuation requires its publication time")
+	}
+	if err := childKey.Validate(); err != nil {
+		return err
+	}
+	outcome := fanoutobligation.Outcome{
+		Ordinal: replay.Ordinal, Kind: fanoutobligation.OutcomeContinued,
+		EventID: forkEventID, SourceEventID: replay.SourceEventID,
+		InheritedDisposition: replay.InheritedDisposition, CreatedAt: now.UTC(),
+	}
+	if err := outcome.Validate(); err != nil {
+		return err
+	}
+	for _, id := range []string{outcome.EventID, outcome.SourceEventID} {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id {
+			return fmt.Errorf("fork fan-out continuation requires exact canonical event identities")
+		}
+	}
+	args := []any{childKey.RunID, childKey.TriggeringDeliveryID, childKey.ElementRef.FlowPath, childKey.ElementRef.Family, childKey.ElementRef.SemanticPath, outcome.Ordinal}
+	insert := `INSERT INTO fan_out_outcomes (
+		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,
+		outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,'continued',$7,$8,$9,NULL,$10)
+		ON CONFLICT (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal) DO NOTHING`
+	where := `run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal=$6`
+	if childKey.DeploymentFeedID != "" {
+		args = []any{childKey.RunID, childKey.DeploymentFeedID, outcome.Ordinal}
+		insert = `INSERT INTO fan_out_outcomes (
+			run_id,deployment_feed_id,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at)
+			VALUES ($1,$2,$3,'continued',$4,$5,$6,NULL,$7)
+			ON CONFLICT (run_id,deployment_feed_id,ordinal) DO NOTHING`
+		where = `run_id=$1 AND deployment_feed_id=$2 AND ordinal=$3`
+	}
+	result, err := tx.ExecContext(ctx, insert, append(args, outcome.EventID, outcome.SourceEventID,
+		nullableRunForkString(string(outcome.InheritedDisposition)), outcome.CreatedAt.UTC())...)
+	if err != nil {
+		return fmt.Errorf("bind fork fan-out continued ordinal %d: %w", outcome.Ordinal, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed < 0 || changed > 1 {
+		return fmt.Errorf("fork fan-out continued ordinal %d changed %d rows", outcome.Ordinal, changed)
+	}
+	var kind string
+	var eventID, sourceEventID, disposition sql.NullString
+	var failure, createdRaw any
+	if err := tx.QueryRowContext(ctx, `SELECT outcome_kind,CAST(event_id AS TEXT),CAST(source_event_id AS TEXT),inherited_disposition,failure,created_at
+		FROM fan_out_outcomes WHERE `+where, args...).Scan(&kind, &eventID, &sourceEventID, &disposition, &failure, &createdRaw); err != nil {
+		return err
+	}
+	createdAt, present, err := sqliteTimeValue(createdRaw)
+	if err != nil || !present || createdAt.IsZero() {
+		return fmt.Errorf("fork fan-out continued ordinal %d has invalid creation time: %v", outcome.Ordinal, err)
+	}
+	if !matchesRunForkFanOutContinuedOutcome(outcome, kind, eventID, sourceEventID, disposition, failure != nil) {
+		return fmt.Errorf("fork fan-out continued ordinal %d conflicts with exact continuation", outcome.Ordinal)
+	}
+	if changed == 1 {
+		ref, err := runforkrevision.FanOutOutcomeFact(childKey, outcome.Ordinal)
+		if err != nil {
+			return err
+		}
+		if err := attempt.AddFacts(childKey.RunID, ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func matchesRunForkFanOutContinuedOutcome(want fanoutobligation.Outcome, kind string, eventID, sourceEventID, disposition sql.NullString, failurePresent bool) bool {
+	return kind == string(fanoutobligation.OutcomeContinued) && eventID.Valid && eventID.String == want.EventID &&
+		sourceEventID.Valid && sourceEventID.String == want.SourceEventID && !failurePresent &&
+		disposition.Valid == (want.InheritedDisposition != "") && disposition.String == string(want.InheritedDisposition)
 }
 
 func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {

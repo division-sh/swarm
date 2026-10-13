@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 			}
 			db.SetMaxOpenConns(1)
 			for _, ddl := range []string{
-				`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)`,
+				`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)`,
 				`CREATE TABLE run_fork_selected_contract_bindings (
 					binding_id TEXT PRIMARY KEY, fork_run_id TEXT NOT NULL, source_run_id TEXT NOT NULL,
 					fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL, fork_event_id TEXT,
@@ -55,13 +56,16 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 				kind     string
 				revision int64
 				eventID  any
+				status   string
 			}{
-				{"event", 2, uuid.NewString()},
-				{"deployment_revision", 3, nil},
+				{"event", 2, uuid.NewString(), "running"},
+				{"deployment_revision", 3, nil, "running"},
+				{"event", 2, uuid.NewString(), "paused"},
+				{"event", 2, uuid.NewString(), "stopped"},
 			} {
 				forkID, sourceID, bindingID, executionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 				const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs VALUES ($1,$2)`, forkID, bundleHash); err != nil {
+				if _, err := db.ExecContext(ctx, `INSERT INTO runs VALUES ($1,$2,$3)`, forkID, bundleHash, arm.status); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings VALUES ($1,$2,$3,$4,$5,$6,'selected_contracts',NULL)`,
@@ -69,8 +73,8 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					t.Fatal(err)
 				}
 				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_runtime_executions VALUES
-					($1,$2,$3,$4,$5,$6,$7,1,1,'owner','admission','container','actors','config','declaration','{}','preparation','{}','running',$8)`,
-					executionID, bindingID, forkID, sourceID, arm.kind, arm.revision, arm.eventID, time.Now().Add(time.Hour)); err != nil {
+					($1,$2,$3,$4,$5,$6,$7,1,1,'owner',$9,$9,$9,$9,$9,'{}',$9,'{}','running',$8)`,
+					executionID, bindingID, forkID, sourceID, arm.kind, arm.revision, arm.eventID, time.Now().Add(time.Hour), "sha256:"+strings.Repeat("1", 64)); err != nil {
 					t.Fatal(err)
 				}
 				binding := startupownership.SelectedForkGrantBinding{ExecutionID: executionID}
@@ -87,6 +91,29 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					}
 					if !want && err == nil {
 						t.Fatalf("contradictory %s point admitted", arm.kind)
+					}
+					if want {
+						grant := startupownership.GrantEvidence{GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "owner",
+							ProcessBootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+							BundleHash: bundleHash, StateVersion: 1, State: startupownership.GrantAdmitted, SelectedFork: &row.Binding}
+						// A real read-only transaction must not acquire the mutation
+						// fence or FOR UPDATE locks. Observation never authorizes work.
+						_ = tx.Rollback()
+						read, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer read.Rollback()
+						active, err := ObserveSelectedForkGenerationGrantTx(ctx, read, grant, backend == "sqlite")
+						if err != nil || active != (arm.status == "running") {
+							t.Fatalf("selected %s read-only observation status=%s active=%t error=%v", arm.kind, arm.status, active, err)
+						}
+						wrong := *grant.SelectedFork
+						wrong.FenceGeneration++
+						grant.SelectedFork = &wrong
+						if active, err := ObserveSelectedForkGenerationGrantTx(ctx, read, grant, backend == "sqlite"); err != nil || active {
+							t.Fatalf("read-only observation borrowed a replaced fence: active=%t error=%v", active, err)
+						}
 					}
 				}
 				load(true)

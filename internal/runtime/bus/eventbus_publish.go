@@ -40,7 +40,7 @@ func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *run
 	if failure.Empty() {
 		return nil
 	}
-	canonical := runtimefailures.Normalize(runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", nil), "eventbus", "resolve_delivery_target")
+	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", nil).Failure
 	return &canonical
 }
 
@@ -999,6 +999,8 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplayScope:         runtimepipelineobligation.ScopeSubscribed,
 		PipelineClaim:       p.publicationClaim.Claim(),
 		ReplyCreations:      append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
+		ReplyContinuations:  append([]runtimepinrouting.ReplyRequestContinuation(nil), p.plan.ReplyContinuations...),
+		ReplyReturns:        append([]runtimepinrouting.ReplyReturnContinuation(nil), p.plan.ReplyReturns...),
 		ReplyClaims:         append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 		JoinAdmissionFences: append([]runtimepipeline.WorkflowJoinAdmissionFence(nil), p.plan.JoinAdmissionFences...),
 	}
@@ -1101,42 +1103,53 @@ func (prepared PreparedPublish) requiresReceiver() bool {
 	return !prepared.exactDuplicate && !prepared.targetFailure && !prepared.dispatchQueued
 }
 
-// PrepareSelectedForkPublish performs canonical admission and route planning
-// without persistence. Its sole consumer is the selected-fork named store
-// operation, which must commit lineage and initial delivery facts before the
-// returned plan may be dispatched.
-func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.Event, input SelectedInputValidation) (PreparedPublish, error) {
+// AdmitSelectedForkPublishInput checks immutable input and schema evidence
+// without receiver preflight. Recovery can recognize an exact committed input
+// before terminal receivers are considered for any genuinely new publication.
+func (eb *EventBus) AdmitSelectedForkPublishInput(ctx context.Context, evt events.Event, input SelectedInputValidation) (context.Context, events.AdmittedEvent, error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return PreparedPublish{}, err
+		return ctx, events.AdmittedEvent{}, err
 	}
 	ctx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return PreparedPublish{}, err
+		return ctx, events.AdmittedEvent{}, err
 	}
 	if evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
-		return PreparedPublish{}, fmt.Errorf("selected-fork preparation requires selected_fork_replay event class")
+		return ctx, events.AdmittedEvent{}, fmt.Errorf("selected-fork preparation requires selected_fork_replay event class")
 	}
 	ctx, err = input.bind(ctx, evt, eb.sourceArtifactFact.BundleHash())
 	if err != nil {
-		return PreparedPublish{}, err
+		return ctx, events.AdmittedEvent{}, err
 	}
 	if input.Present() && (eb.recipientPlanAdmissionGuard == nil || eb.recipientPlanGuard == nil || eb.recipientPlanMaterializer == nil) {
-		return PreparedPublish{}, fmt.Errorf("selected input requires exact selected execution recipient guards")
+		return ctx, events.AdmittedEvent{}, fmt.Errorf("selected input requires exact selected execution recipient guards")
 	}
 	if evt.Type() == "" || !isValidEventTypeName(string(evt.Type())) {
-		return PreparedPublish{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
+		return ctx, events.AdmittedEvent{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadAdmitter != nil {
 		evt, err = eb.admitEventPayload(ctx, evt)
 		if err != nil {
-			return PreparedPublish{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{
 		Now:                           time.Now(),
 		RequirePersistentUUIDIdentity: true,
 	})
+	if err != nil {
+		return ctx, events.AdmittedEvent{}, err
+	}
+	return ctx, admitted, nil
+}
+
+// PrepareSelectedForkPublish performs canonical admission and route planning
+// without persistence. Its sole consumer is the selected-fork named store
+// operation, which must commit lineage and initial delivery facts before the
+// returned plan may be dispatched.
+func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.Event, input SelectedInputValidation) (PreparedPublish, error) {
+	ctx, admitted, err := eb.AdmitSelectedForkPublishInput(ctx, evt, input)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
@@ -2311,6 +2324,10 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
+	routePlan, err = restoreSelectedForkRecipientContexts(ctx, evt, routePlan)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, routePlan); err != nil {
 		return RoutePlan{}, err
 	}
@@ -3101,7 +3118,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"persisted_recipients": plan.PersistedRecipientIDs(),
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
-	canonical := canonicalTargetDeliveryFailure(failure, detail)
+	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", detail)
 	detail["failure"] = canonical.Failure
 	deadLetterRoute := target
 	if deadLetterRoute.Empty() && len(targetSet) > 0 {
@@ -3124,17 +3141,17 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 	}
 }
 
-func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, detail map[string]any) *runtimefailures.Error {
+func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, component, operation string, detail map[string]any) *runtimefailures.Error {
 	var err error
 	switch failure {
 	case runtimepinrouting.FailureStaleArrival:
-		err = runtimefailures.New(runtimefailures.ClassStaleArrival, "stale_arrival", "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.New(runtimefailures.ClassStaleArrival, "stale_arrival", component, operation, detail)
 	case runtimepinrouting.FailureReplyAlreadyTerminal:
-		err = runtimefailures.New(runtimefailures.ClassReplyAlreadyTerminal, "reply_already_terminal", "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.New(runtimefailures.ClassReplyAlreadyTerminal, "reply_already_terminal", component, operation, detail)
 	default:
-		err = runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.NewTarget(failure.Code(), component, operation, detail)
 	}
-	return runtimefailures.FromError(err, "eventbus", "resolve_delivery_target")
+	return runtimefailures.FromError(err, component, operation)
 }
 
 func firstNonEmptyString(vals ...string) string {

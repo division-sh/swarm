@@ -88,8 +88,8 @@ func TestSelectedForkStopAuthorityBothStores(t *testing.T) {
 			if err := selected.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 				t.Fatal(err)
 			}
-			if err := selected.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); err != nil {
-				t.Fatal(err)
+			if acknowledged, err := selected.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); !acknowledged || err != nil {
+				t.Fatalf("close selected execution: acknowledged=%t error=%v", acknowledged, err)
 			}
 			// Failure after terminal work has been staged must roll the whole named
 			// operation back, not leave a cancelled run without its control record.

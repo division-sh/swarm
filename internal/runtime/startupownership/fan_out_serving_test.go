@@ -20,7 +20,15 @@ import (
 
 type servingSessionProbe struct {
 	*fanOutCapacitySession
-	store *servingStoreProbe
+	store    *servingStoreProbe
+	selected *selectedFanOutCapacitySession
+}
+
+func (s *servingSessionProbe) ProveSelectedForkGenerationGrant(ctx context.Context, grant GrantEvidence) error {
+	if s.selected == nil {
+		return s.retainedSessionProbe.ProveSelectedForkGenerationGrant(ctx, grant)
+	}
+	return s.selected.ProveSelectedForkGenerationGrant(ctx, grant)
 }
 
 func (s *servingSessionProbe) FanOutServingStore() (FanOutServingStore, error) {

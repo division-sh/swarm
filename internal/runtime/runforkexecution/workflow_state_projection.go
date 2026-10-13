@@ -31,20 +31,42 @@ func prepareSelectedContractWorkflowReadiness(
 	if !options.ExecutionPosture.Valid() {
 		return agentRuntime, runforkreadiness.Admission{}, fmt.Errorf("selected-contract execution posture is invalid")
 	}
-	sourceModes, err := replay.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, sourceEventIDs)
+	pendingJoins, err := plan.PendingJoinOccurrences()
 	if err != nil {
 		return agentRuntime, runforkreadiness.Admission{}, err
 	}
-	if len(sourceModes) != len(sourceEventIDs) {
+	pendingModes := make(map[string]executionmode.Mode, len(pendingJoins))
+	for _, pending := range pendingJoins {
+		pendingModes[pending.Publication.EventID] = pending.Command.ExecutionMode
+	}
+	physicalIDs := make([]string, 0, len(sourceEventIDs))
+	for _, id := range sourceEventIDs {
+		if _, pending := pendingModes[id]; !pending {
+			physicalIDs = append(physicalIDs, id)
+		}
+	}
+	sourceModes, err := replay.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, physicalIDs)
+	if err != nil {
+		return agentRuntime, runforkreadiness.Admission{}, err
+	}
+	if len(sourceModes) != len(physicalIDs) {
 		return agentRuntime, runforkreadiness.Admission{}, fmt.Errorf("selected-contract source event mode projection is incomplete")
 	}
 	sourceModeByEvent := make(map[string]executionmode.Mode, len(sourceEventIDs))
-	for i, eventID := range sourceEventIDs {
+	for i, eventID := range physicalIDs {
 		mode := sourceModes[i]
 		if err := options.ExecutionPosture.Admit(mode, "selected-contract source event admission"); err != nil {
 			return agentRuntime, runforkreadiness.Admission{}, err
 		}
 		sourceModeByEvent[strings.TrimSpace(eventID)] = mode
+	}
+	for _, eventID := range sourceEventIDs {
+		if mode, pending := pendingModes[eventID]; pending {
+			if err := options.ExecutionPosture.Admit(mode, "selected-contract pending join admission"); err != nil {
+				return agentRuntime, runforkreadiness.Admission{}, err
+			}
+			sourceModeByEvent[eventID] = mode
+		}
 	}
 	modelOptions, _, err := selectedContractAgentModelOptions(options)
 	if err != nil {

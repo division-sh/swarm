@@ -54,6 +54,8 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 			record := runtimereplycontext.Record{
 				RunID:                runID,
 				RequestEventID:       requestEventID,
+				SourceRunID:          runID,
+				SourceRequestEventID: requestEventID,
 				RequesterFlowID:      "requester",
 				RequestOutputPin:     "provider_requested",
 				ReplyInputPin:        "provider_replied",
@@ -154,6 +156,8 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			record := runtimereplycontext.Record{
 				RunID:                runID,
 				RequestEventID:       requestEventID,
+				SourceRunID:          runID,
+				SourceRequestEventID: requestEventID,
 				RequesterFlowID:      "requester",
 				RequestOutputPin:     "provider_requested",
 				ReplyInputPin:        "provider_replied",
@@ -177,6 +181,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			}
 			collision := record
 			collision.RequestEventID = collisionEventID
+			collision.SourceRequestEventID = collisionEventID
 			collision.ID = runtimereplycontext.DeterministicID(collision.RequestEventID, collision.RequesterFlowID, collision.RequestOutputPin, collision.ReplyInputPin, collision.ProviderFlowID, collision.Origin)
 			if err := store.CreateReplyContext(ctx, collision); err == nil {
 				t.Fatal("same-origin in-flight correlation collision unexpectedly accepted")
@@ -401,6 +406,7 @@ func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t 
 func replyContextFreezeTestRecord(requestEventID, runID, suffix string, now time.Time) runtimereplycontext.Record {
 	record := runtimereplycontext.Record{
 		RunID: runID, RequestEventID: requestEventID,
+		SourceRunID: runID, SourceRequestEventID: requestEventID,
 		RequesterFlowID: "requester-" + suffix, RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
 		ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
 		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/" + suffix, EntityID: uuid.NewString()},

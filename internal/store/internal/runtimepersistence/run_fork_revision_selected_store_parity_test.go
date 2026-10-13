@@ -230,11 +230,11 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 			event_class,event_id,run_id,event_name,entity_id,scope,payload,payload_bytes,execution_mode,
 			payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,
 			payload_schema_digest,payload_schema_class,
-			chain_depth,produced_by,produced_by_type,created_at,routing_source_kind,source_route,target_route,target_set,route_settlement
+			chain_depth,produced_by,produced_by_type,created_at,routing_source_kind,source_route,target_route,target_set,route_settlement,run_owner_key
 		) VALUES (
 			'selected_fork_replay',$1,$2,'fork.ready',$3,'entity',$4,$5,'live',
 			$6,'','fork.ready',$7,'schema_less',
-			0,'sqlite-parity','platform',$8,'absent',$9,$9,$10,$11
+			0,'sqlite-parity','platform',$8,'absent',$9,$9,$10,$11,`+replyFixtureRunOwnerKey("$2", postgres)+`
 		)
 	`, eventID, runID, entityID, `{"name":"Snapshot Entity"}`, []byte(`{"name":"Snapshot Entity"}`),
 		authorActivityTestBundleHash, "sha256:"+strings.Repeat("0", 64), at, `{}`, `[]`,
@@ -442,6 +442,7 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 	})
+	requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, fixture.runID)
 	identity := mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", "")
 	seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 
@@ -459,8 +460,8 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	if err != nil {
 		t.Fatalf("finalize thirteen-family revision: %v", err)
 	}
-	if got := result[fixture.runID]; !got.Changed || got.Revision != 1 {
-		t.Fatalf("initial thirteen-family result = %#v, want changed revision 1", got)
+	if got := result[fixture.runID]; !got.Changed || got.Revision != 2 {
+		t.Fatalf("initial thirteen-family result = %#v, want changed revision 2 after creation", got)
 	}
 	if err := validateRunForkRevisionMatrix(ctx, tx, postgres, fixture.runID); err != nil {
 		t.Fatalf("validate initial thirteen-family revision: %v", err)
@@ -478,13 +479,13 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	if err != nil {
 		t.Fatalf("finalize exact no-change: %v", err)
 	}
-	if got := noChange[fixture.runID]; got.Changed || got.Revision != 1 {
-		t.Fatalf("exact no-change result = %#v, want unchanged revision 1", got)
+	if got := noChange[fixture.runID]; got.Changed || got.Revision != 2 {
+		t.Fatalf("exact no-change result = %#v, want unchanged revision 2", got)
 	}
 	if err := noChangeTx.Commit(); err != nil {
 		t.Fatalf("commit exact no-change: %v", err)
 	}
-	initial := loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 1)
+	initial := loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 2)
 	assertRunForkRevisionMatrixShape(t, initial, true)
 
 	proveRunForkRevisionCorruptionFailsClosed(t, ctx, db, postgres, fixture)
@@ -499,8 +500,8 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	if err != nil {
 		t.Fatalf("finalize thirteen-family deletion: %v", err)
 	}
-	if got := deleted[fixture.runID]; !got.Changed || got.Revision != 2 {
-		t.Fatalf("thirteen-family deletion result = %#v, want changed revision 2", got)
+	if got := deleted[fixture.runID]; !got.Changed || got.Revision != 3 {
+		t.Fatalf("thirteen-family deletion result = %#v, want changed revision 3", got)
 	}
 	if err := validateRunForkRevisionMatrix(ctx, deleteTx, postgres, fixture.runID); err != nil {
 		t.Fatalf("validate thirteen-family deletion: %v", err)
@@ -508,12 +509,17 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	if err := deleteTx.Commit(); err != nil {
 		t.Fatalf("commit thirteen-family deletion: %v", err)
 	}
-	assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 2), false)
+	assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 3), false)
+	if after := loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 2); !reflect.DeepEqual(initial, after) {
+		t.Fatal("deletion changed the prior thirteen-family historical facts")
+	}
+	requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, fixture.runID)
 
 	rollbackRunID := "00000000-0000-0000-0000-000000002287"
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: rollbackRunID, StartedAt: fixture.at,
 	})
+	requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, rollbackRunID)
 	rollbackTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin rollback proof: %v", err)
@@ -524,23 +530,49 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	if err != nil {
 		t.Fatalf("declare rollback effects: %v", err)
 	}
-	if _, err := finalizeRunForkRevisionMatrix(ctx, rollbackTx, postgres, rollbackEffects); err != nil {
+	rolledBack, err := finalizeRunForkRevisionMatrix(ctx, rollbackTx, postgres, rollbackEffects)
+	if err != nil {
 		t.Fatalf("finalize rollback proof: %v", err)
+	}
+	if got := rolledBack[rollbackRunID]; !got.Changed || got.Revision != 2 {
+		t.Fatalf("rollback candidate = %#v, want changed revision 2", got)
 	}
 	if err := rollbackTx.Rollback(); err != nil {
 		t.Fatalf("rollback domain and revision facts: %v", err)
 	}
-	for _, table := range []string{"events", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions"} {
+	for _, expected := range []struct {
+		table string
+		count int
+	}{{"events", 0}, {"run_fork_revision_heads", 1}, {"run_fork_revisions", 1}, {"run_fork_fact_revisions", 0}} {
 		var count int
-		if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE run_id=$1", table), rollbackRunID).Scan(&count); err != nil {
-			t.Fatalf("count rolled-back %s: %v", table, err)
+		if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE run_id=$1", expected.table), rollbackRunID).Scan(&count); err != nil {
+			t.Fatalf("count rolled-back %s: %v", expected.table, err)
 		}
-		if count != 0 {
-			t.Fatalf("rolled-back %s rows = %d, want 0", table, count)
+		if count != expected.count {
+			t.Fatalf("rolled-back %s rows = %d, want exact creation baseline %d", expected.table, count, expected.count)
 		}
 	}
+	requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, rollbackRunID)
 	proveRunForkRevisionMultiRunFinalization(t, ctx, db, postgres, selected, fixture.at)
 	return initial
+}
+
+func requireRunForkRevisionMatrixEmptyStart(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	reader, ok := selected.(interface {
+		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	})
+	if !ok {
+		t.Fatal("revision matrix requires its canonical selected fork reader")
+	}
+	plan, err := reader.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, AtStart: true})
+	if err != nil || plan.ForkPoint.Kind != runfork.RunForkPointRunStart || plan.ForkPoint.Revision != 1 ||
+		plan.EventCountAtFork != 0 || len(plan.PendingWork) != 0 || len(plan.Entities) != 0 || plan.StartFirstTurn != nil {
+		t.Fatalf("scenario creation did not retain its exact empty revision-1 start: %+v error=%v", plan, err)
+	}
+	if ids, known := plan.HistoricalEventIDs(1); !known || len(ids) != 0 {
+		t.Fatal("eventless scenario start invented historical event membership")
+	}
 }
 
 func proveRunForkRevisionCorruptionFailsClosed(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) {
@@ -559,7 +591,7 @@ func proveRunForkRevisionCorruptionFailsClosed(t *testing.T, ctx context.Context
 		{
 			name: "corrupt_latest_revision_fact",
 			mutate: func(tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=1 AND family='entity_metadata'`, `{"corrupt":true}`, fixture.runID)
+				_, err := tx.ExecContext(ctx, `UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=2 AND family='entity_metadata'`, `{"corrupt":true}`, fixture.runID)
 				return err
 			},
 		},
@@ -591,6 +623,7 @@ func proveRunForkRevisionMultiRunFinalization(t *testing.T, ctx context.Context,
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 			Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at,
 		})
+		requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, runID)
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -609,8 +642,8 @@ func proveRunForkRevisionMultiRunFinalization(t *testing.T, ctx context.Context,
 		t.Fatalf("finalize multi-run revision: %v", err)
 	}
 	for _, runID := range runIDs {
-		if got := results[runID]; !got.Changed || got.Revision != 1 {
-			t.Fatalf("multi-run result for %s = %#v, want changed revision 1", runID, got)
+		if got := results[runID]; !got.Changed || got.Revision != 2 {
+			t.Fatalf("multi-run result for %s = %#v, want changed revision 2 after creation", runID, got)
 		}
 		if err := validateRunForkRevisionMatrix(ctx, tx, postgres, runID); err != nil {
 			t.Fatalf("validate multi-run revision for %s: %v", runID, err)
@@ -672,12 +705,12 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 			t.Fatalf("admit revision matrix fan-out source evidence: %v", err)
 		}
 		capsuleJSON, err := json.Marshal(fanoutobligation.Capsule{
-			SourceProjection: plan.SemanticEvidence(),
-			NodeKey:          "root.matrix-node",
-			ExecutionFlowID:  "root",
-			Route:            runtimeflowidentity.StoredRoute("root", "root", "root"),
-			HandlerEventKey:  "matrix.event",
-			ProducerSource:   producer,
+			SourcePlanRef: plan.Ref, SourceProjection: plan.SemanticEvidence(),
+			NodeKey:         "root.matrix-node",
+			ExecutionFlowID: "root",
+			Route:           runtimeflowidentity.StoredRoute("root", "root", "root"),
+			HandlerEventKey: "matrix.event",
+			ProducerSource:  producer,
 			Lineage: events.EventLineage{
 				RunID:         f.runID,
 				ParentEventID: f.eventID,
@@ -705,7 +738,7 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_turns (turn_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,session_id,flow_instance,memory_enabled,capability_surface_id,tool_calls,emitted_events,turn_blocks,parse_ok,latency_ms,retry_count,agent_frame_bytes,completion_attempt_id,execution_mode,completion_evidence,created_at) VALUES ($1,$2,'revision-matrix-agent','store-test-fixture','runtime_created','root','','',$3,'',TRUE,$4,$5,$5,$5,TRUE,1,0,$6,$7,'mock',$9,$8)`, f.turnID, f.runID, f.sessionID, f.surfaceID, `[]`, []byte("matrix-frame"), f.attemptID, f.at, string(completionEvidence))
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_conversation_audits (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,turn_count,runtime_state,status,created_at,updated_at) VALUES ($1,$2,'revision-matrix-audit','store-test-fixture','runtime_created','root','','','',FALSE,0,$3,'active',$4,$4)`, f.auditID, f.runID, `{}`, f.at)
 	if includeEventDelivery {
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO reply_contexts (reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at) VALUES ($1,$2,$3,'requester','out','reply','provider','in','out',$4,'matrix-correlation','open',$5,$5)`, f.replyID, f.runID, f.eventID, `{}`, f.at)
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO reply_contexts (reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at,source_run_id,source_request_event_id,source_run_owner_key) VALUES ($1,$2,$3,'requester','out','reply','provider','in','out',$4,'matrix-correlation','open',$5,$5,$2,$3,`+replyFixtureRunOwnerKey("$2", postgres)+`)`, f.replyID, f.runID, f.eventID, `{}`, f.at)
 	}
 }
 

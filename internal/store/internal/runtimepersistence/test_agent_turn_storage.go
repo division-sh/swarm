@@ -71,7 +71,12 @@ func ReadManagedTurnEffectStorageForTest(ctx context.Context, selected any, runI
 			(SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id=$2 AND a.state='settled'),
 			(SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND a.completion_projection_phase IS NOT NULL),
 			(SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id=$2 AND a.state='settled' AND a.completion_projection_phase='response_consumed'),
-			(SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.agent_run_id=$1 AND o.effect_kind='provider_turn')`, runID, agentID).Scan(&out.Settled, &out.Projected, &out.ResponseConsumed, &out.ProviderAttempts)
+			(SELECT COUNT(*) FROM runtime_external_effect_attempts a
+			 JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
+			 LEFT JOIN run_fork_selected_contract_runtime_executions x ON x.execution_id=o.selected_execution_id
+			 WHERE o.effect_kind='provider_turn' AND
+			 ((o.authority_kind='normal_agent' AND o.agent_run_id=$1) OR
+			  (o.authority_kind='selected_contract_fork' AND x.fork_run_id=$1)))`, runID, agentID).Scan(&out.Settled, &out.Projected, &out.ResponseConsumed, &out.ProviderAttempts)
 	})
 	if err != nil {
 		return ManagedTurnEffectStorage{}, err

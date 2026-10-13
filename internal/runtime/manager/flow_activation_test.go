@@ -29,6 +29,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -2051,6 +2052,22 @@ func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 }
 
 func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing.T) {
+	for _, runner := range []struct {
+		name string
+		run  func(*AgentManager, context.Context) error
+		kind managedexecution.Kind
+	}{
+		{"ordinary", (*AgentManager).Run, managedexecution.KindNormalRuntime},
+		{"authoritative", (*AgentManager).RunAuthoritativeDeliveryOnly, managedexecution.KindSelectedContractFork},
+	} {
+		t.Run(runner.name, func(t *testing.T) {
+			proveFlowReadinessFinalizationBoundaries(t, runner.run, runner.kind)
+		})
+	}
+}
+
+func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManager, context.Context) error, kind managedexecution.Kind) {
+	t.Helper()
 	for _, boundary := range []string{
 		"partial_agent",
 		"arm",
@@ -2130,7 +2147,15 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 			instances.readinessLoadErr = nil
 			bus.publishErr = nil
 			instances.creationMarkErr = nil
-			if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			runCtx := managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))
+			if kind == managedexecution.KindSelectedContractFork {
+				admission, err := managedexecution.New(kind, uuid.NewString(), 1, req.TriggerEvent.RunID(), "readiness-retry-test-actors", authorActivityTestSourceArtifactFact.BundleHash(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				runCtx = managedexecution.WithAdmission(runCtx, admission)
+			}
+			if err := run(am, runCtx); err != nil {
 				t.Fatalf("Run automatic readiness owner: %v", err)
 			}
 			select {

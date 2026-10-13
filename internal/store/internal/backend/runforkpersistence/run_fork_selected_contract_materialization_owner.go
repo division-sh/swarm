@@ -36,14 +36,14 @@ func selectedRunForkMaterializationID(sourceRunID string, point runfork.RunForkP
 		return deterministicRunForkMaterializationID(sourceRunID, point.EventID), nil
 	}
 	if operation == nil {
-		return "", fmt.Errorf("deployment revision fork requires a durable invocation")
+		return "", fmt.Errorf("non-event fork point requires a durable invocation")
 	}
 	id, err := uuid.Parse(operation.OperationID)
 	if err != nil || id == uuid.Nil || id.String() != operation.OperationID {
-		return "", fmt.Errorf("deployment revision fork requires a canonical operation ID")
+		return "", fmt.Errorf("non-event fork point requires a canonical operation ID")
 	}
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm:run-fork-deployment-materialization:%s:%d:%s",
-		sourceRunID, point.Revision, operation.OperationID))).String(), nil
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm:run-fork-materialization:%s:%s:%d:%s",
+		sourceRunID, point.Kind, point.Revision, operation.OperationID))).String(), nil
 }
 
 // runForkSelectedContractMaterializationPort is deliberately operation-specific.
@@ -67,14 +67,40 @@ type runForkSelectedContractMaterializationPort struct {
 	materializeEntity     func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges func(bool, bool) error
 	materializeBarriers   runForkFanOutBarrierOwner
+	workflowTimers        runForkWorkflowTimerMaterializationOwner
+	arrivalSchedules      runForkArrivalJoinMaterializationOwner
+	replies               runForkReplyContextOwner
 	now                   func() time.Time
 }
 
-func materializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest, port runForkSelectedContractMaterializationPort) (materialization runfork.RunForkMaterialization, err error) {
+type runForkSelectedContractMaterializationMode uint8
+
+const (
+	runForkSelectedContractMaterialize runForkSelectedContractMaterializationMode = iota + 1
+	runForkSelectedContractRequireExisting
+)
+
+func materializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest, port runForkSelectedContractMaterializationPort, mode runForkSelectedContractMaterializationMode, requiredForkRunID string) (materialization runfork.RunForkMaterialization, err error) {
+	switch mode {
+	case runForkSelectedContractMaterialize:
+		if requiredForkRunID != "" {
+			return runfork.RunForkMaterialization{}, fmt.Errorf("fresh selected materialization cannot require an existing child")
+		}
+	case runForkSelectedContractRequireExisting:
+		id, err := uuid.Parse(requiredForkRunID)
+		if err != nil || id == uuid.Nil || id.String() != requiredForkRunID {
+			return runfork.RunForkMaterialization{}, fmt.Errorf("selected materialization readback requires an exact existing child UUID")
+		}
+		if req.ForkOperation != nil {
+			return runfork.RunForkMaterialization{}, fmt.Errorf("selected materialization readback cannot bind a fork operation")
+		}
+	default:
+		return runfork.RunForkMaterialization{}, fmt.Errorf("selected materialization requires an exact operation mode")
+	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.lockSourceStatus == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
-		port.materializeEntity == nil || port.materializeBarriers == nil || port.now == nil {
+		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil || port.now == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("selected-contract fork materialization operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
@@ -111,7 +137,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		planRequest := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: strings.TrimSpace(req.At), ResolvedPoint: &point}
+		planRequest := runfork.RunForkPlanRequest{
+			SourceRunID: sourceRunID, At: strings.TrimSpace(req.At),
+			AtStart: point.Kind == runfork.RunForkPointRunStart, ResolvedPoint: &point,
+		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
@@ -136,16 +165,26 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil || sourceFingerprint != req.Preparation.Coordinates.SourceFingerprint {
 			return fmt.Errorf("selected preparation differs from transaction's effective source")
 		}
-		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
-		forkRunID, err := selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, forkOperation)
+		replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		if err != nil {
 			return err
+		}
+		forkRunID := requiredForkRunID
+		if mode == runForkSelectedContractMaterialize {
+			forkRunID, err = selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, forkOperation)
+			if err != nil {
+				return err
+			}
 		}
 		routeRecovery, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
 		if err != nil {
 			return err
 		}
-		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil); len(blockers) > 0 {
+		blockers, err := runForkSelectedMaterializationBlockers(plan, forkRunID, replayAdmission)
+		if err != nil {
+			return err
+		}
+		if len(blockers) > 0 {
 			blocked := runfork.RunForkMaterialization{
 				SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ExecutionReady: false,
 				ReplayResumeAdmission: replayAdmission, UnsupportedBlockers: blockers, DeliveryResumeBlocked: true,
@@ -169,7 +208,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := requireOriginalFanOutCarriage(txctx, source, plan, req.OriginalLoopCarriage); err != nil {
 			return err
 		}
-		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.FanOutPlanRefs)
+		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.SelectedFanOutPlans)
 		if err != nil {
 			return err
 		}
@@ -177,7 +216,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		sourceModes, err := selectedContractWorkflowSourceModes(txctx, tx, port.postgres, plan.SourceRunID, req.FrontierAdmission)
+		sourceModes, err := selectedContractWorkflowSourceModes(txctx, tx, port.postgres, plan, req.FrontierAdmission)
 		if err != nil {
 			return err
 		}
@@ -203,8 +242,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
+		if mode == runForkSelectedContractRequireExisting && !found {
+			return &runtimerunlifecycle.RunNotFoundError{RunID: forkRunID}
+		}
 		if found {
-			if forkOperation != nil {
+			if mode == runForkSelectedContractMaterialize && forkOperation != nil {
 				binding, err := loadRunForkSelectedContractBinding(txctx, tx, forkRunID)
 				if err != nil {
 					return err
@@ -234,6 +276,19 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins); err != nil {
 				return err
 			}
+			snapshot, err := port.loadSnapshot(txctx, tx, forkRunID)
+			if err != nil {
+				return err
+			}
+			replayAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan,
+				forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), replayAdmission)
+			if err != nil {
+				return err
+			}
+			replayAdmission, err = requireMaterializedRunForkReplyContexts(txctx, tx, port.replies, plan, forkRunID, port.postgres, replayAdmission)
+			if err != nil {
+				return err
+			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
 			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, routeRecovery); err != nil {
@@ -241,7 +296,14 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			existing.ExecutionReady = false
 			existing.ReplayResumeAdmission = replayAdmission
-			existing.UnsupportedBlockers = runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil)
+			var allowedSourceEventIDs []string
+			if mode == runForkSelectedContractRequireExisting {
+				_, allowedSourceEventIDs, _, err = runfork.RunForkContractFrontierEvidenceBinding(req.FrontierAdmission)
+				if err != nil {
+					return err
+				}
+			}
+			existing.UnsupportedBlockers = runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, allowedSourceEventIDs)
 			materialization = existing
 			return nil
 		}
@@ -250,7 +312,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		now := port.now().UTC()
+		now := runtimerunlifecycle.CanonicalTimestamp(port.now())
 		txctx = runtimecorrelation.WithSourceArtifactFact(txctx, identity.SourceArtifactFact)
 		forkScope, err := runtimeauthoractivity.BundleScopeForTarget(txctx, identity.SourceArtifactFact.BundleHash())
 		if err != nil {
@@ -273,6 +335,13 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 		}
 		forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
+		if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
+			return err
+		}
+		replayAdmission, err = materializeRunForkReplyContexts(forkCtx, tx, attempt, port.replies, plan, forkRunID, port.postgres, replayAdmission)
+		if err != nil {
+			return err
+		}
 		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.activeForkSource(ctx, tx, runID)
 		})
@@ -287,6 +356,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			meta := metadata[state.History.EntityID]
 			meta.PreparedHeader = &header
+			meta.RemovedArrivalRefs = state.RemovedArrivalRefs
 			metadata[state.History.EntityID] = meta
 		}
 		orderedEntities, err := runForkEntitiesInConstructionOrder(plan.Entities)
@@ -298,6 +368,16 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 		}
+		if _, err := materializeRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now); err != nil {
+			return err
+		}
+		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, req.Readiness, port.arrivalSchedules); err != nil {
+			return err
+		}
+		replayAdmission, err = requireMaterializedRunForkTimerHistory(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, now, replayAdmission)
+		if err != nil {
+			return err
+		}
 		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, attempt, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins, now)
 		if err != nil {
 			return err
@@ -308,6 +388,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 			materialization.AgentTopologies = append(materialization.AgentTopologies, topologies...)
+		}
+		if err := attempt.EndInitialRunProjection(forkCtx, forkRunID); err != nil {
+			return err
 		}
 		binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
 			ForkRunID: forkRunID, SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ContractSelection: selection,
@@ -350,7 +433,25 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	return materialization, err
 }
 
-func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, sourceRunID string, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {
+// A complete source inventory permits only materialization. Native child
+// readback, not this prospective filter, removes its execution blocker.
+func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID string, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
+	eligible, err := runForkTimerHistoryMaterializable(plan)
+	if err != nil {
+		return nil, err
+	}
+	blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, admission, nil)
+	filtered := make([]runfork.RunForkUnsupportedBlocker, 0, len(blockers))
+	for _, blocker := range blockers {
+		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven && eligible {
+			continue
+		}
+		filtered = append(filtered, blocker)
+	}
+	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
+}
+
+func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {
 	_, ids, _, bindingErr := runfork.RunForkContractFrontierEvidenceBinding(frontier)
 	if bindingErr != nil {
 		return nil, bindingErr
@@ -359,12 +460,24 @@ func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgr
 	if len(ids) == 0 {
 		return modes, nil
 	}
+	physicalIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		pending, found, err := plan.PendingJoinOccurrence(id)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			modes[id] = pending.Command.ExecutionMode
+		} else {
+			physicalIDs = append(physicalIDs, id)
+		}
+	}
 	var records []eventrecord.Record
 	var err error
 	if postgres {
-		records, err = eventrecordpostgres.LoadMany(ctx, tx, ids)
+		records, err = eventrecordpostgres.LoadMany(ctx, tx, physicalIDs)
 	} else {
-		records, err = eventrecordsqlite.LoadMany(ctx, tx, ids)
+		records, err = eventrecordsqlite.LoadMany(ctx, tx, physicalIDs)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract workflow source associations: %w", err)
@@ -375,7 +488,7 @@ func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgr
 			return nil, fmt.Errorf("decode selected-contract workflow source association: %w", err)
 		}
 		event := admitted.Event()
-		if event.RunID() != sourceRunID {
+		if event.RunID() != plan.SourceRunID {
 			return nil, fmt.Errorf("selected-contract workflow source event %s belongs to another run", event.ID())
 		}
 		if _, duplicate := modes[event.ID()]; duplicate {
@@ -434,6 +547,9 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		},
 		publishChannelChanges: s.publishChannelChanges,
 		materializeBarriers:   s.PipelinePostgresOwner,
+		workflowTimers:        s.PipelinePostgresOwner,
+		arrivalSchedules:      s.PipelinePostgresOwner,
+		replies:               s.replies,
 		now:                   func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -486,6 +602,9 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		},
 		publishChannelChanges: s.publishChannelChanges,
 		materializeBarriers:   s.PipelineSQLiteOwner,
+		workflowTimers:        s.PipelineSQLiteOwner,
+		arrivalSchedules:      s.PipelineSQLiteOwner,
+		replies:               s.replies,
 		now:                   s.now,
 	}
 }

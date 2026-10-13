@@ -24,14 +24,18 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				t.Fatalf("create source run: %v", err)
 			}
 			eventID := uuid.NewString()
+			runOwnerKey := "COALESCE('run:' || CAST($2 AS TEXT), '')"
+			if backend == "postgres" {
+				runOwnerKey = "COALESCE('run:' || CAST($2::uuid AS TEXT), '')"
+			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO events
 				(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
 				 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
 				 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
-				 source_route,target_route,target_set,route_settlement)
+				 source_route,target_route,target_set,route_settlement,run_owner_key)
 				VALUES ('root_ingress',$1,$2,'test.received','global','{}',$3,$4,'test.received',$5,
 				'schema_less','live',0,'external','external',CURRENT_TIMESTAMP,'external_ingress','test',
-				'{"flow_path":"."}','{}','[]','{}')`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
+				'{"flow_path":"."}','{}','[]','{}',`+runOwnerKey+`)`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
 				t.Fatalf("create source event: %v", err)
 			}
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {

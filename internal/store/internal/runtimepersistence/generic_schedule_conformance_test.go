@@ -706,6 +706,7 @@ func TestGenericScheduleReplyContextReplayConflictAndRecurringRejectionOnBothSto
 			now := time.Now().UTC()
 			reply := runtimereplycontext.Record{
 				RunID: runID, RequestEventID: requestEventID,
+				SourceRunID: runID, SourceRequestEventID: requestEventID,
 				RequesterFlowID: "reply", RequestOutputPin: "requested", ReplyInputPin: "replied",
 				ProviderFlowID: "provider", ProviderInputPin: "requested", ProviderOutputPin: "replied",
 				Origin:               events.RouteIdentity{FlowID: "reply", FlowInstance: "reply/instance", EntityID: command.EntityID},

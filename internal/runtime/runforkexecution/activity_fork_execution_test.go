@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -174,19 +176,16 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if err != nil {
 				t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 			}
+			forkInputID := waitSelectedContractActivityInputAccounting(t, ctx, fixture, result, sourceRequestEventID)
 			if got := connectorCalls.Load() - beforeCalls; got != tt.wantConnectorCalls {
 				t.Fatalf("connector calls = %d, want %d", got, tt.wantConnectorCalls)
 			}
-			if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
-				t.Fatalf("selected execution result = %#v", result)
-			}
-
-			forkRequest := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
+			forkRequest := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, forkInputID)
 			wantGeneration, err := loopruntime.ForkGeneration(sourceGeneration, result.Materialization.ForkRunID, entityID)
 			if err != nil || !forkRequest.Generation.Equal(wantGeneration) {
 				t.Fatalf("full child generation=%#v want=%#v err=%v", forkRequest.Generation, wantGeneration, err)
 			}
-			if forkRequest.SourceRunID != result.Materialization.ForkRunID || forkRequest.SourceEventID != result.ForkEvents[0].ForkEventID || !forkRequest.Generation.Valid() || forkRequest.Generation.RevisionID == sourceGeneration.RevisionID {
+			if forkRequest.SourceRunID != result.Materialization.ForkRunID || forkRequest.SourceEventID != forkInputID || !forkRequest.Generation.Valid() || forkRequest.Generation.RevisionID == sourceGeneration.RevisionID {
 				t.Fatalf("fork request identity = %#v, source generation = %#v", forkRequest, sourceGeneration)
 			}
 			forkFact := activityidentity.Fact{
@@ -233,12 +232,17 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatal(err)
 			}
 			reloaded, err := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, result.Materialization.ForkRunID, []string{sourceRequestEventID}, original)
-			// Preparation is not a public read: activation froze the source run.
-			// The old source may not grant another preparation after execution.
-			if err == nil || !strings.Contains(err.Error(), "source event preparation state forked is unsupported") || len(reloaded) != 0 {
-				t.Fatalf("post-activation preparation must refuse: count=%d err=%v", len(reloaded), err)
+			// Bound historical preparation belongs to the active child; it cannot
+			// turn the frozen source into an execution owner.
+			if err != nil || len(reloaded) != 1 || reloaded[0].SourceEventID != sourceRequestEventID {
+				t.Fatalf("exact child lost bound source preparation: count=%d err=%v", len(reloaded), err)
 			}
-			repeated := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
+			rejected, refusal := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, sourceRunID, []string{sourceRequestEventID}, original)
+			var inactive *runlifecycle.RunNotActiveError
+			if !errors.As(refusal, &inactive) || inactive.RunID != sourceRunID || inactive.State != runlifecycle.StateForked || len(rejected) != 0 {
+				t.Fatalf("frozen source gained execution preparation: count=%d refusal=%v", len(rejected), refusal)
+			}
+			repeated := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, forkInputID)
 			if !reflect.DeepEqual(forkRequest, repeated) {
 				t.Fatalf("repeat persisted request read changed correspondence: %#v want=%#v", repeated, forkRequest)
 			}
@@ -250,6 +254,50 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("repeat preparation duplicated activity effects: attempts=%d calls=%d err=%v", repeatedAttempts, connectorCalls.Load()-beforeCalls, err)
 			}
 		})
+	}
+}
+
+func waitSelectedContractActivityInputAccounting(t *testing.T, ctx context.Context, fixture activityForkFixture, result SelectedContractExecutionResult, sourceRequestID string) string {
+	t.Helper()
+	if !result.Activation.Activated || result.Materialization.ForkRunID == "" {
+		t.Fatalf("fork did not acknowledge exact child activation: %+v", result)
+	}
+	id := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceRequestID)
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	reader, ok := fixture.owner.ports.fork.(runtimebus.PreparedPublishEventReader)
+	if !ok {
+		t.Fatal("activity fixture lost its original native publication reader")
+	}
+	var last storetest.LatestPipelineReceiptStorage
+	for {
+		var err error
+		last, err = storetest.ReadLatestPlatformPipelineReceiptStorage(wait, fixture.owner.ports.fork, id)
+		if err != nil {
+			t.Fatalf("read exact child input receipt: %+v/%v", last, err)
+		}
+		if last.Found {
+			if last.Outcome != "success" || (len(last.Failure) != 0 && string(last.Failure) != "null") {
+				t.Fatalf("child activity accounting did not succeed: %+v", last)
+			}
+			prepared, found, err := reader.LoadPreparedPublishEvent(wait, id)
+			if err != nil || !found || prepared.Event.Event().RunID() != result.Materialization.ForkRunID || len(prepared.DeliveryRoutes) != 0 {
+				t.Fatalf("committed platform-consumed input disappeared or gained receiver routes: found=%t routes=%d error=%v", found, len(prepared.DeliveryRoutes), err)
+			}
+			lineage, bound := prepared.Event.Event().SelectedForkLineage()
+			if !bound || lineage.SourceEventID() != sourceRequestID {
+				t.Fatalf("committed child input has wrong source lineage: %+v", lineage)
+			}
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, fixture.owner.ports.fork, result.Materialization.ForkRunID, "platform.activity_requested"); err != nil || count != 1 {
+				t.Fatalf("child executed input cardinality=%d want=1 error=%v", count, err)
+			}
+			return id
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("real child input never settled: last=%+v cause=%v", last, context.Cause(wait))
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -427,9 +475,13 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 }
 
 func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
+	return selectedContractActivityDeclaredSourceWithResultConsumer(t, serverURL, effectClass, selection, false)
+}
+
+func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection, consumeResult bool) LoadedSelectedContractSource {
 	t.Helper()
 	root := t.TempDir()
-	for path, contents := range map[string]string{
+	files := map[string]string{
 		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
 		"entities.yaml": "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
@@ -469,7 +521,16 @@ loops:
   effect_class: %s
   http: {method: POST, url: %q}
 `, effectClass, serverURL),
-	} {
+	}
+	if consumeResult {
+		files["flow_a/schema.yaml"] = strings.Replace(files["flow_a/schema.yaml"], "  pending: {}\n  review: {}", "  review: {}\n  pending: {}", 1)
+		files["flow_a/nodes.yaml"] = strings.Replace(files["flow_a/nodes.yaml"], "review.retry, review.close]", "review.retry, review.close, connector.succeeded]", 1) + `
+    connector.succeeded:
+      loop: {repeat: revision, from: review}
+      advances_to: review
+`
+	}
+	for path, contents := range files {
 		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	repoRoot := runForkExecutionRepoRoot(t)

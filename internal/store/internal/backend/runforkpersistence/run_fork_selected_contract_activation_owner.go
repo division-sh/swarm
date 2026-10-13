@@ -5,13 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -29,13 +31,24 @@ type runForkSelectedContractActivationPort struct {
 	loadLineage           func(context.Context, *sql.Tx, string) (runForkActivationLineage, error)
 	lockFrontier          func(context.Context, *sql.Tx, *runForkActivationLineage) error
 	plan                  func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	loadSnapshot          runForkLifecycleSnapshotLoader
+	workflowTimers        runForkWorkflowTimerMaterializationOwner
+	arrivalSchedules      runForkArrivalJoinMaterializationOwner
+	replies               runForkReplyContextOwner
 	deliveries            *storedelivery.Adapter
-	ensureState           func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
+	attachment            func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error
 	transition            func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
 	diverge               func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
 	freeze                func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges func(bool, bool) error
 	now                   func() time.Time
+}
+
+type runForkSelectedContractActivationEvidence struct {
+	lineage runForkActivationLineage
+	binding runfork.RunForkSelectedContractBinding
+	plan    runfork.RunForkPlan
+	request runfork.RunForkSelectedContractExecutionActivateRequest
 }
 
 func activateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest, port runForkSelectedContractActivationPort) (result runfork.RunForkActivation, err error) {
@@ -47,8 +60,8 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		return runfork.RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.loadLineage == nil || port.lockFrontier == nil ||
-		port.plan == nil || port.deliveries == nil || port.ensureState == nil || port.transition == nil || port.diverge == nil ||
-		port.freeze == nil || port.now == nil {
+		port.plan == nil || port.deliveries == nil || port.attachment == nil || port.transition == nil || port.diverge == nil ||
+		port.freeze == nil || port.now == nil || port.loadSnapshot == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("selected-contract fork activation operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
@@ -102,6 +115,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			planRequest.At = lineage.ForkPoint.EventID
 		} else {
 			planRequest.ResolvedPoint = &lineage.ForkPoint
+			planRequest.AtStart = lineage.ForkPoint.Kind == runfork.RunForkPointRunStart
 		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
@@ -113,7 +127,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		}
 		lineage.ForkPoint = plan.ForkPoint
 		result.ForkPoint = plan.ForkPoint
-		result.ReplayResumeAdmission = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		result.ReplayResumeAdmission, err = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		if err != nil {
+			return err
+		}
 		expectedRouteRecovery, err := prepareRunForkSelectedContractRouteResolution(
 			plan, lineage.ForkRunID, binding.ContractSelection,
 			req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning,
@@ -122,6 +139,19 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			return err
 		}
 		if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, expectedRouteRecovery); err != nil {
+			return err
+		}
+		snapshot, err := port.loadSnapshot(txctx, tx, lineage.ForkRunID)
+		if err != nil {
+			return err
+		}
+		result.ReplayResumeAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
+			plan, lineage.ForkRunID, req.InheritedSchedules, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
+		if err != nil {
+			return err
+		}
+		result.ReplayResumeAdmission, err = requireMaterializedRunForkReplyContexts(txctx, tx, port.replies, plan, lineage.ForkRunID, port.postgres, result.ReplayResumeAdmission)
+		if err != nil {
 			return err
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {
@@ -138,16 +168,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err := ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(txctx, tx, port.deliveries, lineage); err != nil {
 			return addRunForkActivationBlocker(&result, err)
 		}
-		if err := ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, lineage.SourceRunID, lineage.ForkEventRevision); err != nil {
-			return addRunForkActivationBlocker(&result, err)
-		}
 		sourceAdvancedFacts = append(sourceAdvancedFacts, runfork.ActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
 		sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
-		if err := requireSelectedDeploymentDrainedTx(txctx, tx, lineage.ForkRunID); err != nil {
-			return addRunForkActivationBlocker(&result, err)
-		}
-		if err := port.ensureState(txctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs, req.ExecutionSource); err != nil {
+		if err := port.attachment(txctx, tx, runForkSelectedContractActivationEvidence{lineage, binding, plan, req}); err != nil {
 			return addRunForkActivationBlocker(&result, err)
 		}
 
@@ -209,6 +233,94 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	return result, err
 }
 
+type selectedContractCurrentAuthorityOwner interface {
+	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
+}
+
+// A running execution is an attached, fenced executor, not proof that its owed
+// business work has already completed. The retained reader owns the immutable
+// declaration/preparation decoding; the preparation owner proves currentness.
+func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, sqlite bool, owner selectedContractCurrentAuthorityOwner) error {
+	authority, err := selectedContractActivationAuthority(ctx, evidence.lineage.ForkRunID)
+	if err != nil {
+		return err
+	}
+	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, runfork.SelectedForkRecoveryEntry{
+		Binding: evidence.binding, BundleHash: evidence.lineage.ForkBundleHash,
+	}, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if err := validateSelectedContractPreparedAttachment(record, authority, evidence); err != nil {
+		return err
+	}
+	if err := validateSelectedContractStagedConstruction(evidence); err != nil {
+		return err
+	}
+	if err := owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
+		return err
+	}
+	return proveSelectedPreparationForMutationTx(ctx, tx, record.preparation.SelectedForkPreparation, sqlite)
+}
+
+func selectedContractActivationAuthority(ctx context.Context, forkRunID string) (runtimeeffects.Authority, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimeeffects.Authority{}, err
+	}
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || authority.SelectedFork.ForkRunID != forkRunID {
+		return runtimeeffects.Authority{}, fmt.Errorf("selected-contract activation requires exact attached execution authority")
+	}
+	return authority, nil
+}
+
+func validateSelectedContractPreparedAttachment(record selectedRecoveryRecord, authority runtimeeffects.Authority, evidence runForkSelectedContractActivationEvidence) error {
+	if !record.hasExecution || record.state != "running" || record.failure != nil || record.ExecutionID != authority.SelectedFork.ExecutionID {
+		return fmt.Errorf("selected-contract activation requires the current running prepared executor")
+	}
+	preparation := record.preparation
+	if preparation.SourceRunID != evidence.lineage.SourceRunID || preparation.ForkRunID != evidence.lineage.ForkRunID ||
+		!sameSelectedForkPointIdentity(preparation.ForkPoint, evidence.plan.ForkPoint) || preparation.ForkEventID != evidence.plan.ForkPoint.EventID ||
+		preparation.Coordinates.BundleHash != evidence.lineage.ForkBundleHash {
+		return fmt.Errorf("selected-contract attachment differs from fixed child lineage")
+	}
+	_, ids, _, err := runfork.RunForkContractFrontierEvidenceBinding(evidence.request.FrontierAdmission)
+	if err != nil {
+		return err
+	}
+	// Frontier identity is a set; the caller's retained order is execution
+	// chronology. Sort only a copy and keep duplicate/membership checks exact.
+	actual := slices.Clone(evidence.request.AllowedSourceEventIDs)
+	slices.Sort(actual)
+	if !slices.Equal(ids, actual) {
+		return fmt.Errorf("selected-contract activation inputs differ from prepared frontier")
+	}
+	return nil
+}
+
+func validateSelectedContractStagedConstruction(evidence runForkSelectedContractActivationEvidence) error {
+	metadata, err := loadRunForkEntityMetadata(evidence.plan)
+	if err != nil {
+		return err
+	}
+	expected := make([]string, 0, len(metadata))
+	for entityID, meta := range metadata {
+		projection, err := projectRunForkEntityOwnership(evidence.lineage.SourceRunID, evidence.lineage.ForkRunID, entityID, meta.FlowInstance)
+		if err != nil {
+			return err
+		}
+		expected = append(expected, projection.Fork.EntityID)
+	}
+	// Construction is an exact owner inventory, not map or header iteration order.
+	actual := slices.Clone(evidence.lineage.EntityIDs)
+	slices.Sort(expected)
+	slices.Sort(actual)
+	if !slices.Equal(expected, actual) {
+		return fmt.Errorf("selected-contract staged construction differs from exact fixed-cut child inventory")
+	}
+	return nil
+}
+
 func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractExecutionActivateRequest, lineage runForkActivationLineage, sourceStatus string, frozen, postgres bool) error {
 	if req.ForkOperation == nil {
 		return nil
@@ -254,6 +366,8 @@ func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runI
 }
 
 func selectedForkDurableExecutedEventCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	// Continued ordinals already have selected execution lineage. Only fresh
+	// deployment emissions contribute an additional, disjoint execution origin.
 	var total, distinct int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(DISTINCT event_id) FROM (
 		SELECT fork_event_id AS event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1
@@ -290,8 +404,21 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
 		},
-		deliveries:  postgresDeliveryAdapter,
-		ensureState: s.ensureRunForkSelectedContractExecutionForkState,
+		deliveries: postgresDeliveryAdapter,
+		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
+			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
+		},
+		workflowTimers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner, replies: s.replies,
+		attachment: func(ctx context.Context, tx *sql.Tx, evidence runForkSelectedContractActivationEvidence) error {
+			snapshot, err := s.LoadSnapshotTx(ctx, tx, evidence.lineage.ForkRunID, true)
+			if err != nil {
+				return err
+			}
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, false, s.EffectPostgresOwner); err != nil {
+				return err
+			}
+			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, true, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
+		},
 		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
 			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
@@ -325,8 +452,21 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
 		},
-		deliveries:  sqliteDeliveryAdapter,
-		ensureState: s.ensureSQLiteRunForkSelectedContractExecutionForkState,
+		deliveries: sqliteDeliveryAdapter,
+		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
+			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
+		},
+		workflowTimers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner, replies: s.replies,
+		attachment: func(ctx context.Context, tx *sql.Tx, evidence runForkSelectedContractActivationEvidence) error {
+			snapshot, err := s.LoadSnapshotTx(ctx, tx, evidence.lineage.ForkRunID)
+			if err != nil {
+				return err
+			}
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, true, s.EffectSQLiteOwner); err != nil {
+				return err
+			}
+			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, false, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
+		},
 		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
 			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, req)
 			return err

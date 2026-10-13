@@ -37,6 +37,33 @@ type FirstReplyContextStorage struct {
 	ContextID, RequestEventID, AcceptedReplyEventID string
 }
 
+func ReadReplyContextRecords(ctx context.Context, tx *sql.Tx, run string, postgres bool) ([]runtimereplycontext.Record, error) {
+	query := sqliteReplyContextSelect
+	if postgres {
+		query = postgresReplyContextSelect
+	}
+	rows, err := tx.QueryContext(ctx, query+` WHERE run_id=$1 ORDER BY reply_context_id`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []runtimereplycontext.Record
+	for rows.Next() {
+		record, err := scanReplyContext(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func ReadReplyContextRequestIDs(ctx context.Context, tx *sql.Tx, run string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(request_event_id AS TEXT) FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id`, run)
 	if err != nil {
@@ -99,6 +126,9 @@ var _ runtimereplycontext.Store = (*ReplyPostgresOwner)(nil)
 var _ runtimereplycontext.Store = (*ReplySQLiteOwner)(nil)
 
 func (s *ReplyPostgresOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
+	if err := requireFreshReplyContext(record); err != nil {
+		return err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, s.CreateWithinTransaction(txctx, attempt, record)
 	})
@@ -117,26 +147,7 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, attempt *mutati
 	if err != nil {
 		return fmt.Errorf("encode reply context origin: %w", err)
 	}
-	result, err := db.ExecContext(ctx, `
-		INSERT INTO reply_contexts (
-			reply_context_id, run_id, request_event_id, requester_flow_id,
-			request_output_pin, reply_input_pin, provider_flow_id,
-			provider_input_pin, provider_output_pin, origin_route,
-			request_correlation_id, correlation_key, state,
-			accepted_reply_event_id, created_at, updated_at, terminal_at
-		)
-		VALUES (
-			$1, NULLIF($2, '')::uuid, $3::uuid, $4,
-			$5, $6, $7, $8, $9, $10::jsonb,
-			$11, NULLIF($12, ''), $13,
-			NULLIF($14, '')::uuid, $15, $16, $17
-		)
-		ON CONFLICT DO NOTHING
-	`, record.ID, record.RunID, record.RequestEventID, record.RequesterFlowID,
-		record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID,
-		record.ProviderInputPin, record.ProviderOutputPin, string(origin),
-		record.RequestCorrelationID, record.CorrelationKey, string(record.State),
-		record.AcceptedReplyEventID, record.CreatedAt, record.UpdatedAt, record.TerminalAt)
+	result, err := insertReplyContextRow(ctx, db, record, origin, true)
 	if err != nil {
 		return fmt.Errorf("create reply context: %w", err)
 	}
@@ -145,6 +156,9 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, attempt *mutati
 		return fmt.Errorf("create reply context rows: %w", err)
 	}
 	if rows == 1 {
+		if err := requireEnclosingReplyContext(ctx, db, record, true); err != nil {
+			return err
+		}
 		return attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
 	}
 	existing, loadErr := loadPostgresReplyContext(ctx, db, record.ID, false)
@@ -161,10 +175,24 @@ func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, attemp
 }
 
 func (s *ReplySQLiteOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
+	if err := requireFreshReplyContext(record); err != nil {
+		return err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite reply context create", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, s.CreateWithinTransaction(txctx, attempt, record)
 	})
 	return result.Err()
+}
+
+func requireFreshReplyContext(record runtimereplycontext.Record) error {
+	record = record.Normalized()
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	if record.State != runtimereplycontext.StateOpen || record.SourceRunID != record.RunID || record.SourceRequestEventID != record.RequestEventID {
+		return fmt.Errorf("fresh reply creation requires its own open physical request; projection belongs to fixed-cut materialization")
+	}
+	return nil
 }
 
 func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
@@ -179,20 +207,7 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutati
 	if err != nil {
 		return fmt.Errorf("encode reply context origin: %w", err)
 	}
-	result, err := db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO reply_contexts (
-			reply_context_id, run_id, request_event_id, requester_flow_id,
-			request_output_pin, reply_input_pin, provider_flow_id,
-			provider_input_pin, provider_output_pin, origin_route,
-			request_correlation_id, correlation_key, state,
-			accepted_reply_event_id, created_at, updated_at, terminal_at
-		)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?)
-	`, record.ID, record.RunID, record.RequestEventID, record.RequesterFlowID,
-		record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID,
-		record.ProviderInputPin, record.ProviderOutputPin, string(origin),
-		record.RequestCorrelationID, record.CorrelationKey, string(record.State),
-		record.AcceptedReplyEventID, record.CreatedAt, record.UpdatedAt, record.TerminalAt)
+	result, err := insertReplyContextRow(ctx, db, record, origin, false)
 	if err != nil {
 		return fmt.Errorf("create sqlite reply context: %w", err)
 	}
@@ -201,6 +216,9 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutati
 		return fmt.Errorf("create sqlite reply context rows: %w", err)
 	}
 	if rows == 1 {
+		if err := requireEnclosingReplyContext(ctx, db, record, false); err != nil {
+			return err
+		}
 		return attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
 	}
 	existing, loadErr := loadSQLiteReplyContext(ctx, db, record.ID)
@@ -236,6 +254,16 @@ func (s *ReplyPostgresOwner) LoadReplyContext(ctx context.Context, id string) (r
 	return loadPostgresReplyContext(ctx, s.backend, id, false)
 }
 
+func (s *ReplyPostgresOwner) LoadWithinTransaction(ctx context.Context, tx *sql.Tx, id string) (runtimereplycontext.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimereplycontext.Record{}, err
+	}
+	if tx == nil {
+		return runtimereplycontext.Record{}, fmt.Errorf("load postgres reply context: transaction is required")
+	}
+	return loadPostgresReplyContext(ctx, tx, id, false)
+}
+
 func loadPostgresReplyContext(ctx context.Context, db replyContextSQL, id string, forUpdate bool) (runtimereplycontext.Record, error) {
 	query := postgresReplyContextSelect + ` WHERE reply_context_id = $1`
 	if forUpdate {
@@ -248,8 +276,87 @@ func (s *ReplySQLiteOwner) LoadReplyContext(ctx context.Context, id string) (run
 	return loadSQLiteReplyContext(ctx, s.backend, id)
 }
 
+func (s *ReplySQLiteOwner) LoadWithinTransaction(ctx context.Context, tx *sql.Tx, id string) (runtimereplycontext.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimereplycontext.Record{}, err
+	}
+	if tx == nil {
+		return runtimereplycontext.Record{}, fmt.Errorf("load sqlite reply context: transaction is required")
+	}
+	return loadSQLiteReplyContext(ctx, tx, id)
+}
+
 func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) (runtimereplycontext.Record, error) {
 	return scanReplyContext(db.QueryRowContext(ctx, sqliteReplyContextSelect+` WHERE reply_context_id = ?`, strings.TrimSpace(id)))
+}
+
+// Request replay consumes the projected open row, not creation idempotence.
+// The lock remains held through publication so a concurrent reply cannot settle
+// the obligation between this check and its request delivery.
+func (s *ReplyPostgresOwner) RequireOpenWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("reply continuation requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadPostgresReplyContext(ctx, tx, expected.ID, true)
+		if err != nil {
+			return err
+		}
+		return requireOpenReplyContinuation(expected, actual)
+	})
+}
+
+func (s *ReplySQLiteOwner) RequireOpenWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("reply continuation requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadSQLiteReplyContext(ctx, tx, expected.ID)
+		if err != nil {
+			return err
+		}
+		return requireOpenReplyContinuation(expected, actual)
+	})
+}
+
+func requireOpenReplyContinuation(expected, actual runtimereplycontext.Record) error {
+	if expected.State != runtimereplycontext.StateOpen || actual.State != runtimereplycontext.StateOpen {
+		return fmt.Errorf("request continuation requires its existing open reply obligation")
+	}
+	return actual.ValidateContinuationFrom(expected, expected.CreatedAt)
+}
+
+func (s *ReplyPostgresOwner) RequireTerminalWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("retained return requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadPostgresReplyContext(ctx, tx, expected.ID, true)
+		if err != nil {
+			return err
+		}
+		return requireTerminalReplyContinuation(expected, actual)
+	})
+}
+
+func (s *ReplySQLiteOwner) RequireTerminalWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, expected runtimereplycontext.Record) error {
+	if attempt == nil {
+		return fmt.Errorf("retained return requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		actual, err := loadSQLiteReplyContext(ctx, tx, expected.ID)
+		if err != nil {
+			return err
+		}
+		return requireTerminalReplyContinuation(expected, actual)
+	})
+}
+
+func requireTerminalReplyContinuation(expected, actual runtimereplycontext.Record) error {
+	if expected.State != runtimereplycontext.StateTerminal || actual.State != runtimereplycontext.StateTerminal {
+		return fmt.Errorf("retained return requires its existing terminal obligation")
+	}
+	return actual.ValidateContinuationFrom(expected, expected.CreatedAt)
 }
 
 func (s *ReplyPostgresOwner) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
@@ -331,16 +438,16 @@ func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimere
 		}
 		return record, runtimereplycontext.ClaimTerminal, nil
 	}
-	existsQuery := `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = ?)`
+	existsQuery := `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = ? AND COALESCE(run_id, '') = ?)`
 	if postgres {
-		existsQuery = `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = $1::uuid)`
+		existsQuery = `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = $1::uuid AND run_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid)`
 	}
 	var replyEventPersisted bool
-	if err := db.QueryRowContext(ctx, existsQuery, replyEventID).Scan(&replyEventPersisted); err != nil {
+	if err := db.QueryRowContext(ctx, existsQuery, replyEventID, record.RunID).Scan(&replyEventPersisted); err != nil {
 		return runtimereplycontext.Record{}, "", fmt.Errorf("verify reply event %s persistence before claim: %w", replyEventID, err)
 	}
 	if !replyEventPersisted {
-		return runtimereplycontext.Record{}, "", fmt.Errorf("reply event %s must be persisted in the reply-context mutation before terminal claim", replyEventID)
+		return runtimereplycontext.Record{}, "", fmt.Errorf("reply event %s must be persisted in the reply context's run before terminal claim", replyEventID)
 	}
 	now := time.Now().UTC()
 	query := `UPDATE reply_contexts SET state = ?, accepted_reply_event_id = ?, terminal_at = ?, updated_at = ? WHERE reply_context_id = ? AND state = 'open'`
@@ -430,7 +537,9 @@ const postgresReplyContextSelect = `
 	       provider_flow_id, provider_input_pin, provider_output_pin,
 	       origin_route, request_correlation_id, COALESCE(correlation_key, ''),
 	       state, COALESCE(accepted_reply_event_id::text, ''),
-	       created_at, updated_at, terminal_at
+	       created_at, updated_at, terminal_at,
+	       COALESCE(source_run_id::text, ''), source_request_event_id::text,
+	       COALESCE(enclosing_reply_context_id, '')
 	FROM reply_contexts`
 
 const sqliteReplyContextSelect = `
@@ -439,7 +548,9 @@ const sqliteReplyContextSelect = `
 	       provider_flow_id, provider_input_pin, provider_output_pin,
 	       origin_route, request_correlation_id, COALESCE(correlation_key, ''),
 	       state, COALESCE(accepted_reply_event_id, ''),
-	       created_at, updated_at, terminal_at
+	       created_at, updated_at, terminal_at,
+	       COALESCE(source_run_id, ''), source_request_event_id,
+	       COALESCE(enclosing_reply_context_id, '')
 	FROM reply_contexts`
 
 type replyContextRowScanner interface {
@@ -457,6 +568,7 @@ func scanReplyContext(row replyContextRowScanner) (runtimereplycontext.Record, e
 		&originJSON, &record.RequestCorrelationID, &record.CorrelationKey,
 		&record.State, &record.AcceptedReplyEventID,
 		&createdAtRaw, &updatedAtRaw, &terminalAtRaw,
+		&record.SourceRunID, &record.SourceRequestEventID, &record.EnclosingReplyContextID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimereplycontext.Record{}, runtimereplycontext.ErrNotFound

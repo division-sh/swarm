@@ -104,6 +104,9 @@ func TestForkDeploymentReadbackPreservesPreactivationPendingAndInitialStatusBoth
 				`CREATE TABLE fan_out_outcomes (
 					run_id TEXT,deployment_feed_id TEXT,ordinal INTEGER,outcome_kind TEXT,event_id TEXT,
 					source_event_id TEXT,inherited_disposition TEXT,failure TEXT,created_at TIMESTAMP)`,
+				`CREATE TABLE run_fork_selected_contract_executions (fork_event_id TEXT,source_run_id TEXT,fork_run_id TEXT,source_event_id TEXT,source_obligation_event_id TEXT)`,
+				`CREATE TABLE run_fork_delivery_event_replays (fork_event_id TEXT,source_run_id TEXT,fork_run_id TEXT,source_event_id TEXT)`,
+				`CREATE TABLE events (event_id TEXT,run_id TEXT)`,
 			} {
 				if _, err := db.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -137,8 +140,9 @@ func TestForkDeploymentReadbackPreservesPreactivationPendingAndInitialStatusBoth
 			if _, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=1,status='closed' WHERE run_id=$1 AND deployment_feed_id=$2`, key.RunID, key.DeploymentFeedID); err != nil {
 				t.Fatal(err)
 			}
-			carriage := forkDeploymentCarriage{inherit: true, cursor: 1, status: fanoutobligation.StatusClosed,
-				pending: []runfork.RunForkFanOutPendingReplay{{Ordinal: 0, SourceEventID: uuid.NewString()}},
+			carriage := forkDeploymentCarriage{inherit: true, cursor: 1, status: fanoutobligation.StatusClosed, sourceRunID: uuid.NewString(),
+				pendingDeployment: []runfork.RunForkDeploymentPendingEvent{{Ordinal: 0, SourceEventID: uuid.NewString(), SourceDeliveryIDs: []string{uuid.NewString()},
+					Phase: runfork.RunForkDeploymentPendingPublication}},
 			}
 			if err := requireRunForkDeploymentOutcomesTx(ctx, tx, backend == "postgres", key, target, 1, carriage); err != nil {
 				t.Fatalf("preactivation pending replay cannot yet have an outcome: %v", err)

@@ -79,12 +79,14 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 		INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id,
 			request_output_pin, reply_input_pin, provider_flow_id, provider_input_pin,
-			provider_output_pin, origin_route, request_correlation_id, state
+			provider_output_pin, origin_route, request_correlation_id, state,
+			source_run_id, source_request_event_id, source_run_owner_key
 		)
 		VALUES (
 			'reply-v1:test-open', $1::uuid, $2::uuid, 'requester',
 			'provider_requested', 'provider_replied', 'provider', 'requested',
-			'replied', '{"flow_instance":"requester"}'::jsonb, $2, 'open'
+			'replied', '{"flow_instance":"requester"}'::jsonb, $2, 'open',
+			$1::uuid, $2::uuid, 'run:' || CAST($1::uuid AS TEXT)
 		)
 	`, runID, requestEventID); err != nil {
 		t.Fatalf("seed reply context: %v", err)

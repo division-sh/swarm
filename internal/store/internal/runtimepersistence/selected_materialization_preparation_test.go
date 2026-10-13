@@ -109,6 +109,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			workflow, fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -133,6 +134,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			workflow, fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)

@@ -24,6 +24,11 @@ import (
 )
 
 func a2ForkMapFixture(t *testing.T) (runfork.RunForkPlan, rc.FanOutCompiledPlan, semanticview.OriginalLoopCarriage) {
+	plan, compiled, original, _ := a2ForkMapSelectedFixture(t, false)
+	return plan, compiled, original
+}
+
+func a2ForkMapSelectedFixture(t *testing.T, changed bool) (runfork.RunForkPlan, rc.FanOutCompiledPlan, semanticview.OriginalLoopCarriage, semanticview.FanOutPlanCarriage) {
 	t.Helper()
 	root := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("items.ready:\n  items: 'map[text][integer]'\nitems.child:\n  value: text\nbatch.completed:\n  total: integer\n"), 0o644); err != nil {
@@ -69,7 +74,7 @@ func a2ForkMapFixture(t *testing.T) (runfork.RunForkPlan, rc.FanOutCompiledPlan,
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	intent := fanoutobligation.Intent{
 		Request: fanoutobligation.IntentRequest{Key: fanoutobligation.IntentKey{RunID: run, TriggeringDeliveryID: delivery, ElementRef: compiled.Ref.ElementRef}, PlanRef: compiled.Ref, Source: requestSource, Cardinality: 3,
-			Capsule: fanoutobligation.Capsule{SourceProjection: compiled.SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", EntityID: run, HandlerEventKey: "items.ready", Route: flowidentity.StoredRoute(".", run, run), ProducerSource: producer, Lineage: events.EventLineage{RunID: run, ParentEventID: event, ExecutionMode: executionmode.Live}},
+			Capsule: fanoutobligation.Capsule{SourcePlanRef: compiled.Ref, SourceProjection: compiled.SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", EntityID: run, HandlerEventKey: "items.ready", Route: flowidentity.StoredRoute(".", run, run), ProducerSource: producer, Lineage: events.EventLineage{RunID: run, ParentEventID: event, ExecutionMode: executionmode.Live}},
 		},
 		Source: ref, Cursor: 1, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now,
 	}
@@ -79,19 +84,51 @@ func a2ForkMapFixture(t *testing.T) (runfork.RunForkPlan, rc.FanOutCompiledPlan,
 	plan := runfork.RunForkPlan{SourceRunID: run, Entities: []runfork.RunForkEntityState{{EntityID: run, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, FlowInstance: run}}},
 		FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(), InheritedDisposition: "no_route", CreatedAt: now}}}},
 	}
-	return plan, compiled, original
+	if changed {
+		selectedNodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		selectedNodes = []byte(strings.Replace(string(selectedNodes), "value: entry", "value: entry + '-selected'", 1))
+		if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), selectedNodes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		selected, err := rc.LoadWorkflowContractBundleWithOptions(repo, root, rc.DefaultPlatformSpecFile(repo), rc.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source = semanticview.Wrap(selected)
+		selectedPlans := source.FanOutPlansForHandler(node, "items.ready")
+		if len(selectedPlans) != 1 {
+			t.Fatal("selected source lost the exact declaration")
+		}
+		compiled = selectedPlans[0]
+	}
+	carriage, err := semanticview.CompileFanOutPlanCarriage(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan, compiled, original, carriage
 }
 
 // Reduced exact-reader controls complement the actual retained-source reader;
 // they do not claim a full fork materializer/publication/boot receipt.
 func TestA2RetainedMapSourceForkOnBothStores(t *testing.T) {
+	testRetainedMapSourceForkOnBothStores(t, false)
+}
+
+func TestForkFanOutCounterfactualSourceReadbackBothStores(t *testing.T) {
+	testRetainedMapSourceForkOnBothStores(t, true)
+}
+
+func testRetainedMapSourceForkOnBothStores(t *testing.T, counterfactual bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := fanOutTimestampReaderDatabase(t, backend)
-			plan, compiled, original := a2ForkMapFixture(t)
+			plan, compiled, original, carriage := a2ForkMapSelectedFixture(t, counterfactual)
 			intent := plan.FanOutObligations[0].Intent
 			child := uuid.NewString()
-			refs, err := resolveRunForkFanOutPlanRefs(plan, compiled.Ref.BundleHash, []rc.FanOutPlanRef{compiled.Ref})
+			refs, err := resolveRunForkFanOutPlanRefs(plan, compiled.Ref.BundleHash, carriage)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +209,12 @@ func TestA2RetainedMapSourceForkOnBothStores(t *testing.T) {
 					}
 				})
 			}
-			items, err := intent.Request.ProjectSource(map[string]any{"z": []any{1}, " a ": []any{2}, "a": []any{3}})
+			request := intent.Request
+			request.PlanRef, request.Capsule = compiled.Ref, capsule
+			if err := request.ValidateCompiledPlan(compiled); err != nil {
+				t.Fatal(err)
+			}
+			items, err := request.ProjectSource(map[string]any{"z": []any{1}, " a ": []any{2}, "a": []any{3}})
 			if err != nil || !reflect.DeepEqual(items[1:], []any{"a", "z"}) {
 				t.Fatalf("fork lexical range: %#v %v", items, err)
 			}
@@ -182,7 +224,7 @@ func TestA2RetainedMapSourceForkOnBothStores(t *testing.T) {
 
 func TestA2ForkPlanProofRejectsProjectionDrift(t *testing.T) {
 	plan, compiled, _ := a2ForkMapFixture(t)
-	if _, err := resolveRunForkFanOutPlanRefs(plan, compiled.Ref.BundleHash, nil); err != nil {
+	if _, err := resolveRunForkFanOutPlanRefs(plan, compiled.Ref.BundleHash, semanticview.FanOutPlanCarriage{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*runfork.RunForkPlan){
@@ -203,17 +245,15 @@ func TestA2ForkPlanProofRejectsProjectionDrift(t *testing.T) {
 			t.Fatal(err)
 		}
 		change(&bad)
-		if _, err := resolveRunForkFanOutPlanRefs(bad, compiled.Ref.BundleHash, []rc.FanOutPlanRef{compiled.Ref}); err == nil {
+		if _, err := resolveRunForkFanOutPlanRefs(bad, compiled.Ref.BundleHash, semanticview.FanOutPlanCarriage{}); err == nil {
 			t.Fatal("fork proof accepted contradictory admitted projection")
 		}
 	}
-	selected := compiled.Ref
-	selected.BundleHash = "bundle-v2:sha256:" + strings.Repeat("2", 64)
-	if _, err := resolveRunForkFanOutPlanRefs(plan, selected.BundleHash, []rc.FanOutPlanRef{selected}); err != nil {
+	_, selected, _, carriage := a2ForkMapSelectedFixture(t, true)
+	if _, err := resolveRunForkFanOutPlanRefs(plan, selected.Ref.BundleHash, carriage); err != nil {
 		t.Fatal(err)
 	}
-	selected.SemanticDigest = "wrong"
-	if _, err := resolveRunForkFanOutPlanRefs(plan, selected.BundleHash, []rc.FanOutPlanRef{selected}); err == nil {
-		t.Fatal("fork accepted changed semantic interpretation")
+	if _, err := resolveRunForkFanOutPlanRefs(plan, compiled.Ref.BundleHash, carriage); err == nil {
+		t.Fatal("fork accepted compiled evidence from the wrong selected artifact")
 	}
 }

@@ -195,6 +195,37 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if receiver.EntityID == "" {
 				t.Fatal("corruption proof requires the exact existing flow construction, not an entityless actor")
 			}
+			constructionBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+			if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, SuspendedForkReceiverConstruction{}); err == nil {
+				t.Fatal("empty fixture witness invented constructor evidence")
+			}
+			if _, err := SuspendForkReceiverConstructionForTest(ctx, fixture.store, runID, receiver.EntityID); err == nil {
+				t.Fatal("hostile receiver fixture modified its running source")
+			}
+			canceled, cancel := context.WithCancel(ctx)
+			cancel()
+			if _, err := SuspendForkReceiverConstructionForTest(canceled, fixture.store, child.ForkRunID, receiver.EntityID); err == nil {
+				t.Fatal("canceled receiver fixture suspended construction")
+			}
+			if !reflect.DeepEqual(constructionBefore, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+				t.Fatal("refused receiver fixture changed durable history")
+			}
+			construction, err := SuspendForkReceiverConstructionForTest(ctx, fixture.store, child.ForkRunID, receiver.EntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, construction); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(constructionBefore, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+				t.Fatal("receiver fixture failed to restore its exact physical aggregate")
+			}
+			if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, construction); err == nil {
+				t.Fatal("receiver fixture replaced an existing constructor receipt")
+			}
+			if !reflect.DeepEqual(constructionBefore, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+				t.Fatal("duplicate receiver fixture restore changed durable history")
+			}
 			if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2 AND entity_id=$3`, "foreign", child.ForkRunID, receiver.EntityID); err != nil {
 				t.Fatal(err)
 			}
@@ -215,6 +246,14 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				{"malformed_bookkeeping", "bookkeeping", "[]", "requires persisted JSON object"},
 			} {
 				t.Run(corrupt.name, func(t *testing.T) {
+					var construction SuspendedForkReceiverConstruction
+					if corrupt.name == "wrong_path" {
+						var err error
+						construction, err = SuspendForkReceiverConstructionForTest(ctx, fixture.store, child.ForkRunID, receiver.EntityID)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					var original string
 					if err := fixture.db.QueryRowContext(ctx, `SELECT `+corrupt.column+` FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, receiver.EntityID).Scan(&original); err != nil {
 						t.Fatal(err)
@@ -232,9 +271,18 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET `+corrupt.column+`=$1 WHERE run_id=$2 AND entity_id=$3`, original, child.ForkRunID, receiver.EntityID); err != nil {
 						t.Fatal(err)
 					}
+					if corrupt.name == "wrong_path" {
+						if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, construction); err != nil {
+							t.Fatal(err)
+						}
+					}
 				})
 			}
 			t.Run("wrong_run", func(t *testing.T) {
+				construction, err := SuspendForkReceiverConstructionForTest(ctx, fixture.store, child.ForkRunID, receiver.EntityID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				foreignRun := uuid.NewString()
 				foreignSource := stateOnlyRootAcquisitionSource(t, "foreign-replay-parent")
 				foreignBundle, _ := semanticview.Bundle(foreignSource)
@@ -253,12 +301,23 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1, parent_instance=$4 WHERE run_id=$2 AND entity_id=$3`, child.ForkRunID, foreignRun, receiver.EntityID, child.ForkRunID); err != nil {
 					t.Fatal(err)
 				}
+				if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, construction); err != nil {
+					t.Fatal(err)
+				}
 			})
 			for _, missing := range []struct{ name, table, refusal string }{
 				{"state_only_receiver", "flow_instances", "complete workflow target persistence is required"},
 				{"missing_declared_fields", "entity_state", "constructed header projection disagrees with its declared field row"},
 			} {
 				t.Run(missing.name, func(t *testing.T) {
+					var construction SuspendedForkReceiverConstruction
+					if missing.table == "flow_instances" {
+						var err error
+						construction, err = SuspendForkReceiverConstructionForTest(ctx, fixture.store, child.ForkRunID, receiver.EntityID)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					saved := "saved_replay_receiver"
 					if _, err := fixture.db.ExecContext(ctx, `CREATE TABLE `+saved+` AS SELECT * FROM `+missing.table+` WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, receiver.EntityID); err != nil {
 						t.Fatal(err)
@@ -278,6 +337,11 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 					if _, err := fixture.db.ExecContext(ctx, `DROP TABLE `+saved); err != nil {
 						t.Fatal(err)
+					}
+					if missing.table == "flow_instances" {
+						if err := RestoreForkReceiverConstructionForTest(ctx, fixture.store, construction); err != nil {
+							t.Fatal(err)
+						}
 					}
 				})
 			}

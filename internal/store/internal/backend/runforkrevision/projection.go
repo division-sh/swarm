@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 type queryer interface {
@@ -332,12 +333,14 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at,
 				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id, e.inherited_fan_out_origin,
 				e.payload_schema_bundle_hash, e.payload_schema_flow_id, e.payload_schema_event_key,
-				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)`,
-			source: "events e", runAlias: "e",
+				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT),
+				COALESCE(CAST(sf.source_run_id AS TEXT), ''), COALESCE(CAST(sf.source_event_id AS TEXT), ''),
+				COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0)`,
+			source: "events e " + eventrecord.SelectedForkLineageSQL, runAlias: "e",
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
-			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id"),
+			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id", "selected_fork_source_run_id", "selected_fork_source_event_id", "selected_fork_authority_stamp", "selected_fork_lineage_owners"),
 			build: func(values map[string]any) map[string]any {
 				values["routing_source"] = map[string]any{
 					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
@@ -359,25 +362,25 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name,
 				e.created_at, e.flow_config, e.construction_kind, e.stage_defined, e.flow_template, e.mode,
 				e.status, e.current_state, e.entered_state_at, e.updated_at, e.terminated_at, e.parent_instance, e.instance_key,
-				e.initial_materialization`,
+				e.initial_projection_version, e.initial_materialization`,
 			// Revision projection preserves both explicit producer kinds. A constructed
 			// header owns metadata even without fields; an import with no header is a
 			// different persisted fact, never inferred runnable construction.
 			source: `(SELECT f.run_id, f.entity_id, f.instance_path AS flow_instance, f.entity_type, f.slug, f.name,
 				f.created_at, f.config AS flow_config, 'constructed' AS construction_kind, f.stage_defined, f.flow_template, f.mode,
 				f.status, f.current_state, f.entered_state_at, f.updated_at, f.terminated_at, f.parent_instance, f.instance_key,
-				i.projection AS initial_materialization
+				i.projection_version AS initial_projection_version, i.projection AS initial_materialization
 				FROM flow_instances f LEFT JOIN workflow_instance_initial_materializations i
 				ON i.run_id=f.run_id AND i.instance_path=f.instance_path AND i.entity_id=f.entity_id
 				UNION ALL
 				SELECT s.run_id, s.entity_id, s.flow_instance, s.entity_type, s.slug, s.name,
 					s.created_at, NULL AS flow_config, 'imported_state' AS construction_kind, FALSE AS stage_defined, NULL AS flow_template, NULL AS mode,
 					NULL AS status, NULL AS current_state, NULL AS entered_state_at, NULL AS updated_at, NULL AS terminated_at, NULL AS parent_instance, NULL AS instance_key,
-					NULL AS initial_materialization
+					NULL AS initial_projection_version, NULL AS initial_materialization
 				FROM entity_state s WHERE NOT EXISTS (
 					SELECT 1 FROM flow_instances f WHERE f.run_id = s.run_id AND f.instance_path = s.flow_instance
 				)) e`, runAlias: "e",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "initial_materialization": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_materialization"),
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime, "initial_materialization": valueJSON}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_projection_version", "initial_materialization"),
 		}
 	case FamilyEventDeliveries:
 		spec = projectionSpec{
@@ -454,7 +457,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			"created_at", "ordinal", "outcome_kind", "event_id", "outcome_source_event_id", "inherited_disposition", "failure",
 			"barrier_target_flow_path", "barrier_target_node_id", "barrier_handler_event", "barrier_join_id",
 			"barrier_route_scope_key", "barrier_route_instance_id", "barrier_route_instance_path", "barrier_entity_id",
-			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_schedule_activation_id", "barrier_updated_at",
+			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_schedule_activation_id", "barrier_updated_at", "barrier_transferred_occurrence",
 		}
 		parts := []projectionPart{
 			{kind: "intent", alias: "i", query: `
@@ -464,7 +467,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					i.source_resource_flow_path, i.source_resource_event_name, i.source_resource_version_id,
 					i.cardinality, i.cursor, i.status, CAST(i.capsule AS TEXT), i.blocked_reason,
 					CAST(i.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
-					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 				FROM fan_out_intents i WHERE i.run_id=$1`},
 			{kind: "outcome", alias: "o", query: `
 				SELECT
@@ -472,7 +475,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
 					CAST(o.created_at AS TEXT), o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.inherited_disposition, CAST(o.failure AS TEXT),
-					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 				FROM fan_out_outcomes o LEFT JOIN fan_out_intents i ON i.run_id=o.run_id AND
 					((i.origin_kind='deployment' AND i.deployment_feed_id=o.deployment_feed_id) OR
 					(i.origin_kind='handler' AND i.triggering_delivery_id=o.triggering_delivery_id AND
@@ -486,7 +489,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					CAST(b.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
 					b.target_flow_path, b.target_node_id, b.handler_event, b.join_id,
 					b.route_scope_key, CAST(b.route_instance_id AS TEXT), b.route_instance_path, CAST(b.entity_id AS TEXT),
-					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.schedule_activation_id AS TEXT), CAST(b.updated_at AS TEXT)
+					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.schedule_activation_id AS TEXT), CAST(b.updated_at AS TEXT), CAST(b.transferred_occurrence AS TEXT)
 				FROM fan_out_obligation_barriers b WHERE b.run_id=$1`},
 		}
 		spec = projectionSpec{
@@ -494,19 +497,19 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			parts: parts,
 			columns: typedColumns(map[string]valueKind{
 				"capsule": valueJSON, "failure": valueJSON, "created_at": valueTime,
-				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime,
+				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime, "barrier_transferred_occurrence": valueJSON,
 			}, names...),
 		}
 	case FamilyTimers:
-		names := []string{"timer_id", "timer_name", "schedule_scope", "schedule_key", "immutable_hash", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner", "entity_id", "flow_scope_key", "flow_instance_id", "flow_instance", "fire_event", "fire_payload", "routing_source", "execution_mode", "fire_at", "initial_fire_at", "recurring", "recurrence_interval", "owner_node", "owner_agent", "owner_kind", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "reply_context_id", "task_id", "due_basis_kind", "due_basis_absolute", "due_basis_duration", "due_basis_cron", "occurrence_event_id", "occurrence_admitted_at", "accepted_at", "cancel_cause", "cancelled_at", "failure_code", "failure_message", "failed_at", "clock_suspension", "task_type", "status", "fired_at", "created_at"}
+		names := []string{"timer_id", "timer_name", "schedule_scope", "schedule_key", "immutable_hash", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner", "entity_id", "flow_scope_key", "flow_instance_id", "flow_instance", "fire_event", "fire_payload", "routing_source", "execution_mode", "fire_at", "initial_fire_at", "recurring", "recurrence_interval", "owner_node", "owner_agent", "owner_kind", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "reply_context_id", "task_id", "due_basis_kind", "due_basis_absolute", "due_basis_duration", "due_basis_cron", "occurrence_event_id", "occurrence_admitted_at", "accepted_at", "cancel_cause", "cancelled_at", "failure_code", "failure_message", "failed_at", "clock_suspension", "task_type", "status", "fired_at", "created_at", "forked_from_point_kind", "forked_from_point_revision", "source_armed_at"}
 		spec = projectionSpec{
-			query:  `SELECT CAST(t.timer_id AS TEXT), t.timer_name, t.schedule_scope, t.schedule_key, t.immutable_hash, CAST(t.run_id AS TEXT), CAST(t.source_timer_id AS TEXT), CAST(t.forked_from_run_id AS TEXT), CAST(t.forked_from_event_id AS TEXT), t.reconstruction_owner, CAST(t.entity_id AS TEXT), t.flow_scope_key, CAST(t.flow_instance_id AS TEXT), t.flow_instance, t.fire_event, t.fire_payload, t.routing_source, t.execution_mode, t.fire_at, t.initial_fire_at, t.recurring, t.recurrence_interval, t.owner_node, t.owner_agent, t.owner_kind, t.agent_name_owner, t.agent_name_source, t.agent_route_presence, t.agent_flow_scope_key, CAST(t.agent_flow_instance_id AS TEXT), t.reply_context_id, t.task_id, t.due_basis_kind, t.due_basis_absolute, t.due_basis_duration, t.due_basis_cron, CAST(t.occurrence_event_id AS TEXT), t.occurrence_admitted_at, t.accepted_at, t.cancel_cause, t.cancelled_at, t.failure_code, t.failure_message, t.failed_at, t.clock_suspension, t.task_type, t.status, t.fired_at, t.created_at`,
+			query:  `SELECT CAST(t.timer_id AS TEXT), t.timer_name, t.schedule_scope, t.schedule_key, t.immutable_hash, CAST(t.run_id AS TEXT), CAST(t.source_timer_id AS TEXT), CAST(t.forked_from_run_id AS TEXT), CAST(t.forked_from_event_id AS TEXT), t.reconstruction_owner, CAST(t.entity_id AS TEXT), t.flow_scope_key, CAST(t.flow_instance_id AS TEXT), t.flow_instance, t.fire_event, t.fire_payload, t.routing_source, t.execution_mode, t.fire_at, t.initial_fire_at, t.recurring, t.recurrence_interval, t.owner_node, t.owner_agent, t.owner_kind, t.agent_name_owner, t.agent_name_source, t.agent_route_presence, t.agent_flow_scope_key, CAST(t.agent_flow_instance_id AS TEXT), t.reply_context_id, t.task_id, t.due_basis_kind, t.due_basis_absolute, t.due_basis_duration, t.due_basis_cron, CAST(t.occurrence_event_id AS TEXT), t.occurrence_admitted_at, t.accepted_at, t.cancel_cause, t.cancelled_at, t.failure_code, t.failure_message, t.failed_at, t.clock_suspension, t.task_type, t.status, t.fired_at, t.created_at, t.forked_from_point_kind, t.forked_from_point_revision, t.source_armed_at`,
 			source: "timers t", runAlias: "t",
 			columns: typedColumns(map[string]valueKind{
 				"fire_payload": valueJSON, "routing_source": valueJSON, "clock_suspension": valueJSON,
 				"recurring": valueBool,
 				"fire_at":   valueTime, "initial_fire_at": valueTime, "due_basis_absolute": valueTime,
-				"occurrence_admitted_at": valueTime, "accepted_at": valueTime, "cancelled_at": valueTime, "failed_at": valueTime, "fired_at": valueTime, "created_at": valueTime,
+				"occurrence_admitted_at": valueTime, "accepted_at": valueTime, "cancelled_at": valueTime, "failed_at": valueTime, "fired_at": valueTime, "created_at": valueTime, "source_armed_at": valueTime,
 			}, names...),
 		}
 	case FamilyAgentSessions:
@@ -528,11 +531,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime}, "session_id", "status", "created_at", "updated_at"),
 		}
 	case FamilyReplyContexts:
-		spec = projectionSpec{
-			query:  `SELECT r.reply_context_id, CAST(r.request_event_id AS TEXT), r.state, r.created_at, r.updated_at, r.terminal_at`,
-			source: "reply_contexts r", runAlias: "r",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime, "terminal_at": valueTime}, "reply_context_id", "request_event_id", "state", "created_at", "updated_at", "terminal_at"),
-		}
+		spec = replyContextProjectionSpec()
 	default:
 		return projectionSpec{}, false
 	}

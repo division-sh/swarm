@@ -1980,13 +1980,26 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		delete(entity, source.Field)
 		delete(stateFields, source.Field)
 	}
+	incoming := events.DeliveryContextFromContext(frame.ctx).ReplyOnly()
 	var receiver *fanoutobligation.ExecutionReceiver
 	if route, ok := runtimedelivery.RouteFromContext(frame.ctx); ok {
+		if route.Context.ReplyContextID() != incoming.ReplyContextID() {
+			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out continuation differs from its admitted delivery context")
+		}
+		if !incoming.Empty() {
+			routeID, err := route.Identity()
+			if err != nil || events.EncodeDeliveryRouteIdentity(routeID) != claim.RouteIdentity() || claim.RunID() != frame.req.Event.RunID() {
+				return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out reply continuation requires its exact claimed delivery route")
+			}
+		}
 		projected, err := fanoutobligation.ProjectExecutionReceiver(route)
 		if err != nil {
 			return fanoutobligation.IntentRequest{}, err
 		}
 		receiver = &projected
+	}
+	if !incoming.Empty() && receiver == nil {
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out reply continuation requires its admitted delivery route")
 	}
 	request := fanoutobligation.IntentRequest{
 		Key: fanoutobligation.IntentKey{
@@ -1996,11 +2009,12 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		Source:      source,
 		Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{
+			SourcePlanRef:    plan.Ref,
 			SourceProjection: plan.SemanticEvidence(),
 			NodeKey:          frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
 			EntityID: frame.req.EntityID.String(), HandlerEventKey: frame.req.HandlerEventKey,
 			CurrentState: frame.state.State.CurrentState, ChainDepth: frame.req.ChainDepth,
-			ProducerSource: frame.req.ProducerSource, Receiver: receiver, Lineage: events.LineageFromEvent(frame.req.Event),
+			ProducerSource: frame.req.ProducerSource, Receiver: receiver, Context: incoming, Lineage: events.LineageFromEvent(frame.req.Event),
 			Entity: entity, PlatformEntity: cloneStringAnyMap(ctx.PlatformEntity.Raw()), Computed: cloneStringAnyMap(ctx.Computed.Raw()),
 			Accumulated: cloneStringAnyMap(ctx.Accumulated.Raw()), Join: cloneStringAnyMap(ctx.Join.Raw()), Loop: cloneStringAnyMap(ctx.Loop.Raw()),
 			StateFields: stateFields, StateBookkeeping: cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping),

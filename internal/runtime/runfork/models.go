@@ -10,16 +10,20 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 
 	"sort"
 	"strings"
@@ -229,11 +233,12 @@ type RunForkMaterializeRequest struct {
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string
 	At                      string
+	AtStart                 bool `json:"at_start,omitempty"`
 	ContractSelection       *RunForkContractSelection
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
+	SelectedFanOutPlans     semanticview.FanOutPlanCarriage
 }
 
 type RunForkMaterialization struct {
@@ -267,32 +272,41 @@ const (
 type RunForkPlanRequest struct {
 	SourceRunID   string
 	At            string
+	AtStart       bool `json:"at_start,omitempty"`
 	ResolvedPoint *RunForkPoint
 }
 
 type RunForkPlan struct {
-	SourceRunID               string                            `json:"source_run_id"`
-	SourceRunStatus           string                            `json:"source_run_status,omitempty"`
-	SourceRunStartedAt        *time.Time                        `json:"source_run_started_at,omitempty"`
-	SourceRunEndedAt          *time.Time                        `json:"source_run_ended_at,omitempty"`
-	ForkPoint                 RunForkPoint                      `json:"fork_point"`
-	EventCountAtFork          int                               `json:"event_count_at_fork"`
-	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
-	PendingWorkCount          int                               `json:"pending_work_count"`
-	FanOutObligationCount     int                               `json:"fan_out_obligation_count"`
-	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
-	ExecutionReady            bool                              `json:"execution_ready"`
-	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
-	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
-	SelectedContractExecution *RunForkSelectedContractExecution `json:"selected_contract_execution,omitempty"`
-	SelectedContractReadiness *RunForkSelectedContractReadiness `json:"selected_contract_readiness,omitempty"`
-	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
-	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
-	FanOutObligations         []RunForkFanOutObligation         `json:"fan_out_obligations,omitempty"`
-	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
+	SourceRunID               string                                          `json:"source_run_id"`
+	SourceRunStatus           string                                          `json:"source_run_status,omitempty"`
+	SourceRunStartedAt        *time.Time                                      `json:"source_run_started_at,omitempty"`
+	SourceRunEndedAt          *time.Time                                      `json:"source_run_ended_at,omitempty"`
+	ForkPoint                 RunForkPoint                                    `json:"fork_point"`
+	StartFirstTurn            *InputPublication                               `json:"-"`
+	ReplyContexts             []replycontext.Record                           `json:"-"`
+	WorkflowTimers            []timerobligation.WorkflowTimerActivationRecord `json:"-"`
+	JoinSchedules             []genericschedule.Activation                    `json:"-"`
+	TransferredJoins          []genericschedule.TransferredJoinOccurrence     `json:"-"`
+	EventCountAtFork          int                                             `json:"event_count_at_fork"`
+	ReconstructedEntityCount  int                                             `json:"reconstructed_entity_count"`
+	PendingWorkCount          int                                             `json:"pending_work_count"`
+	FanOutObligationCount     int                                             `json:"fan_out_obligation_count"`
+	UnsupportedBlockerCount   int                                             `json:"unsupported_blocker_count"`
+	ExecutionReady            bool                                            `json:"execution_ready"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission                    `json:"replay_resume_admission"`
+	ContractFrontierAdmission *RunForkContractFrontierAdmission               `json:"contract_frontier_admission,omitempty"`
+	SelectedContractExecution *RunForkSelectedContractExecution               `json:"selected_contract_execution,omitempty"`
+	SelectedContractReadiness *RunForkSelectedContractReadiness               `json:"selected_contract_readiness,omitempty"`
+	Entities                  []RunForkEntityState                            `json:"entities,omitempty"`
+	PendingWork               []RunForkPendingWork                            `json:"pending_work,omitempty"`
+	FanOutObligations         []RunForkFanOutObligation                       `json:"fan_out_obligations,omitempty"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker                     `json:"unsupported_blockers,omitempty"`
 	historicalRevision        int64
 	historicalEventIDs        []string
 	historicalInputs          map[string]InputPublication
+	historicalJoins           map[string]PublishedJoinOccurrence
+	historicalRequests        map[string][]string
+	historicalReplyReturns    *historicalReplyReturns
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a
@@ -316,22 +330,144 @@ const (
 // RunForkDeploymentPendingEvent is fixed-revision deployment work, not generic
 // historical agent replay. The selected fork owner must transfer it explicitly.
 type RunForkDeploymentPendingEvent struct {
-	Ordinal           int                           `json:"ordinal"`
-	SourceEventID     string                        `json:"source_event_id"`
-	SourceDeliveryIDs []string                      `json:"source_delivery_ids"`
-	Phase             RunForkDeploymentPendingPhase `json:"phase"`
+	Ordinal              int                                           `json:"ordinal"`
+	SourceEventID        string                                        `json:"source_event_id"`
+	SourceDeliveryIDs    []string                                      `json:"source_delivery_ids"`
+	InheritedDisposition fanoutobligation.InheritedTerminalDisposition `json:"inherited_disposition,omitempty"`
+	Phase                RunForkDeploymentPendingPhase                 `json:"phase"`
 }
 
-// RunForkFanOutPendingReplay is a fixed-revision nonterminal ordinal that may
-// become child-local only through the existing historical delivery replay.
+// RunForkFanOutPendingReplay carries a fixed publication's unfinished recipients.
+// Each origin retains its own admission law; this evidence is not authority.
 type RunForkFanOutPendingReplay struct {
-	Ordinal       int    `json:"ordinal"`
-	SourceEventID string `json:"source_event_id"`
+	Ordinal              int                                           `json:"ordinal"`
+	SourceEventID        string                                        `json:"source_event_id"`
+	SourceDeliveryIDs    []string                                      `json:"source_delivery_ids"`
+	InheritedDisposition fanoutobligation.InheritedTerminalDisposition `json:"inherited_disposition,omitempty"`
 }
 
-// ValidateFanOutPendingReplayAdmission proves that every nonterminal fan-out
-// ordinal can be reconstructed entirely by the existing historical replay.
+func validFanOutPendingRetainedDisposition(disposition fanoutobligation.InheritedTerminalDisposition) bool {
+	return disposition == "" || disposition == fanoutobligation.InheritedSucceeded ||
+		disposition == fanoutobligation.InheritedDeadLettered || disposition == fanoutobligation.InheritedCanceled
+}
+
+func validateFanOutPendingPartition(plan RunForkPlan, obligation RunForkFanOutObligation, replay RunForkFanOutPendingReplay) error {
+	eventID := replay.SourceEventID
+	runUUID, err := uuid.Parse(plan.SourceRunID)
+	if err != nil || runUUID == uuid.Nil || runUUID.String() != plan.SourceRunID || obligation.Intent.Request.Key.RunID != plan.SourceRunID {
+		return fmt.Errorf("fork fan-out pending event %s disagrees with source run identity", eventID)
+	}
+	if !validFanOutPendingRetainedDisposition(replay.InheritedDisposition) {
+		return fmt.Errorf("fork fan-out pending event %s has invalid retained terminal contribution", eventID)
+	}
+	if len(replay.SourceDeliveryIDs) == 0 {
+		return fmt.Errorf("fork fan-out pending event %s requires explicit unfinished delivery IDs", eventID)
+	}
+	owedDeliveries, err := fanOutPendingDeliverySet(replay)
+	if err != nil {
+		return err
+	}
+	seenDeliveries := make(map[string]struct{})
+	matchedDeliveries := make(map[string]struct{}, len(owedDeliveries))
+	for _, pending := range plan.PendingWork {
+		_, owed := owedDeliveries[pending.DeliveryID]
+		if pending.EventID != eventID {
+			if owed || strings.TrimSpace(pending.EventID) == eventID {
+				return fmt.Errorf("fork fan-out pending event %s delivery %s has mismatched source event", eventID, pending.DeliveryID)
+			}
+			continue
+		}
+		// Platform receipts are event history, not delivery obligations.
+		if pending.DeliveryID == "" {
+			continue
+		}
+		if _, duplicate := seenDeliveries[pending.DeliveryID]; duplicate {
+			return fmt.Errorf("fork fan-out pending event %s repeats delivery evidence %s", eventID, pending.DeliveryID)
+		}
+		seenDeliveries[pending.DeliveryID] = struct{}{}
+		unfinished, err := validateCanonicalFanOutPendingDelivery(plan.SourceRunID, pending)
+		if err != nil {
+			return err
+		}
+		if !unfinished {
+			if owed {
+				return fmt.Errorf("fork fan-out pending event %s includes terminal delivery %s", eventID, pending.DeliveryID)
+			}
+			continue
+		}
+		if !owed {
+			return fmt.Errorf("fork fan-out pending event %s omits unfinished delivery %s", eventID, pending.DeliveryID)
+		}
+		matchedDeliveries[pending.DeliveryID] = struct{}{}
+	}
+	for _, deliveryID := range replay.SourceDeliveryIDs {
+		if _, matched := matchedDeliveries[deliveryID]; !matched {
+			return fmt.Errorf("fork fan-out pending event %s has no exact unfinished delivery evidence for %s", eventID, deliveryID)
+		}
+	}
+	return nil
+}
+
+func fanOutPendingDeliverySet(replay RunForkFanOutPendingReplay) (map[string]struct{}, error) {
+	owed := make(map[string]struct{}, len(replay.SourceDeliveryIDs))
+	for _, deliveryID := range replay.SourceDeliveryIDs {
+		deliveryUUID, err := uuid.Parse(deliveryID)
+		if err != nil || deliveryUUID == uuid.Nil || deliveryUUID.String() != deliveryID {
+			return nil, fmt.Errorf("fork fan-out pending event %s requires exact canonical delivery UUID", replay.SourceEventID)
+		}
+		if _, duplicate := owed[deliveryID]; duplicate {
+			return nil, fmt.Errorf("fork fan-out pending event %s repeats delivery %s", replay.SourceEventID, deliveryID)
+		}
+		owed[deliveryID] = struct{}{}
+	}
+	return owed, nil
+}
+
+func validateCanonicalFanOutPendingDelivery(sourceRunID string, pending RunForkPendingWork) (bool, error) {
+	deliveryUUID, err := uuid.Parse(pending.DeliveryID)
+	if err != nil || deliveryUUID == uuid.Nil || deliveryUUID.String() != pending.DeliveryID {
+		return false, fmt.Errorf("fork fan-out pending event %s has noncanonical delivery evidence", pending.EventID)
+	}
+	unfinished := false
+	var status string
+	switch pending.Classification {
+	case RunForkPendingClassificationPending:
+		status, unfinished = "pending", true
+	case RunForkPendingClassificationInProgress:
+		status, unfinished = "in_progress", true
+	case RunForkPendingClassificationFailedRetryable:
+		status, unfinished = "failed", true
+	case RunForkPendingClassificationDeliveredCompleted:
+		status = "delivered"
+	case RunForkPendingClassificationDeadLetter:
+		status = "dead_letter"
+	case RunForkPendingClassificationCanceled:
+		status = "canceled"
+	default:
+		return false, fmt.Errorf("fork fan-out pending event %s delivery %s has unsupported classification", pending.EventID, pending.DeliveryID)
+	}
+	if pending.Status != status {
+		return false, fmt.Errorf("fork fan-out pending event %s delivery %s has contradictory classification/status", pending.EventID, pending.DeliveryID)
+	}
+	if !unfinished {
+		return false, nil
+	}
+	route := pending.DeliveryRoute
+	exactDeliveryID, err := deliverylifecycle.DeliveryID(pending.EventID, route)
+	if err != nil {
+		return false, fmt.Errorf("fork fan-out pending delivery %s route: %w", pending.DeliveryID, err)
+	}
+	if exactDeliveryID != pending.DeliveryID || pending.SubscriberType != route.Recipient.Code() || pending.SubscriberID != route.Recipient.ID() ||
+		(route.Recipient.IsAgent() && route.AgentIdentity.RunID != sourceRunID) {
+		return false, fmt.Errorf("fork fan-out pending delivery %s contradicts exact source route identity", pending.DeliveryID)
+	}
+	return true, nil
+}
+
+// ValidateFanOutPendingReplayAdmission proves the exact fixed-cut recipient
+// relation. Historical claims, sessions and retries do not authorize execution.
 func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
+	seenHandlerEvents := make(map[string]struct{})
 	seenDeploymentEvents := make(map[string]struct{})
 	for _, obligation := range plan.FanOutObligations {
 		if obligation.Intent.Request.Deployment == nil && len(obligation.PendingDeployment) != 0 {
@@ -342,6 +478,9 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 		}
 		seenOrdinals := make(map[int]struct{}, obligation.Intent.Cursor)
 		for _, outcome := range obligation.Outcomes {
+			if err := outcome.Validate(); err != nil {
+				return fmt.Errorf("fork fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
+			}
 			if outcome.Ordinal < 0 || outcome.Ordinal >= obligation.Intent.Cursor {
 				return fmt.Errorf("fork fan-out outcome ordinal %d is outside cursor %d", outcome.Ordinal, obligation.Intent.Cursor)
 			}
@@ -352,35 +491,26 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 		}
 		seenEvents := make(map[string]struct{}, len(obligation.PendingReplays))
 		for _, replay := range obligation.PendingReplays {
-			eventID := strings.TrimSpace(replay.SourceEventID)
+			eventID := replay.SourceEventID
 			if replay.Ordinal < 0 || replay.Ordinal >= obligation.Intent.Cursor {
 				return fmt.Errorf("fork fan-out pending ordinal %d is outside cursor %d", replay.Ordinal, obligation.Intent.Cursor)
 			}
 			if _, duplicate := seenOrdinals[replay.Ordinal]; duplicate {
 				return fmt.Errorf("fork fan-out ordinal %d has duplicate fixed-revision facts", replay.Ordinal)
 			}
-			if _, err := uuid.Parse(eventID); err != nil {
-				return fmt.Errorf("fork fan-out pending ordinal %d requires source event UUID: %w", replay.Ordinal, err)
+			eventUUID, err := uuid.Parse(eventID)
+			if err != nil || eventUUID == uuid.Nil || eventUUID.String() != eventID {
+				return fmt.Errorf("fork fan-out pending ordinal %d requires exact canonical source event UUID", replay.Ordinal)
 			}
-			if _, duplicate := seenEvents[eventID]; duplicate {
-				return fmt.Errorf("fork fan-out pending source event %s is bound to multiple ordinals", eventID)
+			if _, duplicate := seenHandlerEvents[eventID]; duplicate {
+				return fmt.Errorf("fork fan-out pending source event %s is bound to multiple handler ordinals or intents", eventID)
+			}
+			if err := validateFanOutPendingPartition(plan, obligation, replay); err != nil {
+				return err
 			}
 			seenOrdinals[replay.Ordinal] = struct{}{}
 			seenEvents[eventID] = struct{}{}
-
-			deliveries := 0
-			for _, pending := range plan.PendingWork {
-				if strings.TrimSpace(pending.EventID) != eventID {
-					continue
-				}
-				deliveries++
-				if !RunForkPendingWorkReplayableForHistoricalReplay(pending) {
-					return fmt.Errorf("fork fan-out pending event %s includes unsupported delivery %s", eventID, strings.TrimSpace(pending.DeliveryID))
-				}
-			}
-			if deliveries == 0 {
-				return fmt.Errorf("fork fan-out pending event %s has no replayable delivery evidence", eventID)
-			}
+			seenHandlerEvents[eventID] = struct{}{}
 		}
 		for _, candidate := range obligation.PendingDeployment {
 			if candidate.Ordinal < 0 || candidate.Ordinal >= obligation.Intent.Cursor {
@@ -393,6 +523,9 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 			if eventErr != nil || eventUUID == uuid.Nil || eventUUID.String() != candidate.SourceEventID || len(candidate.SourceDeliveryIDs) == 0 ||
 				(candidate.Phase != RunForkDeploymentPendingPublication && candidate.Phase != RunForkDeploymentPendingReceiver) {
 				return fmt.Errorf("fork deployment ordinal %d lacks exact pending event evidence", candidate.Ordinal)
+			}
+			if !validFanOutPendingRetainedDisposition(candidate.InheritedDisposition) {
+				return fmt.Errorf("fork deployment ordinal %d has invalid retained terminal contribution", candidate.Ordinal)
 			}
 			if _, duplicate := seenEvents[candidate.SourceEventID]; duplicate {
 				return fmt.Errorf("fork deployment event %s is bound to multiple ordinals", candidate.SourceEventID)
@@ -431,11 +564,23 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 					return fmt.Errorf("fork deployment delivery %s has %d fixed facts", deliveryID, matches)
 				}
 			}
+			seenFacts := make(map[string]bool)
 			for _, pending := range plan.PendingWork {
 				if pending.EventID != candidate.SourceEventID || pending.DeliveryID == "" {
 					continue
 				}
+				if seenFacts[pending.DeliveryID] {
+					return fmt.Errorf("fork deployment event %s repeats delivery evidence %s", candidate.SourceEventID, pending.DeliveryID)
+				}
+				seenFacts[pending.DeliveryID] = true
 				if _, admitted := seenDeliveries[pending.DeliveryID]; !admitted {
+					switch pending.Classification {
+					case RunForkPendingClassificationDeliveredCompleted, RunForkPendingClassificationDeadLetter, RunForkPendingClassificationCanceled:
+						if _, err := validateCanonicalFanOutPendingDelivery(plan.SourceRunID, pending); err != nil {
+							return err
+						}
+						continue
+					}
 					return fmt.Errorf("fork deployment event %s omits pending delivery %s", candidate.SourceEventID, pending.DeliveryID)
 				}
 			}
@@ -467,22 +612,86 @@ func ValidateFanOutPendingReplayExecution(plan RunForkPlan, work []RunForkHistor
 	}
 	workByDelivery := make(map[string]RunForkHistoricalReplayExecutableWork, len(work))
 	for _, item := range work {
-		workByDelivery[strings.TrimSpace(item.SourceDeliveryID)] = item
+		deliveryID := strings.TrimSpace(item.SourceDeliveryID)
+		if _, duplicate := workByDelivery[deliveryID]; duplicate {
+			return fmt.Errorf("fork replay execution repeats source delivery %s", deliveryID)
+		}
+		workByDelivery[deliveryID] = item
+	}
+	owedByDelivery := make(map[string]string)
+	owedEvents := make(map[string]struct{})
+	fixedByDelivery := make(map[string]RunForkPendingWork)
+	for _, pending := range plan.PendingWork {
+		if pending.DeliveryID != "" {
+			fixedByDelivery[pending.DeliveryID] = pending
+		}
 	}
 	for _, obligation := range plan.FanOutObligations {
-		for _, replay := range obligation.PendingReplays {
-			for _, pending := range plan.PendingWork {
-				if strings.TrimSpace(pending.EventID) != strings.TrimSpace(replay.SourceEventID) {
-					continue
-				}
-				item, ok := workByDelivery[strings.TrimSpace(pending.DeliveryID)]
-				if !ok || strings.TrimSpace(item.SourceEventID) != strings.TrimSpace(replay.SourceEventID) {
-					return fmt.Errorf("fork fan-out pending event %s delivery %s is absent from exact replay execution", replay.SourceEventID, pending.DeliveryID)
+		partitions := append([]RunForkFanOutPendingReplay(nil), obligation.PendingReplays...)
+		for _, pending := range obligation.PendingDeployment {
+			partitions = append(partitions, RunForkFanOutPendingReplay{SourceEventID: pending.SourceEventID, SourceDeliveryIDs: pending.SourceDeliveryIDs})
+		}
+		for _, replay := range partitions {
+			owedEvents[replay.SourceEventID] = struct{}{}
+			for _, deliveryID := range replay.SourceDeliveryIDs {
+				owedByDelivery[deliveryID] = replay.SourceEventID
+				item, ok := workByDelivery[deliveryID]
+				fixed := fixedByDelivery[deliveryID]
+				if !ok || item.Fact != RunForkHistoricalReplayFactEventDeliveries || item.SourceDeliveryID != deliveryID || item.SourceEventID != replay.SourceEventID ||
+					item.SubscriberType != fixed.SubscriberType || item.SubscriberID != fixed.SubscriberID || item.Classification != fixed.Classification || item.ReasonCode != fixed.ReasonCode {
+					return fmt.Errorf("fork fan-out pending event %s delivery %s is absent from exact replay execution", replay.SourceEventID, deliveryID)
 				}
 			}
 		}
 	}
+	for _, item := range work {
+		if _, owedEvent := owedEvents[strings.TrimSpace(item.SourceEventID)]; !owedEvent {
+			continue
+		}
+		if owedByDelivery[item.SourceDeliveryID] != item.SourceEventID {
+			return fmt.Errorf("fork fan-out pending event %s includes unowed execution delivery %s", item.SourceEventID, item.SourceDeliveryID)
+		}
+	}
 	return nil
+}
+
+// FanOutPendingReplay returns only an admitted handler-owned fixed-cut relation.
+// A missing event is reported explicitly; it never falls back to PendingWork.
+func (p RunForkPlan) FanOutPendingReplay(eventID string) (RunForkFanOutPendingReplay, bool, error) {
+	if err := ValidateFanOutPendingReplayAdmission(p); err != nil {
+		return RunForkFanOutPendingReplay{}, false, err
+	}
+	eventUUID, err := uuid.Parse(eventID)
+	if err != nil || eventUUID == uuid.Nil || eventUUID.String() != eventID {
+		return RunForkFanOutPendingReplay{}, false, fmt.Errorf("fork fan-out pending lookup requires exact canonical source event UUID")
+	}
+	for _, obligation := range p.FanOutObligations {
+		for _, replay := range obligation.PendingReplays {
+			if replay.SourceEventID == eventID {
+				replay.SourceDeliveryIDs = append([]string(nil), replay.SourceDeliveryIDs...)
+				return replay, true, nil
+			}
+		}
+	}
+	return RunForkFanOutPendingReplay{}, false, nil
+}
+
+// FanOutPendingRecipientPartition supplies the same immutable routing partition
+// for both origins without admitting deployment work to generic replay.
+func (p RunForkPlan) FanOutPendingRecipientPartition(eventID string) (RunForkFanOutPendingReplay, bool, error) {
+	replay, present, err := p.FanOutPendingReplay(eventID)
+	if err != nil || present {
+		return replay, present, err
+	}
+	for _, obligation := range p.FanOutObligations {
+		for _, pending := range obligation.PendingDeployment {
+			if pending.SourceEventID == eventID {
+				return RunForkFanOutPendingReplay{Ordinal: pending.Ordinal, SourceEventID: pending.SourceEventID,
+					SourceDeliveryIDs: append([]string(nil), pending.SourceDeliveryIDs...), InheritedDisposition: pending.InheritedDisposition}, true, nil
+			}
+		}
+	}
+	return RunForkFanOutPendingReplay{}, false, nil
 }
 
 func (p RunForkPlan) WithHistoricalEvents(revision int64, eventIDs []string) RunForkPlan {
@@ -503,6 +712,7 @@ type RunForkPointKind = forkpoint.Kind
 const (
 	RunForkPointEvent              RunForkPointKind = forkpoint.Event
 	RunForkPointDeploymentRevision RunForkPointKind = forkpoint.DeploymentRevision
+	RunForkPointRunStart           RunForkPointKind = forkpoint.RunStart
 )
 
 type RunForkPoint struct {
@@ -524,24 +734,36 @@ func (p RunForkPoint) Validate() error {
 	}
 	switch p.Kind {
 	case RunForkPointEvent:
-	case RunForkPointDeploymentRevision:
+	case RunForkPointDeploymentRevision, RunForkPointRunStart:
 		if p.Input != "" || p.EventName != "" || p.SourceEventID != "" ||
 			p.ProducedBy != "" || p.ProducedByType != "" || p.RoutingSource != (events.RoutingSource{}) || !p.Timestamp.IsZero() {
-			return fmt.Errorf("deployment revision fork point cannot carry event evidence")
+			label := "deployment revision"
+			if p.Kind == RunForkPointRunStart {
+				label = "run start"
+			}
+			return fmt.Errorf("%s fork point cannot carry event evidence", label)
 		}
 	}
 	return nil
 }
 
+// SameIdentity compares the persisted cut, not diagnostic event metadata.
+func (p RunForkPoint) SameIdentity(other RunForkPoint) bool {
+	return p.Validate() == nil && other.Validate() == nil && p.Kind == other.Kind &&
+		p.Revision == other.Revision && p.EventID == other.EventID
+}
+
 type RunForkEntityState struct {
-	EntityID                string                                     `json:"entity_id"`
-	CurrentState            string                                     `json:"current_state,omitempty"`
-	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
-	Fields                  map[string]any                             `json:"fields,omitempty"`
-	Bookkeeping             map[string]any                             `json:"bookkeeping,omitempty"`
-	Gates                   map[string]any                             `json:"gates,omitempty"`
-	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
-	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`
+	EntityID                string                                      `json:"entity_id"`
+	CurrentState            string                                      `json:"current_state,omitempty"`
+	EnteredStateAt          *time.Time                                  `json:"entered_state_at,omitempty"`
+	Fields                  map[string]any                              `json:"fields,omitempty"`
+	Bookkeeping             map[string]any                              `json:"bookkeeping,omitempty"`
+	Gates                   map[string]any                              `json:"gates,omitempty"`
+	Accumulator             map[string]any                              `json:"accumulator,omitempty"`
+	PublishedArrivals       []PublishedJoinOccurrence                   `json:"-"`
+	TransferredJoins        []genericschedule.TransferredJoinOccurrence `json:"-"`
+	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata  `json:"materialization_metadata,omitempty"`
 }
 
 type RunForkPendingWork struct {
@@ -1172,6 +1394,7 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
+	InheritedSchedules    InheritedScheduleSelection `json:"-"`
 	ForkOperation         *ForkOperationRequest
 	ExecutedEventCount    int
 	DataPins              []durabledata.Pin
@@ -1185,13 +1408,19 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	InputPublication InputPublication     `json:"-"`
-	SourceEventID    string               `json:"source_event_id"`
-	EventName        string               `json:"event_name"`
-	ExecutionMode    executionmode.Mode   `json:"execution_mode"`
-	Scope            string               `json:"scope,omitempty"`
-	RoutingSource    events.RoutingSource `json:"routing_source"`
-	Payload          json.RawMessage      `json:"payload,omitempty"`
+	PublishedActivityResult  activityresult.PublishedContinuation `json:"-"`
+	InputPublication         InputPublication                     `json:"-"`
+	JoinContinuation         genericschedule.JoinContinuation     `json:"-"`
+	JoinRoute                events.DeliveryRoute                 `json:"-"`
+	ContinuedRecipientRoutes []events.DeliveryRoute               `json:"-"`
+	ContinuedReplyRequests   []replycontext.Record                `json:"-"`
+	ContinuedReplyReturn     *replycontext.Record                 `json:"-"`
+	SourceEventID            string                               `json:"source_event_id"`
+	EventName                string                               `json:"event_name"`
+	ExecutionMode            executionmode.Mode                   `json:"execution_mode"`
+	Scope                    string                               `json:"scope,omitempty"`
+	RoutingSource            events.RoutingSource                 `json:"routing_source"`
+	Payload                  json.RawMessage                      `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {
@@ -1359,6 +1588,7 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {
+	InheritedSchedules         InheritedScheduleSelection `json:"-"`
 	Preparation                SelectedForkPreparationBinding
 	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission

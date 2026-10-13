@@ -20,7 +20,7 @@ func TestCompletedInputRecipientRequiresExactExecutionSlot(t *testing.T) {
 	route := events.DeliveryRoute{Recipient: recipient.Recipient, Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "child", FlowInstance: "child/one", EntityID: "source-entity",
 	})}
-	if !completedInputRecipient("source-run", route, recipient) {
+	if !matchesHistoricalRecipient("source-run", route, recipient) {
 		t.Fatal("exact completed recipient was not excluded")
 	}
 	for _, tc := range []struct {
@@ -33,14 +33,14 @@ func TestCompletedInputRecipientRequiresExactExecutionSlot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := route
 			changed.Target = events.MustExistingEntityTarget(tc.target)
-			if completedInputRecipient("source-run", changed, recipient) {
+			if matchesHistoricalRecipient("source-run", changed, recipient) {
 				t.Fatal("completion removed a distinct pending recipient")
 			}
 		})
 	}
 	other := route
 	other.Recipient = events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "child", "other"))
-	if completedInputRecipient("source-run", other, recipient) {
+	if matchesHistoricalRecipient("source-run", other, recipient) {
 		t.Fatal("another handler removed pending work")
 	}
 	plan := recipientAuthorityAgentPlan(t, "child")
@@ -53,14 +53,14 @@ func TestCompletedInputRecipientRequiresExactExecutionSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentRoute := events.DeliveryRoute{Recipient: agent.Recipient, AgentIdentity: live}
-	if !completedInputRecipient("source-run", agentRoute, agent) {
+	if !matchesHistoricalRecipient("source-run", agentRoute, agent) {
 		t.Fatal("exact completed agent was not excluded")
 	}
 	for _, different := range []agentidentity.Identity{
 		mustInputAgent(t, plan, "other-run"), mustInputAgent(t, recipientAuthorityAgentPlan(t, "other"), "source-run"),
 	} {
 		agentRoute.AgentIdentity = different
-		if completedInputRecipient("source-run", agentRoute, agent) {
+		if matchesHistoricalRecipient("source-run", agentRoute, agent) {
 			t.Fatal("foreign agent completion removed pending work")
 		}
 	}

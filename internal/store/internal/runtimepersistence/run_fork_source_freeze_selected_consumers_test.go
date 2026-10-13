@@ -48,8 +48,8 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 			if err := surface.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 				t.Fatalf("quiesce accepted selected execution after source retirement: %v", err)
 			}
-			if err := surface.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); err != nil {
-				t.Fatalf("close accepted selected execution after source retirement: %v", err)
+			if acknowledged, err := surface.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); !acknowledged || err != nil {
+				t.Fatalf("close accepted selected execution after source retirement: acknowledged=%t error=%v", acknowledged, err)
 			}
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen selected authority current=%v err=%v", current, err)

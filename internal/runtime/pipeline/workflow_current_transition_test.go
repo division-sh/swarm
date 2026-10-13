@@ -63,7 +63,7 @@ func TestWorkflowCurrentTransitionProducerBoundAndBytes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected, err := decoded.Project(route, decoded.ParentRoute())
+			projected, err := decoded.Project(route, decoded.ParentRoute(), decoded.WorkflowVersion())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -112,6 +112,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 			CreateReplyContext(context.Context, replycontext.Record) error
 		}).CreateReplyContext(ctx, replycontext.Record{
 			ID: reply, RunID: run, RequestEventID: request, RequesterFlowID: ".", ProviderFlowID: ".",
+			SourceRunID: run, SourceRequestEventID: request,
 			RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
 			Origin: events.RouteIdentity{FlowID: ".", FlowInstance: run, EntityID: run}, RequestCorrelationID: request, State: replycontext.StateOpen, CreatedAt: at, UpdatedAt: at,
 		})

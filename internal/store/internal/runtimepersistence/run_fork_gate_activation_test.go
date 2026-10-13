@@ -57,7 +57,7 @@ type runForkGateSelectedStoreProof struct {
 	StageGateProvenanceRetained bool
 	ProposedEffectPending       bool
 	ProposedEffectForkLocal     bool
-	ProposedEffectReplyDetached bool
+	ProposedEffectReplyAbsent   bool
 	ProposedEffectInputRetained bool
 }
 
@@ -131,6 +131,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 				t.Fatalf("create source stage gate: %v", err)
 			}
 			sourceEffectCard, sourceEffect := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
+			sourceEffectCard, sourceEffect = runForkProposedEffectWithoutReplyForTest(t, sourceEffectCard, sourceEffect)
 			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
 				t.Fatalf("create source proposed effect: %v", err)
 			}
@@ -191,7 +192,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 				StageGateProvenanceRetained: forkedFrom.Interface() == sourceCard.CardID,
 				ProposedEffectPending:       forkEffectCard.Status == decisioncard.StatusPending && forkEffect.State == decisioncard.ProposedEffectPending,
 				ProposedEffectForkLocal:     forkEffect.RunID == forkRunID && forkEffect.CardID != sourceEffect.CardID && forkEffect.SourceRunID == forkRunID,
-				ProposedEffectReplyDetached: sourceEffect.ReplyContextID != "" && forkEffect.ReplyContextID == "",
+				ProposedEffectReplyAbsent:   sourceEffect.ReplyContextID == "" && forkEffect.ReplyContextID == "",
 				ProposedEffectInputRetained: forkEffect.Input.Equal(sourceEffect.Input),
 			}
 		})
@@ -200,7 +201,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 		t.Fatalf("selected-store fork gate materialization differs:\nsqlite=%#v\npostgres=%#v", proofs["sqlite"], proofs["postgres"])
 	}
 	for backend, proof := range proofs {
-		if !proof.StageGatePending || !proof.StageGateForkLocal || !proof.StageGateProvenanceRetained || !proof.ProposedEffectPending || !proof.ProposedEffectForkLocal || !proof.ProposedEffectReplyDetached || !proof.ProposedEffectInputRetained {
+		if !proof.StageGatePending || !proof.StageGateForkLocal || !proof.StageGateProvenanceRetained || !proof.ProposedEffectPending || !proof.ProposedEffectForkLocal || !proof.ProposedEffectReplyAbsent || !proof.ProposedEffectInputRetained {
 			t.Fatalf("%s fork gate proof incomplete: %#v", backend, proof)
 		}
 	}
@@ -208,6 +209,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 
 func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runForkGateSelectedStore, sourceRunID, forkRunID string, target runtimecontracts.BundleIdentity, decisionProjection, effectProjection runForkEntityProjection, sourceActivation, forkActivation gateruntime.Activation, point runfork.RunForkPoint, now time.Time) error {
 	// These fixtures explicitly have no source loops or generation-bearing effect.
+	plan := runfork.RunForkPlan{SourceRunID: sourceRunID, ForkPoint: point}
 	correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, effectProjection.Fork.EntityID)
 	if err != nil {
 		return err
@@ -219,12 +221,12 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now, nil); err != nil {
 				return err
 			}
-			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now, nil)
+			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, forkRunID, target, effectProjection, correspondence, now, nil)
 		case *SQLiteRuntimeStore:
 			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now, nil); err != nil {
 				return err
 			}
-			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now, nil)
+			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, forkRunID, target, effectProjection, correspondence, now, nil)
 		default:
 			return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
 		}
@@ -322,6 +324,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatal(err)
 			}
 			sourceEffectCard, sourceEffect := newRootProposedEffectTestCard(t, sourceRunID, now)
+			sourceEffectCard, sourceEffect = runForkProposedEffectWithoutReplyForTest(t, sourceEffectCard, sourceEffect)
 			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
 				t.Fatalf("create source root proposed effect: %v", err)
 			}
@@ -480,11 +483,33 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatalf("fork root proposed-effect authority retained source identity: anchor=%#v source=%#v", forkEffectAnchor, effectSourceRoute)
 			}
 			pending, err := selected.LoadProposedEffectContinuation(ctx, forkEffectCard.CardID)
-			if err != nil || pending.Validate(forkEffectCard) != nil || forkEffectCard.Status != decisioncard.StatusPending || pending.DecisionEventID != "" || pending.RunID != forkRunID || pending.SourceRunID != forkRunID || pending.EntityID != forkRunID || pending.FlowInstance != forkRunID || pending.BundleHash != target.BundleHash || pending.WorkflowVersion != target.WorkflowVersion {
+			if err != nil || pending.Validate(forkEffectCard) != nil || forkEffectCard.Status != decisioncard.StatusPending || pending.DecisionEventID != "" || pending.RunID != forkRunID || pending.SourceRunID != forkRunID || pending.EntityID != forkRunID || pending.FlowInstance != forkRunID || pending.BundleHash != target.BundleHash || pending.WorkflowVersion != target.WorkflowVersion || pending.ReplyContextID != "" {
 				t.Fatalf("fork pending effect identity/authority = %#v, %v", pending, err)
 			}
 		})
 	}
+}
+
+func runForkProposedEffectWithoutReplyForTest(t *testing.T, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
+	t.Helper()
+	// These authority fixtures have no captured reply row. Real reply transfer is
+	// covered by TestIssue642PendingEffectRetainsOwnChildReplyBothStores.
+	continuation.ReplyContextID = ""
+	continuation = continuation.Canonical()
+	effect, err := continuation.EffectValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card.EffectContentHash = continuation.EffectContentHash
+	card, err = decisioncard.New(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return card, continuation
 }
 
 func newRootProposedEffectTestCard(t *testing.T, runID string, now time.Time) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
@@ -683,6 +708,9 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 					constructHistoricalSourceFixture(t, runtimecorrelation.WithRunID(ctx, runID), f.store, sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID))
 				}
 				sourceCard, sourceContinuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
+				// This component fixture proves fresh authority with lawful reply absence,
+				// not deletion of a fake source-only reply reference.
+				sourceContinuation.ReplyContextID = ""
 				sourceContinuation.EntityID, sourceContinuation.FlowInstance = sourceRunID, sourceRunID
 				sourceContinuation.BundleHash = f.bundle.SourceArtifact.BundleHash()
 				sourceContinuation.WorkflowVersion = f.bundle.WorkflowVersion()
@@ -712,6 +740,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 					t.Fatal(err)
 				}
 				point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
+				plan := runfork.RunForkPlan{SourceRunID: sourceRunID, ForkPoint: point}
 				projection, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, sourceContinuation.EntityID, sourceContinuation.FlowInstance)
 				if err != nil {
 					t.Fatal(err)
@@ -722,9 +751,9 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				}
 				if err := runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 					if store, ok := opened.store.(*PostgresStore); ok {
-						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, forkRunID, target, projection, correspondence, now.Add(2*time.Minute), nil)
 					}
-					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, forkRunID, target, projection, correspondence, now.Add(2*time.Minute), nil)
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -740,8 +769,8 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if sourceContinuation.ReplyContextID == "" || forkContinuation.ReplyContextID != "" {
-					t.Fatalf("fork reply authority = source:%q fork:%q, want source-only", sourceContinuation.ReplyContextID, forkContinuation.ReplyContextID)
+				if sourceContinuation.ReplyContextID != "" || forkContinuation.ReplyContextID != "" {
+					t.Fatalf("fork reply absence = source:%q fork:%q, want both absent", sourceContinuation.ReplyContextID, forkContinuation.ReplyContextID)
 				}
 				if forkCard.Status != decisioncard.StatusPending || forkCard.CardID == sourceCard.CardID || forkContinuation.RequestEventID == sourceContinuation.RequestEventID || forkContinuation.SourceRunID != forkRunID {
 					t.Fatalf("fork authority retained source identity: source=%#v/%#v fork=%#v/%#v", sourceCard, sourceContinuation, forkCard, forkContinuation)

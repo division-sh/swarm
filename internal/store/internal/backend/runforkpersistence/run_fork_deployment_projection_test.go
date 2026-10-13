@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -131,14 +132,23 @@ func TestRunForkFixedRevisionDeploymentTerminalPrefix(t *testing.T) {
 
 func TestRunForkDeploymentNeedsNoHandlerPlanProof(t *testing.T) {
 	const bundle = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	ref := durabledata.DeclarationRef{FlowPath: ".", EventName: "items.ready"}
+	version := durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("c", 64))
+	source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceResourceVersion, Declaration: ref, VersionID: version}
+	at := time.Now().UTC()
 	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
 		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{
 			Key:        fanoutobligation.IntentKey{RunID: uuid.NewString(), DeploymentFeedID: uuid.NewString()},
-			Deployment: &fanoutobligation.DeploymentOrigin{BundleHash: bundle},
-		}},
+			Deployment: &fanoutobligation.DeploymentOrigin{BundleHash: bundle, Declaration: ref, VersionID: version, SchemaDigest: durabledata.SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("b", 64))},
+			Source:     source,
+		}, Source: source, Status: fanoutobligation.StatusClosed, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: at, UpdatedAt: at},
 	}}}
-	refs, err := resolveRunForkFanOutPlanRefs(plan, bundle, nil)
+	refs, err := resolveRunForkFanOutPlanRefs(plan, bundle, semanticview.FanOutPlanCarriage{})
 	if err != nil || len(refs) != 0 {
 		t.Fatalf("deployment borrowed a handler plan: refs=%v err=%v", refs, err)
+	}
+	plan.FanOutObligations[0].Intent.Request.Deployment.SchemaDigest = ""
+	if _, err := resolveRunForkFanOutPlanRefs(plan, bundle, semanticview.FanOutPlanCarriage{}); err == nil {
+		t.Fatal("plan-free deployment history bypassed its own source admission")
 	}
 }

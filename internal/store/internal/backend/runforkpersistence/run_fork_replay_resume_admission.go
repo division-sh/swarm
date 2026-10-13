@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -53,12 +54,17 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 	if evidence.RelevantTimer {
 		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerTimerHistoryUnproven)
 		blockers = appendRunForkBlocker(blockers, blocker)
-		dispositions = append(dispositions, runfork.RunForkReplayResumeDisposition{
+		disposition := runfork.RunForkReplayResumeDisposition{
 			Fact:        runfork.RunForkReplayResumeFactTimerHistory,
 			Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
 			BlockerCode: blocker.Code,
 			Message:     blocker.Message,
-		})
+		}
+		if certificate, err := evidence.TimerHistory.pendingCertificate(); err == nil {
+			disposition.Owner, disposition.Classification = runForkTimerInventoryOwner, certificate
+			disposition.Message = "complete exact workflow and arrival timer history awaits both selected child inventories; source projection is not execution authority"
+		}
+		dispositions = append(dispositions, disposition)
 		hasHistoricalReplayRequirement = true
 	}
 	if evidence.ActiveSession {
@@ -95,6 +101,8 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		hasHistoricalReplayRequirement = true
 	}
 	if evidence.OpenReplyContext {
+		// Only exact child materialization/readback discharges this branch. A
+		// prospective source projection is not reply continuation authority.
 		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerOpenReplyContextUnsupported)
 		blockers = appendRunForkBlocker(blockers, blocker)
 		dispositions = append(dispositions, runfork.RunForkReplayResumeDisposition{
@@ -117,6 +125,91 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		Dispositions:             dispositions,
 		UnsupportedBlockers:      blockers,
 	}
+}
+
+// Called only after the reply adapter has read back the complete child inventory
+// and its exact request, accepted-event, origin and retained return bindings.
+func dischargeMaterializedRunForkReplyAdmission(admission runfork.RunForkReplayResumeAdmission, records []replycontext.Record) (runfork.RunForkReplayResumeAdmission, error) {
+	hasOpen := false
+	for _, record := range records {
+		if record.State == replycontext.StateOpen {
+			hasOpen = true
+		}
+	}
+	blockers := make([]runfork.RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	for _, blocker := range admission.UnsupportedBlockers {
+		if blocker.Code != runfork.RunForkBlockerOpenReplyContextUnsupported {
+			blockers = append(blockers, blocker)
+			continue
+		}
+		if !hasOpen {
+			return admission, fmt.Errorf("open-reply admission has no exact materialized open reply evidence")
+		}
+	}
+	dispositions := append([]runfork.RunForkReplayResumeDisposition(nil), admission.Dispositions...)
+	hasReplayableDelivery := false
+	for i, disposition := range dispositions {
+		if disposition.Fact == runfork.RunForkReplayResumeFactOpenReplyContext && disposition.BlockerCode == runfork.RunForkBlockerOpenReplyContextUnsupported {
+			if !hasOpen {
+				return admission, fmt.Errorf("open-reply disposition has no exact materialized open reply evidence")
+			}
+			dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionReconstruct
+			dispositions[i].BlockerCode = ""
+			dispositions[i].Message = "exact fixed-cut child reply authority and its retained request/return bindings have been materialized and read back; no request, provider session or newer return arm is replayed"
+		}
+		if disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
+			hasReplayableDelivery = true
+		}
+	}
+	admission.UnsupportedBlockers, admission.Dispositions = blockers, dispositions
+	admission.DeliveryEventReplayReady = hasReplayableDelivery && len(blockers) == 0
+	admission.BoundedReplaySupported = admission.DeliveryEventReplayReady
+	admission.StateOnlyExecutionReady = len(blockers) == 0 && !admission.ReplayResumeFactsPresent
+	return admission, nil
+}
+
+// Called only after require-only native readback covers every projected active
+// source row. Terminal source facts are certified but never rearmed.
+func dischargeMaterializedRunForkTimerAdmission(admission runfork.RunForkReplayResumeAdmission, pending, applied string, projectedCount int) (runfork.RunForkReplayResumeAdmission, error) {
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner ||
+		!strings.HasPrefix(pending, runForkTimerPendingPrefix) ||
+		!strings.HasPrefix(applied, runForkTimerAppliedPrefix) || projectedCount < 0 {
+		return admission, fmt.Errorf("workflow timer discharge requires its exact inventory and readback certificates")
+	}
+	dispositions := append([]runfork.RunForkReplayResumeDisposition(nil), admission.Dispositions...)
+	facts := 0
+	for i, disposition := range dispositions {
+		if disposition.Fact != runfork.RunForkReplayResumeFactTimerHistory {
+			continue
+		}
+		facts++
+		if disposition.Owner != runForkTimerInventoryOwner || disposition.Classification != pending ||
+			disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
+			return admission, fmt.Errorf("workflow timer discharge does not match exact source inventory admission")
+		}
+		dispositions[i].Owner, dispositions[i].Classification = runForkTimerReadbackOwner, applied
+		dispositions[i].BlockerCode = ""
+		dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionReconstruct
+		dispositions[i].Message = "complete workflow and arrival timer inventories have exact selected child native readback; original due, arm and typed source lineage are retained"
+		if projectedCount == 0 {
+			dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionNoHistoricalAction
+			dispositions[i].Message = "complete exact terminal timer history requires no child rearm; its fixed-cut history has been certified"
+		}
+	}
+	blockers := make([]runfork.RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	timerBlockers := 0
+	for _, blocker := range admission.UnsupportedBlockers {
+		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven {
+			timerBlockers++
+		} else {
+			blockers = append(blockers, blocker)
+		}
+	}
+	if facts != 1 || timerBlockers != 1 {
+		return admission, fmt.Errorf("workflow timer discharge requires exactly one inventory disposition and blocker")
+	}
+	admission.Dispositions, admission.UnsupportedBlockers = dispositions, blockers
+	return runfork.RecalculateReplayResumeAdmission(admission), nil
 }
 
 func runForkReplayResumeDispositionForPendingWork(item runfork.RunForkPendingWork) runfork.RunForkReplayResumeDisposition {

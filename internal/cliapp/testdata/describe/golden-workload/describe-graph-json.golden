@@ -35852,6 +35852,16 @@
       }
     },
     {
+      "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.attachment_and_retirement",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.backend_contract",
       "provenance": {
         "origin": "authored",
@@ -35952,7 +35962,27 @@
       }
     },
     {
+      "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.execution_scope",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.fresh_schema_only",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.generic_schedule_resource_custody",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -36033,6 +36063,16 @@
     },
     {
       "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.retirement",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runs.terminal_evidence.completion_candidate.selected_execution_fence",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

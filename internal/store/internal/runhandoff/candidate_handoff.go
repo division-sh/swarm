@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -13,7 +12,7 @@ import (
 
 type CandidateCoordinator struct {
 	mu      sync.Mutex
-	entries map[string]*candidateSinkEntry
+	entries map[runtimerunlifecycle.CandidateScope]*candidateSinkEntry
 }
 
 func NewCandidateCoordinator() *CandidateCoordinator {
@@ -66,8 +65,10 @@ func ReserveCandidateHandoff(ctx context.Context) (*CandidateHandoff, error) {
 	}
 	var lease *worklifetime.Lease
 	var err error
-	if runtimeOwner, ok := owner.(*worklifetime.RuntimeOccurrence); ok {
-		lease, err = runtimeOwner.BeginAcceptedDescendant(detached)
+	if acceptedOwner, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		lease, err = acceptedOwner.BeginAcceptedDescendant(detached)
 	} else {
 		lease, err = owner.Begin(detached)
 	}
@@ -104,7 +105,7 @@ func (r *CandidateHandoff) Prepare(
 		return nil
 	}
 	r.identities[identity] = struct{}{}
-	sink, barrier := sinks.reserve(result.Candidate.BundleHash)
+	sink, barrier := sinks.reserve(result.Candidate.Scope())
 	if sink == nil {
 		r.barriers = append(r.barriers, barrier)
 		return nil
@@ -218,19 +219,18 @@ func (r *CandidateCoordinator) Register(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	bundleHash := strings.TrimSpace(scope.BundleHash)
 	r.mu.Lock()
 	if r.entries == nil {
-		r.entries = make(map[string]*candidateSinkEntry)
+		r.entries = make(map[runtimerunlifecycle.CandidateScope]*candidateSinkEntry)
 	}
-	entry := r.entries[bundleHash]
+	entry := r.entries[scope]
 	if entry == nil {
 		entry = &candidateSinkEntry{}
-		r.entries[bundleHash] = entry
+		r.entries[scope] = entry
 	}
 	if entry.sink != nil {
 		r.mu.Unlock()
-		return nil, fmt.Errorf("completion candidate sink already registered for bundle_hash %s", bundleHash)
+		return nil, fmt.Errorf("completion candidate sink already registered for scope %+v", scope)
 	}
 	entry.sink = sink
 	pendingZero := entry.pendingZero
@@ -243,8 +243,8 @@ func (r *CandidateCoordinator) Register(
 			if entry.sink == sink {
 				entry.sink = nil
 			}
-			if entry.pending == 0 {
-				delete(r.entries, bundleHash)
+			if entry.pending == 0 && r.entries[scope] == entry {
+				delete(r.entries, scope)
 			}
 			r.mu.Unlock()
 			return nil, fmt.Errorf("wait for pre-registration completion candidate mutations: %w", context.Cause(ctx))
@@ -257,38 +257,36 @@ func (r *CandidateCoordinator) Register(
 		if entry.sink == sink {
 			entry.sink = nil
 		}
-		if entry.pending == 0 {
-			delete(r.entries, bundleHash)
+		if entry.pending == 0 && r.entries[scope] == entry {
+			delete(r.entries, scope)
 		}
 	}}, nil
 }
 
 // Registered reports whether sink currently owns the exact candidate scope.
 // It is an observation only; admission still happens through Register/reserve.
-func (r *CandidateCoordinator) Registered(bundleHash string, sink runtimerunlifecycle.CandidateSink) bool {
+func (r *CandidateCoordinator) Registered(scope runtimerunlifecycle.CandidateScope, sink runtimerunlifecycle.CandidateSink) bool {
 	if r == nil || sink == nil {
 		return false
 	}
-	bundleHash = strings.TrimSpace(bundleHash)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	entry := r.entries[bundleHash]
+	entry := r.entries[scope]
 	return entry != nil && entry.sink == sink
 }
 
 func (r *CandidateCoordinator) reserve(
-	bundleHash string,
+	scope runtimerunlifecycle.CandidateScope,
 ) (runtimerunlifecycle.CandidateSink, *candidateRegistrationBarrier) {
-	bundleHash = strings.TrimSpace(bundleHash)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.entries == nil {
-		r.entries = make(map[string]*candidateSinkEntry)
+		r.entries = make(map[runtimerunlifecycle.CandidateScope]*candidateSinkEntry)
 	}
-	entry := r.entries[bundleHash]
+	entry := r.entries[scope]
 	if entry == nil {
 		entry = &candidateSinkEntry{}
-		r.entries[bundleHash] = entry
+		r.entries[scope] = entry
 	}
 	if entry.sink != nil {
 		return entry.sink, nil
@@ -307,8 +305,8 @@ func (r *CandidateCoordinator) reserve(
 		if entry.pending == 0 {
 			close(entry.pendingZero)
 			entry.pendingZero = nil
-			if entry.sink == nil {
-				delete(r.entries, bundleHash)
+			if entry.sink == nil && r.entries[scope] == entry {
+				delete(r.entries, scope)
 			}
 		}
 	}}

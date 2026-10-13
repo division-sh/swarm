@@ -24,6 +24,10 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startFork, err := ForkMaterializationRunOrigin("run-parent", ForkOriginPointRunStart, 5, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, origin := range []RunOrigin{
 		event,
 		DeploymentRunOrigin(),
@@ -31,6 +35,7 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 		standing,
 		fork,
 		deploymentFork,
+		startFork,
 	} {
 		raw, err := json.Marshal(origin)
 		if err != nil {
@@ -73,6 +78,9 @@ func TestRunOriginRejectsEveryPartialAndMixedShape(t *testing.T) {
 		{name: "fork_missing_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1"},
 		{name: "fork_missing_revision", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointDeploymentRevision)},
 		{name: "fork_deployment_with_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointDeploymentRevision), forkRevision: 2, sourceEventID: testForkOriginEventID},
+		{name: "fork_start_without_revision", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointRunStart)},
+		{name: "fork_start_negative_revision", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointRunStart), forkRevision: -1},
+		{name: "fork_start_with_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointRunStart), forkRevision: 2, sourceEventID: testForkOriginEventID},
 		{name: "fork_event_without_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointEvent), forkRevision: 2},
 		{name: "fork_with_event", kind: string(OriginForkMaterialization), eventID: "event-1", eventType: "scan.requested", sourceRunID: "run-1", forkPointKind: string(ForkOriginPointEvent), forkRevision: 2, sourceEventID: testForkOriginEventID},
 	} {

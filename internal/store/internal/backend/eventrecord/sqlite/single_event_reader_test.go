@@ -43,13 +43,13 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"n":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
 	requireSingleReaderRun(t, b, event.RunID())
 	columns := []string{}
-	for _, name := range strings.Fields("event_class event_id run_id event_name task_id entity_id flow_instance scope payload payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type source_event_id routing_source_kind routing_source_authority source_route target_route target_set route_settlement operator_reference_event_id inherited_fan_out_origin") {
+	for _, name := range strings.Fields("event_class event_id run_id event_name task_id entity_id flow_instance scope payload payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type source_event_id routing_source_kind routing_source_authority source_route target_route target_set route_settlement operator_reference_event_id inherited_fan_out_origin run_owner_key") {
 		columns = append(columns, name+" TEXT")
 	}
 	columns = append(columns, "payload_bytes BLOB", "chain_depth INTEGER", "created_at TIMESTAMP", "handler_node TEXT", "idempotency_key TEXT", "UNIQUE(event_id)")
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
-		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id TEXT, source_run_id TEXT, source_event_id TEXT, selection_authority TEXT)",
+		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id TEXT, source_run_id TEXT, source_event_id TEXT, selection_authority TEXT, source_obligation_event_id TEXT)",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id TEXT, source_run_id TEXT, source_event_id TEXT, selection_authority TEXT)",
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -167,7 +167,8 @@ func TestSingleEventReaderCanonicalFreshnessAndCorruption(t *testing.T) {
 		t.Fatalf("inserted=%v acknowledged=%v", inserted, ok)
 	}
 	var revision int64
-	if err := b.QueryRowContext(ctx, "SELECT last_revision FROM run_fork_revision_heads WHERE run_id=?", record.RunID).Scan(&revision); err != nil || revision != 1 {
+	// Creation owns revision 1; the first event advances it exactly once.
+	if err := b.QueryRowContext(ctx, "SELECT last_revision FROM run_fork_revision_heads WHERE run_id=?", record.RunID).Scan(&revision); err != nil || revision != 2 {
 		t.Fatalf("event revision=%d err=%v", revision, err)
 	}
 	duplicate := mutationprotocol.RunSQLite(ctx, b, "duplicate event reader fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (bool, error) {
@@ -179,7 +180,7 @@ func TestSingleEventReaderCanonicalFreshnessAndCorruption(t *testing.T) {
 	if inserted, ok := duplicate.Value(); !ok || inserted {
 		t.Fatalf("duplicate inserted=%v acknowledged=%v", inserted, ok)
 	}
-	if err := b.QueryRowContext(ctx, "SELECT last_revision FROM run_fork_revision_heads WHERE run_id=?", record.RunID).Scan(&revision); err != nil || revision != 1 {
+	if err := b.QueryRowContext(ctx, "SELECT last_revision FROM run_fork_revision_heads WHERE run_id=?", record.RunID).Scan(&revision); err != nil || revision != 2 {
 		t.Fatalf("duplicate event revision=%d err=%v", revision, err)
 	}
 	compare(true, false)
@@ -199,8 +200,8 @@ func TestSingleEventReaderCanonicalFreshnessAndCorruption(t *testing.T) {
 		{`UPDATE events SET payload_bytes='{"n":2}'`, nil, true, false},
 		{`UPDATE events SET payload_bytes='{"n":null}'`, nil, false, true},
 		{`UPDATE events SET payload_bytes='{"n":3}'`, nil, true, false},
-		{`INSERT INTO run_fork_selected_contract_executions VALUES (?,?,?,?)`, []any{record.EventID, uuid.NewString(), uuid.NewString(), "fixture"}, false, true},
-		{`INSERT INTO run_fork_delivery_event_replays SELECT * FROM run_fork_selected_contract_executions`, nil, false, true},
+		{`INSERT INTO run_fork_selected_contract_executions (fork_event_id,source_run_id,source_event_id,selection_authority) VALUES (?,?,?,?)`, []any{record.EventID, uuid.NewString(), uuid.NewString(), "fixture"}, false, true},
+		{`INSERT INTO run_fork_delivery_event_replays SELECT fork_event_id,source_run_id,source_event_id,selection_authority FROM run_fork_selected_contract_executions`, nil, false, true},
 		{`DELETE FROM run_fork_selected_contract_executions`, nil, false, true},
 		{`DELETE FROM run_fork_delivery_event_replays`, nil, true, false},
 		{`ALTER TABLE events RENAME COLUMN payload_bytes TO missing_payload`, nil, false, true},

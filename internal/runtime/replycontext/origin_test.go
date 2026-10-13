@@ -59,6 +59,7 @@ func a2ReplyOriginRecord(t *testing.T) Record {
 	}
 	return Record{
 		ID: "reply", RunID: "run", RequestEventID: "request", RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker", ProviderInputPin: "request", ProviderOutputPin: "return",
+		SourceRunID: "run", SourceRequestEventID: "request",
 		Origin: events.RouteIdentity{FlowID: "collector", FlowInstance: "collector/one", EntityID: "entity"}, RequestCorrelationID: "correlation", State: StateOpen, CreatedAt: time.Now().UTC(),
 		ReturnJoins: []events.JoinAdmissionReceipt{{Ref: ref, Disposition: events.JoinAdmissionBound}},
 	}

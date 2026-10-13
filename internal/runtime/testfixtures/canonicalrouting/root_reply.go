@@ -95,6 +95,77 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	return root
 }
 
+// CopyMixedReplyRequest keeps the request's provider and a same-flow ordinary
+// observer in one real publication. The observer does not own a reply binding.
+func CopyMixedReplyRequest(t testing.TB) string {
+	t.Helper()
+	root := CopyRootReplyBoundary(t, true, true)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  outputs: [request.finished]\n", "  outputs: [request.finished, request.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"request.finished:\n", "request.observed:\n  request_id: text\nrequest.finished:\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `request-observer:
+  execution_type: system_node
+  subscribes_to: [provider.requested]
+  event_handlers:
+    provider.requested:
+      emit:
+        event: request.observed
+        fields: {request_id: payload.request_id}
+result-observer:
+`)
+	return root
+}
+
+// One authored ordinal transfers the complete mixed request through the normal
+// pump, so a held node observer does not block the provider's own return.
+func CopyHandedOffMixedReplyRequest(t testing.TB) string {
+	t.Helper()
+	root := CopyMixedReplyRequest(t)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"request.started:\n  account_id: text\n  request_id: text\n",
+		"request.started:\n  account_id: text\n  request_id: text\n  items: '[text]'\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    request.started:
+      emit:
+        event: provider.requested
+        fields:
+          account_id: payload.account_id
+          request_id: payload.request_id
+`, `    request.started:
+      fan_out:
+        items_from: payload.items
+        as: request_id
+        identity: request_id
+        emit:
+          event: provider.requested
+          fields:
+            account_id: payload.account_id
+            request_id: request_id
+`)
+	return root
+}
+
+// CopyMixedReplyResponse routes one output both as a reply and as an ordinary
+// observation to the same instance, under different compiled input pins.
+func CopyMixedReplyResponse(t testing.TB) string {
+	t.Helper()
+	root := CopyMixedReplyRequest(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [request.finished, request.observed]", "outputs: [request.finished, request.observed, reply.observed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", "    correlation_key: request_id\n  - {event: provider.replied, from: provider, to: ., rename: provider.observed}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "request.finished:\n", "reply.observed:\n  request_id: text\nrequest.finished:\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `response-observer:
+  execution_type: system_node
+  subscribes_to: [provider.observed]
+  event_handlers:
+    provider.observed:
+      emit:
+        event: reply.observed
+        fields: {request_id: payload.request_id}
+result-observer:
+`)
+	return root
+}
+
 type RootReplyNegativeMutation uint8
 
 const (

@@ -471,6 +471,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, managerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err
@@ -493,6 +494,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, sqliteManagerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err

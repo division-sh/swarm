@@ -30,6 +30,38 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                        "standing-service pre-mutation execution-posture inspection",
 	"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go":                    "read-only cancellation inventory excluding selected possession from normal recovery",
 	"internal/store/testsql/event.go":                                                                "named hostile rollback injection used only by tests",
+	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":          "exact read-only drafted/rolled-back publication cardinality proof",
+	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":            "exact read-only replay lineage and child-delivery membership, not lifecycle selection",
+	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go":         "exact read-only selected receiver claim and terminal receipt proof",
+}
+
+var selectedForkDeliveryReadCounts = map[string]int{
+	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":  1,
+	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":    2,
+	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go": 1,
+}
+
+var selectedForkDeliveryMutationSQL = regexp.MustCompile(`(?is)\b(?:into|update|delete\s+from|on)\s+(?:event_deliveries|event_delivery_attempts)\b`)
+
+func selectedForkDeliveryReadSQL(query string) bool {
+	fields := strings.Fields(query)
+	return len(fields) != 0 && strings.EqualFold(fields[0], "SELECT") && !selectedForkDeliveryMutationSQL.MatchString(query)
+}
+
+func TestSelectedForkDeliveryEvidenceReadersCannotMutate(t *testing.T) {
+	if !selectedForkDeliveryReadSQL("SELECT\n COUNT(*) FROM event_deliveries") {
+		t.Fatal("canonical multiline SELECT was refused")
+	}
+	for _, query := range []string{
+		"UPDATE event_deliveries SET status='delivered'",
+		"INSERT INTO event_delivery_attempts VALUES (1)",
+		"DELETE FROM event_deliveries",
+		"SELECT COUNT(*) FROM event_deliveries; DELETE FROM event_deliveries",
+	} {
+		if selectedForkDeliveryReadSQL(query) {
+			t.Fatalf("selected evidence reader admitted mutation: %s", query)
+		}
+	}
 }
 
 func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
@@ -96,6 +128,9 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 					return true
 				}
 				found[relative]++
+				if _, readOnly := selectedForkDeliveryReadCounts[relative]; readOnly && !selectedForkDeliveryReadSQL(raw) {
+					t.Errorf("%s:%d read-only selected evidence owner contains delivery mutation SQL", relative, fset.Position(literal.Pos()).Line)
+				}
 				if _, allowed := executableDeliverySQLOwners[relative]; !allowed {
 					t.Errorf("%s:%d owns executable-delivery SQL outside the closed lifecycle boundary", relative, fset.Position(literal.Pos()).Line)
 				}
@@ -121,6 +156,11 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 	} {
 		if got := found[path]; got != want {
 			t.Errorf("closed executable-delivery SQL owner %s has %d queries, want %d", path, got, want)
+		}
+	}
+	for path, want := range selectedForkDeliveryReadCounts {
+		if got := found[path]; got != want {
+			t.Errorf("closed selected evidence reader %s has %d delivery queries, want %d", path, got, want)
 		}
 	}
 }
