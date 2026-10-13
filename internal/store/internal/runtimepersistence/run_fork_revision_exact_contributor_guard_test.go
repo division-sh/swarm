@@ -367,7 +367,9 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"runlifecycle/active_run_quiescence.go", "terminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
 		{"runlifecycle/active_run_quiescence.go", "sqliteTerminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
 		{"genericschedule/owner.go", "admitAttempt", []string{"admitTx(ctx, tx, attempt, postgres, command, now, admissionErr)"}},
-		{"genericschedule/owner.go", "admitTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "attempt.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/owner.go", "admitTx", []string{"admitWithRestorationTx(ctx, tx, attempt, postgres, command, now, admissionErr, nil)"}},
+		{"genericschedule/owner.go", "admitWithRestorationTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "attempt.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/fork_one_shot.go", "RestoreForkOneShotTx", []string{"admitWithRestorationTx(ctx, tx, attempt, postgres, request.Child.Canonical(), nil, nil, &request)"}},
 		{"genericschedule/fork_join.go", "RestoreForkJoinTx", []string{
 			"admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt }, nil)",
 			"stampForkJoinOrigin(ctx, tx, postgres, child.ID, request)",
