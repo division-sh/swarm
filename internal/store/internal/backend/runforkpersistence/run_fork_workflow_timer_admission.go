@@ -28,6 +28,7 @@ type runForkTimerHistoryInventory struct {
 	WorkflowTimerIDs          []string
 	ActiveTimerIDs            []string
 	ArrivalScheduleIDs        []string
+	OneShotScheduleIDs        []string
 	TransferredPublicationIDs []string
 	UnresolvedTimerIDs        []string
 	RecordDigest              string
@@ -116,13 +117,13 @@ func runForkArrivalScheduleEvidence(sourceRunID string, arrivals []genericschedu
 func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 	source, err := uuid.Parse(i.SourceRunID)
 	if !i.Complete || err != nil || source == uuid.Nil || source.String() != i.SourceRunID ||
-		len(i.WorkflowTimerIDs)+len(i.ArrivalScheduleIDs)+len(i.TransferredPublicationIDs) == 0 || len(i.UnresolvedTimerIDs) != 0 || i.RecordDigest == "" {
+		len(i.WorkflowTimerIDs)+len(i.ArrivalScheduleIDs)+len(i.OneShotScheduleIDs)+len(i.TransferredPublicationIDs) == 0 || len(i.UnresolvedTimerIDs) != 0 || i.RecordDigest == "" {
 		return "", fmt.Errorf("timer history lacks complete exact workflow and arrival inventory")
 	}
 	if err := i.Point.Validate(); err != nil {
 		return "", err
 	}
-	if !slices.IsSorted(i.WorkflowTimerIDs) || !slices.IsSorted(i.ActiveTimerIDs) || !slices.IsSorted(i.ArrivalScheduleIDs) || !slices.IsSorted(i.TransferredPublicationIDs) {
+	if !slices.IsSorted(i.WorkflowTimerIDs) || !slices.IsSorted(i.ActiveTimerIDs) || !slices.IsSorted(i.ArrivalScheduleIDs) || !slices.IsSorted(i.OneShotScheduleIDs) || !slices.IsSorted(i.TransferredPublicationIDs) {
 		return "", fmt.Errorf("timer history inventory is not canonical")
 	}
 	ids := make(map[string]struct{}, len(i.WorkflowTimerIDs))
@@ -154,6 +155,12 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 		}
 		ids[id] = struct{}{}
 	}
+	for _, id := range i.OneShotScheduleIDs {
+		if _, duplicate := ids[id]; duplicate || id == "" {
+			return "", fmt.Errorf("timer history repeats or omits a one-shot identity")
+		}
+		ids[id] = struct{}{}
+	}
 	digest, err := canonicaljson.Hash(struct {
 		SourceRunID    string
 		Point          runfork.RunForkPoint
@@ -165,8 +172,9 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 		ArrivalIDs     []string
 		TransferredIDs []string
 		Records        string
+		OneShotIDs     []string `json:",omitempty"`
 	}{i.SourceRunID, i.Point, len(i.WorkflowTimerIDs), len(i.ActiveTimerIDs), len(i.WorkflowTimerIDs) - len(i.ActiveTimerIDs),
-		i.WorkflowTimerIDs, i.ActiveTimerIDs, i.ArrivalScheduleIDs, i.TransferredPublicationIDs, i.RecordDigest})
+		i.WorkflowTimerIDs, i.ActiveTimerIDs, i.ArrivalScheduleIDs, i.TransferredPublicationIDs, i.RecordDigest, i.OneShotScheduleIDs})
 	if err != nil {
 		return "", err
 	}
@@ -176,7 +184,7 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 // This permits postponing only the timer blocker during materialization. It
 // never discharges source admission or grants execution authority.
 func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
-	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules, plan.TransferredJoins...)
+	inventory, err := runForkPlanTimerRecordInventory(plan)
 	if err != nil {
 		return false, err
 	}

@@ -32,6 +32,7 @@ type runForkAdmissionEvidence struct {
 	RelevantTimer           bool
 	TimerHistory            runForkTimerHistoryInventory
 	JoinSchedules           []genericschedule.Activation
+	OneShotSchedules        []genericschedule.Activation
 	TransferredJoins        []genericschedule.TransferredJoinOccurrence
 	RelevantRoute           bool
 	ActiveSession           bool
@@ -271,6 +272,7 @@ func planRunForkSnapshot(
 	}
 	evidence.TimerHistory.Point = plan.ForkPoint
 	plan.JoinSchedules = evidence.JoinSchedules
+	plan.OneShotSchedules = evidence.OneShotSchedules
 	plan.TransferredJoins = evidence.TransferredJoins
 	publications, err := runForkAllJoinPublications(snapshot, plan)
 	if err != nil {

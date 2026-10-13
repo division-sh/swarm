@@ -374,6 +374,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, req.Readiness, port.arrivalSchedules); err != nil {
 			return err
 		}
+		if err := materializeRunForkOneShotSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
+			return err
+		}
 		replayAdmission, err = requireMaterializedRunForkTimerHistory(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, now, replayAdmission)
 		if err != nil {
 			return err

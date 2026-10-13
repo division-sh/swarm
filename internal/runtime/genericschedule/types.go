@@ -437,6 +437,7 @@ type Activation struct {
 	Failure                Failure
 	ClockSuspension        *ClockSuspension
 	ForkJoinOrigin         *ForkJoinOrigin
+	ForkOneShotOrigin      *ForkOneShotOrigin
 }
 
 func (a Activation) Canonical() Activation {
@@ -462,6 +463,11 @@ func (a Activation) Canonical() Activation {
 		origin.SourceAdmittedAt = canonicalTime(origin.SourceAdmittedAt)
 		a.ForkJoinOrigin = &origin
 	}
+	if a.ForkOneShotOrigin != nil {
+		origin := *a.ForkOneShotOrigin
+		origin.DueBasisAt = canonicalTime(origin.DueBasisAt)
+		a.ForkOneShotOrigin = &origin
+	}
 	return a
 }
 
@@ -483,7 +489,17 @@ func (a Activation) Validate() error {
 	if a.AdmittedAt.IsZero() || a.InitialDueAt.IsZero() || a.CurrentDueAt.IsZero() {
 		return errors.New("generic schedule activation requires admitted, initial, and current due coordinates")
 	}
-	derived, err := a.Command.Due.FirstDue(a.AdmittedAt)
+	if a.ForkJoinOrigin != nil && a.ForkOneShotOrigin != nil {
+		return errors.New("generic schedule cannot carry multiple reconstruction origins")
+	}
+	dueBasisAt := a.AdmittedAt
+	if a.ForkOneShotOrigin != nil {
+		if err := validateForkOneShotOrigin(a); err != nil {
+			return err
+		}
+		dueBasisAt = a.ForkOneShotOrigin.DueBasisAt
+	}
+	derived, err := a.Command.Due.FirstDue(dueBasisAt)
 	if err != nil || !derived.Equal(a.InitialDueAt) {
 		return errors.New("generic schedule initial due coordinate does not match persisted due basis")
 	}
@@ -586,9 +602,10 @@ func (a Activation) EvidenceDigest() (string, error) {
 		CancelledAt, FiredAt, AcceptedAt, FailedAt time.Time
 		Failure                                    Failure
 		ClockSuspension                            *ClockSuspension
-		ForkJoinOrigin                             *ForkJoinOrigin `json:",omitempty"`
+		ForkJoinOrigin                             *ForkJoinOrigin    `json:",omitempty"`
+		ForkOneShotOrigin                          *ForkOneShotOrigin `json:",omitempty"`
 	}{a.ID, a.ImmutableHash, a.AdmittedAt, a.InitialDueAt, a.CurrentDueAt, a.CurrentEventID, a.CurrentEventAdmittedAt,
-		a.Status, a.CancelCause, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure, a.ClockSuspension, a.ForkJoinOrigin})
+		a.Status, a.CancelCause, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure, a.ClockSuspension, a.ForkJoinOrigin, a.ForkOneShotOrigin})
 }
 
 func (a Activation) validateCurrentDue() error {

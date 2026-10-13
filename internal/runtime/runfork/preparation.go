@@ -166,6 +166,14 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		}
 		transferred = append(transferred, digest)
 	}
+	oneShots := make([]string, 0, len(plan.OneShotSchedules))
+	for _, schedule := range plan.OneShotSchedules {
+		digest, err := schedule.EvidenceDigest()
+		if err != nil {
+			return "", fmt.Errorf("selected preparation one-shot schedule: %w", err)
+		}
+		oneShots = append(oneShots, digest)
+	}
 	raw, err := canonicaljson.Bytes(struct {
 		Plan          RunForkPlan
 		History       []string
@@ -179,7 +187,8 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Frontier      RunForkContractFrontierAdmission
 		Recipients    RunForkSelectedContractRecipientPlanning
 		Declarations  string
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision})
+		OneShots      []string `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots})
 	if err != nil {
 		return "", err
 	}
