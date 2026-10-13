@@ -31,6 +31,26 @@ func (s *PipelineSQLiteOwner) MaterializeRunForkArrivalJoinScheduleTx(ctx contex
 	return storegenericschedule.RestoreForkJoinTx(ctx, attempt, false, request)
 }
 
+func (s *PipelinePostgresOwner) MaterializeRunForkOneShotScheduleTx(ctx context.Context, attempt *mutationprotocol.Attempt, request storegenericschedule.ForkOneShotRequest) (genericschedule.Activation, error) {
+	if s == nil || s.RunLifecyclePostgresOwner == nil {
+		return genericschedule.Activation{}, fmt.Errorf("fork one-shot requires the postgres lifecycle owner")
+	}
+	if err := requireRunForkArrivalScheduleSource(ctx, attempt, s.RunLifecyclePostgresOwner, request.Child.RunID); err != nil {
+		return genericschedule.Activation{}, err
+	}
+	return storegenericschedule.RestoreForkOneShotTx(ctx, attempt, true, request)
+}
+
+func (s *PipelineSQLiteOwner) MaterializeRunForkOneShotScheduleTx(ctx context.Context, attempt *mutationprotocol.Attempt, request storegenericschedule.ForkOneShotRequest) (genericschedule.Activation, error) {
+	if s == nil || s.RunLifecycleSQLiteOwner == nil {
+		return genericschedule.Activation{}, fmt.Errorf("fork one-shot requires the sqlite lifecycle owner")
+	}
+	if err := requireRunForkArrivalScheduleSource(ctx, attempt, s.RunLifecycleSQLiteOwner, request.Child.RunID); err != nil {
+		return genericschedule.Activation{}, err
+	}
+	return storegenericschedule.RestoreForkOneShotTx(ctx, attempt, false, request)
+}
+
 func (s *PipelinePostgresOwner) ReadRunForkArrivalJoinScheduleInventoryTx(ctx context.Context, attempt *mutationprotocol.Attempt, childRunID string) ([]genericschedule.Activation, error) {
 	if s == nil || s.RunLifecyclePostgresOwner == nil {
 		return nil, fmt.Errorf("fork arrival readback requires the postgres lifecycle owner")

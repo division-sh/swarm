@@ -262,6 +262,10 @@ func admitAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgr
 }
 
 func admitTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time, admissionErr error) (runtimegenericschedule.AdmissionResult, error) {
+	return admitWithRestorationTx(ctx, tx, attempt, postgres, command, now, admissionErr, nil)
+}
+
+func admitWithRestorationTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time, admissionErr error, restoration *ForkOneShotRequest) (runtimegenericschedule.AdmissionResult, error) {
 	scope, err := command.ScopeKey()
 	if err != nil {
 		return runtimegenericschedule.AdmissionResult{}, err
@@ -280,15 +284,23 @@ func admitTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt,
 	if admissionErr != nil {
 		return runtimegenericschedule.AdmissionResult{}, admissionErr
 	}
-	admittedAt := canonicalTime(now())
-	firstDue, err := command.Due.FirstDue(admittedAt)
-	if err != nil {
-		return runtimegenericschedule.AdmissionResult{}, err
-	}
-	activation := runtimegenericschedule.Activation{
-		ID: uuid.NewString(), Command: command, ImmutableHash: hash,
-		AdmittedAt: admittedAt, InitialDueAt: firstDue, CurrentDueAt: firstDue,
-		Status: runtimegenericschedule.StatusActive,
+	var activation runtimegenericschedule.Activation
+	if restoration != nil {
+		activation, err = restoration.Expected(uuid.NewString())
+		if err != nil {
+			return runtimegenericschedule.AdmissionResult{}, err
+		}
+	} else {
+		admittedAt := canonicalTime(now())
+		firstDue, err := command.Due.FirstDue(admittedAt)
+		if err != nil {
+			return runtimegenericschedule.AdmissionResult{}, err
+		}
+		activation = runtimegenericschedule.Activation{
+			ID: uuid.NewString(), Command: command, ImmutableHash: hash,
+			AdmittedAt: admittedAt, InitialDueAt: firstDue, CurrentDueAt: firstDue,
+			Status: runtimegenericschedule.StatusActive,
+		}
 	}
 	if err := activation.Validate(); err != nil {
 		return runtimegenericschedule.AdmissionResult{}, err
@@ -1031,7 +1043,17 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	if origin.SourceAdmittedAt, _, err = timeValue(sourceAdmissionRaw); err != nil {
 		return malformed(err)
 	}
-	if activation.ForkJoinOrigin, err = runtimegenericschedule.DecodeForkJoinOrigin(origin); err != nil {
+	switch origin.Owner {
+	case runtimegenericschedule.ForkOneShotReconstructionOwner:
+		activation.ForkOneShotOrigin, err = runtimegenericschedule.DecodeForkOneShotOrigin(runtimegenericschedule.ForkOneShotOrigin{
+			SourceActivationID: origin.SourceActivationID, SourceRunID: origin.SourceRunID,
+			PointKind: origin.PointKind, PointRevision: origin.PointRevision, PointEventID: origin.PointEventID,
+			DueBasisAt: origin.SourceAdmittedAt, Owner: origin.Owner,
+		})
+	default:
+		activation.ForkJoinOrigin, err = runtimegenericschedule.DecodeForkJoinOrigin(origin)
+	}
+	if err != nil {
 		return malformed(err)
 	}
 	activation = activation.Canonical()
@@ -1094,6 +1116,7 @@ func insertActivationTx(ctx context.Context, tx *sql.Tx, d dialect, scope string
 		args[5] = activation.Command.RunID
 		args[6] = activation.Command.EntityID
 		args[22] = activation.Command.ReplyContext
+		query, args = forkOneShotInsert(query, d, activation, args)
 		var storedRunID string
 		err := tx.QueryRowContext(ctx, query, args...).Scan(&storedRunID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1104,6 +1127,7 @@ func insertActivationTx(ctx context.Context, tx *sql.Tx, d dialect, scope string
 		}
 		return storedRunID, true, nil
 	}
+	query, args = forkOneShotInsert(query, d, activation, args)
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return "", false, fmt.Errorf("insert generic schedule activation: %w", err)

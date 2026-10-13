@@ -159,7 +159,15 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 		return runForkAdmissionEvidence{}, err
 	}
 	transferred := runForkTransferredJoins(entities)
+	oneShots, err := loadRunForkOneShotSchedules(snapshot)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
 	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules, arrivals, transferred...)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	timerHistory, err = includeRunForkOneShotInventory(timerHistory, oneShots)
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
@@ -192,9 +200,10 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
-		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.TransferredPublicationIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
+		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.OneShotScheduleIDs)+len(timerHistory.TransferredPublicationIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
 		TimerHistory:            timerHistory,
 		JoinSchedules:           arrivals,
+		OneShotSchedules:        oneShots,
 		TransferredJoins:        transferred,
 		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
