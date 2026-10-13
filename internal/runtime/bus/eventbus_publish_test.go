@@ -139,13 +139,16 @@ func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing
 
 func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
+	source := busPublicationFailureSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	ctx = context.WithValue(ctx, publisherDispatchValueKey{}, "publisher-value")
 	observer := &dispatchContextObserver{t: t}
-	bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
+	bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: observer})
 	if err != nil {
 		t.Fatal(err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, bus, source, root, time.Now().UTC())
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("task.requested"), "provider", "", []byte(`{}`), 0,
 		eventBusTestRunID, events.EventEnvelope{}, time.Now().UTC(),
@@ -161,6 +164,16 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 type eventBusRunFixtureStore interface {
 	runtimebus.EventStore
 	storetest.RunFixtureStore
+}
+
+func busPublicationFailureSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyBusPublicationFailure(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) context.Context {
@@ -938,6 +951,7 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 			t.Run(backend+"/"+fault.name, func(t *testing.T) {
 				var selected interface {
 					runtimebus.EventStore
+					componentFlowConstructionStore
 					runtimerunlifecycle.OperationOwner
 					runtimerunlifecycle.CandidateStore
 					PipelineObligations() runtimepipelineobligation.Store
@@ -947,20 +961,24 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				} else {
 					selected = storetest.StartPostgresRuntimeStore(t)
 				}
-				ctx := testAuthorActivityContext(context.Background())
+				source := busPublicationFailureSource(t)
+				ctx := testAuthorActivityContextForSource(context.Background(), source)
 				runID, eventID := uuid.NewString(), uuid.NewString()
-				if err := ensureTestEventBusSourceArtifact(selected, nil, testSourceArtifactFact(nil)); err != nil {
+				if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 					t.Fatalf("persist selected source artifact: %v", err)
 				}
 				if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 					t.Fatalf("create run through lifecycle owner: %v", err)
 				}
 				eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
-					Interceptors: []runtimebus.EventInterceptor{pendingPostCommitInterceptor{err: fault.err}},
+					ContractBundle: source,
+					Interceptors:   []runtimebus.EventInterceptor{pendingPostCommitInterceptor{err: fault.err}},
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+				seedCompleteEventDispatchRoot(t, runtimecorrelation.WithRunID(ctx, runID), selected, eb, source, root, time.Now().UTC())
 				event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.failed"), "", "", []byte(`{}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC())
 				if err := eb.Publish(ctx, event); !errors.Is(err, fault.err) {
@@ -988,7 +1006,7 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
 					t.Fatalf("release recovery claim: %v", err)
 				}
-				recovered, err := newScopedTestEventBus(selected)
+				recovered, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1246,7 +1264,8 @@ func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, selected a
 
 func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := eventBusTestRunContext(t, pg)
+	source := busPublicationFailureSource(t)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		obligations: &failPipelineSettlementOnceStore{
@@ -1255,14 +1274,16 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 		},
 	}
 	logger := &recordingLoggerHook{}
-	eb, err := newScopedTestEventBus(failing, runtimebus.EventBusOptions{Logger: logger})
+	eb, err := newScopedTestEventBus(failing, runtimebus.EventBusOptions{ContractBundle: source, Logger: logger})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	seedCompleteEventDispatchRoot(t, ctx, pg, eb, source, root, time.Now().UTC())
 
 	agentID := "agent-post-commit-receipt"
 	eventID := "21000000-0000-0000-0000-000000000011"
-	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
+	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, eventBusTestRunID, agentID, testSourceArtifactFact(source))
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, events.EventType("custom.receipt_failure"))
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
