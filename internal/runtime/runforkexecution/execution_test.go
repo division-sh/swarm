@@ -4913,33 +4913,23 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), selectedContractGuardEvent(t, "fork-event",
-		"item.received", runfork.RunForkSelectedContractExecutionOwner, "source-event"),
-
-		bus.PublishRecipientPlan{
-			RoutedRecipients: []bus.PublishDiagnosticRecipient{
-				{
-					Type:        "agent",
-					ID:          "target-agent",
-					RouteSource: "selected_contracts",
-				},
-				{
-					Type:        "node",
-					ID:          mustRunForkRootNode("test-node").Key(),
-					RouteSource: "selected_contracts",
-				},
-			},
-		})
+	routes, err := guard.materializeRemainingDeliveryRoutes(selectedContractGuardEvent(t, "fork-event",
+		"item.received", runfork.RunForkSelectedContractExecutionOwner, "source-event"), nil)
 	if err != nil {
-		t.Fatalf("MaterializeNodeDeliveryRoutes: %v", err)
+		t.Fatalf("MaterializeDeliveryRoutes: %v", err)
 	}
-	if len(routes) != 1 ||
+	if len(routes) != 2 ||
 		!routes[0].Recipient.IsNode() ||
 		routes[0].Recipient.ID() != mustRunForkRootNode("test-node").Key() ||
 		!routes[0].Target.Empty() ||
 		routes[0].Handler.Empty() ||
 		!routes[0].Handler.Node().Equal(mustRunForkRootNode("test-node")) {
-		t.Fatalf("materialized routes = %#v, want target node route only", routes)
+		t.Fatalf("materialized routes = %#v, want exact target node route and admitted agent", routes)
+	}
+	wantAgent := selectedContractTestRootAgentIdentity(t, "target-agent")
+	wantAgent.RunID = "fork-run"
+	if routes[1].Recipient.ID() != "target-agent" || !routes[1].Recipient.IsAgent() || routes[1].AgentIdentity != wantAgent || !routes[1].Target.Empty() || !routes[1].Handler.Empty() {
+		t.Fatalf("materialized agent = %#v, want exact child-run identity without borrowed target", routes[1])
 	}
 }
 

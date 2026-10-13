@@ -52,10 +52,10 @@ func (s *PipelinePostgresOwner) LookupFlowInstance(ctx context.Context, request 
 		if err != nil {
 			return err
 		}
-		snapshot, err := newFlowInstanceIndexSnapshot(ctx, tx, true, request.Source(), request.SourceFact().BundleHash(), run, s.historicalInstances)
-		if err != nil {
+		if err := validateFlowInstanceIndexSnapshot(request.Source(), request.SourceFact().BundleHash(), run, s.historicalInstances); err != nil {
 			return err
 		}
+		snapshot := flowInstanceIndexSnapshot{tx: tx, postgres: true, source: request.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
 		observation, found, err = snapshot.lookup(ctx, request)
 		return err
 	})
@@ -79,10 +79,10 @@ func (s *PipelineSQLiteOwner) LookupFlowInstance(ctx context.Context, request pi
 		if err != nil {
 			return err
 		}
-		snapshot, err := newFlowInstanceIndexSnapshot(ctx, tx, false, request.Source(), request.SourceFact().BundleHash(), run, s.historicalInstances)
-		if err != nil {
+		if err := validateFlowInstanceIndexSnapshot(request.Source(), request.SourceFact().BundleHash(), run, s.historicalInstances); err != nil {
 			return err
 		}
+		snapshot := flowInstanceIndexSnapshot{tx: tx, source: request.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
 		observation, found, err = snapshot.lookup(ctx, request)
 		return err
 	})
@@ -105,10 +105,10 @@ func (s *PipelinePostgresOwner) ListFlowInstances(ctx context.Context, scope pip
 		if err != nil {
 			return err
 		}
-		snapshot, err := newFlowInstanceIndexSnapshot(ctx, tx, true, scope.Source(), scope.SourceFact().BundleHash(), run, s.historicalInstances)
-		if err != nil {
+		if err := validateFlowInstanceIndexSnapshot(scope.Source(), scope.SourceFact().BundleHash(), run, s.historicalInstances); err != nil {
 			return err
 		}
+		snapshot := flowInstanceIndexSnapshot{tx: tx, postgres: true, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
 		observations, err = snapshot.list(ctx, scope)
 		return err
 	})
@@ -131,10 +131,10 @@ func (s *PipelineSQLiteOwner) ListFlowInstances(ctx context.Context, scope pipel
 		if err != nil {
 			return err
 		}
-		snapshot, err := newFlowInstanceIndexSnapshot(ctx, tx, false, scope.Source(), scope.SourceFact().BundleHash(), run, s.historicalInstances)
-		if err != nil {
+		if err := validateFlowInstanceIndexSnapshot(scope.Source(), scope.SourceFact().BundleHash(), run, s.historicalInstances); err != nil {
 			return err
 		}
+		snapshot := flowInstanceIndexSnapshot{tx: tx, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
 		observations, err = snapshot.list(ctx, scope)
 		return err
 	})
@@ -155,11 +155,11 @@ type flowInstanceIndexSnapshot struct {
 	observed   map[string]pipeline.FlowInstanceObservation
 }
 
-func newFlowInstanceIndexSnapshot(ctx context.Context, tx *sql.Tx, postgres bool, source semanticview.Source, hash string, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) (*flowInstanceIndexSnapshot, error) {
-	if tx == nil || source == nil || historical == nil || run.Validate() != nil || run.BundleHash != hash {
-		return nil, fmt.Errorf("instance snapshot requires its exact admitted source, lineage and read owner")
+func validateFlowInstanceIndexSnapshot(source semanticview.Source, hash string, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) error {
+	if source == nil || historical == nil || run.Validate() != nil || run.BundleHash != hash {
+		return fmt.Errorf("instance snapshot requires its exact admitted source, lineage and read owner")
 	}
-	return &flowInstanceIndexSnapshot{tx: tx, postgres: postgres, source: source, run: run, historical: historical, observed: make(map[string]pipeline.FlowInstanceObservation)}, nil
+	return nil
 }
 
 func (s *flowInstanceIndexSnapshot) requireRecordedRevision(ctx context.Context) error {

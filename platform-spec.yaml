@@ -20872,6 +20872,11 @@ run_model:
       and runtime.run_fork.selected_contract_route_topology, then produces deterministic fork-local recipient-plan
       evidence for selected frontier events before selected execution publishes fork-local events. The selected execution
       publish path and EventBus.Publish MUST consume/gate on this owner before deriving recipients for selected-fork work.
+      The publish materializer transfers both admitted node and agent recipients, including when the source event has
+      no routing source. Agent plans compose only with the admitted child run; their exact coordinates select
+      construction evidence through the store-owned instance index independently of actor entity ownership. This
+      transfer MUST NOT invent a routing source, borrow a construction entity for an entityless actor, or admit
+      recipients outside the fixed frontier; compiled connections retain their own execution claims.
       internal/runtime/bus.deliveryPlanner.Plan MAY be a downstream helper or isolated pure primitive, but it is not the
       canonical owner and MUST NOT bypass this owner. Dynamic flow-instance topology remains fail-closed unless explicit
       fork-local topology proof exists. Source route rows, source flow-instance route rows, source event_deliveries,

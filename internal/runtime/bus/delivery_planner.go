@@ -458,7 +458,23 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if p.connectPlanner.source != nil {
 		var targets []events.RouteIdentity
+		var owners []runtimeflowidentity.RunScopedFlowInstance
 		for _, intent := range plan.DeliveryIntents {
+			if intent.Recipient.IsAgent() {
+				identity := intent.AgentIdentity.Normalize()
+				if identity.Validate() != nil || identity.RunID != evt.RunID() || identity.AgentID() != intent.Recipient.ID() {
+					return selectedRunTargetOwnerProjection{}, fmt.Errorf("materialized agent requires its exact publication identity")
+				}
+				route := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
+				if identity.Route.Presence == agentidentity.RouteRoot {
+					route = runtimeflowidentity.StoredRoute(".", evt.RunID(), evt.RunID())
+				}
+				owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
+				if err != nil {
+					return selectedRunTargetOwnerProjection{}, err
+				}
+				owners = append(owners, owner)
+			}
 			target := intent.TargetBlueprint
 			if intent.Recipient.IsNode() {
 				var err error
@@ -471,10 +487,11 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 			}
 			targets = append(targets, target)
 		}
-		owners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
+		targetOwners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
 		if err != nil {
 			return selectedRunTargetOwnerProjection{}, err
 		}
+		owners = append(owners, targetOwners...)
 		scope, err := p.connectPlanner.lookupTargetScope(ctx, evt.RunID(), nil, owners)
 		if err != nil {
 			return selectedRunTargetOwnerProjection{}, err
