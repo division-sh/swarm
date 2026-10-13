@@ -1,186 +1,45 @@
 package contracts
 
 import (
-	"fmt"
-	"go/ast"
-	"go/types"
 	"path/filepath"
-	"sort"
-	"strings"
+	"reflect"
+	"slices"
 	"testing"
-
-	"golang.org/x/tools/go/packages"
 )
 
-type handlerRuleDisplayLabelReader struct {
-	Path      string
-	Enclosing string
-}
-
-func (r handlerRuleDisplayLabelReader) key() string {
-	return r.Path + "::" + r.Enclosing
-}
-
-type handlerRuleDisplayLabelAllowance struct {
-	Count  int
-	Reason string
-}
-
+// Retired fields cannot have readers once they are absent from the typed model.
+// This replaces the old presentation-reader allowance inventory, not its ceiling.
 func TestHandlerRuleDisplayLabelReaderBoundary(t *testing.T) {
-	for _, activityKey := range []string{
-		"internal/runtime/contracts/workflow_contract_activity.go::ActivitySitesForNode",
-		"internal/runtime/engine/executor.go::(*Executor).stepActivity",
-	} {
-		if allowance, permitted := allowedHandlerRuleDisplayLabelReaders()[activityKey]; permitted {
-			t.Fatalf("activity naming still permits rule-label authority: %s %#v", activityKey, allowance)
-		}
-	}
-	readers := loadHandlerRuleDisplayLabelReaders(t, nil)
-	got := map[string]int{}
-	for _, reader := range readers {
-		got[reader.key()]++
-	}
-	var problems []string
-	for key, count := range got {
-		allowance, ok := allowedHandlerRuleDisplayLabelReaders()[key]
-		if !ok {
-			problems = append(problems, fmt.Sprintf("%s count=%d (unclassified)", key, count))
-			continue
-		}
-		if count != allowance.Count {
-			problems = append(problems, fmt.Sprintf("%s count=%d want=%d", key, count, allowance.Count))
-		}
-	}
-	for key := range allowedHandlerRuleDisplayLabelReaders() {
-		if allowedHandlerRuleDisplayLabelReaders()[key].Reason == "" {
-			problems = append(problems, key+" (missing classification reason)")
-		}
-		if got[key] == 0 {
-			problems = append(problems, key+" (missing)")
-		}
-	}
-	sort.Strings(problems)
-	if len(problems) > 0 {
-		t.Fatalf("HandlerRuleEntry.ID reader boundary changed:\n%s\nThe field is presentation-only except explicitly tracked generated-name seams; use DeclarationIdentity for authored semantic identity.", strings.Join(problems, "\n"))
+	if fields := retiredHandlerRuleFields(reflect.TypeOf(HandlerRuleEntry{})); len(fields) != 0 {
+		t.Fatalf("HandlerRuleEntry restored authored presentation authority: %v", fields)
 	}
 }
 
 func TestHandlerRuleDisplayLabelReaderBoundaryRejectsHostileSemanticUse(t *testing.T) {
-	root := handlerRuleIdentityGuardRepoRoot(t)
-	path := filepath.Join(root, "internal", "runtime", "contracts", "handler_rule_identity_guard_hostile.go")
-	overlay := map[string][]byte{path: []byte(`package contracts
-
-import "strings"
-
-func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling HandlerRuleEntry) bool {
-    return strings.TrimSpace(arbitraryReceiver.ID) == strings.TrimSpace(sibling.ID)
-}
-`)}
-	readers := loadHandlerRuleDisplayLabelReaders(t, overlay)
-	count := 0
-	for _, reader := range readers {
-		if reader.Enclosing == "hostileRuleLabelAuthority" {
-			count++
-			if _, allowed := allowedHandlerRuleDisplayLabelReaders()[reader.key()]; allowed {
-				t.Fatalf("hostile semantic reader unexpectedly allowlisted: %s", reader.key())
+	for _, name := range []string{"ID", "Description"} {
+		t.Run(name, func(t *testing.T) {
+			hostile := reflect.StructOf([]reflect.StructField{{Name: name, Type: reflect.TypeOf("")}})
+			if got := retiredHandlerRuleFields(hostile); !slices.Equal(got, []string{name}) {
+				t.Fatalf("restored %s authority escaped the typed model boundary: %v", name, got)
 			}
-		}
-	}
-	if count != 2 {
-		t.Fatalf("typed guard detected %d hostile HandlerRuleEntry.ID readers, want 2: %#v", count, readers)
-	}
-}
-
-func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
-	return map[string]handlerRuleDisplayLabelAllowance{}
-}
-
-func loadHandlerRuleDisplayLabelReaders(t *testing.T, overlay map[string][]byte) []handlerRuleDisplayLabelReader {
-	t.Helper()
-	root := handlerRuleIdentityGuardRepoRoot(t)
-	cfg := &packages.Config{
-		Dir: root,
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
-		Tests:   false,
-		Overlay: overlay,
-	}
-	pkgs, err := packages.Load(cfg, "./internal/runtime/...", "./internal/store/...", "./internal/operatorread/...")
-	if err != nil {
-		t.Fatalf("load handler rule identity ownership packages: %v", err)
-	}
-	if packages.PrintErrors(pkgs) > 0 {
-		t.Fatal("load handler rule identity ownership packages reported type errors")
-	}
-	var readers []handlerRuleDisplayLabelReader
-	for _, pkg := range pkgs {
-		for index, file := range pkg.Syntax {
-			if index >= len(pkg.CompiledGoFiles) || strings.HasSuffix(pkg.CompiledGoFiles[index], "_test.go") {
-				continue
-			}
-			relative, err := filepath.Rel(root, pkg.CompiledGoFiles[index])
-			if err != nil {
-				t.Fatal(err)
-			}
-			readers = append(readers, collectHandlerRuleDisplayLabelReaders(filepath.ToSlash(relative), file, pkg.TypesInfo)...)
-		}
-	}
-	sort.Slice(readers, func(i, j int) bool { return readers[i].key() < readers[j].key() })
-	return readers
-}
-
-func collectHandlerRuleDisplayLabelReaders(path string, file *ast.File, info *types.Info) []handlerRuleDisplayLabelReader {
-	var readers []handlerRuleDisplayLabelReader
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
-		}
-		enclosing := handlerRuleGuardFunctionName(function)
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok || !isHandlerRuleDisplayLabelField(selector, info) {
-				return true
-			}
-			readers = append(readers, handlerRuleDisplayLabelReader{Path: path, Enclosing: enclosing})
-			return true
 		})
 	}
-	return readers
+	if fields := retiredHandlerRuleFields(reflect.TypeOf(struct{ Condition string }{})); len(fields) != 0 {
+		t.Fatalf("predicate text was incorrectly retired: %v", fields)
+	}
+	if _, exists := reflect.TypeOf(ActivitySpec{}).FieldByName("ID"); !exists {
+		t.Fatal("the rule model cut removed explicit activity identity")
+	}
 }
 
-func isHandlerRuleDisplayLabelField(selector *ast.SelectorExpr, info *types.Info) bool {
-	if selector == nil || selector.Sel == nil || selector.Sel.Name != "ID" || info == nil {
-		return false
-	}
-	selection := info.Selections[selector]
-	if selection == nil || selection.Kind() != types.FieldVal {
-		return false
-	}
-	receiver := types.Unalias(selection.Recv())
-	if pointer, ok := receiver.(*types.Pointer); ok {
-		receiver = types.Unalias(pointer.Elem())
-	}
-	named, ok := receiver.(*types.Named)
-	return ok && named.Obj() != nil && named.Obj().Pkg() != nil &&
-		named.Obj().Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/contracts" &&
-		named.Obj().Name() == "HandlerRuleEntry"
-}
-
-func handlerRuleGuardFunctionName(function *ast.FuncDecl) string {
-	if function.Recv == nil || len(function.Recv.List) == 0 {
-		return function.Name.Name
-	}
-	receiver := function.Recv.List[0].Type
-	switch typed := receiver.(type) {
-	case *ast.Ident:
-		return "(" + typed.Name + ")." + function.Name.Name
-	case *ast.StarExpr:
-		if name, ok := typed.X.(*ast.Ident); ok {
-			return "(*" + name.Name + ")." + function.Name.Name
+func retiredHandlerRuleFields(row reflect.Type) []string {
+	var fields []string
+	for _, name := range []string{"ID", "Description"} {
+		if _, present := row.FieldByName(name); present {
+			fields = append(fields, name)
 		}
 	}
-	return function.Name.Name
+	return fields
 }
 
 func handlerRuleIdentityGuardRepoRoot(t *testing.T) string {

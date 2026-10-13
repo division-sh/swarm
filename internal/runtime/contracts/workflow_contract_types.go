@@ -267,8 +267,6 @@ type HandlerTransitionSemantic struct {
 	Clear            *ClearSpec
 }
 type HandlerRuleEntry struct {
-	ID                  string                   `yaml:"id"`
-	Description         string                   `yaml:"description"`
 	Condition           string                   `yaml:"condition"`
 	PolicyRow           PolicySheetRowMetadata   `yaml:"-"`
 	AdvancesTo          string                   `yaml:"advances_to"`

@@ -82,7 +82,6 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 		},
 	}
 	rules := []runtimecontracts.HandlerRuleEntry{{
-		ID:        "render_bundle",
 		PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: spec},
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpModule,
@@ -92,7 +91,6 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 	}}
 	if consumed {
 		rules = append(rules, runtimecontracts.HandlerRuleEntry{
-			ID:        "rendered_yaml",
 			Condition: `computed.rendered_bundle.format == "yaml"`,
 			Emit:      runtimecontracts.EmitSpec{Event: "bundle.rendered"},
 		})
@@ -150,7 +148,6 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 	}
 	rules := []runtimecontracts.HandlerRuleEntry{
 		{
-			ID:        "render_bundle",
 			PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: spec},
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpModule,
@@ -159,7 +156,6 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 			},
 		},
 		{
-			ID:        "rendered_yaml",
 			Condition: `computed.rendered_bundle.format == "yaml"`,
 			Emit:      runtimecontracts.EmitSpec{Event: "bundle.rendered"},
 		},

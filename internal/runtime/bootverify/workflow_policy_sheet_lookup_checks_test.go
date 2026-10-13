@@ -20,7 +20,6 @@ func TestPolicySheetLookupValueRowsAcceptsConsumedDefaultedInlineLookup(t *testi
 func TestPolicySheetLookupValueRowsAcceptsEmitFieldConsumer(t *testing.T) {
 	handler := bootverifyLookupHandler(true, false)
 	handler.Rules = append(handler.Rules, runtimecontracts.HandlerRuleEntry{
-		ID:        "emit_template",
 		Condition: "true",
 		Emit: runtimecontracts.EmitSpec{
 			Event: "repo.service_template_selected",
@@ -79,7 +78,7 @@ func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testin
 			name:    "earlier policy compute row",
 			wantRow: "lookup row rules[1]: lookup",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
-				earlier := bootverifyLookupConsumerRule("earlier", "computed.earlier", "computed.template_path")
+				earlier := bootverifyLookupConsumerRule("computed.earlier", "computed.template_path")
 				handler.Rules = append([]runtimecontracts.HandlerRuleEntry{earlier}, handler.Rules...)
 			},
 		},
@@ -98,7 +97,7 @@ func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testin
 
 func TestPolicySheetLookupValueRowsAcceptsLaterComputeConsumer(t *testing.T) {
 	handler := bootverifyLookupHandler(true, false)
-	handler.Rules = append(handler.Rules, bootverifyLookupConsumerRule("later", "computed.later", "computed.template_path"))
+	handler.Rules = append(handler.Rules, bootverifyLookupConsumerRule("computed.later", "computed.template_path"))
 	findings := bootverifyLookupFindings(handler)
 	if findingContainsAll(findings, policySheetLookupCheckID, "lookup row rules[0]: lookup", "is not consumed") {
 		t.Fatalf("lookup findings = %#v, want later compute row accepted as scaffold_paths consumer", findings)
@@ -165,7 +164,6 @@ func bootverifyLookupHandler(defaultDeclared, includeConsumer bool) runtimecontr
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			ID:        "scaffold_paths",
 			PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindLookup, Lookup: lookup},
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpLookup,
@@ -176,14 +174,13 @@ func bootverifyLookupHandler(defaultDeclared, includeConsumer bool) runtimecontr
 	}
 	if includeConsumer {
 		handler.Rules = append(handler.Rules, runtimecontracts.HandlerRuleEntry{
-			ID:        "service_route",
 			Condition: `computed.template_path == "templates/service/go"`,
 		})
 	}
 	return handler
 }
 
-func bootverifyLookupConsumerRule(id, storeAs, firstInput string) runtimecontracts.HandlerRuleEntry {
+func bootverifyLookupConsumerRule(storeAs, firstInput string) runtimecontracts.HandlerRuleEntry {
 	rule := bootverifyLookupHandler(true, false).Rules[0]
 	lookup := *rule.Compute.Lookup
 	lookup.On = []string{firstInput, "payload.language"}
@@ -193,7 +190,6 @@ func bootverifyLookupConsumerRule(id, storeAs, firstInput string) runtimecontrac
 	compute.Lookup = &lookup
 	policyRow := rule.PolicyRow
 	policyRow.Lookup = &lookup
-	rule.ID = id
 	rule.Compute = &compute
 	rule.PolicyRow = policyRow
 	return rule

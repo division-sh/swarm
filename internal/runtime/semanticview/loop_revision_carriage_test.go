@@ -191,7 +191,7 @@ func TestOriginalLoopCarriageUnanimousSites(t *testing.T) {
 				cel.Fields["revision_id"] = contracts.RefExpression("payload.revision_id")
 			}
 			handler.Emit = contracts.EmitSpec{}
-			handler.Rules = []contracts.HandlerRuleEntry{{ID: "first", Emit: ref}, {ID: "second", Emit: cel}}
+			handler.Rules = []contracts.HandlerRuleEntry{{Emit: ref}, {Emit: cel}}
 			if reverse {
 				handler.Rules[0], handler.Rules[1] = handler.Rules[1], handler.Rules[0]
 			}
