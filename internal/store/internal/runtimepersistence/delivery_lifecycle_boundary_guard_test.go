@@ -31,14 +31,16 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go":                    "read-only cancellation inventory excluding selected possession from normal recovery",
 	"internal/store/testsql/event.go":                                                                "named hostile rollback injection used only by tests",
 	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":          "exact read-only drafted/rolled-back publication cardinality proof",
+	"internal/store/internal/backend/pipelinepersistence/test_selected_reply_return_rollback.go":     "exact read-only drafted/rolled-back accepted-return publication cardinality proof",
 	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":            "exact read-only replay lineage and child-delivery membership, not lifecycle selection",
 	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go":         "exact read-only selected receiver claim and terminal receipt proof",
 }
 
 var selectedForkDeliveryReadCounts = map[string]int{
-	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":  1,
-	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":    2,
-	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go": 1,
+	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":      1,
+	"internal/store/internal/backend/pipelinepersistence/test_selected_reply_return_rollback.go": 1,
+	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":        2,
+	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go":     1,
 }
 
 var selectedForkDeliveryMutationSQL = regexp.MustCompile(`(?is)\b(?:into|update|delete\s+from|on)\s+(?:event_deliveries|event_delivery_attempts)\b`)
