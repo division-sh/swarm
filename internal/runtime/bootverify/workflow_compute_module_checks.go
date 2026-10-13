@@ -33,11 +33,11 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 					continue
 				}
 				ref := computeModuleRef{
-					Node:      node,
-					EventType: eventType,
-					RuleIndex: idx,
-					RuleID:    strings.TrimSpace(rule.ID),
-					RuleRef:   policyRuleElementRef(rule),
+					Node:        node,
+					EventType:   eventType,
+					RuleIndex:   idx,
+					RuleDisplay: rule.DisplayLabel("rules", idx),
+					RuleRef:     policyRuleElementRef(rule),
 				}
 				findings = append(findings, validateComputeModuleValueRow(ctx, c.source, ref, handler, rule)...)
 			}
@@ -47,27 +47,20 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 }
 
 type computeModuleRef struct {
-	Node      runtimeidentity.ExecutableNode
-	EventType string
-	RuleIndex int
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
+	Node        runtimeidentity.ExecutableNode
+	EventType   string
+	RuleIndex   int
+	RuleDisplay string
+	RuleRef     runtimeidentity.DeclarationIdentity
 }
 
 func computeModuleFinding(ref computeModuleRef, detail string) Finding {
 	return Finding{
 		CheckID:  computeModuleCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RuleDisplay, detail),
 		Location: ref.Node.Key(),
 	}
-}
-
-func (r computeModuleRef) RowLabel() string {
-	if id := strings.TrimSpace(r.RuleID); id != "" {
-		return id
-	}
-	return fmt.Sprintf("#%d", r.RuleIndex)
 }
 
 func policySheetRuleIsComputeModuleValueRow(rule runtimecontracts.HandlerRuleEntry) bool {
@@ -133,7 +126,7 @@ func validateComputeModuleArtifact(ctx context.Context, ref computeModuleRef, mo
 	case pythonmodule.Kind:
 		return pythonmodule.ValidateSource(ctx, pythonmodule.Request{
 			ModuleID:    moduleID,
-			RowID:       ref.RowLabel(),
+			RowID:       ref.RuleDisplay,
 			Digest:      strings.TrimSpace(module.Digest),
 			Entry:       strings.TrimSpace(module.Entry),
 			Source:      moduleBytes,

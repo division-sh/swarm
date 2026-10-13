@@ -93,20 +93,13 @@ func hostileRuleLabelAuthority(arbitraryReceiver HandlerRuleEntry, sibling Handl
 
 func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelAllowance {
 	return map[string]handlerRuleDisplayLabelAllowance{
-		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::checkPolicySheetLookupValueRows":                      {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::policySheetLookupDuplicateComputedBindings":           {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/bootverify/workflow_policy_sheet_validation_checks.go::checkPolicySheetValidationValueRows":              {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/bootverify/workflow_policy_sheet_validation_checks.go::validatePolicySheetValidationDispositionConsumer": {Count: 1, Reason: "diagnostic consumer label; self-exclusion uses RuleIndex"},
-		"internal/runtime/contracts/compute_module_validation.go::validatePolicySheetComputeModuleRows":                            {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/contracts/validation_policy_validation.go::validatePolicySheetValidationRows":                            {Count: 1, Reason: "diagnostic row label"},
-		"internal/runtime/contracts/workflow_contract_emit.go::HandlerDeclarativeEmitSites":                                        {Count: 4, Reason: "emit-site presentation label"},
-		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":                                       {Count: 1, Reason: "emit-template presentation label"},
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue":                            {Count: 2, Reason: "keyed-map presentation projection"},
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":                             {Count: 1, Reason: "authored rule presentation label projection"},
-		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRulePolicyValue":                            {Count: 1, Reason: "policy value-row diagnostic label; relocated from projectNodeRuleEntryValue"},
-		"internal/runtime/contracts/workflow_fan_out_semantics.go::HandlerFanOutSites":                                             {Count: 2, Reason: "fan-out-site presentation label"},
-		"internal/runtime/contracts/workflow_transition_carriers.go::handlerAdvanceCarriers":                                       {Count: 1, Reason: "transition diagnostic carrier label"},
+		"internal/runtime/contracts/workflow_contract_emit.go::HandlerDeclarativeEmitSites":             {Count: 4, Reason: "emit-site presentation label"},
+		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":            {Count: 1, Reason: "emit-template presentation label"},
+		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeKeyedRulesValue": {Count: 2, Reason: "keyed-map presentation projection"},
+		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRuleEntryValue":  {Count: 1, Reason: "authored rule presentation label projection"},
+		"internal/runtime/contracts/workflow_contract_nodes_rules_value.go::projectNodeRulePolicyValue": {Count: 1, Reason: "policy value-row diagnostic label; relocated from projectNodeRuleEntryValue"},
+		"internal/runtime/contracts/workflow_fan_out_semantics.go::HandlerFanOutSites":                  {Count: 2, Reason: "fan-out-site presentation label"},
+		"internal/runtime/contracts/workflow_transition_carriers.go::handlerAdvanceCarriers":            {Count: 1, Reason: "transition diagnostic carrier label"},
 	}
 }
 

@@ -221,7 +221,7 @@ func validatePolicySheetComputeModuleRows(bundle *WorkflowContractBundle) []erro
 				if !policySheetRuleIsComputeModuleValueRow(rule) {
 					continue
 				}
-				context := fmt.Sprintf("node %s handler %s rules[%d] compute_module row %s", node.Key(), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
+				context := fmt.Sprintf("node %s handler %s %s", node.Key(), strings.TrimSpace(eventType), rule.DisplayLabel("rules", idx))
 				var tool ToolSchemaEntry
 				if rule.Compute != nil && rule.Compute.Module != nil {
 					tool, _ = bundle.ToolEntryForExecutableNode(node, rule.Compute.Module.Module)
