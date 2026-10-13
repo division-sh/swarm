@@ -370,8 +370,13 @@ func sqliteRenderType(raw string) (string, error) {
 		return "INTEGER", nil
 	case "NUMERIC":
 		return "NUMERIC", nil
-	case "TEXT[]":
-		return "TEXT", nil
+	}
+	if element, array := strings.CutSuffix(normalized, "[]"); array && !strings.ContainsAny(element, "[]") {
+		// Only canonical scalar types emitted by the schema owner have this
+		// JSON-text array representation; arbitrary or nested SQL types do not.
+		if canonical, err := SchemaFieldTypeToDDL(element); err == nil && canonical == element {
+			return "TEXT", nil
+		}
 	}
 	if schemaDDLNumericPattern.MatchString(strings.ToLower(strings.TrimSpace(raw))) {
 		return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(raw), " ", "")), nil

@@ -27,8 +27,8 @@ func listDeclarationScalar(value yamlsource.Value, context string, explicitType 
 	if err != nil {
 		return "", err
 	}
-	if !explicitType && scalar.Style&(yamlsource.SingleQuotedStyle|yamlsource.DoubleQuotedStyle) != 0 && strings.HasPrefix(raw, "[") {
-		return "", nodeValueError(value, fmt.Errorf("%w: %s quoted list reference is not a declaration; use [T] unquoted, or an explicit type: scalar for metadata", ErrInvalidField, context))
+	if !explicitType && scalar.Style != 0 && strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		return "", nodeValueError(value, fmt.Errorf("%w: %s styled list reference is not a declaration; use [T] unquoted, or an explicit type: scalar for metadata", ErrInvalidField, context))
 	}
 	return raw, nil
 }
