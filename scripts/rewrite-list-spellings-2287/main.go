@@ -53,6 +53,9 @@ var generatedSourceEdits = map[string][][2]string{
 	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go": {
 		{"  account_ids: \"[NumericAccount]\"", "  account_ids: [NumericAccount]"},
 	},
+	"internal/runtime/testfixtures/canonicalrouting/root_reply.go": {
+		{"  request_id: \"[text]\"", "  request_id: [text]"},
+	},
 }
 
 type edit struct {
@@ -102,7 +105,7 @@ func scalarEdit(body string, value yamlsource.Value, replacement string) (edit, 
 }
 
 func bareReference(raw string) string {
-	if strings.HasSuffix(raw, "?") || strings.HasPrefix(raw, "[[") || strings.Contains(raw, ",") {
+	if strings.HasSuffix(raw, "?") || strings.Contains(raw, ",") || (strings.HasPrefix(raw, "[") && strings.Contains(raw[1:], "[")) {
 		return "{type: " + strconv.Quote(raw) + "}"
 	}
 	return raw
@@ -303,6 +306,12 @@ func rewriteGoLiteral(path string, lit *ast.BasicLit, parents map[ast.Node]ast.N
 		return "", false
 	}
 	next := text
+	// These exact table cells are concatenated into declaration values by
+	// CopyFlowConstructorSupply, not passed as programmatic type references.
+	if filepath.ToSlash(path) == "internal/runtime/bootverify/flow_constructor_test.go" &&
+		(text == "list<map[text]text>" || text == "[map[text]text]") {
+		next = bareReference(canonical(text))
+	}
 	if entry, ok := parents[lit].(*ast.KeyValueExpr); ok {
 		if key, ok := entry.Key.(*ast.Ident); ok && (key.Name == "Type" || key.Name == "resultType") {
 			next = canonical(text)
