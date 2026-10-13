@@ -116,8 +116,14 @@ func finishFailurePopulation(path string, report failurePopulationReport) error 
 			return err
 		}
 	}
-	if report.Summary.Incomplete != 0 {
-		return fmt.Errorf("failure population incompletely observed: %d runs; inspect the retained report for missing history or evidence", report.Summary.Incomplete)
+	incomplete := 0
+	for _, run := range report.Runs {
+		if !run.ObservationComplete() {
+			incomplete++
+		}
+	}
+	if incomplete != 0 {
+		return fmt.Errorf("failure population incompletely observed: %d runs; inspect the retained report for missing history or evidence", incomplete)
 	}
 	return nil
 }

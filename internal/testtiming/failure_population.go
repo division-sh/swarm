@@ -100,17 +100,29 @@ func completeFailureHistory(run FailureRun) bool {
 	return true
 }
 
+func (run FailureRun) ObservationComplete() bool {
+	if !completeFailureHistory(run) {
+		return false
+	}
+	for _, attempt := range run.Attempts {
+		if len(attempt.Problems) != 0 {
+			return false
+		}
+		for _, failure := range attempt.Failures {
+			if failure.Problem != "" || !hexIdentity(failure.Source, 20) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func countFailureExposure(run FailureRun, summary *FailurePopulation) {
-	incomplete := !completeFailureHistory(run)
 	for _, attempt := range run.Attempts {
 		summary.CancelledJobs += len(attempt.CancelledJobs)
 		summary.UnstartedJobs += len(attempt.UnstartedJobs)
-		incomplete = incomplete || len(attempt.Problems) != 0
-		for _, failure := range attempt.Failures {
-			incomplete = incomplete || failure.Problem != "" || !hexIdentity(failure.Source, 20)
-		}
 	}
-	if incomplete {
+	if !run.ObservationComplete() {
 		summary.Incomplete++
 	}
 	if run.Status != "completed" {
