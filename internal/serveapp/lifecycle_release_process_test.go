@@ -62,7 +62,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					if entity.Fields["result"] != "approved" {
 						t.Fatalf("nested gate final public result: %+v", entity)
 					}
-					requireLifecycleEventCount(t, rt, seed.RunID, prefix+"work.completed", 1)
+					requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, prefix+"work.completed", 1)
 					before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
 					if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
@@ -83,7 +83,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
-					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					current := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					if current.Attempt != attempt || current.MaxAttempts != 2 {
 						t.Fatalf("wrong public loop generation: %+v", current)
 					}
@@ -99,7 +99,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, next)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), finalEvent, "review", next)
 				}
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
 					t.Fatalf("loop cap not closed: %+v", closed)
 				}
@@ -122,7 +122,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if entity.Fields["revision_id"] != closed.RevisionID {
 					t.Fatalf("connected public result lost escaped revision: %+v", entity)
 				}
-				requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
 			})
 		}
 	}

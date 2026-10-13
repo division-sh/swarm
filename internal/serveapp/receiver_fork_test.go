@@ -146,7 +146,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						time.Sleep(10 * time.Millisecond)
 					}
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.RunID)
-					requireLifecycleEventCount(t, rt, request.RunID, "work.completed", 1)
+					requireLifecycleEventCount(t, rt.ReceiverStateReader, request.RunID, "work.completed", 1)
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": request.RunID, "idempotency_key": "empty-fork-pause"})
 					if surface == "fieldless_settled" {
 						forkPoint = outputID

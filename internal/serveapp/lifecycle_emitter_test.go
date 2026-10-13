@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
@@ -45,12 +47,12 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			}
 			publish("loop.start", "loop-start", map[string]any{"seed": true})
 			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, "drafting")
-			first := readLifecycleLoop(t, rt, started.RunID, entityID)
+			first := readLifecycleLoop(t, rt.Endpoint, started.RunID, entityID)
 			if first.Attempt != 1 || first.MaxAttempts != 2 || first.Status != loopruntime.StatusOpen {
 				t.Fatalf("first loop=%#v", first)
 			}
 			for attempt := 1; attempt <= 2; attempt++ {
-				current := readLifecycleLoop(t, rt, started.RunID, entityID)
+				current := readLifecycleLoop(t, rt.Endpoint, started.RunID, entityID)
 				if current.Attempt != attempt {
 					t.Fatalf("attempt=%#v", current)
 				}
@@ -64,7 +66,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 				}
 				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, entityID, state)
 			}
-			closed := readLifecycleLoop(t, rt, started.RunID, entityID)
+			closed := readLifecycleLoop(t, rt.Endpoint, started.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 || closed.RevisionID == first.RevisionID {
 				t.Fatalf("closed loop=%#v", closed)
 			}
@@ -77,15 +79,15 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			if received.Fields["revision_id"] != closed.RevisionID {
 				t.Fatalf("escape result=%#v, loop=%#v", received, closed)
 			}
-			requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, started.RunID, "loop.escaped", 1)
 		})
 	}
 }
 
-func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.PublicActivation {
+func readLifecycleLoop(t *testing.T, endpoint, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
 	var result operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
 	if len(result.Loops) != 1 {
 		t.Fatalf("expected one public loop: %#v", result)
 	}
@@ -130,7 +132,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 					requireServedEntityReadback(t, rt.Endpoint, started.RunID, entityID, "done")
 					var replay map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &replay)
-					requireLifecycleEventCount(t, rt, started.RunID, tc.prefix+"work.completed", 1)
+					requireLifecycleEventCount(t, rt.ReceiverStateReader, started.RunID, tc.prefix+"work.completed", 1)
 					var fields string
 					if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id = $1 AND entity_id = $2`, started.RunID, entityID).Scan(&fields); err != nil {
 						t.Fatal(err)
@@ -172,10 +174,14 @@ func waitLifecycleGateCard(t *testing.T, rt servedControlProofRuntime, runID str
 	return ""
 }
 
-func requireLifecycleEventCount(t *testing.T, rt servedControlProofRuntime, runID, event string, want int) {
+func requireLifecycleEventCount(t *testing.T, reader receiverProofStateReader, runID, event string, want int) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = $1 AND event_name = $2`, runID, event).Scan(&count); err != nil {
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunNamedEventStorage(ctx, reader, runID, event)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if count != want {

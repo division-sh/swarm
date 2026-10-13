@@ -61,7 +61,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				if entity.Fields["result"] != scope+"first/alpha" {
 					t.Fatalf("scope %q wrong public result: %+v", scope, entity)
 				}
-				requireLifecycleEventCount(t, rt, fork.ForkRunID, scope+"work.completed", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, fork.ForkRunID, scope+"work.completed", 1)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			childBefore := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID)

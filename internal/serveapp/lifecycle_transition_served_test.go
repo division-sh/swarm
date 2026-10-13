@@ -70,7 +70,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 								if entity.Fields["result"] != recipient+handler+"/"+choice {
 									t.Fatalf("wrong public output: %#v", entity)
 								}
-								requireLifecycleEventCount(t, rt, seed.RunID, recipient+"work.completed", 1)
+								requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, recipient+"work.completed", 1)
 							}
 							var entities int
 							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&entities); err != nil {

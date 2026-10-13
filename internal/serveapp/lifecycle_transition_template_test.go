@@ -171,7 +171,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			t.Fatalf("actual template key/instance missing: entity=%#v instance=%s", keyed, s.instance)
 		}
 		for attempt := 1; attempt <= 2; attempt++ {
-			loop := readLifecycleLoop(t, rt, runID, s.entity)
+			loop := readLifecycleLoop(t, rt.Endpoint, runID, s.entity)
 			if loop.Attempt != attempt {
 				t.Fatalf("%s loop attempt=%d want=%d", side, loop.Attempt, attempt)
 			}
@@ -194,7 +194,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 				t.Fatalf("%s ordinary/cap transition borrowed another template/carrier: %+v", side, record)
 			}
 		}
-		s.revision = readLifecycleLoop(t, rt, runID, s.entity).RevisionID
+		s.revision = readLifecycleLoop(t, rt.Endpoint, runID, s.entity).RevisionID
 		s.gateEntity, s.gateInstance = requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink", "review")
 		requireLifecycleTemplateInstance(t, rt, runID, s.gateInstance, s.flow+"/sink")
 		var rawConfig string
@@ -274,8 +274,8 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[0].TriggerEventID {
 		t.Fatalf("%s gate receipt split activation/history: %#v", s.side, gate)
 	}
-	requireLifecycleEventCount(t, rt, runID, s.gateInstance+"/work.completed", 1)
-	requireLifecycleEventCount(t, rt, runID, s.flow+"/sink/work.completed", 0)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, s.gateInstance+"/work.completed", 1)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, s.flow+"/sink/work.completed", 0)
 	t.Logf("TEMPLATE_DECIDED run=%s side=%s card=%s event=%s final=%s compiled=%#v", runID, s.side, gate.CardID, gate.DecisionEventID, final, compiled)
 }
 
@@ -325,8 +325,8 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 				t.Fatalf("root plus two template/second-template/final chains: entities=%d", count)
 			}
 			for _, s := range siblings {
-				requireLifecycleEventCount(t, rt, runID, s.instance+"/loop.escaped", 1)
-				requireLifecycleEventCount(t, rt, runID, s.flow+"/loop.escaped", 0)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, s.instance+"/loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, s.flow+"/loop.escaped", 0)
 			}
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID)
 			for _, s := range siblings {

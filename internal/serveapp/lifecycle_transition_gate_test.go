@@ -36,7 +36,7 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("duplicate advance-only verdict mutated history")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 0)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 0)
 		})
 	}
 }

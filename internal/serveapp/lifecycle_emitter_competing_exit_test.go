@@ -147,11 +147,11 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								if !won || (code != apiv1.RunAlreadyTerminalCode && !lateTerminal) {
 									t.Fatalf("unexpected ordinary exit rejection: %#v", exitReply.Error)
 								}
-								requireLifecycleEventCount(t, rt, seed.RunID, "work.cancelled", 0)
+								requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.cancelled", 0)
 							}
 							// Publication, durable subscriber delivery, and public entity
 							// state must agree on the same winning gate outcome.
-							requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", count)
+							requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", count)
 							var deliveries int
 							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id WHERE e.run_id = $1 AND e.event_name = 'work.completed'`, seed.RunID).Scan(&deliveries); err != nil {
 								t.Fatal(err)

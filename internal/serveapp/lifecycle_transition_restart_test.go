@@ -166,8 +166,8 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if !ok || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 				t.Fatalf("frozen selected gate cause=%#v", compiled)
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.changed", 0)
 			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
@@ -186,8 +186,8 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("terminal restart/replay changed evidence")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.changed", 0)
 			if code := third.stop(); code != 0 {
 				t.Fatalf("third stop=%d", code)
 			}
@@ -230,7 +230,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				var capParams map[string]any
 				var capRevision string
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					loop := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					capRevision = loop.RevisionID
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
@@ -266,7 +266,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "escaped")
 				receipt := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 				if closed.RevisionID != capRevision || closed.Attempt != 2 || closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" {
 					t.Fatalf("restart loop=%#v", closed)
 				}
@@ -292,8 +292,8 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if duplicate.EventID != cap.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 					t.Fatal("terminal restart changed cap identity/history")
 				}
-				requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)
-				requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "ordinary.repeated", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
 				if code := third.stop(); code != 0 {
 					t.Fatalf("third stop=%d", code)
 				}

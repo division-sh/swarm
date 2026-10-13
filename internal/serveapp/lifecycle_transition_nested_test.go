@@ -130,7 +130,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, runID, entityID)
+					loop := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
 					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
@@ -143,7 +143,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), repeated.EventID, "review", state)
 				}
-				closed := readLifecycleLoop(t, rt, runID, entityID)
+				closed := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
 				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
 				gateEntities = append(gateEntities, gateEntity)
 				var entity operatorread.OperatorEntityFull
@@ -210,8 +210,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if !ok || compiled.FlowID() != prefix+"sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 					t.Fatalf("nested gate borrowed sibling cause=%#v", compiled)
 				}
-				requireLifecycleEventCount(t, rt, runID, prefix+"loop.escaped", 1)
-				requireLifecycleEventCount(t, rt, runID, prefix+"sink/work.completed", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, prefix+"loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, prefix+"sink/work.completed", 1)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var entities int

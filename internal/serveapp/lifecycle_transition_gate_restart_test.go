@@ -137,7 +137,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("recovered gate duplicate mutated history")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
 			if code := second.stop(); code != 0 {
 				t.Fatalf("recovered stop=%d", code)
 			}

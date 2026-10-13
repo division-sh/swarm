@@ -6260,3 +6260,66 @@ lifecycle/joined-inventory/writer-stage roots, fourteen backend cells, PASS
 31.43s under race. Existing late-NULL view restoration, counters, detached
 values, run isolation and all original assertions remain. No runtime reader
 change, weakened assertion, extra gate or new debt allowance.
+
+## Whole Lifecycle Count / Public Loop Reader Group (2026-10-13, Stacked Locally)
+
+While the seven-pair entity-stage accounting request remains held, this ready
+exact-owner group removes the WHOLE31-call requireLifecycleEventCount raw
+dependency and WHOLE19-call readLifecycleLoop broad carrier. The former now
+uses the existing storetest.CountRunNamedEventStorage -> private selected read
+bridge -> eventrecord.CountRunNamedEventStorageTx, inside the original reader's
+InspectSnapshot. The exact run/event-name COUNT and equality/error assertion
+are unchanged; no SQL, selector, new port or broad diagnostic owner is added.
+The latter already used only public entity.get: it now receives the same exact
+rt.Endpoint string, preserving run/entity parameters, exactly-one-loop refusal
+and the original returned public activation. It does not gain SQL authority or
+replace public observability with a storage shortcut.
+
+All50 calls across21 complete predecessor bodies are machine-pinned at signed
+0da2d85e370f943618a45f3a2b093282a5683742. The new finite manifest digest is
+7202f3b970cab9e979d8821ace9dd803bb6024350949c3288863f033c98b51aa.
+Two explicit inverse rules preserve every other source/flow/history/sibling/
+fault/replay/cleanup/assertion cut. Owned-source walking rejects raw/foreign
+arguments and verifies31+19 calls. Both complete helper bodies and the single
+physical query are checked against their immutable preimages and live source.
+Hostile context-error swallowing, count inequality, cardinality weakening,
+wrong result element and lost caller roles/assertions/cuts refuse. Earlier
+writer-stage/lifecycle/mailbox/source-domain preservation is composed, not
+suppressed. No still-live raw signature changes in this group; both helper
+carriers are genuinely gone.
+
+Existing finite corpus1356 recipes/638 transitions, digest
+34b821e91e94a57045ea2fba9b92aa5406e73cdae728764ac1fe89ce09cd9a91.
+All historical Before/After/Successor and24 immutable receipts remain.
+Complete cheap family/historical/idempotence collection PASS; the two live
+whole-group/helper controls PASS0.626s. All-package/variant candidate-overlay
+typing PASS61.585s. Existing scalar owner's exact run/name/multiplicity/case/
+trailing-space/absence/cancelled/closed/counter proof passes BOTH under race
+12.166s. Original loop and gate-advance-only journeys BOTH under race PASS
+26.636s, proving both positive and absent native event counts and public loop
+readback. Actual independently built release executable connected-loop cells
+on BOTH stores PASS34.443s, proving unaccepted independent inspection and public
+readback roles in real process lifetimes. All unchanged owner/boundary and
+unaffected release-gate/replay receipts carry; no duplicate local tier. U1000
+passes on four affected packages; new guard functions are below30 cognitive
+complexity. The inherited43-complexity loop test's complete body is preserved
+apart from the mechanically checked role arguments.
+
+One fresh real census: actual7556 ->7502, an additional54 apparent removals.
+The ONLY new/increased identities remain the EXACT SAME seven entity-stage
+signature pairs already requested in6136468470; this group adds none. Aggregate
+7654 ->7502 (152 apparent removals) is not claimed as an authorized refresh or
+ratchet PASS. The census remains RED58.901s, and the committed7654/5364 baseline
+is unchanged. Do not pay for the seven identities with these removals. This
+local group can stack under the existing rule gate, but aggregate bookkeeping/
+landing qualification remains held until the exact transition is authorized.
+
+Parent #2542/#2151 stays OPEN. Old raw diagnostic, construction, carrier and
+transaction families remain explicitly in that parent; no broader closure is
+claimed. No production/platform semantics, no new issue/watchlist/framework,
+no push/PR/tier/server2/rebase. Next highest ready dependencies remain the raw
+debug chain and shared construction groups. Existing M01/Docker/other holds,
+static-fork initial publication intake, zero-tail completion and final
+integration requirements survive. Receipts:~/.cache/swarm-2542-family145/
+lifecycle-readers-*; previous native oracle hardening receipts are entity-state-
+distinct-valid-oracle-*.

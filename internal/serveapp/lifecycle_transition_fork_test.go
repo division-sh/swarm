@@ -60,7 +60,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			frontierPayload := map[string]any{"seed": true}
 			if !gate {
 				frontierEvent = "loop.admit"
-				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt, seed.RunID, entityID).RevisionID}
+				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID).RevisionID}
 			}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
@@ -196,8 +196,8 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !reflect.DeepEqual(parent, readCard(parentParams["card_id"])) || !reflect.DeepEqual(child, readCard(childParams["card_id"])) {
 		t.Fatal("refusal changed either frozen card")
 	}
-	requireLifecycleEventCount(t, rt, runID, "work.completed", 0)
-	requireLifecycleEventCount(t, rt, parentRun, "work.completed", 0)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, "work.completed", 0)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, parentRun, "work.completed", 0)
 }
 
 func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
@@ -211,7 +211,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 		child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
 		t.Fatalf("fork loop identity/business facts: parent=%#v child=%#v", parent, child)
 	}
-	public := readLifecycleLoop(t, rt, runID, entity)
+	public := readLifecycleLoop(t, rt.Endpoint, runID, entity)
 	if public.RevisionID != child.RevisionID || public.Status != loopruntime.StatusOpen {
 		t.Fatalf("child public loop=%#v", public)
 	}
@@ -247,7 +247,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 		t.Fatalf("projected root input delivery = %s, want delivered", status)
 	}
 	for _, event := range []string{"loop.close", "work.completed"} {
-		requireLifecycleEventCount(t, rt, runID, event, 0)
+		requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, event, 0)
 	}
 }
 
