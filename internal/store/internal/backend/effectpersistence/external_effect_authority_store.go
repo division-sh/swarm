@@ -12,6 +12,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
@@ -24,24 +25,8 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
-		fields, err := agentIdentityFields(authority.Normal.Identity)
-		if err != nil {
-			return false, err
-		}
-		var epoch, generation int64
-		var phase string
-		err = q.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
-			FROM agents
-			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
-			  AND agent_route_presence=$4 AND flow_scope_key=$5
-			  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return err == nil && epoch == authority.Normal.RuntimeEpoch && generation == int64(authority.Normal.Generation) && strings.TrimSpace(phase) == "running", err
+		observation, err := storeagent.ReadAgentExecution(ctx, q, authority.Normal, false)
+		return observation.Current, err
 	case runtimeeffects.AuthoritySelectedContractFork:
 		var current selectedRuntimeAuthorityRow
 		err := q.QueryRowContext(ctx, `
@@ -94,24 +79,8 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
-		fields, err := agentIdentityFields(authority.Normal.Identity)
-		if err != nil {
-			return false, err
-		}
-		var epoch, generation int64
-		var phase string
-		err = q.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
-			FROM agents
-			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
-			  AND agent_route_presence=? AND flow_scope_key=?
-			  AND flow_instance_id=? AND flow_instance=? AND run_id=?
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return err == nil && epoch == authority.Normal.RuntimeEpoch && generation == int64(authority.Normal.Generation) && strings.TrimSpace(phase) == "running", err
+		observation, err := storeagent.ReadAgentExecution(ctx, q, authority.Normal, true)
+		return observation.Current, err
 	case runtimeeffects.AuthoritySelectedContractFork:
 		var current selectedRuntimeAuthorityRow
 		err := q.QueryRowContext(ctx, `
@@ -265,19 +234,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 	var err error
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
-		fields, fieldsErr := agentIdentityFields(authority.Normal.Identity)
-		if fieldsErr != nil {
-			return fieldsErr
-		}
-		res, err = tx.ExecContext(ctx, `
-			UPDATE agents SET lifecycle_generation=lifecycle_generation
-			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
-			  AND agent_route_presence=$4 AND flow_scope_key=$5
-			  AND flow_instance_id=$6 AND flow_instance=$7
-			  AND lifecycle_runtime_epoch=$8 AND lifecycle_generation=$9 AND run_id=$10::uuid AND lifecycle_phase='running'
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			authority.Normal.RuntimeEpoch, authority.Normal.Generation, fields.RunID)
+		return requireCurrentNormalAgentTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `
@@ -373,19 +330,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 	var err error
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
-		fields, fieldsErr := agentIdentityFields(authority.Normal.Identity)
-		if fieldsErr != nil {
-			return fieldsErr
-		}
-		res, err = tx.ExecContext(ctx, `
-			UPDATE agents SET lifecycle_generation=lifecycle_generation
-			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
-			  AND agent_route_presence=? AND flow_scope_key=?
-			  AND flow_instance_id=? AND flow_instance=?
-			  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND run_id=? AND lifecycle_phase='running'
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			authority.Normal.RuntimeEpoch, authority.Normal.Generation, fields.RunID)
+		return requireCurrentNormalAgentTx(ctx, tx, authority, true)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `
@@ -471,6 +416,17 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 
 func (s *EffectSQLiteOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
+}
+
+func requireCurrentNormalAgentTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, sqlite bool) error {
+	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, authority.Normal.Identity, authority.Normal, sqlite)
+	if err != nil {
+		return fmt.Errorf("lock current external effect authority: %w", err)
+	}
+	if !observation.Current {
+		return invalidExternalAuthority(authority, "stale")
+	}
+	return nil
 }
 
 func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, authority runtimeeffects.Authority) error {

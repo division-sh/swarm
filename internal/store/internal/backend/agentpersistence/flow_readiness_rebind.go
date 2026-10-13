@@ -66,7 +66,7 @@ func rejectIndividualReadinessRestamp(req manager.AgentLifecycleTransition, inst
 	return nil
 }
 
-func validateFlowReadinessSuccessor(req manager.AgentLifecycleTransition, previous lifecycleCell, exists, instanceRebind bool) error {
+func validateFlowReadinessSuccessor(req manager.AgentLifecycleTransition, previous manager.AgentLifecycleState, exists, instanceRebind bool) error {
 	if req.OperationKind != "source_set_rebind" || req.Topology.Authority.Kind != agenttopology.AuthorityFlowReadinessPlan {
 		return nil
 	}
@@ -76,10 +76,7 @@ func validateFlowReadinessSuccessor(req manager.AgentLifecycleTransition, previo
 	if !exists {
 		return topologyConflict(req, "readiness_successor_predecessor_missing")
 	}
-	var old agenttopology.Admission
-	if err := canonicaljson.DecodeInto(previous.Topology, &old); err != nil {
-		return err
-	}
+	old := previous.Topology
 	if err := old.Validate(); err != nil {
 		return err
 	}

@@ -12,6 +12,8 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -53,133 +55,71 @@ type completionSettlementPermit struct {
 	Drain providerDrainPermit
 }
 
-func resolveCompletionSettlementPermitPostgres(
-	ctx context.Context,
-	tx *sql.Tx,
-	attempt runtimeeffects.Attempt,
-) (completionSettlementPermit, error) {
+func resolveCompletionSettlementPermitPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
+	return resolveCompletionSettlementPermit(ctx, tx, attempt, false)
+}
+
+func resolveCompletionSettlementPermitSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
+	return resolveCompletionSettlementPermit(ctx, tx, attempt, true)
+}
+
+func resolveCompletionSettlementPermit(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, sqlite bool) (completionSettlementPermit, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
-		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
-			if err := requireChannelDeliverySettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
-				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
-				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
-			}, true); err != nil {
-				return completionSettlementPermit{}, err
-			}
-			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
+		settlement := runtimeeffects.Settlement{
+			AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
+			Authority: attempt.Authority, State: runtimeeffects.StateSettled,
 		}
-		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
-			if err := requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
-				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
-				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
-			}, true); err != nil {
-				return completionSettlementPermit{}, err
+		var err error
+		switch attempt.Authority.Kind {
+		case runtimeeffects.AuthorityChannelDelivery:
+			err = requireChannelDeliverySettlementAuthorityTx(ctx, tx, settlement, !sqlite)
+		case runtimeeffects.AuthorityChannelNativeSetting:
+			err = requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, settlement, !sqlite)
+		default:
+			if sqlite {
+				err = requireExternalEffectAuthoritySQLite(ctx, tx, attempt.Authority, false)
+			} else {
+				err = requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false)
 			}
-			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
 		}
-		if err := requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false); err != nil {
+		if err != nil {
 			return completionSettlementPermit{}, err
 		}
 		return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
 	}
-	if err := requireExternalEffectRunActivePostgres(ctx, tx, attempt.Authority); err != nil {
+	requireActive := requireExternalEffectRunActivePostgres
+	loadDrain := loadProviderDrainPermitPostgres
+	if sqlite {
+		requireActive = requireExternalEffectRunActiveSQLite
+		loadDrain = loadProviderDrainPermitSQLite
+	}
+	if err := requireActive(ctx, tx, attempt.Authority); err != nil {
 		return completionSettlementPermit{}, err
 	}
-	fields, err := agentIdentityFields(attempt.Authority.Normal.Identity)
+	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, attempt.Authority.Normal.Identity, attempt.Authority.Normal, sqlite)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
-	var epoch, generation int64
-	var phase string
-	var transitionID sql.NullString
-	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_last_transition_id::text
-		FROM agents
-		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
-		  AND agent_route_presence=$4 AND flow_scope_key=$5
-		  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
-		FOR UPDATE
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
-	if err != nil {
-		return completionSettlementPermit{}, err
+	if !observation.Found {
+		return completionSettlementPermit{}, sql.ErrNoRows
 	}
-	if epoch == attempt.Authority.Normal.RuntimeEpoch && generation == int64(attempt.Authority.Normal.Generation) && phase == "running" {
+	if observation.Current {
 		return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
 	}
-	permit, err := loadProviderDrainPermitPostgres(ctx, tx, attempt)
+	permit, err := loadDrain(ctx, tx, attempt)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
-	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
+	if !providerDrainMatchesSuccessor(permit, observation.State) {
 		return completionSettlementPermit{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_successor_mismatch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 	}
 	return completionSettlementPermit{Kind: completionSettlementDrained, Drain: permit}, nil
 }
 
-func resolveCompletionSettlementPermitSQLite(
-	ctx context.Context,
-	tx *sql.Tx,
-	attempt runtimeeffects.Attempt,
-) (completionSettlementPermit, error) {
-	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
-		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
-			if err := requireChannelDeliverySettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
-				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
-				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
-			}, false); err != nil {
-				return completionSettlementPermit{}, err
-			}
-			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
-		}
-		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
-			if err := requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
-				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
-				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
-			}, false); err != nil {
-				return completionSettlementPermit{}, err
-			}
-			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
-		}
-		if err := requireExternalEffectAuthoritySQLite(ctx, tx, attempt.Authority, false); err != nil {
-			return completionSettlementPermit{}, err
-		}
-		return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
-	}
-	if err := requireExternalEffectRunActiveSQLite(ctx, tx, attempt.Authority); err != nil {
-		return completionSettlementPermit{}, err
-	}
-	fields, err := agentIdentityFields(attempt.Authority.Normal.Identity)
-	if err != nil {
-		return completionSettlementPermit{}, err
-	}
-	var epoch, generation int64
-	var phase string
-	var transitionID sql.NullString
-	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_last_transition_id
-		FROM agents
-		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
-		  AND agent_route_presence=? AND flow_scope_key=?
-		  AND flow_instance_id=? AND flow_instance=? AND run_id=?
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
-	if err != nil {
-		return completionSettlementPermit{}, err
-	}
-	if epoch == attempt.Authority.Normal.RuntimeEpoch && generation == int64(attempt.Authority.Normal.Generation) && phase == "running" {
-		return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
-	}
-	permit, err := loadProviderDrainPermitSQLite(ctx, tx, attempt)
-	if err != nil {
-		return completionSettlementPermit{}, err
-	}
-	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
-		return completionSettlementPermit{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_successor_mismatch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
-	}
-	return completionSettlementPermit{Kind: completionSettlementDrained, Drain: permit}, nil
+func providerDrainMatchesSuccessor(permit providerDrainPermit, state runtimemanager.AgentLifecycleState) bool {
+	return state.RuntimeEpoch == permit.SuccessorEpoch && state.Generation == permit.SuccessorGeneration &&
+		string(state.Phase) == string(permit.Target) && state.LastTransitionID != "" &&
+		state.LastTransitionID == permit.LifecycleTransitionID
 }
 
 func loadProviderDrainPermitPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (providerDrainPermit, error) {
@@ -362,31 +302,15 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
 	}
-	fields, err := agentIdentityFields(attempt.Authority.Normal.Identity)
+	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, attempt.Authority.Normal.Identity, attempt.Authority.Normal, !postgres)
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
 	}
-	var epoch, generation int64
-	var phase string
-	var transitionID sql.NullString
-	if postgres {
-		err = tx.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,lifecycle_last_transition_id::text FROM agents
-			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3 AND agent_route_presence=$4
-			  AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid FOR UPDATE
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
-	} else {
-		err = tx.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,lifecycle_last_transition_id FROM agents
-			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=?
-			  AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=? AND run_id=?
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
-	}
-	if err != nil {
-		return providerDrainRecoveryResolution{}, err
+	if !observation.Found {
+		return providerDrainRecoveryResolution{}, sql.ErrNoRows
 	}
 	if !found {
-		if epoch == attempt.Authority.Normal.RuntimeEpoch && generation == int64(attempt.Authority.Normal.Generation) && phase == "running" {
+		if observation.Current {
 			return providerDrainRecoveryResolution{Kind: completionSettlementCurrent}, nil
 		}
 		return providerDrainRecoveryResolution{}, runtimefailures.New(
@@ -397,8 +321,7 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 			map[string]any{"attempt_id": attempt.AttemptID},
 		)
 	}
-	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
+	if !providerDrainMatchesSuccessor(permit, observation.State) {
 		return providerDrainRecoveryResolution{}, runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"provider_attempt_drain_successor_mismatch",

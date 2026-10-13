@@ -159,15 +159,16 @@ type AgentLifecycleTransition struct {
 }
 
 type AgentLifecycleState struct {
-	Identity       runtimeagentidentity.Identity
-	AgentID        string
-	RuntimeEpoch   int64
-	Generation     uint64
-	Phase          AgentLifecyclePhase
-	ConfigRevision string
-	RunMode        AgentRunMode
-	Topology       runtimeagenttopology.Admission
-	ProcessBinding ProcessExecutionBinding
+	Identity         runtimeagentidentity.Identity
+	AgentID          string
+	RuntimeEpoch     int64
+	Generation       uint64
+	Phase            AgentLifecyclePhase
+	ConfigRevision   string
+	RunMode          AgentRunMode
+	Topology         runtimeagenttopology.Admission
+	ProcessBinding   ProcessExecutionBinding
+	LastTransitionID string
 }
 
 type AgentLifecycleTransitionResult struct {
