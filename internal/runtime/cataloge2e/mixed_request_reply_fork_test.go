@@ -2,11 +2,13 @@ package cataloge2e
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -246,6 +248,12 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 					t.Fatal("ordinary observer reopened or changed settled reply history")
 				}
 				proveMixedRequestObserverOnlyReforkPartition(t, wait, selected, staged.ForkRunID, inputID)
+				if returnedRequester {
+					sourceRun, reforkCut := staged.ForkRunID, inputID
+					for hop := 0; hop < 2; hop++ {
+						sourceRun, reforkCut = executeObserverOnlyRequestRefork(t, h, selected, owner, loader, selection, options, sourceRun, reforkCut)
+					}
+				}
 			} else {
 				returned, found, err := selected.LoadPreparedPublishEvent(wait, terminal.AcceptedReplyEventID)
 				if err != nil || !found || len(returned.DeliveryRoutes) != 1 || returned.DeliveryRoutes[0].Target.Route() != terminal.Origin {
@@ -370,7 +378,25 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 	// Keep the probe immutable for the runtime lifetime, including failed waits.
 	// Releasing it does not race with an in-flight handler's completion callback.
 	published := make(chan error, 1)
-	go func() { published <- h.publishRuntimeEventResultForStep(step, 20*time.Second, false) }()
+	if returnedRequester {
+		raw, err := json.Marshal(step.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := eventtest.ExistingRunRootIngress(step.eventID, events.EventType(step.Event), step.sourceAgent, "", raw, 0,
+			catalogRuntimeRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, catalogRuntimeRunID), step.createdAt.UTC())
+		// A completion-waiting publication runs its node interceptors before
+		// draining deferred returns. Holding one of those interceptors while
+		// waiting for the return would block the fixture itself. Ordinary async
+		// admission gives each exact durable delivery its existing continuation.
+		go func() {
+			publishCtx, stop := context.WithTimeout(h.ctx, 20*time.Second)
+			defer stop()
+			published <- h.rt.Bus.Publish(publishCtx, event)
+		}()
+	} else {
+		go func() { published <- h.publishRuntimeEventResultForStep(step, 20*time.Second, false) }()
+	}
 	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
 	defer cancel()
 	var claim lifecycleprobe.Signal
@@ -442,6 +468,12 @@ func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarnes
 				if finished.RunID() != catalogRuntimeRunID || finished.ParentEventID() != row.AcceptedReplyEventID {
 					t.Fatal("requester return cut belongs to another run or accepted reply")
 				}
+				observed, err := storetest.ReadLifecycleEventCardinality(ctx, selected, catalogRuntimeRunID, "request.observed")
+				if err != nil || observed != 0 {
+					t.Fatalf("completed-requester cut no longer has an unfinished observer: observed=%d error=%v", observed, err)
+				}
+				t.Logf("ordinary async source reached completed requester with its original observer still claimed: request=%s return=%s cut=%s claim=%s",
+					row.RequestEventID, row.AcceptedReplyEventID, cut, claim.EventID)
 			}
 			held.resume()
 			select {
