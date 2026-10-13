@@ -563,13 +563,6 @@ func uniqueYAMLMappingFields(value yamlsource.Value, context string) ([]yamlsour
 	return fields, nil
 }
 
-func eventFieldValue(fields map[string]yamlsource.MappingField, name string) yamlsource.Value {
-	if field, ok := fields[name]; ok {
-		return field.Value
-	}
-	return yamlsource.MissingDocument("").Root()
-}
-
 func requiredLiteralString(value yamlsource.Value, context string) (string, error) {
 	if value.Presence() != yamlsource.PresenceScalar {
 		return "", fmt.Errorf("%s at %s is %s, want non-empty scalar", context, value.Location(), value.Presence())
