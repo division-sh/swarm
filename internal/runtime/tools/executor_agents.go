@@ -146,6 +146,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Payload:       payload,
 		RoutingSource: routingSource,
 		ExecutionMode: executionMode,
+		ReplyContext:  events.DeliveryContextFromContext(ctx).ReplyContextID(),
 		Due:           due,
 	}
 	result, err := e.genericSchedules.Admit(ctx, command)
