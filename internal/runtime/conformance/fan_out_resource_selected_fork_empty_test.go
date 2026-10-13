@@ -19,104 +19,112 @@ import (
 // receiver merely to make the selected execution path look event-shaped.
 func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := selectedDeploymentResourceFixture(t, backend, "singleton")
-			server := f.operatorServer(t)
-			path := filepath.Join(t.TempDir(), "empty.jsonl")
-			if err := os.WriteFile(path, nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			empty := selectedDeploymentVersion(t, f, nil)
-			if len(empty.Rows) != 0 {
-				t.Fatalf("empty import compiled %d rows", len(empty.Rows))
-			}
-			sourceRunID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
-			var sourcePin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, sourceRunID).Scan(&sourcePin); err != nil {
-				t.Fatal(err)
-			}
-			if sourcePin != string(empty.VersionID) {
-				t.Fatalf("empty source pin=%s want=%s", sourcePin, empty.VersionID)
-			}
-			owner, initialRecovery := deploymentForkOwner(t, f)
-			if len(initialRecovery) != 0 {
-				t.Fatalf("fresh empty source has selected recovery: %+v", initialRecovery)
-			}
-			forkServer := deploymentForkServer(t, f, owner)
-			params := map[string]any{
-				"source_run_id":       sourceRunID,
-				"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
-				"allow_source_freeze": true,
-				"idempotency_key":     uuid.NewString(),
-			}
-			result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
-			if len(rpcErr) != 0 {
-				t.Fatalf("empty selected source fork: %s", rpcErr)
-			}
-			if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != empty.VersionID {
-				t.Fatalf("empty fork lost exact pin or child: %+v", result)
-			}
-			for _, runID := range []string{sourceRunID, result.ForkRunID} {
-				for _, query := range []string{
-					`SELECT COUNT(*) FROM events WHERE run_id=$1`,
-					`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`,
-					`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`,
-				} {
-					var count int
-					if err := f.db.QueryRowContext(f.ctx, query, runID).Scan(&count); err != nil {
-						t.Fatal(err)
-					}
-					if count != 0 {
-						t.Fatalf("empty run %s produced %d rows for %s", runID, count, query)
+		for _, selector := range []string{"deployment", "start"} {
+			t.Run(backend+"/"+selector, func(t *testing.T) {
+				f := selectedDeploymentResourceFixture(t, backend, "singleton")
+				server := f.operatorServer(t)
+				path := filepath.Join(t.TempDir(), "empty.jsonl")
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				empty := selectedDeploymentVersion(t, f, nil)
+				if len(empty.Rows) != 0 {
+					t.Fatalf("empty import compiled %d rows", len(empty.Rows))
+				}
+				sourceRunID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
+				var sourcePin string
+				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, sourceRunID).Scan(&sourcePin); err != nil {
+					t.Fatal(err)
+				}
+				if sourcePin != string(empty.VersionID) {
+					t.Fatalf("empty source pin=%s want=%s", sourcePin, empty.VersionID)
+				}
+				owner, initialRecovery := deploymentForkOwner(t, f)
+				if len(initialRecovery) != 0 {
+					t.Fatalf("fresh empty source has selected recovery: %+v", initialRecovery)
+				}
+				forkServer := deploymentForkServer(t, f, owner)
+				params := map[string]any{
+					"source_run_id":       sourceRunID,
+					"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
+					"allow_source_freeze": true,
+					"idempotency_key":     uuid.NewString(),
+				}
+				if selector == "start" {
+					params["at_start"] = true
+				}
+				result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+				if len(rpcErr) != 0 {
+					t.Fatalf("empty selected source fork: %s", rpcErr)
+				}
+				if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != empty.VersionID {
+					t.Fatalf("empty fork lost exact pin or child: %+v", result)
+				}
+				if selector == "start" && (result.ForkPoint.Kind != runfork.RunForkPointRunStart || result.ForkPoint.Revision != 1 || result.ForkPoint.EventID != "") {
+					t.Fatalf("empty start fork lost its exclusive original point: %+v", result.ForkPoint)
+				}
+				for _, runID := range []string{sourceRunID, result.ForkRunID} {
+					for _, query := range []string{
+						`SELECT COUNT(*) FROM events WHERE run_id=$1`,
+						`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`,
+						`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`,
+					} {
+						var count int
+						if err := f.db.QueryRowContext(f.ctx, query, runID).Scan(&count); err != nil {
+							t.Fatal(err)
+						}
+						if count != 0 {
+							t.Fatalf("empty run %s produced %d rows for %s", runID, count, query)
+						}
 					}
 				}
-			}
-			replayServer := deploymentForkServer(t, f, owner)
-			replay, rpcErr := deploymentForkRPC(t, f.ctx, replayServer, params)
-			if len(rpcErr) != 0 || !reflect.DeepEqual(replay, result) {
-				t.Fatalf("quiesced empty fork replay differs: first=%+v replay=%+v error=%s", result, replay, rpcErr)
-			}
-			var generationsBefore int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsBefore); err != nil {
-				t.Fatal(err)
-			}
-			if generationsBefore != 1 {
-				t.Fatalf("empty selected fork has %d execution generations, want one", generationsBefore)
-			}
-			if err := owner.RetireSelectedContexts(f.ctx); err != nil {
-				t.Fatal(err)
-			}
-			old := f.runtime
-			join := beginServingLifetimeJoin(old, nil)
-			assertServingJoinComplete(t, join, old, nil)
-			f.boot(t)
-			f.runtime.fanOutServing.Wake()
-			recoveredOwner, recovery := deploymentForkOwner(t, f)
-			var controlOnly bool
-			for _, entry := range recovery {
-				if entry.RunID == result.ForkRunID {
-					controlOnly = entry.Disposition == runfork.SelectedForkRecoveryControlOnly
+				replayServer := deploymentForkServer(t, f, owner)
+				replay, rpcErr := deploymentForkRPC(t, f.ctx, replayServer, params)
+				if len(rpcErr) != 0 || !reflect.DeepEqual(replay, result) {
+					t.Fatalf("quiesced empty fork replay differs: first=%+v replay=%+v error=%s", result, replay, rpcErr)
 				}
-			}
-			if !controlOnly {
-				t.Fatalf("empty completed selected fork recovered executable work: %+v", recovery)
-			}
-			restartedServer := deploymentForkServerAt(t, f, recoveredOwner, func() time.Time { return time.Now().Add(48 * time.Hour) })
-			restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
-			if len(rpcErr) != 0 || !reflect.DeepEqual(restartedReplay, result) {
-				t.Fatalf("empty restarted fork lost durable result: first=%+v replay=%+v error=%s", result, restartedReplay, rpcErr)
-			}
-			var generationsAfter, eventsAfter int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsAfter); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventsAfter); err != nil {
-				t.Fatal(err)
-			}
-			if generationsAfter != generationsBefore || eventsAfter != 0 {
-				t.Fatalf("empty restart resurrected work: generations=%d want=%d events=%d", generationsAfter, generationsBefore, eventsAfter)
-			}
-		})
+				var generationsBefore int
+				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsBefore); err != nil {
+					t.Fatal(err)
+				}
+				if generationsBefore != 1 {
+					t.Fatalf("empty selected fork has %d execution generations, want one", generationsBefore)
+				}
+				if err := owner.RetireSelectedContexts(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				old := f.runtime
+				join := beginServingLifetimeJoin(old, nil)
+				assertServingJoinComplete(t, join, old, nil)
+				f.boot(t)
+				f.runtime.fanOutServing.Wake()
+				recoveredOwner, recovery := deploymentForkOwner(t, f)
+				var controlOnly bool
+				for _, entry := range recovery {
+					if entry.RunID == result.ForkRunID {
+						controlOnly = entry.Disposition == runfork.SelectedForkRecoveryControlOnly
+					}
+				}
+				if !controlOnly {
+					t.Fatalf("empty completed selected fork recovered executable work: %+v", recovery)
+				}
+				restartedServer := deploymentForkServerAt(t, f, recoveredOwner, func() time.Time { return time.Now().Add(48 * time.Hour) })
+				restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
+				if len(rpcErr) != 0 || !reflect.DeepEqual(restartedReplay, result) {
+					t.Fatalf("empty restarted fork lost durable result: first=%+v replay=%+v error=%s", result, restartedReplay, rpcErr)
+				}
+				var generationsAfter, eventsAfter int
+				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsAfter); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventsAfter); err != nil {
+					t.Fatal(err)
+				}
+				if generationsAfter != generationsBefore || eventsAfter != 0 {
+					t.Fatalf("empty restart resurrected work: generations=%d want=%d events=%d", generationsAfter, generationsBefore, eventsAfter)
+				}
+			})
+		}
 	}
 }
 
