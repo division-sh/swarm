@@ -29,11 +29,11 @@ func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 					continue
 				}
 				ref := policySheetLookupRef{
-					Node:      node,
-					EventType: eventType,
-					RuleIndex: idx,
-					RuleID:    strings.TrimSpace(rule.ID),
-					RuleRef:   policyRuleElementRef(rule),
+					Node:        node,
+					EventType:   eventType,
+					RuleIndex:   idx,
+					RuleDisplay: rule.DisplayLabel("rules", idx),
+					RuleRef:     policyRuleElementRef(rule),
 				}
 				findings = append(findings, validatePolicySheetLookupValueRow(c.source, ref, handler, rule)...)
 			}
@@ -43,27 +43,20 @@ func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 }
 
 type policySheetLookupRef struct {
-	Node      runtimeidentity.ExecutableNode
-	EventType string
-	RuleIndex int
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
+	Node        runtimeidentity.ExecutableNode
+	EventType   string
+	RuleIndex   int
+	RuleDisplay string
+	RuleRef     runtimeidentity.DeclarationIdentity
 }
 
 func policySheetLookupFinding(ref policySheetLookupRef, detail string) Finding {
 	return Finding{
 		CheckID:  policySheetLookupCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RuleDisplay, detail),
 		Location: ref.Node.Key(),
 	}
-}
-
-func (r policySheetLookupRef) RowLabel() string {
-	if id := strings.TrimSpace(r.RuleID); id != "" {
-		return id
-	}
-	return fmt.Sprintf("#%d", r.RuleIndex)
 }
 
 func policySheetRuleIsLookupValueRow(rule runtimecontracts.HandlerRuleEntry) bool {
@@ -325,10 +318,7 @@ func policySheetLookupDuplicateComputedBindings(nodeID, eventType string, handle
 	}
 	appendCompute("handler.compute", handler.Compute)
 	for idx, rule := range handler.Rules {
-		scope := fmt.Sprintf("handler.rules[%d].compute", idx)
-		if id := strings.TrimSpace(rule.ID); id != "" {
-			scope = "handler.rules[" + id + "].compute"
-		}
+		scope := "handler." + rule.DisplayLabel("rules", idx) + ".compute"
 		appendCompute(scope, rule.Compute)
 	}
 	seen := map[string]binding{}
