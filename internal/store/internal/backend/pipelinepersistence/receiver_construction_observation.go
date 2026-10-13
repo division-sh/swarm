@@ -49,39 +49,70 @@ func ReadFlowConstructionPublicationTx(ctx context.Context, tx *sql.Tx, owner fl
 	if tx == nil {
 		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("construction evidence requires the selected read transaction")
 	}
-	if err := owner.Validate(); err != nil {
+	if err := validateFlowConstructionPublicationCoordinate(owner, entityID); err != nil {
 		return pipeline.FlowConstructionPublicationEvidence{}, err
 	}
-	entity, entityErr := uuid.Parse(entityID)
-	if entityErr != nil || entity == uuid.Nil || entity.String() != entityID {
-		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("construction evidence requires exact entity identity")
-	}
-	var raw, readiness []byte
-	var templateID, headerEntityID, planHash string
+	var record flowConstructionPublicationRecord
+	var readiness []byte
+	var planHash string
 	var parentInstance, instanceKey sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT m.projection, fi.flow_template, fi.entity_id, r.plan, r.plan_hash, fi.parent_instance, fi.instance_key
 		FROM workflow_instance_initial_materializations m
 		JOIN flow_instances fi ON fi.run_id=m.run_id AND fi.instance_path=m.instance_path AND fi.entity_id=m.entity_id
 		JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
-		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&raw, &templateID, &headerEntityID, &readiness, &planHash, &parentInstance, &instanceKey); err != nil {
+		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&record.raw, &record.templateID, &record.entityID, &readiness, &planHash, &parentInstance, &instanceKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
 		}
 		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("read immutable construction evidence: %w", err)
 	}
-	evidence, err := pipeline.ProjectFlowConstructionPublication(raw, owner, entityID)
+	record.parentInstance, record.instanceKey = parentInstance.String, instanceKey.String
+	evidence, err := record.project(owner, entityID)
+	if err != nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	plan, err := pipeline.DecodeFlowReadinessPlan(readiness, planHash)
+	if err != nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
+	}
+	return record.admitReadiness(owner, evidence, plan)
+}
+
+// Both the singleton reader and index batch authenticate through this owner.
+// A supplied readiness plan has already been decoded in the same read snapshot.
+type flowConstructionPublicationRecord struct {
+	raw                                               []byte
+	templateID, entityID, parentInstance, instanceKey string
+}
+
+func (r flowConstructionPublicationRecord) project(owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
+	if err := validateFlowConstructionPublicationCoordinate(owner, entityID); err != nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	evidence, err := pipeline.ProjectFlowConstructionPublication(r.raw, owner, entityID)
 	if err != nil {
 		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
 	}
 	if evidence.CreatingInput.EventID == uuid.Nil.String() {
 		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, fmt.Errorf("construction evidence requires exact creating-event identity"))
 	}
-	plan, err := pipeline.DecodeFlowReadinessPlan(readiness, planHash)
-	if err != nil {
-		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
+	return evidence, nil
+}
+
+func validateFlowConstructionPublicationCoordinate(owner flowidentity.RunScopedFlowInstance, entityID string) error {
+	if err := owner.Validate(); err != nil {
+		return err
 	}
-	if evidence.Identity.TemplateID != templateID || evidence.Identity.EntityID != headerEntityID || plan.Identity != evidence.Identity || plan.RunID != owner.RunID ||
-		evidence.Identity.ParentRoute.FlowInstance != parentInstance.String || evidence.InstanceKey != instanceKey.String {
+	entity, err := uuid.Parse(entityID)
+	if err != nil || entity == uuid.Nil || entity.String() != entityID {
+		return fmt.Errorf("construction evidence requires exact entity identity")
+	}
+	return nil
+}
+
+func (r flowConstructionPublicationRecord) admitReadiness(owner flowidentity.RunScopedFlowInstance, evidence pipeline.FlowConstructionPublicationEvidence, plan pipeline.DynamicFlowRuntimeReadinessPlan) (pipeline.FlowConstructionPublicationEvidence, error) {
+	if evidence.Identity.TemplateID != r.templateID || evidence.Identity.EntityID != r.entityID || plan.Identity != evidence.Identity || plan.RunID != owner.RunID ||
+		evidence.Identity.ParentRoute.FlowInstance != r.parentInstance || evidence.InstanceKey != r.instanceKey {
 		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, fmt.Errorf("construction evidence contradicts its native header or attachment owner"))
 	}
 	return evidence, nil

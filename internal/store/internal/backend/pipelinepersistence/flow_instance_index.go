@@ -153,6 +153,7 @@ type flowInstanceIndexSnapshot struct {
 	revision   int64
 	historical HistoricalFlowInstanceReader
 	observed   map[string]pipeline.FlowInstanceObservation
+	companions map[string]*flowInstanceCompanions
 }
 
 func validateFlowInstanceIndexSnapshot(source semanticview.Source, hash string, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) error {
@@ -281,8 +282,12 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
+	if err := s.preloadCompanions(ctx, []pipeline.WorkflowInstance{header}); err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
+	companions := s.companions[header.StorageRef]
 	route := flowidentity.StoredRoute(flowidentity.ScopeKey(s.source, header.WorkflowName), header.InstanceID, header.StorageRef)
-	readiness, readyFound, err := loadDynamicFlowRuntimeReadiness(ctx, s.tx, s.postgres, s.run.RunID, route, false)
+	readiness, readyFound, err := companions.observeReadiness()
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
@@ -297,7 +302,14 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		if !readyFound {
 			return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: fmt.Errorf("native instance lacks desired attachment evidence")}
 		}
-		receipt, readErr := ReadFlowConstructionPublicationTx(ctx, s.tx, flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}, header.EntityID)
+		owner := flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}
+		if !companions.constructionPresent {
+			return pipeline.FlowInstanceObservation{}, corruptFlowConstructionEvidence(owner, sql.ErrNoRows)
+		}
+		receipt, readErr := companions.construction.project(owner, header.EntityID)
+		if readErr == nil {
+			receipt, readErr = companions.construction.admitReadiness(owner, receipt, readiness.Plan)
+		}
 		if readErr != nil {
 			if errors.Is(readErr, sql.ErrNoRows) {
 				return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: readErr}
@@ -404,6 +416,9 @@ func (s *flowInstanceIndexSnapshot) list(ctx context.Context, scope pipeline.Flo
 func (s *flowInstanceIndexSnapshot) observeDeclaration(ctx context.Context, scope pipeline.FlowInstanceLookupScope, flowID string) ([]pipeline.FlowInstanceObservation, error) {
 	headers, err := s.headers(ctx, `fi.flow_template=$2 ORDER BY fi.instance_path`, scope.RunID(), flowID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.preloadCompanions(ctx, headers); err != nil {
 		return nil, err
 	}
 	observations := make([]pipeline.FlowInstanceObservation, 0, len(headers))

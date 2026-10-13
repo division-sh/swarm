@@ -347,14 +347,19 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("load dynamic flow runtime readiness %s: %w", route.InstancePath, err)
 	}
 	record.AttemptState = attemptState.String
+	item, err := decodeStoredDynamicFlowRuntimeReadiness(record, creationEventEmittedAt, instanceTerminatedAt)
+	return item, err == nil, err
+}
+
+func decodeStoredDynamicFlowRuntimeReadiness(record runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord, creationEventEmittedAt, instanceTerminatedAt any) (runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	var err error
 	if record.CreationEventEmittedAt, record.HasCreationEventEmittedAt, err = sqliteTimeValue(creationEventEmittedAt); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
+		return runtimepipeline.DynamicFlowRuntimeReadiness{}, err
 	}
 	if record.InstanceTerminatedAt, record.HasInstanceTerminatedAt, err = sqliteTimeValue(instanceTerminatedAt); err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
+		return runtimepipeline.DynamicFlowRuntimeReadiness{}, err
 	}
-	item, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record)
-	return item, err == nil, err
+	return runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record)
 }
 
 var _ runtimepipeline.DynamicFlowRuntimeReadinessPersistence = (*PipelinePostgresOwner)(nil)

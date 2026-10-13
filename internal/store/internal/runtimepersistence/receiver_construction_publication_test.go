@@ -20,6 +20,7 @@ func TestReceiverConstructionPublicationFieldsUsesExactOriginalOwnerBothStores(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+			f.constructKeylessRoot(t)
 			req := f.request("receipt-key", "ti-receipt", "initial")
 			raw, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
 				"request_id": "receipt-key",
