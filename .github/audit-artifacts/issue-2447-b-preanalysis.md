@@ -1,5 +1,39 @@
 # Pre-Implementation Coverage Audit: 2447/B Admission
 
+## Pre-Push Checkpoint After 2645 Integration
+
+The complete guard/census selector at 77158295b finished all 299 packages:
+2,151 passing test checks, zero failures and zero test skips. Its receipt is
+`b-boundary-final-guards.jsonl`, SHA256
+`b90e0e6910e7efe0e8329fb5a955823fee6fd46037453a9b9b35898f103f44d8`.
+The exact debt count is still 10611, without an allowance or baseline increase.
+This is retained source-qualified evidence, not a relabeled integrated-head run.
+
+D's explicit node-only allocation6138843482 permits G to consume the exact
+`list_declaration_value.go` and `workflow_contract_nodes_state_value.go` from
+D's signed 983ba90d5. Those bytes and the two allocated node-source conversions
+are now integrated with attribution; D's global Wave1/event/corpus retirement
+is not imported. Authored node tests cover the exact bare block numeric carrier,
+primitive/named positives, metadata scalar/default preservation, suffix/prefix
+typed refusals, and invalid shape/style controls. Their fresh execution remains
+required; the original physical SQLite counterexample is not waived.
+
+The signed branch was rebased onto 708c0f441. Its first clean-tree, no-argument
+`go run ./cmd/swarm-test preflight` at 2186944c6 FAILED after 324.646s:
+`TestReleaseE2EPackageStaysAtPublicProcessBoundary` correctly rejected the new
+public proof's internal operatorread/engine/joinruntime imports. The correction
+uses only public RPC wire evidence: the full entity response is retained across
+restart, template identity and exact fields are checked directly, and the exact
+node-owned join bucket must contain one closed/fired seven-member activation
+with ordered members and matching outputs. No guard exception, in-process
+oracle, route/deadline change or assertion omission is introduced. The failed
+receipt remains failed; preflight must pass on the new clean head before push.
+
+S08 remains held on the requested SQLite renderer delta6138390624: PostgreSQL's
+real generated-table root passes race x3, but SQLite refuses NUMERIC(5,2)[].
+No renderer change is authorized yet, and no complete B closure or review-ready
+PR is claimed while that required physical proof is red. A is closed, C frozen.
+
 ## Current Boundary: Approved Coding, D Integration Required
 
 Reviewer-g6138208732 approves S03a/b and G's S08 normalized-reference/physical
