@@ -1045,6 +1045,14 @@ func runClaudeAttemptProofProcessHelper() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	if mode := os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE"); strings.HasPrefix(mode, "buffered_") {
+		code, err := completion2270WriteBufferedFrame(captureDir, mode, providerSessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		return code
+	}
 	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "postlaunch_failure" {
 		if outputFormat == "stream-json" {
 			fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","tools":[]}`)
@@ -1064,6 +1072,9 @@ func runClaudeAttemptProofProcessHelper() int {
 	}
 	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "case_variant_usage" {
 		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q,\"model\":\"exact-terminal\",\"total_cost_usd\":0.3,\"usage\":{\"input_tokens\":12,\"INPUT_TOKENS\":false,\"output_tokens\":3,\"cache_creation_input_tokens\":5,\"cache_creation\":{\"ephemeral_5m_input_tokens\":2,\"EPHEMERAL_5M_INPUT_TOKENS\":false,\"ephemeral_1h_input_tokens\":3}}}\n", providerSessionID)
+	}
+	if mode := os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE"); strings.HasPrefix(mode, "invalid_utf8_") {
+		completion2270WriteMalformedUnicodeFrame(mode)
 	}
 	return 0
 }
