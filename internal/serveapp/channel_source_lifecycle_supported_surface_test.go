@@ -94,8 +94,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							waitObjectChannelDisposition(t, reader, postedIntent, "stale", "rejected")
 						}
 						var decisions int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
-							t.Fatalf("replacement admitted a predecessor control: count=%d err=%v", decisions, err)
+						{
+							var err error
+							decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+							if err != nil || decisions != 0 {
+								t.Fatalf("replacement admitted a predecessor control: count=%d err=%v", decisions, err)
+							}
 						}
 					}
 				case "retained_reset", "source_reset":
@@ -260,8 +264,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal(err)
 					}
 					var supersessionCount, exactLineageCount int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&supersessionCount); err != nil {
-						t.Fatal(err)
+					{
+						var err error
+						supersessionCount, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), fork.ForkRunID, "mailbox.card_superseded")
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events e
 						JOIN run_fork_selected_contract_executions x ON x.fork_event_id=e.source_event_id AND x.fork_run_id=e.run_id
@@ -325,7 +333,8 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							observed, cardErr := channelAnchorStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), child)
 							status, verdict := observed.Status, observed.Verdict
 							var decisions int
-							eventErr := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&decisions)
+							var eventErr error
+							decisions, eventErr = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), fork.ForkRunID, "mailbox.card_decided")
 							t.Fatalf("selected-fork callback %+v lacks terminal unsupported disposition: observation=%+v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", childIntent, result, status, verdict, cardErr, decisions, eventErr)
 						}
 						time.Sleep(20 * time.Millisecond)
@@ -359,8 +368,12 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if err := decisionErr; err != nil || status != "pending" || verdict != "" {
 						t.Fatalf("fork replay/restart changed child: %s/%s %v", status, verdict, err)
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&events); err != nil || events != 0 {
-						t.Fatalf("fork restart emitted a decision: %d %v", events, err)
+					{
+						var err error
+						events, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), fork.ForkRunID, "mailbox.card_decided")
+						if err != nil || events != 0 {
+							t.Fatalf("fork restart emitted a decision: %d %v", events, err)
+						}
 					}
 					if err := db.QueryRow(`SELECT COUNT(*) FROM decision_card_input_drafts WHERE card_id=$1`, child).Scan(&drafts); err != nil || drafts != 0 {
 						t.Fatalf("upstream fork refusal created a draft: %d %v", drafts, err)

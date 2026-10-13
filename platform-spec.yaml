@@ -7082,6 +7082,16 @@ engine:
                 reader, and joined process cleanup precedes reader close and backing-store release. No raw pool, transaction,
                 callback, arbitrary query or execution authority crosses these observation ports. Remaining independent
                 channel fixture setup, compound snapshots and live fault seams stay explicitly tracked migration debt.
+              channel_run_named_event_observation: >-
+                Channel journey run/name cardinality witnesses consume the existing eventrecord physical count through
+                the original selected read-only inspector. They retain every event row in the exact issued run and exact
+                event-name bytes, without status, header, eligibility, deduplication, case or whitespace normalization.
+                Original independent observation cuts, scalar destinations, error scopes, decision/publication counts,
+                temporal refusal, crash/receipt/restart and parent-immutability assertions remain unchanged. Failed,
+                cancelled or closed ownership supplies no provisional count; successful physical absence remains zero.
+                The borrowed facet still cannot close the parent-owned observer or expose pools, SQL, selectors,
+                callbacks, reconstruction or execution authority. Wider source/compound/fault/construction seams remain
+                explicitly tracked authority debt, not alternate run/name interpreters.
               workflow_state_storage_observation: >-
                 The complete served lifecycle flow-entity and pending-input state-count helper chains consume their
                 existing selected receiver-state inspector and canonical workflow-header/entity row owners, never the

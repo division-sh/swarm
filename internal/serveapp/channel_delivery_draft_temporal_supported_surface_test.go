@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -102,8 +103,12 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, cardID).Scan(&actualStatus); err != nil || actualStatus != cardStatus {
 						t.Fatalf("obsolete input changed canonical card: %s %v", actualStatus, err)
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&actualDecisions); err != nil || actualDecisions != decisions {
-						t.Fatalf("obsolete input changed decision count: %d %v", actualDecisions, err)
+					{
+						var err error
+						actualDecisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+						if err != nil || actualDecisions != decisions {
+							t.Fatalf("obsolete input changed decision count: %d %v", actualDecisions, err)
+						}
 					}
 					assertChannelHistoricalRender(t, db, cardID, initial)
 					assertChannelHistoricalRender(t, db, cardID, prompt)

@@ -82,8 +82,12 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901090)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901100, withSummary)
 				var decisions, copies, uncertainty int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
-					t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
+				{
+					var err error
+					decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+					if err != nil || decisions != 1 {
+						t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
+					}
 				}
 				if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END)
 					FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, cardID).Scan(&copies, &uncertainty); err != nil || copies != 2 || uncertainty != 1 {

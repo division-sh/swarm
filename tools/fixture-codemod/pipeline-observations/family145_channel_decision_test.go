@@ -32,6 +32,7 @@ func channelDecisionPins(t *testing.T) []channeldecision.Pin {
 }
 
 func family145ChannelDecisionCallerInverse(function, current string) string {
+	current = family145ChannelEventCountCallerInverse(function, current)
 	pins, err := channeldecision.Decode(family145ChannelDecisionBytes)
 	if err != nil {
 		panic(err)
@@ -46,6 +47,7 @@ func family145ChannelDecisionCallerInverse(function, current string) string {
 
 func family145CheckChannelDecisionWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
+	current = family145ChannelEventCountPrevious(t, file, function, current)
 	for _, pin := range channelDecisionPins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -72,7 +74,13 @@ func channelDecisionCurrentDeclaration(t *testing.T, path, function string) stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	return requestKeyDeclaration(t, raw, function)
+	return family145ChannelEventCountPrevious(t, path, function, requestKeyDeclaration(t, raw, function))
+}
+
+func family145ChannelDecisionPrevious(t *testing.T, file, function, current string) string {
+	t.Helper()
+	current = family145ChannelEventCountPrevious(t, file, function, current)
+	return channeldecision.Previous(channelDecisionPins(t), file, function, current)
 }
 
 func TestFamily145ChannelDecisionTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
@@ -102,7 +110,7 @@ func TestFamily145ChannelDecisionWholeChainPreservesEveryPollAndRefusalCut(t *te
 			t.Fatal("channel decision source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || family145ChannelEventCountPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("channel decision current source escaped its whole rule:", key, err)
 		}
 		after, count, err := channeldecision.Transform(pin.Before)
@@ -183,7 +191,7 @@ func channelDecisionOwnedFile(t *testing.T, path string, file *ast.File) (int, i
 				calls++
 				allowed[id.Pos()] = true
 				current := requestkey.Node(fn)
-				if channeldecision.Previous(channelDecisionPins(t), path, fn.Name.Name, current) == current {
+				if family145ChannelDecisionPrevious(t, path, fn.Name.Name, current) == current {
 					t.Error("channel decision caller escaped exact chain:", path, fn.Name.Name)
 				}
 			}

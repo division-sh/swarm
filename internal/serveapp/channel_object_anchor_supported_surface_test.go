@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -84,8 +85,12 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					waitObjectTerminalReceipt(t, db, p, card, receipt, "Decision: approve")
 					proveObjectRejectedControl(t, db, p, receipt, approve, fmt.Sprintf("anchor-stale-%d", index))
 					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("duplicate/stale %s completion count=%d: %v", kind, count, err)
+					{
+						var err error
+						count, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+						if err != nil || count != 1 {
+							t.Fatalf("duplicate/stale %s completion count=%d: %v", kind, count, err)
+						}
 					}
 				})
 			}

@@ -155,8 +155,12 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if cut == "launched" {
 					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(940000+messageID)), "stale", "rejected")
 					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 0 {
-						t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
+					{
+						var err error
+						count, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+						if err != nil || count != 0 {
+							t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
+						}
 					}
 				} else {
 					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)

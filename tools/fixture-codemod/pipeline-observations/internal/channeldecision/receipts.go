@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channeleventcount"
 )
 
 const Path = "tools/fixture-codemod/pipeline-observations/family145-channel-decision-preimages.json"
@@ -42,6 +44,11 @@ func Previous(pins []Pin, file, function, current string) string {
 }
 
 func ReadPrevious(file, function, current string) (string, error) {
+	var err error
+	current, err = channeleventcount.ReadPrevious(file, function, current)
+	if err != nil {
+		return "", err
+	}
 	raw, err := os.ReadFile(Path)
 	if err != nil {
 		return "", err

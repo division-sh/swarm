@@ -50,8 +50,12 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 						if err != nil || !found || result.State != "pending" || result.Disposition != "" {
 							t.Fatalf("verified exact action %+v missing at pre-mutation barrier: %+v found=%t %v", intentQuery, result, found, err)
 						}
-						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
-							t.Fatalf("pre-mutation cut already emitted a decision: %d %v", decisions, err)
+						{
+							var err error
+							decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+							if err != nil || decisions != 0 {
+								t.Fatalf("pre-mutation cut already emitted a decision: %d %v", decisions, err)
+							}
 						}
 					case <-time.After(20 * time.Second):
 						t.Fatal("callback did not reach actual provider response barrier")
@@ -92,8 +96,12 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					t.Fatal("restart replayed uncertain or settled acknowledgment")
 				}
 				var decisions int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
-					t.Fatalf("ACK was confused with business completion: decisions=%d err=%v", decisions, err)
+				{
+					var err error
+					decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+					if err != nil || decisions != 1 {
+						t.Fatalf("ACK was confused with business completion: decisions=%d err=%v", decisions, err)
+					}
 				}
 				if err := intentReader.Close(); err != nil {
 					t.Fatal(err)

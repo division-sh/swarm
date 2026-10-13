@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -72,8 +73,12 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				}
 				proveObjectRejectedControl(t, db, p, receipt, approve, "temporal-stale")
 				var decisions int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
-					t.Fatalf("historical control regained authority: decisions=%d %v", decisions, err)
+				{
+					var err error
+					decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+					if err != nil || decisions != 0 {
+						t.Fatalf("historical control regained authority: decisions=%d %v", decisions, err)
+					}
 				}
 				p.mu.Lock()
 				defer p.mu.Unlock()

@@ -18,7 +18,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelanchor"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channeldecision"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
@@ -36,7 +35,7 @@ func channelAnchorPins(t *testing.T) []channelanchor.Pin {
 
 func family145ChannelAnchorPrevious(t *testing.T, file, function, current string) string {
 	t.Helper()
-	current = channeldecision.Previous(channelDecisionPins(t), file, function, current)
+	current = family145ChannelDecisionPrevious(t, file, function, current)
 	return channelanchor.Previous(channelAnchorPins(t), file, function, current)
 }
 
@@ -57,7 +56,7 @@ func family145ChannelAnchorCallerInverse(function, current string) string {
 
 func family145CheckChannelAnchorWholeRule(t *testing.T, file, function, current string) bool {
 	t.Helper()
-	current = channeldecision.Previous(channelDecisionPins(t), file, function, current)
+	current = family145ChannelDecisionPrevious(t, file, function, current)
 	for _, pin := range channelAnchorPins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -185,7 +184,7 @@ func TestFamily145ChannelAnchorWholeChainPreservesEveryPollAndRefusalCut(t *test
 			t.Fatal("channel anchor source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || channeldecision.Previous(channelDecisionPins(t), pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil || family145ChannelDecisionPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("channel anchor current source escaped its whole rule:", key, err)
 		}
 		after, count, err := channelanchor.Transform(pin.Before)
@@ -265,7 +264,7 @@ func channelAnchorOwnedFile(t *testing.T, path string, file *ast.File) (int, int
 			if ok && channelanchor.Helpers[id.Name] != 0 {
 				calls++
 				allowed[id.Pos()] = true
-				current := channeldecision.Previous(channelDecisionPins(t), path, fn.Name.Name, requestkey.Node(fn))
+				current := family145ChannelDecisionPrevious(t, path, fn.Name.Name, requestkey.Node(fn))
 				if channelanchor.Previous(channelAnchorPins(t), path, fn.Name.Name, current) == current {
 					t.Error("channel anchor caller escaped exact chain:", path, fn.Name.Name)
 				}

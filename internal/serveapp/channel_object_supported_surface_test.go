@@ -176,8 +176,12 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					waitObjectChannelDisposition(t, provider.intentReader, objectIntentQuery(provider.intentIdentity, channeldelivery.IntentText, id+"-text"), "teaching")
 				}
 				var decisions int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
-					t.Fatalf("object duplicate/stale controls changed decisions: %d %v", decisions, err)
+				{
+					var err error
+					decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+					if err != nil || decisions != 1 {
+						t.Fatalf("object duplicate/stale controls changed decisions: %d %v", decisions, err)
+					}
 				}
 				proveObjectChannelRecovery(t, h, db, provider, scope, command, identity.SourceArtifacts[0].BundleHash, postAction)
 				proveObjectChannelRebindRetirement(t, h, db, provider, scope, command, begun.Operation.OperationID)
@@ -247,8 +251,12 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {
 		t.Fatalf("object resend settled/replayed predecessor: %d/%d %v", copies, uncertain, err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
-		t.Fatalf("object fresh-copy decision cardinality: %d %v", decisions, err)
+	{
+		var err error
+		decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+		if err != nil || decisions != 1 {
+			t.Fatalf("object fresh-copy decision cardinality: %d %v", decisions, err)
+		}
 	}
 }
 
