@@ -11,13 +11,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -242,8 +245,54 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 		fields[declaration.Instance.Path()] = key
 		entityType = "termination_context"
 	}
-	return commitPreparedWorkflowAggregateFixture(t, testAuthorActivityContext(), fixture.store.(agentFixtureFlowStore), owner.RunID, pipeline.WorkflowInstance{
+	instance := pipeline.WorkflowInstance{
 		InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: entity, EntityType: entityType, WorkflowName: owner.Route.ScopeKey, WorkflowVersion: "fixture",
 		Mode: declaration.EffectiveMode(), InstanceKey: key, StageDefined: true, CurrentState: "ready", Fields: fields, CreatedAt: now, EnteredStageAt: now,
-	}, now)
+	}
+	if (owner.Route.ScopeKey == "global" || owner.Route.ScopeKey == ".") && declaration.Instance.Empty() {
+		repo := pipeline.WorkflowRepoRoot()
+		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(bundle)
+		instance.WorkflowVersion = source.WorkflowVersion()
+		if owner.Route.ScopeKey == "global" {
+			root := flowidentity.Stored(source, ".", owner.RunID, owner.RunID, owner.RunID, "")
+			rootOwner, err := flowidentity.NewRunScopedFlowInstance(owner.RunID, root.Route())
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := pipeline.NewExactFlowInstanceLookup(source, sourceartifactfixture.Fact(), rootOwner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := correlation.WithRunID(testAuthorActivityContext(), owner.RunID)
+			observed, found, err := fixture.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found {
+				if err := observed.ValidateSelection(request); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				graph, found := semanticview.WorkflowStageTopology(source, ".")
+				if !found {
+					t.Fatal("turn termination fixture requires its compiled structural root")
+				}
+				stage, err := graph.InitialStoredStage()
+				if err != nil {
+					t.Fatal(err)
+				}
+				commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), owner.RunID, pipeline.WorkflowInstance{
+					InstanceID: root.InstanceID, StorageRef: root.InstancePath, EntityID: root.EntityID,
+					WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Fields: map[string]any{},
+					StageDefined: graph.StageCount() != 0, CurrentState: stage.ID(), CreatedAt: now, EnteredStageAt: now,
+				}, now)
+			}
+			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = root.TemplateID, root.InstancePath, root.EntityID
+		}
+	}
+	return commitPreparedWorkflowAggregateFixture(t, testAuthorActivityContext(), fixture.store.(agentFixtureFlowStore), owner.RunID, instance, now)
 }

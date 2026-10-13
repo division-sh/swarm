@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -19,6 +20,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +35,18 @@ func TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores(t *testing.T
 					t.Fatal(err)
 				}
 				owner := flowidentity.RunScopedFlowInstance{RunID: fixture.authority.Target.RunID, Route: flowidentity.StoredRoute(scope, instance, path)}
-				at, entity := time.Now().UTC().Truncate(time.Microsecond), uuid.NewString()
+				repo := pipeline.WorkflowRepoRoot()
+				bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				source := semanticview.Wrap(bundle)
+				parent := flowidentity.Stored(source, ".", owner.RunID, owner.RunID, owner.RunID, "")
+				child, err := flowidentity.KeylessChild(source, parent, scope)
+				if err != nil || child.Route() != owner.Route {
+					t.Fatalf("turn termination fixture child = %+v, error = %v", child, err)
+				}
+				at, entity := time.Now().UTC().Truncate(time.Microsecond), child.EntityID
 				record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
 				if _, err := fixture.store.(deliverylifecycle.Store).SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
 					t.Fatalf("settle the fixture's unrelated initial claim: %v", err)
