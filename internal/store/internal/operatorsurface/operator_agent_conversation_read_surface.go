@@ -887,14 +887,13 @@ func operatorConversationQuerySources() []string {
 				memory_enabled,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				turn_count,
-				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
+				` + conversationTranscriptMessageCountSQL(false) + ` AS message_count,
 				runtime_state,
-				conversation,
 				created_at AS started_at,
 				CASE WHEN status = 'terminated' THEN terminated_at ELSE NULL END AS ended_at,
 				updated_at,
 				created_at
-			FROM agent_sessions
+			FROM agent_sessions conversation_owner
 			WHERE status IN ('active', 'terminated') AND memory_enabled = TRUE
 		`, fmt.Sprintf(`
 			SELECT
@@ -911,16 +910,15 @@ func operatorConversationQuerySources() []string {
 				memory_enabled,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				COALESCE(turn_count, 0) AS turn_count,
-				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
+				`+conversationTranscriptMessageCountSQL(false)+` AS message_count,
 				COALESCE(runtime_state, '{}'::jsonb) AS runtime_state,
-				COALESCE(conversation, '[]'::jsonb) AS conversation,
 				created_at AS started_at,
 				NULL::timestamptz AS ended_at,
 				updated_at,
 				created_at
 			FROM (
 				%s
-			) task_conversations
+			) conversation_owner
 		`, CanonicalStatelessConversationVisibilitySourceSQL())}
 }
 

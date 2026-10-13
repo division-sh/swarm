@@ -19,7 +19,6 @@ func CanonicalStatelessConversationVisibilitySourceSQL() string {
 			COALESCE(status, '') AS status,
 			COALESCE(turn_count, 0) AS turn_count,
 			COALESCE(runtime_state, '{}'::jsonb) AS runtime_state,
-			COALESCE(conversation, '[]'::jsonb) AS conversation,
 			updated_at,
 			created_at
 		FROM agent_conversation_audits

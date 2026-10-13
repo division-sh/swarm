@@ -31,8 +31,8 @@ func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *muta
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, entity_id,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,0,?, '[]',1,'{}','active',?,?)
+			turn_count, runtime_state, status, created_at, updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,0,?,1,'{}','active',?,?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			run_id=excluded.run_id, agent_id=excluded.agent_id,
 			agent_name_owner=excluded.agent_name_owner, agent_name_source=excluded.agent_name_source,

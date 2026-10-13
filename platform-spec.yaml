@@ -8478,12 +8478,14 @@ engine:
         are derived from emit_events. Entity tools are governed by
         contract_formats.persistence_model.role_scoped_entity_tools and tool_model.agent_tool_filtering, not by prompt prose.'
     stateless_memory_audit: 'Agents with memory false do NOT create agent_sessions rows. Stateless execution has
-      no live memory lookup or persistence. The conversation transcript
-      (reasoning, tool calls, results) is persisted after each invocation to agent_conversation_audits
-      (write-only audit table) and agent_turns (per-turn append-only log). The transcript is NEVER loaded
+      no live memory lookup or persistence. agent_turns is the sole transcript owner: the complete session
+      query ordered by turn ordinal (created_at, turn_id), with each turn''s blocks, tools and emitted events.
+      agent_conversation_audits retains only invocation identity, status, time and runtime metadata. The transcript is NEVER loaded
       back for subsequent invocations. Each event invocation starts with a fresh context. Memory false means
-      "no memory between invocations" AND "no live session row." The persisted audit snapshot enables the
-      operator run-trace surfaces to show agent reasoning details. Rows may be archived per retention policy.'
+      "no memory between invocations" AND "no live session row." Operator list/get/turn surfaces and message
+      counts consume the full session transcript from agent_turns, not the provider hydration head or a
+      stored conversation copy. Public turn projection continues to redact private reasoning and tool data.
+      Rows may be archived per retention policy.'
     provider_session_ids: 'External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in
       runtime_state.provider_session_id in agent_sessions for memory-enabled invocations. Stateless execution does not
       retain provider conversation state. NOT in session_id or audit_id. Those are platform-owned
@@ -18419,9 +18421,9 @@ platform_tables:
             INDEX idx_agent_turns_completion_attempt (completion_attempt_id) WHERE completion_attempt_id IS NOT NULL
         );
     agent_conversation_audits:
-      description: 'Write-only audit table for memory-false conversation snapshots. One row per stateless
-        agent invocation. The conversation transcript is persisted here after each invocation for operator debugging.
-        This table is NEVER read back for subsequent invocations — it is purely
+      description: 'Invocation metadata for memory-false agents, linked by session_id to agent_turns.
+        Identity, status, timestamps and runtime_state serve operator/debug, revision and fork readers.
+        No conversation transcript is stored here. This table is NEVER read back for subsequent invocations — it is purely
         for audit/debug. Operator readers distinguish live memory (agent_sessions) from stateless audits
         (agent_conversation_audits) by table, not by convention.'
       ddl: |
@@ -18437,7 +18439,6 @@ platform_tables:
             flow_instance        TEXT NOT NULL,
             entity_id            UUID,
             memory_enabled       BOOLEAN NOT NULL DEFAULT FALSE CHECK (memory_enabled = FALSE),
-            conversation         JSONB NOT NULL DEFAULT '[]',
             turn_count           INTEGER NOT NULL DEFAULT 0,
             runtime_state        JSONB NOT NULL DEFAULT '{}',
             status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),
@@ -18460,10 +18461,11 @@ platform_tables:
       write_only: 'This table is append/update only from the runtime perspective. The runtime writes the
         audit row after each memory-disabled invocation. It is NEVER read back to construct agent context.
         Readers are: v1 operator API, flight recorder queries, debug tools.'
-      relationship_to_agent_turns: 'agent_conversation_audits holds the full conversation snapshot per
-        invocation. agent_turns holds the per-turn structured execution log. Both are audit surfaces.
-        agent_turns is more granular (one row per turn). agent_conversation_audits captures the complete
-        conversation context (all messages, all tool results) in one row.'
+      relationship_to_agent_turns: 'agent_turns is the single transcript owner for memory-enabled and
+        stateless sessions. The ordered complete session-turn query is the transcript; message_count counts
+        its rows, independent of pagination, latest-turn metadata or session/audit turn_count. The native
+        agent_sessions.conversation is only a provider hydration head, not a public transcript. Audit metadata
+        remains linked by session_id; no transcript column, constant-empty projection or compatibility reader exists.'
     routing_rules:
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
