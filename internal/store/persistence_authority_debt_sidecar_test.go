@@ -67,6 +67,16 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 		return baseline, fmt.Errorf("read mandatory collector sidecar: %w", err)
 	}
 	if _, err := debtParseCollectorMetadata(metadataBytes, data, collector); err != nil {
+		if collector == debtServedDebugCollectorTo {
+			if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+				return baseline, err
+			}
+			if priorErr := debtServedDebugUnrefreshedMetadata(root, metadataBytes, data, baseline); priorErr != nil {
+				return baseline, priorErr
+			}
+			baseline.Collector = collector
+			return baseline, nil
+		}
 		if historical || collector != debtWriterStageCollectorTo || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
 			return baseline, err
 		}
@@ -87,4 +97,19 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 	}
 	baseline.Collector = collector
 	return baseline, nil
+}
+
+func debtServedDebugUnrefreshedMetadata(root string, metadata, data []byte, baseline authorityDebtBaseline) error {
+	if baseline.Collector != debtCacheCollectorFrom {
+		return fmt.Errorf("historical TSV collector header changed")
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtWriterStageCollectorTo); err != nil {
+		return err
+	}
+	for _, pair := range debtServedDebugSignatureTransitions() {
+		if baseline.Sites[pair[0].identity()] != pair[0] || baseline.Sites[pair[1].identity()].Multiplicity != 0 {
+			return fmt.Errorf("unrefreshed served-debug baseline lacks exact donor")
+		}
+	}
+	return debtServedDebugSourcePins(root)
 }

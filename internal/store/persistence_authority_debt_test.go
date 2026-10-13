@@ -146,6 +146,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(failures) != 0 {
 		return failures
 	}
+	head, base, baseActual, failures = debtServedDebugSignatureComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	old, current := debtQuiescenceUncertaintyTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -290,6 +294,208 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	return head, base, source, nil
 }
 
+// Ruling6138883675: exactly49 pairs retain71 raw occurrences, with zero credit.
+func debtServedDebugSignatureTransitions() [49][2]authorityDebtSite {
+	return [49][2]authorityDebtSite{
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/issue2277_audit_probe_test.go", Declaration: "TestAudit2277StoppedRunReadinessRestart", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/issue2277_audit_probe_test.go", Declaration: "TestAudit2277StoppedRunReadinessRestart", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/mailbox_entity_filter_test.go", Declaration: "startServedMailboxEntityFilterProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "mailbox", Replacement: "selected mailbox/completion owner and named mailbox fault/readback", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/mailbox_entity_filter_test.go", Declaration: "startServedMailboxEntityFilterProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "mailbox", Replacement: "selected mailbox/completion owner and named mailbox fault/readback", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.servedJoinTarget", Resolved: "func=func(t *testing.T, db *database/sql.DB, runID string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|results=(string)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.servedJoinTarget", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, runID string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=(string)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinFailureReachesAPIAndCLI", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.servedJoinTarget", Resolved: "func=func(t *testing.T, db *database/sql.DB, runID string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|results=(string)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.servedJoinTarget", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, runID string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=(string)", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 3},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 3},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedJoinSourceTimer", Resolved: "func=func(t *testing.T, db *database/sql.DB, runID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedJoinSourceTimer", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, runID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "createServedControlWaitingRun", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "createServedControlWaitingRun", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "publishServedLiveAgentHoldEvent", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "requireServedStoppedPendingDelivery", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "requireServedStoppedPendingDelivery", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "requireServedStoppedPendingDelivery", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "requireServedStoppedPendingDelivery", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedAgentRestartLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedAgentRestartLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionPostgresProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.runServedCreateCarryProjectionProof", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionPostgresProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.runServedCreateCarryProjectionProof", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionSQLiteProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.runServedCreateCarryProjectionProof", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, backend string, bundleHash string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedCreateCarryProjectionSQLiteProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.runServedCreateCarryProjectionProof", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, bundleHash string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedDynamicAutoEmitProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishActiveLoadProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishActiveLoadProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishCommittedReplayScope", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, wantScope string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishActiveLoadProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishActiveLoadProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishFollowUpProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishFollowUpProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishTargetRouteProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedEventPublishTargetRouteProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishEventID", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventName string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|results=(string)", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedLiveAgentEventReplayLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedLiveAgentEventReplayLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedStoppedPendingDelivery", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireServedStoppedPendingDelivery", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|results=()", Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunForkBackendProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRunForkBackendProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRuntimeIngressControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "runServedRuntimeIngressControlLifecycleProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "startServedSessionCleanupProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "startServedSessionCleanupProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "startServedSessionCleanupProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "startServedSessionCleanupProof", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishDeliveryStatusCountForRun", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, subscriberType string, subscriberID string, status string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "waitForServedEventPublishNodeDeliveryLifecycle", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/main_runtime_test.go", Declaration: "waitForServedEventPublishNodeDeliveryLifecycle", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycleForNode", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, nodeID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/receiver_failure_settlement_test.go", Declaration: "TestReceiverCompositionFailureSettlementBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/receiver_failure_settlement_test.go", Declaration: "TestReceiverCompositionFailureSettlementBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/reset_candidate_fence_test.go", Declaration: "TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/reset_candidate_fence_test.go", Declaration: "TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/reset_convergence_receipt_test.go", Declaration: "proveServedResetFinalReceiptFailure", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/reset_convergence_receipt_test.go", Declaration: "proveServedResetFinalReceiptFailure", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/reset_served_parity_test.go", Declaration: "TestServedResetCLIDryRunApplyAndReplayBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/reset_served_parity_test.go", Declaration: "TestServedResetCLIDryRunApplyAndReplayBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/reset_served_parity_test.go", Declaration: "TestServedResetRetainClearAndHistoricalReplayBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/reset_served_parity_test.go", Declaration: "TestServedResetRetainClearAndHistoricalReplayBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/selected_fork_pending_input_mixed_test.go", Declaration: "TestSelectedForkPendingInputMixedCompletionBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/selected_fork_pending_input_mixed_test.go", Declaration: "TestSelectedForkPendingInputMixedCompletionBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedDeliveryOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/selected_fork_pending_input_mixed_test.go", Declaration: "TestSelectedForkPendingInputMixedCompletionBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/selected_fork_pending_input_mixed_test.go", Declaration: "TestSelectedForkPendingInputMixedCompletionBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitServedEventPublishReceiptOutcomeCount", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, eventID string, subscriberType string, subscriberID string, outcome string, want int)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=string|arg=string|arg=int|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/selected_reset_admission_test.go", Declaration: "TestSelectedResetPreparationAdmissionOrderBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/selected_reset_admission_test.go", Declaration: "TestSelectedResetPreparationAdmissionOrderBothStores", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitForServedEventPublishNodeDeliveryLifecycle", Resolved: "func=func(t *testing.T, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, backend string, runID string, eventID string, probe *github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|arg=string|arg=string|arg=*github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest.Probe|results=()", Family: "event", Replacement: "selected canonical event operation and domain event observation port", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_activity_test.go", Declaration: "proveActivitySemanticResultExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 3},
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_activity_test.go", Declaration: "proveActivitySemanticResultExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 3},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_gate_test.go", Declaration: "TestWorkflowGateSemanticNumericOutcomeExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_gate_test.go", Declaration: "TestWorkflowGateSemanticNumericOutcomeExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_ingress_test.go", Declaration: "TestServedSemanticNumericEventSubscription", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_ingress_test.go", Declaration: "TestServedSemanticNumericEventSubscription", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_ingress_test.go", Declaration: "TestServedSemanticNumericIdempotencyReplay", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 3},
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_ingress_test.go", Declaration: "TestServedSemanticNumericIdempotencyReplay", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 3},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_schedule_test.go", Declaration: "TestGenericScheduleSemanticPayloadExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/semantic_numeric_schedule_test.go", Declaration: "TestGenericScheduleSemanticPayloadExecutionParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.semanticNumericOutput", Resolved: "func=func(t *testing.T, endpoint string, db *database/sql.DB, reader github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader, run string)|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/serveapp.receiverProofStateReader|arg=string|results=()", Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2},
+		},
+	}
+}
+
 func debtWriterStageSignatureTransitions() [7][2]authorityDebtSite {
 	return [7][2]authorityDebtSite{
 		{
@@ -377,7 +583,14 @@ func debtWriterStageSourcePins(root string, forward bool) error {
 		if err := format.Node(&body, token.NewFileSet(), fn); err != nil {
 			return err
 		}
-		bodies[fn.Name.Name] = debtBaselineChecksum(body.Bytes())
+		source := body.String()
+		if forward {
+			source, err = debtServedDebugWriterStagePrevious(root, fn.Name.Name, source)
+			if err != nil {
+				return err
+			}
+		}
+		bodies[fn.Name.Name] = debtBaselineChecksum([]byte(source))
 	}
 	column := 1
 	if forward {
@@ -419,6 +632,174 @@ func debtWriterStageCollectorTransition(base, current string, trusted, head auth
 		}
 	}
 	for _, pair := range debtWriterStageSignatureTransitions() {
+		if trusted.Sites[pair[0].identity()] != pair[0] || trusted.Sites[pair[1].identity()].Multiplicity != 0 ||
+			(head.Sites[pair[0].identity()] != pair[0] && head.Sites[pair[1].identity()] != pair[1]) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
+}
+
+func debtServedDebugSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	for _, pair := range debtServedDebugSignatureTransitions() {
+		old, current := pair[0], pair[1]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"both reviewed served-debug signature identities survive: " + old.Declaration}
+			}
+		}
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+			head = debtForwardQuiescenceUncertainty(head, old, current)
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	return head, base, source, nil
+}
+
+type debtServedDebugBody struct {
+	File, Function, Before, After, SHA256 string
+	DebugCalls, HelperCalls               int
+}
+
+func debtServedDebugBodies(root string) ([]debtServedDebugBody, error) {
+	path := "tools/fixture-codemod/pipeline-observations/family145-served-debug-preimages.json"
+	raw, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil || debtBaselineChecksum(raw) != "5bc30573335e4c9efc8915f7db12eb345938e927b347bf368007c1b899a8bd4a" {
+		return nil, fmt.Errorf("exact served-debug85 source evidence changed: %v", err)
+	}
+	var bodies []debtServedDebugBody
+	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 85 {
+		return nil, fmt.Errorf("invalid served-debug source inventory: %v", err)
+	}
+	return bodies, nil
+}
+
+// Compose ONLY the four approved complete successors through their immutable
+// intermediate. The original eleven writer-stage hashes are never rewritten.
+func debtServedDebugWriterStagePrevious(root, function, current string) (string, error) {
+	var reviewed string
+	for _, pin := range debtWriterStageBodyPins() {
+		if pin[0] == function {
+			reviewed = pin[2]
+		}
+	}
+	if reviewed == "" || debtBaselineChecksum([]byte(current)) == reviewed {
+		return current, nil
+	}
+	switch function {
+	case "runServedDynamicAutoEmitProof", "runServedEventPublishActiveLoadProof", "runServedEventPublishFollowUpProof", "runServedEventPublishTargetRouteProof":
+	default:
+		return "", fmt.Errorf("writer-stage source changed outside four approved compositions: %s", function)
+	}
+	bodies, err := debtServedDebugBodies(root)
+	if err != nil {
+		return "", err
+	}
+	for _, body := range bodies {
+		if body.File == "internal/serveapp/main_runtime_test.go" && body.Function == function && body.After == current && debtBaselineChecksum([]byte(body.Before)) == reviewed {
+			return body.Before, nil
+		}
+	}
+	return "", fmt.Errorf("served-debug writer-stage successor is not exact: %s", function)
+}
+
+func debtServedDebugDeclarations(path string) (map[string]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	bodies := map[string]string{}
+	for _, declaration := range file.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil {
+			continue
+		}
+		if _, duplicate := bodies[fn.Name.Name]; duplicate {
+			return nil, fmt.Errorf("duplicate served-debug declaration: %s", fn.Name.Name)
+		}
+		var out bytes.Buffer
+		if err := format.Node(&out, token.NewFileSet(), fn); err != nil {
+			return nil, err
+		}
+		bodies[fn.Name.Name] = out.String()
+	}
+	return bodies, nil
+}
+
+func debtServedDebugRequiredSources() map[string]bool {
+	needed := map[string]bool{}
+	for _, pair := range debtServedDebugSignatureTransitions() {
+		needed[pair[0].File+"/"+pair[0].Declaration] = true
+		callee := pair[0].Operation[strings.LastIndex(pair[0].Operation, ".")+1:]
+		// Each helper definition is independently selected from the reviewed
+		// ledger; callers cannot choose a different owner with the same type.
+		needed["callee/"+callee] = true
+	}
+	for _, root := range []string{"TestRunServeRuntimeJoinFailureReachesAPIAndCLI", "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", "startServedSessionCleanupProof", "runServedCreateCarryProjectionSQLiteProof", "runServedCreateCarryProjectionPostgresProof", "TestServedSemanticNumericIdempotencyReplay", "runServedStandingServiceLifecycleBackendProof", "runServedGeneratedInputFixtureBackendProof", "runServedPublicMockApprovalBackendProof"} {
+		needed["capture/"+root] = true
+	}
+	return needed
+}
+
+func debtServedDebugSourcePins(root string) error {
+	manifest, err := os.ReadFile(filepath.Join(root, ".github/audit-artifacts/issue-2542-served-debug-signature-transition-request.json"))
+	if err != nil || debtBaselineChecksum(manifest) != "bcf9e019cc0ecbd0eccd28c97689074e509b94372ece4d8f93c6c77f790be018" {
+		return fmt.Errorf("reviewed49-pair/71-occurrence manifest changed: %v", err)
+	}
+	bodies, err := debtServedDebugBodies(root)
+	if err != nil {
+		return err
+	}
+	needed := debtServedDebugRequiredSources()
+	loaded := map[string]map[string]string{}
+	for _, body := range bodies {
+		keys := []string{body.File + "/" + body.Function, "callee/" + body.Function, "capture/" + body.Function}
+		if !needed[keys[0]] && !needed[keys[1]] && !needed[keys[2]] {
+			continue
+		}
+		if loaded[body.File] == nil {
+			loaded[body.File], err = debtServedDebugDeclarations(filepath.Join(root, body.File))
+			if err != nil {
+				return err
+			}
+		}
+		if body.After == "" || loaded[body.File][body.Function] != body.After {
+			return fmt.Errorf("reviewed served-debug reader provenance/body changed: %s/%s", body.File, body.Function)
+		}
+		for _, key := range keys {
+			delete(needed, key)
+		}
+	}
+	if len(needed) != 0 {
+		return fmt.Errorf("served-debug source proof lacks required callers/owners/captures: %v", needed)
+	}
+	return nil
+}
+
+func debtServedDebugSourceTransition(root string, actual, source map[string]authorityDebtSite) error {
+	for _, pair := range debtServedDebugSignatureTransitions() {
+		if actual[pair[1].identity()] == pair[1] && source[pair[0].identity()] == pair[0] {
+			return debtServedDebugSourcePins(root)
+		}
+	}
+	return nil // Landed no-op or genuine deletion does not reconstruct authority.
+}
+
+func debtServedDebugCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	if current != debtServedDebugCollectorTo || head.Collector != current || trusted.Collector != base {
+		return false
+	}
+	if base != debtWriterStageCollectorTo {
+		intermediate := trusted
+		intermediate.Collector = debtWriterStageCollectorTo
+		if debtValidateCollectorIdentity(base, intermediate.Collector, trusted, intermediate, "") != nil {
+			return false
+		}
+	}
+	for _, pair := range debtServedDebugSignatureTransitions() {
 		if trusted.Sites[pair[0].identity()] != pair[0] || trusted.Sites[pair[1].identity()].Multiplicity != 0 ||
 			(head.Sites[pair[0].identity()] != pair[0] && head.Sites[pair[1].identity()] != pair[1]) {
 			return false
@@ -871,6 +1252,9 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if err := debtWriterStageSourceTransition(root, baseRoot, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
+	if err := debtServedDebugSourceTransition(root, actual, baseActual); err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -880,6 +1264,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		normalized, normalizedBase, normalizedSource, _ := debtStageCompletionComparisons(actual, head.Sites, trusted.Sites, baseActual)
 		normalized, _, _, _ = debtRunFixtureSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		normalized, _, _, _ = debtWriterStageSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
+		normalized, _, _, _ = debtServedDebugSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -940,6 +1325,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return nil
 	}
 	if debtWriterStageCollectorTransition(base, current, trusted, head) {
+		return nil
+	}
+	if debtServedDebugCollectorTransition(base, current, trusted, head) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

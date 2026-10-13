@@ -6557,3 +6557,72 @@ timing will accompany the signed checkpoint; distinguish accounting/review wait
 from implementation and proof. No push, PR, tier, server2 or rebase. Rebase is
 ONCE after #2617 and orchestrator handoff. Receipts live under
 ~/.cache/swarm-2542-family145/served-debug-*.
+
+### Exact Diagnostic Accounting And Isolated-Query Repair
+
+Ruling6138883675 accepts the semantic wave and authorizes only its49 signature
+pairs/71 retained occurrences, four exact source compositions and the two
+inherited isolated-query INSERT literals. The independent A2 endpoint wave is
+saved locally while this repair is qualified on the accepted9c964b502 tree.
+No runtime/fixture semantic rerun is needed for unchanged diagnostic consumers;
+their preceding both-store race, real corruption mutant, restart, independent
+inspection, idempotence and all165 correspondence receipts carry.
+
+The existing finite policy now contains exactly49 pairs generated from the
+approved complete predecessor and frozen-source real census. Each pair preserves
+all fields and multiplicity; coexisting donors/recipients, missing/changed donor,
+type/argument/receiver/result/owner/class/file/declaration/operation changes,
+reverse/resurrection and unrelated additions reject. All71 remain raw debt.
+Required caller/callee bodies plus the nine original role captures must match
+their complete exact reviewed current source. Same-typed reader provenance
+changes and source/read/parse failures reject. Only the four approved current
+callee bodies compose through their exact reviewed intermediate. All original
+eleven hashes, old seven/nine pairs and immutable manifests remain unchanged.
+Prior approved policy steps compose explicitly; metadata accepts no unknown
+fingerprint, baseline growth, source omission or deletion credit.
+
+The exact next collector fingerprint is
+95de50b780ae728dd0cbc9517df19970a2cdc7c7e72e0a13aa6c06e3344ce22c.
+Unrefreshed metadata is allowed ONLY for explicit local downward operation,
+matching original sidecar/checksum, all49 exact donors and complete source proof.
+Normal read-only/CI/historical/malformed/foreign metadata refuses. The request
+generator now reads the signed bfdcdc112 predecessor baseline with its exact
+checksum, not the subsequently lowered current baseline; regeneration still
+returns request SHA256bcf9e019cc0ecbd0eccd28c97689074e509b94372ece4d8f93c6c77f790be018.
+This is finite one-way conservation, not a signature normalization framework.
+
+The source-pinned isolated-query classifier retains its original cardinality
+fixture unchanged (one literal) and accounts separately for exactly two literals
+in TestPostgresResetRecoveryPayloadsKeepPhysicalBytesNamesOrderAndNull, full
+file SHA256fc5456a13b9796d160f82e4780874a3794c5ab335cdbdc6bfa91fe736037395c.
+Per-file/function counts are explicit. Schema/admitted/native setup, SQL/name,
+scope/path and extra-INSERT controls reject. The existing structural root runs
+these controls, rather than stranding a new root outside its owner. No legacy
+direct-writer allowlist, marker, whole-file exclusion or runtime event writer
+API was added. The physical query fixture and its counted debt are unchanged.
+An initial test-control spelling itself contained two new positive SQL literals;
+its mutation now targets the original VALUES fragment, with the extra literal
+derived from the actual executed fixture. Final writer inventory is green
+without any new allowance or hidden executed SQL.
+
+Fresh accounting/source/metadata/history controls PASS20 roots/1556 cases;
+the two structural roots PASS18 cases. Fresh real global downward census
+PASS248.610s:7468/5183 ->7340/5065,128 genuine findings/118 raw sites removed,
+ZERO additions, all71 transfers conserved. Unresolved excluded-source67 remains
+counted. Final NORMAL read-only ratchet plus prior sidecar/G01/uncertainty
+controls PASS9 roots/70 cases (package28.394s). Current baseline SHA256
+f75eb1767d5976c4e5a0cae7dc49bf628ae4b9acef2cef08a90a829b0dedc5c1;
+original eleven-body artifact stays93497d8c6e5024fd3b559bba023b13d5c35279e949bdac5391f17deafe8491f0.
+The policy fingerprint discovery intentionally rejected its temporary pending
+value before exact pinning; it is not a claimed passing receipt. All final
+policy/structural receipts are source-specific, not retries of unchanged reds.
+Affected U1000 passes and every new policy/control function is below the
+cognitive-complexity ceiling; final signed complexity is recorded at checkpoint.
+
+This clears the two9c964b502 holds only, subject to reviewer-b's repair delta.
+It does not claim parent/aggregate/integrated completion, flake or timing repair.
+All earlier qualification holds stay OPEN. No push/PR/tier/server2/rebase;
+one rebase after#2617 and orchestrator handoff remains. The new push preflight
+directive is acknowledged for the future rebased push, not asserted as run on
+this older local tree. Receipts:served-debug-policy-* and
+served-debug-isolated-query-classification-final-green.jsonl.

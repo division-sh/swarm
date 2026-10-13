@@ -96,8 +96,8 @@ func TestPersistenceAuthorityDebtWriterStageModelMatchesReviewedManifestAndBodie
 		}
 	}
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtWriterStageCollectorTo {
-		t.Fatalf("writer-stage policy source=%s pinned=%s error=%v", digest, debtWriterStageCollectorTo, err)
+	if err != nil || digest != debtServedDebugCollectorTo {
+		t.Fatalf("reviewed exact served-debug successor=%s pinned=%s error=%v", digest, debtServedDebugCollectorTo, err)
 	}
 }
 
@@ -233,7 +233,7 @@ func debtWriterStageCheckPriorComposition(t *testing.T) {
 func TestPersistenceAuthorityDebtWriterStageUnrefreshedMetadataIsScopedAndFailClosed(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	copy := t.TempDir()
-	for _, path := range []string{"internal/serveapp/main_runtime_test.go", ".github/audit-artifacts/issue-2542-writer-stage-signature-transition-request.json"} {
+	for _, path := range []string{"internal/serveapp/main_runtime_test.go", ".github/audit-artifacts/issue-2542-writer-stage-signature-transition-request.json", "tools/fixture-codemod/pipeline-observations/family145-served-debug-preimages.json"} {
 		data, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)

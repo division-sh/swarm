@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,11 +21,17 @@ type pair struct {
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		panic("usage: request-served-debug-bookkeeping <exact-candidate-census.tsv>")
+	model := len(os.Args) == 3 && os.Args[1] == "-go-model"
+	if len(os.Args) != 2 && !model {
+		panic("usage: request-served-debug-bookkeeping [-go-model] <exact-candidate-census.tsv>")
 	}
-	old := read("internal/store/testdata/persistence_authority_debt_baseline.tsv")
-	current := read(os.Args[1])
+	predecessor, err := exec.Command("git", "show", "bfdcdc112f7053494ea597c053aaa49678804bbc:internal/store/testdata/persistence_authority_debt_baseline.tsv").Output()
+	must(err)
+	if fmt.Sprintf("%x", sha256.Sum256(predecessor)) != "fb6db8b87f441912b61afded6ea18eec5238520d672a5cb46a63c87da2f31bd5" {
+		panic("approved complete predecessor baseline changed")
+	}
+	old := parse(predecessor)
+	current := read(os.Args[len(os.Args)-1])
 	byLocation := map[string][]site{}
 	for _, s := range old {
 		byLocation[location(s)] = append(byLocation[location(s)], s)
@@ -53,9 +61,27 @@ func main() {
 		a, b := pairs[i], pairs[j]
 		return a.File+"\t"+a.Enclosing+"\t"+a.Operation < b.File+"\t"+b.Enclosing+"\t"+b.Operation
 	})
+	if model {
+		writeModel(pairs)
+		return
+	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	must(encoder.Encode(pairs))
+}
+
+func writeModel(pairs []pair) {
+	fmt.Println("// Ruling6138883675: exactly49 pairs retain71 raw occurrences, with zero credit.")
+	fmt.Println("func debtServedDebugSignatureTransitions() [49][2]authorityDebtSite {")
+	fmt.Println("return [49][2]authorityDebtSite{")
+	for _, p := range pairs {
+		fmt.Println("{")
+		for _, resolved := range []string{p.Before, p.After} {
+			fmt.Printf("{Kind:%q, File:%q, Declaration:%q, Operation:%q, Resolved:%q, Family:%q, Replacement:%q, Multiplicity:%d},\n", p.Kind, p.File, p.Enclosing, p.Operation, resolved, p.Family, p.Owner, p.Multiplicity)
+		}
+		fmt.Println("},")
+	}
+	fmt.Println("}\n}")
 }
 
 func validate(before, after site) {
@@ -76,6 +102,10 @@ func validate(before, after site) {
 func read(path string) map[string]site {
 	raw, err := os.ReadFile(path)
 	must(err)
+	return parse(raw)
+}
+
+func parse(raw []byte) map[string]site {
 	out := map[string]site{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		if line == "" || strings.HasPrefix(line, "#") {
