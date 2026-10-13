@@ -553,7 +553,11 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, runID, "node-a", "flow-a/1", entityID, "relevant", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, uuid.NewString(), "flow-a/2", "flow-a", "", "waiting", "{}", at.Add(-time.Minute))
+	commitPreparedWorkflowAggregateFixture(t, ctx, pg, runID, pipeline.WorkflowInstance{
+		InstanceID: "2", StorageRef: "flow-a/2", EntityID: uuid.NewString(),
+		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
+		CurrentState: "waiting", Fields: map[string]any{}, CreatedAt: at.Add(-time.Minute), EnteredStageAt: at.Add(-time.Minute),
+	}, at.Add(-time.Minute))
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
