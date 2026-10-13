@@ -9132,6 +9132,10 @@ engine:
         work, recurrence and clock suspension require their existing supported continuation or a fail-closed refusal
         before partial child mutation. Physical materialization and retained lineage never authorize firing: activation,
         wakeup reconciliation and successor recovery still require the current selected child authority.
+        A successor hydrates a retained root declaration only after exact child identity, configuration revision,
+        topology and predecessor lifecycle validation. The existing authoritative agent start owns its current-grant
+        process takeover before route publication; recovery neither respawns that durable actor nor adds a second
+        takeover protocol. Fresh construction and ordinary duplicate-actor refusal retain their existing rules.
       wakeup: >
         Persistence commits before registration. A wakeup contains only activation identity and current due coordinate,
         reloads durable facts before execution, and is fenced by lifecycle-owned bounded/coalesced recovery. Process-local
