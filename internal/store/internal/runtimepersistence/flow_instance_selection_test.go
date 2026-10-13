@@ -86,6 +86,9 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 					request.Mode = mode
 					requireR7SelectionNoMutation(t, f, func() {
 						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+						if _, unavailable := selected.UnavailableReceiver(); unavailable {
+							t.Fatal("absence produced unavailable occupancy")
+						}
 						if mode == contracts.FlowInputResolutionModeSelect {
 							var missing *pipeline.WorkflowInstanceLookupMiss
 							if !errors.As(err, &missing) || selected.Activation != nil || selected.Observation.Valid() {
@@ -119,6 +122,9 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 					request.Mode = mode
 					requireR7SelectionNoMutation(t, f, func() {
 						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+						if _, unavailable := selected.UnavailableReceiver(); unavailable {
+							t.Fatal("active occupancy produced lifecycle refusal")
+						}
 						if mode == contracts.FlowInputResolutionModeCreate {
 							var conflict *pipeline.FlowInstanceActivationConflict
 							if !errors.As(err, &conflict) || conflict.Owner.Route != winner.Identity.Route() || selected.Activation != nil {
@@ -155,6 +161,10 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 						if err == nil || selected.Activation != nil || selected.Observation.Valid() {
 							t.Fatalf("final-stage occupancy became creation or execution: %+v %v", selected, err)
 						}
+						unavailable, refused := selected.UnavailableReceiver()
+						if refused != (mode != contracts.FlowInputResolutionModeCreate) || refused && unavailable != owner {
+							t.Fatalf("final-stage refusal lost exact occupied receiver: %+v refused=%t", unavailable, refused)
+						}
 						if mode == contracts.FlowInputResolutionModeCreate {
 							var conflict *pipeline.FlowInstanceActivationConflict
 							if !errors.As(err, &conflict) || conflict.Owner != owner {
@@ -188,6 +198,10 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
 						if err == nil || selected.Activation != nil || selected.Observation.Valid() {
 							t.Fatalf("terminal occupancy became creation or execution: %+v %v", selected, err)
+						}
+						unavailable, refused := selected.UnavailableReceiver()
+						if refused != (mode != contracts.FlowInputResolutionModeCreate) || refused && unavailable != owner {
+							t.Fatalf("terminal refusal lost exact occupied receiver: %+v refused=%t", unavailable, refused)
 						}
 						if mode == contracts.FlowInputResolutionModeCreate {
 							var conflict *pipeline.FlowInstanceActivationConflict

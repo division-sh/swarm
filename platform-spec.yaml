@@ -2451,6 +2451,9 @@ contract_formats:
               Native corruption cannot become absence or missing-row historical fallback; admitted historical
               construction intentionally lacks fresh constructor/readiness companions. Its fixed captured receipt and
               lineage remain required, and selected execution additionally needs current fork-local authority.
+              A validated terminal or terminated occupant remains occupied and produces the compiled target-failure
+              disposition, never an activation proposal. Reader, corruption, cancellation and independent storage errors
+              cannot mint that selected-occupancy result; explicit create still rejects the occupied construction.
               Static materialization consumes only compiled target facts, not descriptor or payload-key input. Agent
               descriptors remain separately owned carrier/recipient evidence, never instance-existence authority.
               Arbitrary business fields, current field-derived keys, config, deliveries, receipts, replay/readback,

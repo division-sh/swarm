@@ -127,6 +127,9 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 			PayloadProjection: projection, Bookkeeping: map[string]any{"last_source_event": event.ID()}, TriggerEvent: event},
 	})
 	if err != nil {
+		if _, unavailable := selected.UnavailableReceiver(); unavailable {
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{}, true, nil
+		}
 		if isolatedInstanceLookupMiss(err) {
 			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, connectInstanceSelection{}, true, nil
 		}

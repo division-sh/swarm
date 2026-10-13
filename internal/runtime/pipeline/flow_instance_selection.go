@@ -9,12 +9,19 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-// Selection contains either an admitted stored receiver or a pure R5.1
-// construction plan. Neither is authority to commit or attach that receiver.
+// Selection contains an admitted receiver, a pure R5.1 construction plan, or
+// unavailable occupancy. None is authority to commit or attach that receiver.
 type FlowInstanceSelection struct {
 	Observation FlowInstanceObservation
 	Activation  *FlowInstanceActivationPlan
 	Proposed    *FlowInstanceActivationPlan
+	unavailable flowidentity.RunScopedFlowInstance
+}
+
+// UnavailableReceiver reports admitted occupancy, not execution authority.
+// Reader errors cannot produce this selection-owned diagnostic coordinate.
+func (s FlowInstanceSelection) UnavailableReceiver() (flowidentity.RunScopedFlowInstance, bool) {
+	return s.unavailable, s.unavailable.RunID != ""
 }
 
 func (s FlowInstanceSelection) Identity() flowidentity.Instance {
@@ -110,6 +117,10 @@ func selectObservedFlowInstance(request FlowInstanceSelectionRequest, observatio
 		stage = instance.CurrentState
 	}
 	if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
+		switch err.(type) {
+		case *TerminalReceiverError, *TerminatedReceiverError:
+			return FlowInstanceSelection{unavailable: observation.Owner()}, err
+		}
 		return FlowInstanceSelection{}, err
 	}
 	return FlowInstanceSelection{Observation: observation}, nil

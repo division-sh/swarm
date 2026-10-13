@@ -272,6 +272,41 @@ func TestTerminalTargetDiagnosticPreservesCreateAndReplyAdmission(t *testing.T) 
 	}
 }
 
+func TestKeylessConnectDistinguishesSelectedUnavailableReceiverFromReadFailure(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	plans, issues := compiledConnectPlans(source)
+	if len(plans) != 1 || len(issues) != 0 {
+		t.Fatalf("keyless source requires one valid connection: plans=%d issues=%+v", len(plans), issues)
+	}
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("keyless-unavailable"), "root.ready", "test", "", []byte(`{}`), 0,
+		busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
+	ctx := constructionIndexContext(t, source)
+	root := ConstructedFlowInstanceIdentityFixture(source, ".", "", event.RunID())
+	child := ConstructedFlowInstanceIdentityFixture(source, "consumer", "", event.RunID())
+	reader := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{
+		constructionIndexObservation(t, source, event.RunID(), root, ""),
+		TerminatedFlowInstanceObservationFixture(t, source, event.RunID(), child),
+	}}
+	resolver := newConnectRoutePlanResolver(source, derivedRouteTableFixture(t, source), nil, reader, nil)
+	materialized, selection, err := resolver.materializeKeylessConnect(ctx, event, plans[0])
+	if err != nil || materialized.Failure != pinrouting.ConnectFailureLifecycleUnavailable || !selection.Empty() || selection.Activation != nil {
+		t.Fatalf("selected unavailable keyless receiver escaped its target refusal: %+v %+v err=%v", materialized, selection, err)
+	}
+	if got := connectRoutePlanTargetFailure(materialized.Failure); got != pinrouting.FailureTargetUnreachableTerminated {
+		t.Fatalf("keyless lifecycle refusal lost its canonical target failure: %v", got)
+	}
+	terminal := &pipeline.TerminatedReceiverError{FlowID: "consumer"}
+	corrupt := &pipeline.FlowInstanceConstructionCorruption{RunID: event.RunID(), FlowID: "consumer", Cause: terminal}
+	for _, failure := range []error{terminal, corrupt, context.Canceled, errors.Join(terminal, errors.New("independent read failure"))} {
+		reader.selectionErr = failure
+		resolver.lifecycle.index = reader
+		materialized, selection, err := resolver.materializeKeylessConnect(ctx, event, plans[0])
+		if !errors.Is(err, failure) || !materialized.Failure.Empty() || !selection.Empty() {
+			t.Fatalf("keyless reader failure became semantic unavailability: %+v %+v err=%v want=%v", materialized, selection, err, failure)
+		}
+	}
+}
+
 func (r *unscopedConnectIndexTestReader) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
 	r.requested = append(r.requested, scope)
 	return slices.Clone(r.observations), r.err

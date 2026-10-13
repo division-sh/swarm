@@ -1009,6 +1009,9 @@ func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFai
 	if failure.Empty() {
 		return 0
 	}
+	if failure == runtimepinrouting.ConnectFailureLifecycleUnavailable {
+		return runtimepinrouting.FailureTargetUnreachableTerminated
+	}
 	return runtimepinrouting.TargetFailureFromConnect(failure)
 }
 

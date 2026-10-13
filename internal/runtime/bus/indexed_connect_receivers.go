@@ -237,6 +237,9 @@ func (r connectRoutePlanResolver) materializeKeylessConnect(ctx context.Context,
 	}
 	selection, err := pipeline.PrepareFlowInstanceSelection(ctx, r.lifecycle.index, nil, pipeline.FlowInstanceSelectionRequest{Lookup: request, Mode: contracts.FlowInputResolutionModeSelect, Prepared: preparedConnectPlans(ctx), RunProposal: r.lifecycle.runProposal})
 	if err != nil {
+		if _, unavailable := selection.UnavailableReceiver(); unavailable {
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{}, nil
+		}
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 	}
 	instance := selection.Identity()
