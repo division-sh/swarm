@@ -50,6 +50,7 @@ func TestRunStartOriginalPointPreservesCreatingInputBothStores(t *testing.T) {
 			}
 			assertStart := func(point *runfork.RunForkPoint) runfork.RunForkPoint {
 				t.Helper()
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, initial.ID())
 				plan, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, AtStart: true, ResolvedPoint: point})
 				if err != nil {
 					t.Fatal(err)
@@ -86,6 +87,7 @@ func TestEventlessRunHasOriginalStartWithoutInventedIntakeBothStores(t *testing.
 			runID := uuid.NewString()
 			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC))
+			c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 			planner := fixture.store.(interface {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 			})
