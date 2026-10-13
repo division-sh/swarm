@@ -508,7 +508,7 @@ coordinator-node:
 	}{
 		{name: "declared stateless primary", entities: "coordinator_state: {}\n"},
 		{name: "unused scalar", entities: "coordinator_state:\n  unused_label: text\n"},
-		{name: "unused list", entities: "coordinator_state:\n  unused_members: '[text]'\n"},
+		{name: "unused list", entities: "coordinator_state:\n  unused_members: [text]\n"},
 		{name: "unused map", entities: "coordinator_state:\n  unused_verticals: map[text]VerticalState\n"},
 	}
 	for _, tc := range tests {
