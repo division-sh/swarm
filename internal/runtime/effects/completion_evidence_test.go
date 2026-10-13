@@ -2,6 +2,7 @@ package effects
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -30,6 +31,8 @@ func TestCompletion2270EvidenceValidation(t *testing.T) {
 		"blank-label":            func(e *CompletionEvidence) { e.Models[0].Model = " " },
 		"negative-tokens":        func(e *CompletionEvidence) { *e.Models[1].InputTokens = -1 },
 		"negative-price":         func(e *CompletionEvidence) { *e.Models[1].ProviderReportedCostUSD = -1 },
+		"infinite-total":         func(e *CompletionEvidence) { *e.ProviderReportedCostUSD = math.Inf(1) },
+		"nan-total":              func(e *CompletionEvidence) { *e.ProviderReportedCostUSD = math.NaN() },
 		"missing-reported-total": func(e *CompletionEvidence) { e.ProviderReportedCostUSD = nil },
 		"unknown-price-owner":    func(e *CompletionEvidence) { e.CostProvenance = "exact-tokens" },
 	} {

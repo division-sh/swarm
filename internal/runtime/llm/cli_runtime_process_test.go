@@ -68,7 +68,7 @@ func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness
 	}
 	settlementCtx := harness.CompletionContext("claude-shared-settlement")
 	if _, settleErr := settleCompletionTurn(
-		settlementCtx, dispatch, target.ID, turn, nil, profile, unavailableCompletionUsage(),
+		settlementCtx, dispatch, target.ID, turn, nil, profile, claudeFailureUsage(err),
 		claudeCompletionFailureState(err), &failure.Failure, nil,
 	); settleErr != nil {
 		settlementFailure, _ := runtimefailures.As(settleErr)
