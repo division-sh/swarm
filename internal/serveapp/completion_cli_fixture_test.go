@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,7 +22,6 @@ const completion2270InvocationFile = "swarm-completion-2270-business.jsonl"
 
 const completion2270CLIProgram = `#!/usr/bin/env node
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const args = process.argv.slice(2);
@@ -49,7 +47,7 @@ const startup = !flags.has('--model') && !flags.has('--resume') && !flags.has('-
 if (!startup && flags.get('--model') !== 'request-A') throw Error('missing exact business model');
 if (!startup) {
   const evidence = {attempt_id: session, invocation_id: crypto.randomUUID(), model: flags.get('--model')};
-  fs.appendFileSync(path.join(os.tmpdir(), 'swarm-completion-2270-business.jsonl'), JSON.stringify(evidence) + '\n');
+  fs.appendFileSync(path.join(process.cwd(), 'swarm-completion-2270-business.jsonl'), JSON.stringify(evidence) + '\n');
 }
 (async () => {
   const configuration = JSON.parse(flags.get('--mcp-config'));
@@ -143,8 +141,7 @@ func readCompletion2270WorkspaceInvocations(ctx context.Context, lifecycle works
 			continue
 		}
 		seen[container] = true
-		file := filepath.Join("/tmp", completion2270InvocationFile)
-		output, err := manager.RunDocker(ctx, "exec", container, "sh", "-c", `if [ -f "$1" ]; then cat "$1"; fi`, "completion-proof-read", file)
+		output, err := manager.RunDocker(ctx, "exec", container, "sh", "-c", `if [ -f "$1" ]; then cat "$1"; fi`, "completion-proof-read", completion2270InvocationFile)
 		if err != nil {
 			return nil, fmt.Errorf("read original CLI invocation evidence: %w", err)
 		}

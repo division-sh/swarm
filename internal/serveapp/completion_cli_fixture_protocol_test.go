@@ -125,6 +125,12 @@ func TestClaudeCLICompletion2270InvocationOracleRejectsRedispatch(t *testing.T) 
 		if i == 0 && validateCompletion2270SingleInvocation(rows, uuid.NewString()) == nil {
 			t.Fatal("oracle accepted a foreign admitted attempt")
 		}
+		if err := os.RemoveAll(filepath.Join(root, "private-invocation")); err != nil {
+			t.Fatal(err)
+		}
+		if preserved := readCompletion2270ProtocolInvocations(t, root); !reflect.DeepEqual(preserved, rows) {
+			t.Fatal("disposable invocation cleanup erased physical business evidence")
+		}
 	}
 }
 
@@ -158,7 +164,7 @@ func TestClaudeCLICompletion2270InvocationReaderUsesPublishedProjectionWorkspace
 		var bound *workspace.DockerManager
 		template.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 			containers := bound.SystemWorkspaceContainers()
-			if len(args) != 7 || args[0] != "exec" || (args[1] != containers[0] && args[1] != containers[1]) || args[6] != "/tmp/"+completion2270InvocationFile {
+			if len(args) != 7 || args[0] != "exec" || (args[1] != containers[0] && args[1] != containers[1]) || args[6] != completion2270InvocationFile {
 				return "", fmt.Errorf("invocation reader used template or foreign workspace: %v", args)
 			}
 			reads++
@@ -301,7 +307,11 @@ func runCompletion2270Protocol(t *testing.T, root string, args []string, prompt 
 	defer cancel()
 	command := exec.CommandContext(ctx, node, append([]string{filepath.Join(root, "completion-proof-cli")}, args...)...)
 	command.Dir = root
-	command.Env = append(os.Environ(), "TMPDIR="+root, "CLAUDE_CONFIG_DIR="+filepath.Join(root, "claude"))
+	scratch := filepath.Join(root, "private-invocation")
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command.Env = append(os.Environ(), "TMPDIR="+scratch, "CLAUDE_CONFIG_DIR="+filepath.Join(root, "claude"))
 	command.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
