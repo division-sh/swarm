@@ -637,7 +637,6 @@ func WriteLocalPreflightText(out io.Writer, report LocalPreflightReport) {
 		status = "failed"
 	}
 	fmt.Fprintf(out, "claude_cli preflight: %s\n", status)
-	writeDoctorConfigSourceText(out, report.ConfigSource)
 	if report.PackInventory != nil {
 		writePackInventory(out, *report.PackInventory)
 	}
