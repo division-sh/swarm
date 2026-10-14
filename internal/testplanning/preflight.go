@@ -74,19 +74,31 @@ type PreflightPackage struct {
 }
 
 type PreflightPlan struct {
-	Version      int                `json:"version"`
-	HeadSHA      string             `json:"head_sha"`
-	BaseSHA      string             `json:"base_sha"`
-	BuildContext BuildContext       `json:"build_context"`
-	Packages     []PreflightPackage `json:"packages"`
-	Digest       string             `json:"digest"`
+	Version      int                  `json:"version"`
+	HeadSHA      string               `json:"head_sha"`
+	BaseSHA      string               `json:"base_sha"`
+	BuildContext BuildContext         `json:"build_context"`
+	Packages     []PreflightPackage   `json:"packages"`
+	Digest       string               `json:"digest"`
+	Comparison   *PreflightComparison `json:"comparison,omitempty"`
+}
+
+type PreflightComparison struct {
+	OriginMasterSHA string `json:"origin_master_sha"`
+	DiffSHA256      string `json:"diff_sha256"`
+	DebtRequired    bool   `json:"debt_required"`
+}
+
+var preflightDebtRoots = []TestRoot{
+	preflightRoot("internal/store", "TestPersistenceAuthorityDebtRatchet"),
+	preflightRoot("internal/store", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"),
 }
 
 func preflightRoot(pkg, name string) TestRoot {
 	return TestRoot{Package: "github.com/division-sh/swarm/" + pkg, Name: name}
 }
 
-func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPlan) (PreflightPlan, error) {
+func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPlan, comparison PreflightComparison) (PreflightPlan, error) {
 	if err := native.Validate(); err != nil {
 		return PreflightPlan{}, err
 	}
@@ -99,6 +111,9 @@ func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPl
 	}
 	roots := append(slices.Clone(preflightCandidates), structural...)
 	roots = append(roots, preflightSafetyRoots...)
+	if comparison.DebtRequired {
+		roots = append(roots, preflightDebtRoots...)
+	}
 	owners := make(map[TestRoot][]RequiredTest)
 	for _, unit := range native.Units {
 		for _, root := range unit.RequiredTests {
@@ -116,7 +131,13 @@ func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPl
 		proof.Children = slices.Compact(proof.Children)
 		required = append(required, proof)
 	}
-	return bindPreflightSelection(native.HeadSHA, base, inventory, required)
+	plan, err := bindPreflightSelection(native.HeadSHA, base, inventory, required)
+	if err != nil {
+		return plan, err
+	}
+	plan.Comparison = &comparison
+	plan.Digest = plan.digest()
+	return plan, plan.Validate()
 }
 
 func bindPreflightSelection(head, base string, inventory RootInventory, required []RequiredTest) (PreflightPlan, error) {
@@ -158,6 +179,13 @@ func (p PreflightPlan) Validate() error {
 	if err := p.BuildContext.Validate(); err != nil {
 		return err
 	}
+	if p.Comparison != nil {
+		origin, originErr := hex.DecodeString(p.Comparison.OriginMasterSHA)
+		diff, diffErr := hex.DecodeString(p.Comparison.DiffSHA256)
+		if originErr != nil || len(origin) != 20 || diffErr != nil || len(diff) != 32 {
+			return fmt.Errorf("invalid frozen preflight comparison")
+		}
+	}
 	seen := map[TestRoot]bool{}
 	for _, pkg := range p.Packages {
 		if pkg.Package == "" || len(pkg.Required) == 0 || pkg.Run != preflightSelector(pkg.Required) {
@@ -168,6 +196,13 @@ func (p PreflightPlan) Validate() error {
 				return fmt.Errorf("invalid preflight root %s/%s", root.Package, root.Name)
 			}
 			seen[root.TestRoot] = true
+		}
+	}
+	if p.Comparison != nil {
+		for _, root := range preflightDebtRoots {
+			if seen[root] != p.Comparison.DebtRequired {
+				return fmt.Errorf("preflight debt eligibility and canonical root %s disagree", root.Name)
+			}
 		}
 	}
 	return nil

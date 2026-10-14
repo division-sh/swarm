@@ -38,7 +38,15 @@ func originalPreflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
 		{Name: "vet", Args: []string{"go", "vet", "./..."}},
 	}
 	for _, pkg := range plan.Packages {
-		phases = append(phases, preflightPhase{Name: pkg.Package, Package: &pkg, Args: []string{"go", "test", "-json", "-count=1", "-run", pkg.Run, pkg.Package}})
+		args := []string{"go", "test", "-json", "-count=1"}
+		var debtBase string
+		for _, root := range pkg.Required {
+			if root.Name == "TestPersistenceAuthorityDebtRatchet" {
+				args = append(args, "-timeout=20m")
+				debtBase = plan.BaseSHA
+			}
+		}
+		phases = append(phases, preflightPhase{Name: pkg.Package, Package: &pkg, Args: append(args, "-run", pkg.Run, pkg.Package), DebtBase: debtBase})
 	}
 	return phases
 }
