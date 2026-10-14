@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -88,9 +87,8 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			}
 			selected.persistence = pipeline.NewWorkflowPersistence(loss)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected.events, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2CountJoinFiles(2)))
+			ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 			node := externalPipelineSourceNode(t, source, ".", "collector")
 			module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
 				{Node: node, Subscriptions: []events.EventType{"item.completed", "halt.requested"}, ExecutionType: contracts.SystemNodeExecutionType},
@@ -99,7 +97,7 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			logger := &exactJoinRuntimeLogger{}
 			newBus := func() *runtimebus.EventBus {
 				t.Helper()
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger},
 					"platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
@@ -108,7 +106,7 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			}
 			bus := newBus()
 			schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
+			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe})
 			owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
@@ -223,7 +221,7 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			bus = newBus()
 			var driver *exactJoinScheduleDriver
 			schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-			pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
+			pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe})
 			install()
 			callsBefore := loss.calls.Load()
 			if err := bus.PublishAcknowledged(ctx, closing); err != nil {
