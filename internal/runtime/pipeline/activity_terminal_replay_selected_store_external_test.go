@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -326,13 +327,7 @@ func activityReplayJournal(selected gateRecoveryStoreCase) runtimepipeline.Activ
 
 func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.ToolSchemaEntry) semanticview.Source {
 	t.Helper()
-	files := map[string]string{
-		"schema.yaml":            "name: activity-journal-proof\nstages: []\npins:\n  inputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
-		"events.yaml":            "activity.source:\n  marker: text\n",
-		"research/schema.yaml":   "name: research\ninstance: marker\nstages: []\npins:\n  inputs: [activity.source]\n",
-		"research/entities.yaml": "activity_entity:\n  marker: text\n",
-		"research/nodes.yaml":    "scanner:\n  execution_type: system_node\n  subscribes_to: [activity.source]\n  event_handlers:\n    activity.source: {}\n",
-	}
+	files := canonicalrouting.ActivityTerminalReplayDocuments(t)
 	if len(tools) != 0 {
 		raw, err := yaml.Marshal(tools)
 		if err != nil {
