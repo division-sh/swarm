@@ -15,7 +15,7 @@ import (
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
 // captured by run-fork revisioning, including persisted connect-route evidence.
-// It excludes live worker claim tokens, lease expiry and physical handoff stamps;
+// It excludes live worker claim tokens, lease expiry and physical update/handoff stamps;
 // historical readback is never a capability or proof of current ownership.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
@@ -43,7 +43,6 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		StartedAt                 *time.Time                       `json:"started_at"`
 		SettledAt                 *time.Time                       `json:"settled_at"`
 		CreatedAt                 time.Time                        `json:"created_at"`
-		UpdatedAt                 time.Time                        `json:"updated_at"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -111,7 +110,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		FinalSelection: fact.FinalSelection,
 		ClaimVersion:   fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
 		ReasonCode: strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
-		CreatedAt: fact.CreatedAt.UTC(), UpdatedAt: fact.UpdatedAt.UTC(),
+		CreatedAt: fact.CreatedAt.UTC(),
 	}
 	if fact.NextEligibleAt != nil {
 		snapshot.NextEligibleAt = fact.NextEligibleAt.UTC()
@@ -137,7 +136,7 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 	}
 	if snapshot.SubscriberID == "" || snapshot.MaxRetries != snapshot.SubscriberClass.MaxRetries() ||
 		snapshot.RetryCount < 0 || snapshot.RetryCount > snapshot.MaxRetries ||
-		snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() || snapshot.ClaimVersion < 0 {
+		snapshot.CreatedAt.IsZero() || snapshot.ClaimVersion < 0 {
 		return fmt.Errorf("%w: historical delivery snapshot violates structural policy", ErrConflict)
 	}
 	return validateHistoricalLifecycleShape(snapshot)
