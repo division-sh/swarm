@@ -18,6 +18,8 @@ var (
 	binaryDate    = "unknown"
 )
 
+const deploymentConfigFlagHelp = "Deployment config file: whole file; default .swarm/swarm.yaml; --config wins over SWARM_CONFIG"
+
 type BuildMetadata struct {
 	Version string
 	Commit  string
@@ -127,7 +129,7 @@ Use default 'swarm verify' to observe admission for an explicitly configured dep
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
-	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", "Path to swarm.yaml config")
+	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", deploymentConfigFlagHelp)
 	cmd.AddGroup(
 		&cobra.Group{ID: commandGroupStart, Title: "Getting started:"},
 		&cobra.Group{ID: commandGroupAuthor, Title: "Author & validate:"},
@@ -339,7 +341,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Path to swarm.yaml config")
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, deploymentConfigFlagHelp)
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend preference for local serve: docker, or host for explicit trusted/unsafe local-dev opt-in")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, RuntimeStoreBackendHelp)

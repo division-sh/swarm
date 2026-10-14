@@ -104,9 +104,14 @@ default) and no LLM credential (an agent-free flow boots without one). For
 Postgres, the agent workspace image, and LLM backend setup, see
 [Installation](https://docs.division.sh/installation) and
 [Configuration](https://docs.division.sh/reference/configuration). For local
-non-secret defaults, use [`swarm.example.yaml`](swarm.example.yaml) as the
-non-secret `swarm.yaml` reference. For contract
-credentials, use `swarm secrets set` and validate with `swarm secrets check`.
+deployment setup, use [`swarm.example.yaml`](swarm.example.yaml) as the non-secret
+reference. Swarm reads one file: `.swarm/swarm.yaml` in the current directory,
+or built-in defaults if that file is absent. `--config <file>` replaces that
+selection completely. `SWARM_CONFIG` selects the same file when `--config` is
+absent; `--config` wins when both are set. Swarm does not discover root
+`swarm.yaml` or user-global config files, and does not load repo `.env` files.
+For contract credentials, use `swarm secrets set` and validate with
+`swarm secrets check`.
 
 For local webhook development, `swarm serve --dev --expose` owns a temporary
 public callback URL and reconciles registration declared by a configured channel
