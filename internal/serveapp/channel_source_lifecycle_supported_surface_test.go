@@ -25,8 +25,10 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
+				var sourceReader sourceArtifactReader
 				var deliveryReader servedRunDeliveryReader
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+					sourceReader = p.sourceReader
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
@@ -47,7 +49,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				waitChannelDeliverySendsSettled(t, db, backend)
 				frozen := readChannelSourceHistory(t, db, card)
 				var originalSource []byte
-				if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&originalSource); err != nil {
+				if err := func() error {
+					var err error
+					originalSource, err = readServedPersistedSourceBlob(context.Background(), sourceReader, hash)
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				callback, signing, _ := h.provider.Registration()
@@ -83,7 +89,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatalf("new process did not admit changed artifact: %+v", identity)
 						}
 						var retained []byte
-						if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, originalSource) {
+						if err := func() error {
+							var err error
+							retained, err = readServedPersistedSourceBlob(context.Background(), sourceReader, hash)
+							return err
+						}(); err != nil || !bytes.Equal(retained, originalSource) {
 							t.Fatalf("changed process replaced retained source: %v", err)
 						}
 						callback, signing, _ = h.provider.Registration()
@@ -219,7 +229,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						}
 					} else {
 						var retained []byte
-						if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, originalSource) {
+						if err := func() error {
+							var err error
+							retained, err = readServedPersistedSourceBlob(context.Background(), sourceReader, hash)
+							return err
+						}(); err != nil || !bytes.Equal(retained, originalSource) {
 							t.Fatalf("retained reset changed source bytes: %v", err)
 						}
 						later := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})

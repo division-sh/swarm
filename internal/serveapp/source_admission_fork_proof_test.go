@@ -72,7 +72,11 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 				t.Fatalf("serve did not present admitted source: %v\n%s", err, process.outputString())
 			}
 			var blob []byte
-			if err := rt.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1", verified.Hash).Scan(&blob); err != nil {
+			if err := func() error {
+				var err error
+				blob, err = readServedPersistedSourceBlob(context.Background(), selected.SourceArtifactStore(), verified.Hash)
+				return err
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			stored, err := sourceartifact.DecodeLogical(blob)

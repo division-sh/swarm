@@ -38,7 +38,11 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				var originalSource []byte
-				if err := proof.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&originalSource); err != nil {
+				if err := func() error {
+					var err error
+					originalSource, err = readServedPersistedSourceBlob(context.Background(), proof.SourceArtifacts, proof.BundleHash)
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
@@ -123,7 +127,11 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					}
 				} else {
 					var retainedSource []byte
-					if err := proof.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&retainedSource); err != nil || !bytes.Equal(originalSource, retainedSource) {
+					if err := func() error {
+						var err error
+						retainedSource, err = readServedPersistedSourceBlob(context.Background(), proof.SourceArtifacts, proof.BundleHash)
+						return err
+					}(); err != nil || !bytes.Equal(originalSource, retainedSource) {
 						t.Fatalf("retained admitted source changed: %v", err)
 					}
 					use, _, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)

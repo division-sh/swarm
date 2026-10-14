@@ -1469,6 +1469,7 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
+	SourceArtifacts         sourceArtifactReader
 	Endpoint                string
 	DB                      *sql.DB
 	Backend                 string
@@ -1609,10 +1610,12 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
+	var sourceReader sourceArtifactReader
 	var deliveryReader servedRunDeliveryReader
 	var receiverReader receiverProofStateReader
 	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		sourceReader = p.sourceReader
 		deliveryReader = p.deps.DeliveryStore.SummarizeRun
 		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
@@ -1640,7 +1643,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{SourceArtifacts: sourceReader, ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1649,7 +1652,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), TestRuntimeContextsReadyHook: captureContexts, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()})
-		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		return servedControlProofRuntime{SourceArtifacts: sourceReader, ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
