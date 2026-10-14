@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -637,6 +638,15 @@ func validateRunForkRevisionMatrix(ctx context.Context, tx *sql.Tx, postgres boo
 
 func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.Tx, f runForkRevisionMatrixFixture, includeEventDelivery, postgres bool) {
 	t.Helper()
+	completionEvidence, err := (runtimeeffects.CompletionEvidence{
+		Request: runtimeeffects.CompletionRequest{
+			ModelAlias: "regular", RequestedModel: "mock-regular", BackendProfile: "mock", Provider: "mock", Transport: "cli",
+		},
+		Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable,
+	}).Encode()
+	if err != nil {
+		t.Fatalf("encode revision matrix mock completion evidence: %v", err)
+	}
 	if includeEventDelivery {
 		target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "matrix-flow", FlowInstance: "matrix-flow/one"})
 		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("matrix-node")), Target: target}
@@ -693,7 +703,7 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO managed_agent_capability_surfaces (surface_id,integrity_hash,authority_kind,authority_id,execution_kind,execution_authority_id,run_id,actor_id,provider,transport,surface,created_at) VALUES ($1,'revision-matrix-surface','startup_probe',$2,'normal_agent','revision-matrix',$3,'revision-matrix-agent','mock','cli',$4,$5)`, f.surfaceID, f.authorityID, f.runID, `{}`, f.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO runtime_external_effect_operations (operation_id,effect_kind,effect_class,execution_mode,bundle_hash,authority_kind,authority_id,generation,startup_authority_id,capability_plan_fingerprint,authority_evidence,lineage,request_fingerprint,state,created_at,updated_at,completed_at) VALUES ($1,'provider_turn','read_only','mock','matrix-bundle','startup_probe','revision-matrix',1,$2,'matrix-plan',$3,$3,'matrix-request','settled',$4,$4,$4)`, f.operationID, f.authorityID, `{}`, f.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO runtime_external_effect_attempts (attempt_id,operation_id,attempt_ordinal,adapter,transport,execution_mode,generation,execution_owner,lease_expires_at,fence_generation,usage_target_kind,usage_target_id,capability_surface_id,state,evidence,authorized_at,launched_at,response_observed_at,completed_at,updated_at) VALUES ($1,$2,1,'mock','cli','mock',1,'revision-matrix',$3,1,'agent_turn',$4,$5,'settled',$6,$7,$7,$7,$7,$7)`, f.attemptID, f.operationID, f.at.Add(time.Hour), f.turnID, f.surfaceID, `{}`, f.at)
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_turns (turn_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,session_id,flow_instance,memory_enabled,capability_surface_id,tool_calls,emitted_events,turn_blocks,parse_ok,latency_ms,retry_count,agent_frame_bytes,completion_attempt_id,execution_mode,created_at) VALUES ($1,$2,'revision-matrix-agent','store-test-fixture','runtime_created','root','','',$3,'',TRUE,$4,$5,$5,$5,TRUE,1,0,$6,$7,'mock',$8)`, f.turnID, f.runID, f.sessionID, f.surfaceID, `[]`, []byte("matrix-frame"), f.attemptID, f.at)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_turns (turn_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,session_id,flow_instance,memory_enabled,capability_surface_id,tool_calls,emitted_events,turn_blocks,parse_ok,latency_ms,retry_count,agent_frame_bytes,completion_attempt_id,execution_mode,completion_evidence,created_at) VALUES ($1,$2,'revision-matrix-agent','store-test-fixture','runtime_created','root','','',$3,'',TRUE,$4,$5,$5,$5,TRUE,1,0,$6,$7,'mock',$9,$8)`, f.turnID, f.runID, f.sessionID, f.surfaceID, `[]`, []byte("matrix-frame"), f.attemptID, f.at, string(completionEvidence))
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO agent_conversation_audits (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,turn_count,runtime_state,status,created_at,updated_at) VALUES ($1,$2,'revision-matrix-audit','store-test-fixture','runtime_created','root','','','',FALSE,0,$3,'active',$4,$4)`, f.auditID, f.runID, `{}`, f.at)
 	if includeEventDelivery {
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO reply_contexts (reply_context_id,run_id,request_event_id,requester_flow_id,request_output_pin,reply_input_pin,provider_flow_id,provider_input_pin,provider_output_pin,origin_route,request_correlation_id,state,created_at,updated_at) VALUES ($1,$2,$3,'requester','out','reply','provider','in','out',$4,'matrix-correlation','open',$5,$5)`, f.replyID, f.runID, f.eventID, `{}`, f.at)
