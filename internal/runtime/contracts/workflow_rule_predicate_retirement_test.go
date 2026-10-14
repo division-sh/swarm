@@ -195,12 +195,12 @@ func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "proof: {}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
 	nodes := filepath.Join(root, "nodes.yaml")
-	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          condition: 'true'\n        - else: true\n")
+	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - condition: 'true'\n        - else: true\n")
 	repoRoot := contractRepoRoot(t)
 	if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) {
 		t.Fatalf("retired bundle admission = %v", err)
 	}
-	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          when: |-\n                  true\n        - else: true\n")
+	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - when: |-\n                true\n        - else: true\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)

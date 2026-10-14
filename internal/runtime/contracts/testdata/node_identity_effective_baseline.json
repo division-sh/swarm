@@ -818,8 +818,6 @@
               "Raw": "payload.revenue"
             },
             "OnComplete": {
-              "ID": "",
-              "Description": "",
               "Condition": "",
               "PolicyRow": {
                 "Kind": "",
@@ -865,8 +863,6 @@
               "From": "stage_entry"
             },
             "OnDeadline": {
-              "ID": "",
-              "Description": "",
               "Condition": "",
               "PolicyRow": {
                 "Kind": "",
@@ -1678,14 +1674,12 @@
                     "SourceEvent": "",
                     "Writes": null
                   },
-                  "Description": "",
                   "Emit": {
                     "Event": "",
                     "Fields": null,
                     "From": ""
                   },
                   "FanOut": null,
-                  "ID": "",
                   "PolicyRow": {
                     "CaseValues": null,
                     "Kind": "",
@@ -1722,14 +1716,12 @@
                     "SourceEvent": "",
                     "Writes": null
                   },
-                  "Description": "",
                   "Emit": {
                     "Event": "",
                     "Fields": null,
                     "From": ""
                   },
                   "FanOut": null,
-                  "ID": "",
                   "PolicyRow": {
                     "CaseValues": null,
                     "Kind": "",
@@ -2479,8 +2471,6 @@
             "Raw": "payload.revenue"
           },
           "OnComplete": {
-            "ID": "",
-            "Description": "",
             "Condition": "",
             "PolicyRow": {
               "Kind": "",
@@ -2526,8 +2516,6 @@
             "From": "stage_entry"
           },
           "OnDeadline": {
-            "ID": "",
-            "Description": "",
             "Condition": "",
             "PolicyRow": {
               "Kind": "",
@@ -6972,8 +6960,6 @@
           "OnComplete": null,
           "Rules": [
             {
-              "ID": "observe_validation_started",
-              "Description": "",
               "Condition": "payload.validation_case_id != \"\"",
               "PolicyRow": {
                 "Kind": "when",
@@ -7015,8 +7001,6 @@
               "FanOut": null
             },
             {
-              "ID": "unmatched",
-              "Description": "",
               "Condition": "else",
               "PolicyRow": {
                 "Kind": "default",
@@ -7260,14 +7244,12 @@
                     "SourceEvent": "",
                     "Writes": null
                   },
-                  "Description": "",
                   "Emit": {
                     "Event": "",
                     "Fields": null,
                     "From": ""
                   },
                   "FanOut": null,
-                  "ID": "observe_validation_started",
                   "PolicyRow": {
                     "CaseValues": null,
                     "Kind": "when",
@@ -7303,14 +7285,12 @@
                     "SourceEvent": "",
                     "Writes": null
                   },
-                  "Description": "",
                   "Emit": {
                     "Event": "",
                     "Fields": null,
                     "From": ""
                   },
                   "FanOut": null,
-                  "ID": "unmatched",
                   "PolicyRow": {
                     "CaseValues": null,
                     "Kind": "default",
@@ -7592,8 +7572,6 @@
         "OnComplete": null,
         "Rules": [
           {
-            "ID": "observe_validation_started",
-            "Description": "",
             "Condition": "payload.validation_case_id != \"\"",
             "PolicyRow": {
               "Kind": "when",
@@ -7635,8 +7613,6 @@
             "FanOut": null
           },
           {
-            "ID": "unmatched",
-            "Description": "",
             "Condition": "else",
             "PolicyRow": {
               "Kind": "default",

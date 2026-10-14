@@ -61,7 +61,7 @@ func TestW4PolicyRowNestedFieldPresence(t *testing.T) {
 					if shape.name != "missing" {
 						body += tc.field + ": " + shape.value + "\n"
 					}
-					return "id: selected\n" + tc.kind + ":\n  " + strings.ReplaceAll(strings.TrimSpace(body), "\n", "\n  ") + "\n"
+					return tc.kind + ":\n  " + strings.ReplaceAll(strings.TrimSpace(body), "\n", "\n  ") + "\n"
 				}, decodeNodeTestYAML, func(t *testing.T, name string, row HandlerRuleEntry) {
 					if !row.Authored() || !reflect.DeepEqual(tc.read(row), tc.want[name]) {
 						t.Fatalf("typed %s.%s=%#v want %#v, authored=%t", tc.kind, tc.field, tc.read(row), tc.want[name], row.Authored())
