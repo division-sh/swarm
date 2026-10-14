@@ -65,6 +65,13 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					priorCapabilities := buildSelectedAPICapabilities
 					buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 						selected = owner
+						if profileID == llmselection.BackendClaudeCLI {
+							var err error
+							req, err = completion2270ObserveSelectedWorkspace(req, &invocationProof)
+							if err != nil {
+								return selectedAPICapabilities{}, err
+							}
+						}
 						caps, err := priorCapabilities(owner, req)
 						if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); ok {
 							previous := executor.ExecuteSelectedContractRunFork
@@ -126,7 +133,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 							settings.WorkspaceImage, settings.SourceProjection = image, projection
 							manager.SetConfig(settings)
 							manager.SetSemanticSource(source)
-							return &completion2270ObservedWorkspace{DockerManager: manager, proof: &invocationProof}, nil
+							return manager, nil
 						}
 						t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
 					} else {
