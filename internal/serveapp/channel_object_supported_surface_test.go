@@ -114,7 +114,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash, "payload": map[string]any{"detail": strings.Repeat("object-owned detail;", 60)}, "idempotency_key": "object-card"})
 				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				message := waitObjectCardReceipt(t, db, card)
+				message := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 				objectChannelIngress(t, callback, signing, "native-entry-1", map[string]any{"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "entry-1"}, "entry": map[string]any{"reference": command, "address": "mock_bot"}})
 				postAction := func(id, reference, token string) {
 					t.Helper()
@@ -125,7 +125,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 						return input["cursor"] == id
 					})
 				}
-				pages := proveObjectChannelPages(t, db, provider, card, message, postAction)
+				pages := proveObjectChannelPages(t, channelSettlementStorageObservation(t, h), provider, card, message, postAction)
 				more := waitObjectMessageControl(t, provider, message, "More choices")
 				postAction("choices-1", message, more)
 				waitObjectMessageControl(t, provider, message, "approve")
@@ -134,7 +134,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				reject := waitObjectMessageControl(t, provider, message, "reject")
 				postAction("reject-1", message, reject)
 				waitObjectMessageText(t, provider, message, "Input: reason (text) required")
-				waitChannelDraftPromptSettlement(t, db, card)
+				waitChannelDraftPromptSettlement(t, channelSettlementStorageObservation(t, h), card)
 				closeObjectIntentObservation(t, provider)
 				h.stop(t)
 				h.start(t)
@@ -183,7 +183,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 						t.Fatalf("object duplicate/stale controls changed decisions: %d %v", decisions, err)
 					}
 				}
-				proveObjectChannelRecovery(t, h, db, provider, scope, command, identity.SourceArtifacts[0].BundleHash, postAction)
+				proveObjectChannelRecovery(t, h, provider, scope, command, identity.SourceArtifacts[0].BundleHash, postAction)
 				proveObjectChannelRebindRetirement(t, h, db, provider, scope, command, begun.Operation.OperationID)
 				provider.mu.Lock()
 				defer provider.mu.Unlock()
@@ -197,14 +197,14 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 	}
 }
 
-func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, scope, command, bundle string, post func(string, string, string)) {
+func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, p *objectChannelProvider, scope, command, bundle string, post func(string, string, string)) {
 	t.Helper()
 	p.mu.Lock()
 	p.loseNextCard = true
 	p.mu.Unlock()
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundle, "payload": map[string]any{"detail": strings.Repeat("uncertain object detail;", 60)}, "idempotency_key": "object-recovery-card"})
 	card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-	waitUncertainCopyPlan(t, db, card)
+	waitUncertainCopyPlan(t, channelSettlementStorageObservation(t, h), card)
 	p.mu.Lock()
 	callback, signing := p.callback, p.signing
 	before := len(p.deliveries)
@@ -237,7 +237,7 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 		}
 	}
 	post("object-resend", reference, token)
-	fresh := waitObjectCardReceipt(t, db, card)
+	fresh := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 	if fresh == lostReference {
 		t.Fatal("fresh copy borrowed the uncertain predecessor's reference")
 	}
@@ -248,7 +248,12 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 	waitObjectMessageText(t, p, fresh, "Decision: approve")
 	var copies, uncertain, decisions int
-	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {
+	if err := func() error {
+		observed, err := channelSettlementStorageObservation(t, h).ReadCardCopyCountsStorage(context.Background(), card)
+		copies = observed.Total
+		uncertain = observed.Uncertain
+		return err
+	}(); err != nil || copies != 2 || uncertain != 1 {
 		t.Fatalf("object resend settled/replayed predecessor: %d/%d %v", copies, uncertain, err)
 	}
 	{
@@ -409,9 +414,9 @@ func channelDispositionAccepted(result channeldelivery.IntentObservation, found 
 	return false, fmt.Errorf("settled %s, want %v", result.Disposition, allowed)
 }
 
-func proveObjectChannelPages(t *testing.T, db *sql.DB, p *objectChannelProvider, card, reference string, post func(string, string, string)) int {
+func proveObjectChannelPages(t *testing.T, reader storetest.ChannelSettlementObservation, p *objectChannelProvider, card, reference string, post func(string, string, string)) int {
 	t.Helper()
-	frozen := readChannelHistoricalRender(t, db, card)
+	frozen := readChannelHistoricalRender(t, reader, card)
 	var input struct {
 		FullText string `json:"full_text"`
 	}
@@ -468,18 +473,22 @@ func proveObjectChannelPages(t *testing.T, db *sql.DB, p *objectChannelProvider,
 			if index < 2 || index != advertised || complete.String() != input.FullText {
 				t.Fatalf("object pages changed immutable full text: pages=%d", index)
 			}
-			assertChannelHistoricalRender(t, db, card, frozen)
+			assertChannelHistoricalRender(t, reader, card, frozen)
 			return index
 		}
 	}
 }
 
-func waitObjectCardReceipt(t *testing.T, db *sql.DB, card string) string {
+func waitObjectCardReceipt(t *testing.T, reader storetest.ChannelSettlementObservation, card string) string {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var raw string
-		err := db.QueryRow(`SELECT CAST(r.provider_reference AS TEXT) FROM channel_delivery_receipts r JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id AND p.current_receipt_operation_id=r.effect_operation_id WHERE p.source_kind='card' AND p.source_id=$1 AND p.state='sent' AND r.state='sent' ORDER BY r.settled_at DESC LIMIT 1`, card).Scan(&raw)
+		err := func() error {
+			observed, err := reader.ReadLatestCardSentReceiptStorage(context.Background(), card)
+			raw = observed
+			return err
+		}()
 		if err == nil {
 			var value struct {
 				Reference struct {

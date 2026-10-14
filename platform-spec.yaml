@@ -7095,6 +7095,26 @@ engine:
                 reader, and joined process cleanup precedes reader close and backing-store release. No raw pool, transaction,
                 callback, arbitrary query or execution authority crosses these observation ports. Remaining independent
                 channel fixture setup, compound snapshots and live fault seams stay explicitly tracked migration debt.
+              channel_settlement_storage_observation: >-
+                Receipt, draft, intent and settlement-diagnostic witnesses consume the same harness-owned selected
+                read-only inspection lifetime. Channel delivery owns the latest sent card receipt through the exact
+                delivery/current-operation join, both sent states and descending settlement limit; the independent
+                ascending historical receipt witness remains distinct. Closed text/action response kinds retain their
+                publication/source, current-operation and provider-event predicates without extra eligibility filters.
+                Acknowledged draft render reads retain raw input/hash and both sent states; decision-card draft/card
+                snapshots retain all seven physical text values, NULL defaults, clocks and index encodings. Global
+                pending and settled/disposition intent counts preserve exact multiplicity and overshoot refusal.
+                Unsettled responsibility consumes the canonical send-eligibility and accepted-effect predicates,
+                including accepted work after source or destination loss. Recovery reads preserve exact delivery,
+                global fresh-copy, uncertain-source, card-copy and historical/current render scopes; decision reads
+                retain their original global or exact three-card scope. Failure diagnostics retain independent named
+                channel-delivery and external-effect projections, original ordering and 21/20 and 1025/1024 bounds,
+                NULL omission, exact decoded delivery identity and the existing authority redaction allowlist. No
+                arbitrary query, table, pool, transaction or callback capability crosses the detached observation ports.
+                Successful absence preserves the original polling sentinel without masking cancellation or failed
+                cleanup. Existing process-restart, receipt/replay and parent-owned joined cleanup cuts are unchanged.
+                The isolated-schema responsibility control and six-domain budget diagnostic scanner remain explicit
+                migration debt; these storage observations grant no send, admission, recovery or writer authority.
               channel_run_named_event_observation: >-
                 Channel journey run/name cardinality witnesses consume the existing eventrecord physical count through
                 the original selected read-only inspector. They retain every event row in the exact issued run and exact

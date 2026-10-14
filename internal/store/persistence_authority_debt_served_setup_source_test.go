@@ -109,7 +109,8 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 				return nil, err
 			}
 		}
-		if files[pin.File][pin.Function] != pin.After {
+		current, err := debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served setup actual current source changed: %s", pin.Function)
 		}
 	}
@@ -117,6 +118,11 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 }
 
 func debtServedSetupSourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtChannelSettlementSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	pins, err := debtServedSetupSourcePins(root)
 	if err != nil {
 		return "", err
@@ -152,6 +158,7 @@ func debtServedSetupCopySourceEvidence(t *testing.T, root, copy string) {
 	for _, pin := range pins {
 		debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
 	}
+	debtChannelSettlementCopySources(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtServedSetupSourceInverseRejectsStaleAndForeignCuts(t *testing.T) {
@@ -161,7 +168,11 @@ func TestPersistenceAuthorityDebtServedSetupSourceInverseRejectsStaleAndForeignC
 		t.Fatal(err)
 	}
 	for _, pin := range pins {
-		got, err := debtServedSetupSourcePrevious(root, pin.File, pin.Function, pin.After)
+		bodies, err := debtServedSetupDeclarations(filepath.Join(root, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := debtServedSetupSourcePrevious(root, pin.File, pin.Function, bodies[pin.Function])
 		if err != nil || got != pin.Before {
 			t.Fatal("exact setup source inverse failed:", pin.Function, err)
 		}

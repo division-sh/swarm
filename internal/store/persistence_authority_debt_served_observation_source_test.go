@@ -344,8 +344,13 @@ func TestPersistenceAuthorityDebtServedObservationSourceInversesAreExactAndActua
 		if err != nil {
 			t.Fatal(err)
 		}
-		mutant := strings.Replace(pin.After, "{", "{foreignLiveCut();", 1)
-		debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), pin.After, mutant, 1))
+		current, err := debtServedSetupDeclarations(filepath.Join(copy, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := current[pin.Function]
+		mutant := strings.Replace(body, "{", "{foreignLiveCut();", 1)
+		debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), body, mutant, 1))
 		if _, err := debtServedObservationPreviousForKeys(copy, pins[0].File, pins[0].Function, pins[0].After, keys); err == nil {
 			t.Fatal("unchanged supplied string bypassed changed actual live source:", pin.Function)
 		}

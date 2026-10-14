@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
@@ -95,6 +96,9 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 			files[pin.File] = raw
 		}
 		current, err := setupCurrentBody(files[pin.File], pin.Function)
+		if err == nil {
+			current, err = channelsettlement.EarlierSource(root, pin.File, pin.Function, current)
+		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("served setup actual current declaration changed: %s: %v", pin.Function, err)
 		}
@@ -103,6 +107,11 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 }
 
 func SetupEarlierSource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = channelsettlement.EarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	pins, err := ReadSetupPins(root)
 	if err != nil {
 		return "", err

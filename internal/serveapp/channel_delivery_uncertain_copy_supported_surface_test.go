@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,7 +19,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 		for _, schedule := range []string{"applied_before_loss", "applied_after_completion"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
 				withSummary := schedule == "applied_after_completion"
-				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
+				h, _, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed"})
@@ -46,7 +45,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 						t.Fatal("provider did not retain the unacknowledged edit")
 					}
 				}
-				waitUncertainCopyPlan(t, db, cardID)
+				waitUncertainCopyPlan(t, channelSettlementStorageObservation(t, h), cardID)
 				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901010)
 				callback, signing, _ := h.provider.Registration()
 				resendToken, inboxMessage := requestChannelRecoveryAction(t, h.provider, callback, signing, "Resend card")
@@ -89,8 +88,12 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 						t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
 					}
 				}
-				if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END)
-					FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, cardID).Scan(&copies, &uncertainty); err != nil || copies != 2 || uncertainty != 1 {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadCardCopyCountsStorage(context.Background(), cardID)
+					copies = observed.Total
+					uncertainty = observed.Uncertain
+					return err
+				}(); err != nil || copies != 2 || uncertainty != 1 {
 					t.Fatalf("resend/restart settled the predecessor or created extra copies: %d/%d, %v", copies, uncertainty, err)
 				}
 				oldEdits := 0
@@ -243,12 +246,16 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 	}
 }
 
-func waitUncertainCopyPlan(t *testing.T, db *sql.DB, cardID string) {
+func waitUncertainCopyPlan(t *testing.T, reader storetest.ChannelSettlementObservation, cardID string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans WHERE source_id=$1 AND state='uncertain'`, cardID).Scan(&count); err != nil {
+		if err := func() error {
+			observed, err := reader.CountUncertainSourcePlansStorage(context.Background(), cardID)
+			count = observed
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if count == 1 {

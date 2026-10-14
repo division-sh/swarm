@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
@@ -23,21 +24,21 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				if transition == "expire" {
 					ttl = 4 * time.Second
 				}
-				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
+				h, _, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed"})
 				cardID := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				message := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cardID)
-				initial := readChannelHistoricalRender(t, db, cardID)
+				initial := readChannelHistoricalRender(t, channelSettlementStorageObservation(t, h), cardID)
 				reject, found := telegramCallbackToken(h.provider.Delivery(message-1), "reject")
 				if !found {
 					t.Fatalf("actual card has no required-input verdict: card=%s message=%d delivery=%v render=%s", cardID, message, h.provider.Delivery(message-1), initial.input)
 				}
 				postUncertainCopyCallback(t, h, message, reject, 902001)
 				waitChannelReceiptText(t, h, message, "Input: reason (text) required", false)
-				acknowledgedPrompt := waitChannelDraftPromptSettlement(t, db, cardID)
-				prompt := readChannelHistoricalRender(t, db, cardID)
+				acknowledgedPrompt := waitChannelDraftPromptSettlement(t, channelSettlementStorageObservation(t, h), cardID)
+				prompt := readChannelHistoricalRender(t, channelSettlementStorageObservation(t, h), cardID)
 				cancel := latestChannelDraftCancel(t, h, message)
 				draftStatus, cardStatus, decisions := "cancelled", "pending", 0
 				var response map[string]any
@@ -78,7 +79,7 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "draft-run-stop"}, &response)
 					cardStatus = "superseded"
 				}
-				waitChannelDraftStatus(t, db, cardID, draftStatus)
+				waitChannelDraftStatus(t, channelSettlementStorageObservation(t, h), cardID, draftStatus)
 				for _, restart := range []bool{false, true} {
 					if restart {
 						if err := intentReader.Close(); err != nil {
@@ -100,7 +101,11 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentText, fmt.Sprint(update+1)), "teaching")
 					var actualStatus string
 					var actualDecisions int
-					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, cardID).Scan(&actualStatus); err != nil || actualStatus != cardStatus {
+					if err := func() error {
+						observed, err := channelSettlementStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), cardID)
+						actualStatus = observed.Status
+						return err
+					}(); err != nil || actualStatus != cardStatus {
 						t.Fatalf("obsolete input changed canonical card: %s %v", actualStatus, err)
 					}
 					{
@@ -110,9 +115,9 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 							t.Fatalf("obsolete input changed decision count: %d %v", actualDecisions, err)
 						}
 					}
-					assertChannelHistoricalRender(t, db, cardID, initial)
-					assertChannelHistoricalRender(t, db, cardID, prompt)
-					waitChannelDraftStatus(t, db, cardID, draftStatus)
+					assertChannelHistoricalRender(t, channelSettlementStorageObservation(t, h), cardID, initial)
+					assertChannelHistoricalRender(t, channelSettlementStorageObservation(t, h), cardID, prompt)
+					waitChannelDraftStatus(t, channelSettlementStorageObservation(t, h), cardID, draftStatus)
 				}
 				for _, edit := range h.provider.Edits() {
 					if strings.Contains(fmt.Sprint(edit["text"]), "obsolete-private-draft-answer") {
@@ -128,25 +133,38 @@ type channelHistoricalRender struct {
 	id, input, hash, snapshot string
 }
 
-func readChannelHistoricalRender(t *testing.T, db *sql.DB, cardID string) channelHistoricalRender {
+func readChannelHistoricalRender(t *testing.T, reader storetest.ChannelSettlementObservation, cardID string) channelHistoricalRender {
 	t.Helper()
 	var frozen channelHistoricalRender
-	if err := db.QueryRow(`SELECT p.current_render_id,CAST(r.render_input AS TEXT),r.render_hash,CAST(c.snapshot AS TEXT)
-		FROM decision_cards c JOIN channel_delivery_plans p ON p.source_id=c.card_id
-		JOIN channel_delivery_renders r ON r.render_id=p.current_render_id WHERE c.card_id=$1`, cardID).
-		Scan(&frozen.id, &frozen.input, &frozen.hash, &frozen.snapshot); err != nil {
+	if err := func() error {
+		observed, err := reader.ReadChannelCardRenderStorage(context.Background(), cardID)
+		frozen.id = observed.RenderID
+		frozen.input = observed.Input
+		frozen.hash = observed.Hash
+		frozen.snapshot = observed.Snapshot
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	return frozen
 }
 
-func assertChannelHistoricalRender(t *testing.T, db *sql.DB, cardID string, frozen channelHistoricalRender) {
+func assertChannelHistoricalRender(t *testing.T, reader storetest.ChannelSettlementObservation, cardID string, frozen channelHistoricalRender) {
 	t.Helper()
 	var input, hash, snapshot string
-	if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, frozen.id).Scan(&input, &hash); err != nil {
+	if err := func() error {
+		observed, err := reader.ReadChannelRenderStorage(context.Background(), frozen.id)
+		input = observed.Input
+		hash = observed.Hash
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT CAST(snapshot AS TEXT) FROM decision_cards WHERE card_id=$1`, cardID).Scan(&snapshot); err != nil {
+	if err := func() error {
+		observed, err := reader.ReadCardSnapshotStorage(context.Background(), cardID)
+		snapshot = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if input != frozen.input || hash != frozen.hash || snapshot != frozen.snapshot {
@@ -168,16 +186,17 @@ func latestChannelDraftCancel(t *testing.T, h *channelOnboardingE2EHarness, mess
 	return ""
 }
 
-func waitChannelDraftPromptSettlement(t *testing.T, db *sql.DB, cardID string) channeldelivery.Frozen {
+func waitChannelDraftPromptSettlement(t *testing.T, reader storetest.ChannelSettlementObservation, cardID string) channeldelivery.Frozen {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var input, hash string
-		err := db.QueryRow(`SELECT CAST(r.render_input AS TEXT),r.render_hash
-			FROM channel_delivery_plans p JOIN channel_delivery_receipts receipt
-			ON receipt.effect_operation_id=p.current_receipt_operation_id AND receipt.render_id=p.current_render_id
-			JOIN channel_delivery_renders r ON r.render_id=p.current_render_id
-			WHERE p.source_kind='card' AND p.source_id=$1 AND p.state='sent' AND receipt.state='sent'`, cardID).Scan(&input, &hash)
+		err := func() error {
+			observed, err := reader.ReadAcknowledgedCardRenderStorage(context.Background(), cardID)
+			input = observed.Input
+			hash = observed.Hash
+			return err
+		}()
 		if err == nil {
 			canonical, err := canonicaljson.Canonicalize([]byte(input))
 			if err != nil {
@@ -200,12 +219,16 @@ func waitChannelDraftPromptSettlement(t *testing.T, db *sql.DB, cardID string) c
 	}
 }
 
-func waitChannelDraftStatus(t *testing.T, db *sql.DB, cardID, status string) {
+func waitChannelDraftStatus(t *testing.T, reader storetest.ChannelSettlementObservation, cardID, status string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var actual string
-		if err := db.QueryRow(`SELECT status FROM decision_card_input_drafts WHERE card_id=$1`, cardID).Scan(&actual); err != nil {
+		if err := func() error {
+			observed, err := reader.ReadChannelDraftStatusStorage(context.Background(), cardID)
+			actual = observed
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if actual == status {

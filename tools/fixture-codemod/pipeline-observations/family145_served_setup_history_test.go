@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
@@ -20,11 +21,17 @@ import (
 func servedSetupComparisonDeclaration(t *testing.T, pins []runphysical.Pin, path string, fn *ast.FuncDecl) *ast.FuncDecl {
 	t.Helper()
 	current := requestkey.Node(fn)
+	actual := current
+	var err error
+	current, err = channelsettlement.EarlierSource("../../..", path, fn.Name.Name, current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	prior, err := servedsettlement.EarlierSource(pins, path, fn.Name.Name, current)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current == prior {
+	if actual == prior {
 		return fn
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), path, "package proof\n"+prior, parser.AllErrors)
@@ -66,6 +73,10 @@ func TestFamily145ServedSetupHistoryPreservesAllFieldsOrderAndExactAdvances(t *t
 		restored := servedSetupEarlierHistory(t, current, recipes)
 		if !reflect.DeepEqual(restored, prior) {
 			t.Fatal("setup history lost original bytes, metadata or order")
+		}
+		current, err := channelsettlement.EarlierHistory("../../..", current, recipes)
+		if err != nil {
+			t.Fatal(err)
 		}
 		var rows []map[string]any
 		if err := json.Unmarshal(current, &rows); err != nil || len(rows) != count {
@@ -170,6 +181,11 @@ func servedSetupPriorHistory(t *testing.T, recipes bool) []byte {
 
 func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
+	var err error
+	current, err = channelsettlement.EarlierHistory("../../..", current, recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := servedsettlement.RestoreSetupHistory(current, servedSetupPriorHistory(t, recipes), servedSetupPins(t), recipes)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +195,11 @@ func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byt
 
 func servedSetupEarlierSource(t *testing.T, file, function, current string) string {
 	t.Helper()
+	var err error
+	current, err = channelsettlement.EarlierSource("../../..", file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	pins, err := servedsettlement.ReadSetupPins("../../..")
 	if err != nil {
 		t.Fatal(err)

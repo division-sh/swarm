@@ -16,7 +16,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, transition := range []string{"defer_restart", "expire_restart", "stop_supersedes"} {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
-				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
+				h, _, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed"})
 				gate := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
@@ -33,9 +33,14 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					t.Fatal("actual human card lacks its initial action")
 				}
 				var snapshot, renderID, frozenInput, frozenHash string
-				if err := db.QueryRow(`SELECT CAST(c.snapshot AS TEXT),p.current_render_id,CAST(r.render_input AS TEXT),r.render_hash
-					FROM decision_cards c JOIN channel_delivery_plans p ON p.source_id=c.card_id
-					JOIN channel_delivery_renders r ON r.render_id=p.current_render_id WHERE c.card_id=$1`, card).Scan(&snapshot, &renderID, &frozenInput, &frozenHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelCardRenderStorage(context.Background(), card)
+					snapshot = observed.Snapshot
+					renderID = observed.RenderID
+					frozenInput = observed.Input
+					frozenHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				fragment, terminal := "Deferred until: ", false
@@ -60,10 +65,19 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 				}
 				waitChannelReceiptText(t, h, message, fragment, terminal)
 				var afterSnapshot, afterInput, afterHash string
-				if err := db.QueryRow(`SELECT CAST(snapshot AS TEXT) FROM decision_cards WHERE card_id=$1`, card).Scan(&afterSnapshot); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadCardSnapshotStorage(context.Background(), card)
+					afterSnapshot = observed
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, renderID).Scan(&afterInput, &afterHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), renderID)
+					afterInput = observed.Input
+					afterHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				if afterSnapshot != snapshot || afterInput != frozenInput || afterHash != frozenHash {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -112,6 +113,9 @@ func ValidateBatchCurrentSource(root string, pins []runphysical.Pin) error {
 			return err
 		}
 		current, err := UniqueBody(raw, pin.Function)
+		if err == nil {
+			current, err = channelsettlement.EarlierSource(root, pin.File, pin.Function, current)
+		}
 		if err == nil {
 			current, err = EarlierSource(setup, pin.File, pin.Function, current)
 		}

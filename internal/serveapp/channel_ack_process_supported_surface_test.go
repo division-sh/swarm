@@ -15,14 +15,14 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
 				h, db, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				h.stop(t)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				intentReader := openChannelAnchorObservation(t, h)
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "ack-crash-seed"})
 				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				messageID := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
@@ -43,7 +43,11 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					case <-arrived:
 						var status string
 						var decisions int
-						if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, card).Scan(&status); err != nil || status != "pending" {
+						if err := func() error {
+							observed, err := channelSettlementStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), card)
+							status = observed.Status
+							return err
+						}(); err != nil || status != "pending" {
 							t.Fatalf("ACK barrier is not before business mutation: %s %v", status, err)
 						}
 						result, found, err := intentReader.ObserveChannelIntent(context.Background(), intentQuery)

@@ -210,13 +210,13 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			}
 			card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), runID, "stage_gate", "telegram-ingress")
 			waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
-			waitChannelDeliverySendsSettled(t, db, backend)
+			waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 			var deliveryID string
 			if err := db.QueryRow(`SELECT CAST(delivery_id AS TEXT) FROM channel_delivery_plans
 				WHERE current_receipt_operation_id IS NOT NULL ORDER BY created_at LIMIT 1`).Scan(&deliveryID); err != nil {
 				t.Fatal(err)
 			}
-			evidence, err := readChannelDeliverySettlementDiagnostic(context.Background(), db, deliveryID)
+			evidence, err := readSelectedChannelDeliverySettlementDiagnostic(context.Background(), channelSettlementStorageObservation(t, h), deliveryID)
 			if err != nil {
 				t.Fatal(err)
 			}

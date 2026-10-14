@@ -251,7 +251,11 @@ func TestPersistenceAuthorityDebtServedObservationRetirementPinsAll48LiveBodies(
 			if err != nil {
 				t.Fatal(err)
 			}
-			debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
+			current, err := debtServedSetupDeclarations(filepath.Join(root, pin.File))
+			if err != nil {
+				t.Fatal(err)
+			}
+			debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, current[pin.Function])
 		}
 	}
 	const path = "internal/store/testdata/persistence_authority_served_observation_retirements.json"

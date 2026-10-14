@@ -23,11 +23,11 @@ func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, schedule := range []string{"chooser_current", "chooser_restart", "chooser_edit_ack_loss", "lost_prompt_edit"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
-				h, db, provider, command, hash := startObjectChannelInputJourney(t, backend, false)
+				h, _, provider, command, hash := startObjectChannelInputJourney(t, backend, false)
 				if schedule != "lost_prompt_edit" {
-					proveObjectChannelChooserRestart(t, h, db, provider, hash, schedule)
+					proveObjectChannelChooserRestart(t, h, provider, hash, schedule)
 				} else {
-					proveObjectChannelLostPrompt(t, h, db, provider, hash, command)
+					proveObjectChannelLostPrompt(t, h, provider, hash, command)
 				}
 				provider.mu.Lock()
 				defer provider.mu.Unlock()
@@ -46,19 +46,19 @@ func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, p, _, hash := startObjectChannelInputJourney(t, backend, true)
+			h, _, p, _, hash := startObjectChannelInputJourney(t, backend, true)
 			for index := 0; index < 2; index++ {
-				card, receipt, reject := beginObjectInputCard(t, h, db, p, hash, index)
+				card, receipt, reject := beginObjectInputCard(t, h, p, hash, index)
 				postObjectInputAction(t, p, fmt.Sprintf("typed-reject-%d", index), receipt, reject)
-				waitChannelDraftPromptSettlement(t, db, card)
+				waitChannelDraftPromptSettlement(t, channelSettlementStorageObservation(t, h), card)
 			}
 			postObjectChannelFact(t, p, "typed-invalid-answer", map[string]any{"text": "not-an-integer"})
 			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "typed-invalid-answer"), "chooser")
-			_, chooser := waitObjectRequestedResponse(t, db, "typed-invalid-answer")
+			_, chooser := waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "typed-invalid-answer")
 			choice := firstObjectDraftChoice(t, p, chooser)
 			postObjectInputAction(t, p, "typed-invalid-select", chooser, choice)
 			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "typed-invalid-select"), "navigation")
-			_, teaching := waitObjectIntentResponse(t, db, "operator_channel_action_intents", "typed-invalid-select")
+			_, teaching := waitObjectIntentResponse(t, channelSettlementStorageObservation(t, h), channeldelivery.IntentAction, "typed-invalid-select")
 			waitObjectMessageText(t, p, teaching, "That answer does not match the requested field.")
 			p.mu.Lock()
 			input := p.message(teaching)
@@ -68,15 +68,23 @@ func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
 				t.Fatalf("chosen-answer teaching exceeded the compiled provider bounds: %#v", input)
 			}
 			var decided int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE status='decided'`).Scan(&decided); err != nil || decided != 0 {
+			if err := func() error {
+				observed, err := channelSettlementStorageObservation(t, h).CountDecidedCardsStorage(context.Background())
+				decided = observed
+				return err
+			}(); err != nil || decided != 0 {
 				t.Fatalf("invalid chosen answer completed a card: %d %v", decided, err)
 			}
 			postObjectChannelFact(t, p, "typed-valid-answer", map[string]any{"text": "27"})
 			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "typed-valid-answer"), "chooser")
-			_, nextChooser := waitObjectRequestedResponse(t, db, "typed-valid-answer")
+			_, nextChooser := waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "typed-valid-answer")
 			postObjectInputAction(t, p, "typed-valid-select", nextChooser, firstObjectDraftChoice(t, p, nextChooser))
 			waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "typed-valid-select"), "applied")
-			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE status='decided'`).Scan(&decided); err != nil || decided != 1 {
+			if err := func() error {
+				observed, err := channelSettlementStorageObservation(t, h).CountDecidedCardsStorage(context.Background())
+				decided = observed
+				return err
+			}(); err != nil || decided != 1 {
 				t.Fatalf("valid retry did not complete exactly one card: %d %v", decided, err)
 			}
 		})
@@ -206,11 +214,11 @@ func postObjectInputAction(t *testing.T, p *objectChannelProvider, id, receipt, 
 	waitObjectChannelEffect(t, p, "/v2/ack", func(input map[string]any) bool { return input["cursor"] == id })
 }
 
-func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash string, index int) (string, string, string) {
+func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, p *objectChannelProvider, hash string, index int) (string, string, string) {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"detail": strings.Repeat("input-owned detail;", 60)}, "idempotency_key": fmt.Sprintf("input-card-%d", index)})
 	card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-	receipt := waitObjectCardReceipt(t, db, card)
+	receipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 	for page := 0; page < 2; page++ {
 		more := waitObjectMessageControl(t, p, receipt, "More choices")
 		postObjectInputAction(t, p, fmt.Sprintf("input-page-%d-%d", index, page), receipt, more)
@@ -223,18 +231,18 @@ func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.
 	return card, receipt, waitObjectMessageControl(t, p, receipt, "reject")
 }
 
-func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash, schedule string) {
+func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarness, p *objectChannelProvider, hash, schedule string) {
 	t.Helper()
 	cards := make([]string, 3)
 	for index := range cards {
-		card, receipt, reject := beginObjectInputCard(t, h, db, p, hash, index)
+		card, receipt, reject := beginObjectInputCard(t, h, p, hash, index)
 		cards[index] = card
 		postObjectInputAction(t, p, fmt.Sprintf("input-reject-%d", index), receipt, reject)
-		waitChannelDraftPromptSettlement(t, db, card)
+		waitChannelDraftPromptSettlement(t, channelSettlementStorageObservation(t, h), card)
 	}
 	postObjectChannelFact(t, p, "ambiguous-answer", map[string]any{"text": "object-private-ambiguous-answer"})
 	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "ambiguous-answer"), "chooser")
-	deliveryID, receipt := waitObjectRequestedResponse(t, db, "ambiguous-answer")
+	deliveryID, receipt := waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "ambiguous-answer")
 	if schedule == "chooser_restart" {
 		closeObjectIntentObservation(t, p)
 		h.stop(t)
@@ -242,10 +250,10 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 		p.intentReader = openChannelAnchorObservation(t, h)
 	}
 	if schedule == "chooser_edit_ack_loss" {
-		proveObjectResponseEditLoss(t, h, db, p, deliveryID, receipt)
+		proveObjectResponseEditLoss(t, h, p, deliveryID, receipt)
 		postObjectChannelFact(t, p, "fresh-chooser-answer", map[string]any{"text": "object-private-new-answer"})
 		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "fresh-chooser-answer"), "chooser")
-		_, fresh := waitObjectRequestedResponse(t, db, "fresh-chooser-answer")
+		_, fresh := waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "fresh-chooser-answer")
 		if fresh == receipt {
 			t.Fatal("new explicit answer reused uncertain chooser")
 		}
@@ -285,7 +293,11 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var decided int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE card_id IN ($1,$2,$3) AND status='decided'`, cards[0], cards[1], cards[2]).Scan(&decided); err != nil {
+		if err := func() error {
+			observed, err := channelSettlementStorageObservation(t, h).CountThreeDecidedCardsStorage(context.Background(), cards[0], cards[1], cards[2])
+			decided = observed
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if decided == 1 {
@@ -354,14 +366,18 @@ func waitObjectEditAfterAction(t *testing.T, p *objectChannelProvider, receipt, 
 	}
 }
 
-func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, hash, command string) {
+func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, p *objectChannelProvider, hash, command string) {
 	t.Helper()
-	card, oldReceipt, reject := beginObjectInputCard(t, h, db, p, hash, 0)
+	card, oldReceipt, reject := beginObjectInputCard(t, h, p, hash, 0)
 	p.mu.Lock()
 	p.loseNextPrompt = true
 	p.mu.Unlock()
 	postObjectInputAction(t, p, "lost-prompt-reject", oldReceipt, reject)
-	waitUncertainCopyPlan(t, db, card)
+	waitUncertainCopyPlan(t, channelSettlementStorageObservation(t, h), card)
+	if _, err := channelSettlementStorageObservation(t, h).ReadLatestCardSentReceiptStorage(context.Background(), card); err != sql.ErrNoRows {
+		t.Fatalf("uncertain plan retained a current sent receipt: %v", err)
+	}
+	requireHistoricalObjectReceipt(t, h, card, oldReceipt)
 	waitObjectMessageText(t, p, oldReceipt, "Input: reason (text) required")
 	for _, restart := range []bool{false, true} {
 		if restart {
@@ -393,16 +409,22 @@ func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, 
 		t.Fatalf("uncertain prompt lacks explicit bounded fresh-copy recovery: %#v", input)
 	}
 	postObjectInputAction(t, p, "prompt-resend", inbox, resend)
-	fresh := waitObjectCardReceipt(t, db, card)
+	fresh := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 	if fresh == oldReceipt {
 		t.Fatal("prompt recovery reused its uncertain predecessor receipt")
 	}
+	requireHistoricalObjectReceipt(t, h, card, oldReceipt)
 	waitObjectMessageText(t, p, fresh, "Input: reason (text) required")
 	postObjectChannelFact(t, p, "fresh-prompt-answer", map[string]any{"text": "object-private-fresh-answer", "reply": map[string]any{"id": fresh}})
 	waitUncertainCopyDecision(t, channelAnchorStorageObservation(t, h), card)
 	waitObjectMessageText(t, p, fresh, "Decision: reject")
 	var copies, uncertain, decisions int
-	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {
+	if err := func() error {
+		observed, err := channelSettlementStorageObservation(t, h).ReadCardCopyCountsStorage(context.Background(), card)
+		copies = observed.Total
+		uncertain = observed.Uncertain
+		return err
+	}(); err != nil || copies != 2 || uncertain != 1 {
 		t.Fatalf("prompt recovery changed predecessor truth: %d/%d %v", copies, uncertain, err)
 	}
 	if err := func() error {

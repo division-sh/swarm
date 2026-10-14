@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channeldecision"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channeleventcount"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/eventname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forkcompanion"
@@ -43,7 +44,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "b6e79403d00ca697977fce6c145f67bde4b0c3b2999711de140515cf08fc84b1"
+const targetDigest = "3fe00f04e3c8eb85f84c398547f68e87c49144639346d3a33a3677e6081c034f"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -364,6 +365,7 @@ func main() {
 	rows, changes = composeSourceBlobHistory(rows, changes, sourceBlobPins)
 	rows, changes = composeServedBatchHistory(rows, changes, batchPins)
 	rows, changes = composeServedSetupHistory(rows, changes, setupPins)
+	rows, changes = composeChannelSettlementHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -417,6 +419,9 @@ func composeServedBatchHistory(rows []recipe, changes []transition, pins []runph
 }
 
 func servedBatchEarlierDeclaration(path, function, current string) string {
+	var err error
+	current, err = channelsettlement.EarlierSource(".", path, function, current)
+	must(err)
 	if pin, ok := servedSetupComparison[path+"/"+function]; ok {
 		if current != pin.After {
 			panic("served setup historical argument is not actual current source: " + function)

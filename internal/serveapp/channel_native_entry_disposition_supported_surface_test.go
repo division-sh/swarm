@@ -1,9 +1,12 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +14,32 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
+
+type overshotChannelSettlementObservation struct {
+	storetest.ChannelSettlementObservation
+}
+
+func (overshotChannelSettlementObservation) CountTextIntentDispositionStorage(context.Context, string) (int, error) {
+	return 2, nil
+}
+func TestChannelSettlementIntentCountOvershootRefuses(t *testing.T) {
+	if os.Getenv("SWARM_TEST_CHANNEL_COUNT_OVERSHOOT") == "1" {
+		waitNativeIntentCount(t, overshotChannelSettlementObservation{}, "entry", 1)
+		return
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(binary, "-test.run=^TestChannelSettlementIntentCountOvershootRefuses$")
+	command.Env = append(os.Environ(), "SWARM_TEST_CHANNEL_COUNT_OVERSHOOT=1")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), `native intent disposition="entry" count=2 want=1`) {
+		t.Fatalf("overshoot did not refuse immediately: %v\n%s", err, output)
+	}
+}
 
 func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
@@ -75,9 +103,9 @@ func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 					send(825403, 8593, "/"+command)
 					rejectedCount++
 				}
-				waitNativeIntentCount(t, db, "entry_rejected", rejectedCount)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry_rejected", rejectedCount)
 				send(825100, 8593, "/unknown_000", http.StatusOK)
-				waitNativeIntentCount(t, db, "entry_rejected", rejectedCount)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry_rejected", rejectedCount)
 				var forbiddenPlans int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans p JOIN operator_channel_text_intents i
 					ON p.source_id=i.publication_id WHERE i.disposition='entry_rejected'`).Scan(&forbiddenPlans); err != nil || forbiddenPlans != 0 {
@@ -96,29 +124,29 @@ func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 					text += "@SwarmTestBot"
 				}
 				send(825500, 8593, text)
-				waitNativeIntentCount(t, db, "", 1)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "", 1)
 				h.stop(t)
 				h.start(t)
 				waitNativeQualification(t, h, begun.Operation.OperationID, channelnative.QualificationInvalid, time.Time{})
-				waitNativeIntentCount(t, db, "", 1)
-				waitNativeIntentCount(t, db, "entry", 0)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "", 1)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 0)
 				cut := time.Now().UTC()
 				if err := h.provider.SeedCommands("entry-token", scope, "fr", nil); err != nil {
 					t.Fatal(err)
 				}
 				waitNativeQualification(t, h, begun.Operation.OperationID, channelnative.QualificationQualified, cut)
-				waitNativeIntentCount(t, db, "entry", 1)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 1)
 				waitNativeInboxDeliveries(t, h, fmt.Sprint(chat), 1)
 				send(825501, 8593, text)
-				waitNativeIntentCount(t, db, "entry", 2)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 2)
 				waitNativeInboxDeliveries(t, h, fmt.Sprint(chat), 2)
 				h.stop(t)
 				h.start(t)
 				waitNativeQualification(t, h, begun.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
-				waitNativeIntentCount(t, db, "entry_rejected", rejectedCount)
-				waitNativeIntentCount(t, db, "entry", 2)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry_rejected", rejectedCount)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 2)
 				send(825502, 8593, text)
-				waitNativeIntentCount(t, db, "entry", 3)
+				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 3)
 				waitNativeInboxDeliveries(t, h, fmt.Sprint(chat), 3)
 			})
 		}
@@ -153,16 +181,16 @@ func waitNativeInboxDeliveries(t *testing.T, h *channelOnboardingE2EHarness, con
 	}
 }
 
-func waitNativeIntentCount(t *testing.T, db *sql.DB, disposition string, want int) {
+func waitNativeIntentCount(t *testing.T, reader storetest.ChannelSettlementObservation, disposition string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
-	query := `SELECT COUNT(*) FROM operator_channel_text_intents WHERE state='settled' AND disposition='` + disposition + `'`
-	if disposition == "" {
-		query = `SELECT COUNT(*) FROM operator_channel_text_intents WHERE state='pending'`
-	}
 	for {
 		var count int
-		if err := db.QueryRow(query).Scan(&count); err != nil {
+		if err := func() error {
+			observed, err := reader.CountTextIntentDispositionStorage(context.Background(), disposition)
+			count = observed
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if count == want {

@@ -47,7 +47,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 						flowInstance = "observers"
 					}
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-anchor-" + string(kind)})
-					waitObjectCardReceipt(t, db, waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
+					waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
 						if kind == decisioncard.AnchorKindProposedEffect {
@@ -56,7 +56,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "object-producer-" + string(kind)})
 					}
 					card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, kind, flowInstance)
-					receipt := waitObjectCardReceipt(t, db, card)
+					receipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 					label := "Approve"
 					if kind == decisioncard.AnchorKindStageGate {
 						label = "approve"

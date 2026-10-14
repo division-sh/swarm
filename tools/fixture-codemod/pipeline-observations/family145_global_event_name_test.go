@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
@@ -83,7 +84,11 @@ func globalNameEarlierCurrentDeclaration(t *testing.T, file, function, current s
 			return pin.Before
 		}
 	}
-	return current
+	previous, err := channelsettlement.EarlierSource("../../..", file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return previous
 }
 
 func TestFamily145GlobalEventNameReusesOriginalNativeOwnerAndAddsOnlyClosedObservationRole(t *testing.T) {
@@ -107,6 +112,10 @@ func TestFamily145GlobalEventNameReusesOriginalNativeOwnerAndAddsOnlyClosedObser
 	current, readErr := os.ReadFile(filepath.Join("../../..", path))
 	if err != nil || readErr != nil {
 		t.Fatal(err, readErr)
+	}
+	current, err = channelsettlement.EarlierObservationSource("../../..", current)
+	if err != nil {
+		t.Fatal(err)
 	}
 	globalNameObservationDelta(t, old, current)
 	bridge, err := os.ReadFile("../../../internal/serveapp/global_event_name_observation_test.go")

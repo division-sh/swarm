@@ -11,6 +11,7 @@ import (
 type ChannelObservation interface {
 	render.Observer
 	ChannelAnchorObservation
+	ChannelSettlementObservation
 	Close() error
 }
 

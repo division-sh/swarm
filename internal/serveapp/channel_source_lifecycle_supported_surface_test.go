@@ -46,7 +46,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				if !ok {
 					t.Fatal("source-lifecycle card lacks frozen control")
 				}
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				frozen := readChannelSourceHistory(t, db, card)
 				var originalSource []byte
 				if err := func() error {
@@ -116,7 +116,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					clear := operation == "source_reset"
 					command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 					postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 978001, "message": map[string]any{"message_id": 978001, "from": map[string]any{"id": 7000}, "chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command}})
-					waitNativeIntentCount(t, db, "entry", 1)
+					waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry", 1)
 					waitNativeInboxDeliveries(t, h, "1001", 1)
 					rejectedToken := uuid.NewString()
 					postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 978002, "callback_query": map[string]any{"id": "reset-history-refusal", "from": map[string]any{"id": 7000}, "message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": rejectedToken}})
@@ -125,7 +125,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if err := reader.Close(); err != nil {
 						t.Fatal(err)
 					}
-					waitChannelDeliverySendsSettled(t, db, backend)
+					waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
 						var count int
 						if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE state='settled'`).Scan(&count); err != nil || count == 0 {
@@ -357,7 +357,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal(err)
 					}
 					var status string
-					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, child).Scan(&status); err != nil || status != "pending" {
+					if err := func() error {
+						observed, err := channelSettlementStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), child)
+						status = observed.Status
+						return err
+					}(); err != nil || status != "pending" {
 						t.Fatalf("fork callback bypassed selected control refusal: status=%s err=%v", status, err)
 					}
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
@@ -370,7 +374,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					postChannelSourceControl(t, callback, signing, ordinaryCard, ordinaryToken, ordinaryMessage)
 					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), ordinaryCard)
-					waitChannelDeliverySendsSettled(t, db, backend)
+					waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 					h.stop(t)
 					h.start(t)
 					callback, signing, _ = h.provider.Registration()

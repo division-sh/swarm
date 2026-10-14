@@ -18,19 +18,24 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				h, db, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-temporal-seed"})
 				gate := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				gateReceipt := waitObjectCardReceipt(t, db, gate)
+				gateReceipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), gate)
 				deadline := time.Now().UTC().Add(time.Hour)
 				if transition == "expire_restart" {
 					deadline = time.Now().UTC().Add(10 * time.Second)
 				}
 				requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)}, "idempotency_key": "object-temporal-human"})
 				card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindHumanTask, "observers")
-				receipt := waitObjectCardReceipt(t, db, card)
+				receipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 				approve := objectAnchorChoice(t, p, receipt, "Approve", 0)
 				var snapshot, render, input, frozenHash string
-				if err := db.QueryRow(`SELECT CAST(c.snapshot AS TEXT),p.current_render_id,CAST(r.render_input AS TEXT),r.render_hash
-					FROM decision_cards c JOIN channel_delivery_plans p ON p.source_id=c.card_id
-					JOIN channel_delivery_renders r ON r.render_id=p.current_render_id WHERE c.card_id=$1`, card).Scan(&snapshot, &render, &input, &frozenHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelCardRenderStorage(context.Background(), card)
+					snapshot = observed.Snapshot
+					render = observed.RenderID
+					input = observed.Input
+					frozenHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				fragment := "Deferred until: "
@@ -62,10 +67,19 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 					waitObjectTerminalReceipt(t, db, p, card, receipt, fragment)
 				}
 				var afterSnapshot, afterInput, afterHash string
-				if err := db.QueryRow(`SELECT CAST(snapshot AS TEXT) FROM decision_cards WHERE card_id=$1`, card).Scan(&afterSnapshot); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadCardSnapshotStorage(context.Background(), card)
+					afterSnapshot = observed
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&afterInput, &afterHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), render)
+					afterInput = observed.Input
+					afterHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				if afterSnapshot != snapshot || afterInput != input || afterHash != frozenHash {

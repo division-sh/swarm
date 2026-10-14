@@ -19,7 +19,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
 				h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				h.stop(t)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
@@ -30,7 +30,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				}
 				standingCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
 				waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), standingCard)
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				var arrived <-chan int
 				var release func()
 				seedAdmitted := make(chan struct{})
@@ -95,7 +95,12 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				}
 				operation, render := waitChannelDeliveryProcessAttempt(t, db, backend, card, state)
 				var input, renderHash string
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&input, &renderHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), render)
+					input = observed.Input
+					renderHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
@@ -135,7 +140,12 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 						FROM channel_delivery_plans p WHERE p.source_id=$1`, card, operation).Scan(&retainedState, &retainedCurrent, &receipts)
 					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s", cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
 				}
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&afterInput, &afterHash); err != nil {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), render)
+					afterInput = observed.Input
+					afterHash = observed.Hash
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				wantReceipt := "sent"
