@@ -380,13 +380,13 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			t.Run(verb, func(t *testing.T) {
 				server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 					switch request.Method {
-					case "channel.onboarding_start":
+					case "channel.onboarding_select":
 						if request.Params["verb"] != verb || request.Params["provider_credential"] != nil {
 							t.Fatalf("replacement selection = %s %#v", request.Method, request.Params)
 						}
-						return channelOnboardingCLIResult("preparing", "", false)
-					case "channel.onboarding_retry":
-						if request.Params["operation_id"] != operatorChannelCLIOperation || request.Params["provider_credential"] != "replacement-token" {
+						return channelCLISelectionResult(channelOnboardingCLIResult("preparing", "", false))
+					case "channel.onboarding_start":
+						if request.Params["expected_selection"] != "selected-declaration" || request.Params["provider_credential"] != "replacement-token" {
 							t.Fatalf("replacement admission = %s %#v", request.Method, request.Params)
 						}
 						return channelOnboardingCLIResult("succeeded", "bound", true)

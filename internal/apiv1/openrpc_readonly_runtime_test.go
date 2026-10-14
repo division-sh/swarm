@@ -266,6 +266,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.list",
 		"agent.usage",
 		"channel.onboarding_get",
+		"channel.onboarding_select",
 		"conversation.fork_list",
 		"conversation.fork_view",
 		"conversation.get_turn",
@@ -301,6 +302,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.list":                 {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"agent.usage":                {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
 		"channel.onboarding_get":     {Params: map[string]any{"operation_id": "00000000-0000-4000-8000-000000000207"}, ResultKeys: []string{"operation", "candidate"}},
+		"channel.onboarding_select":  {Params: map[string]any{"verb": "reconnect", "provider": "telegram"}, ResultKeys: []string{"candidate", "selection_fence"}},
 		"conversation.fork_list":     {Params: map[string]any{}, ResultKeys: []string{"forks"}},
 		"conversation.fork_view":     {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
 		"conversation.get_turn":      {Params: map[string]any{"session_id": "sess-1", "turn_id": readOnlyProbeTurnID}, ResultKeys: []string{"session", "turn", "frame"}},
@@ -975,6 +977,12 @@ func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities)
 		if methodName == "channel.onboarding_get" {
 			handler = func(context.Context, Request) (any, error) {
 				return readOnlyOnboardingProbeResult(), nil
+			}
+			ok = true
+		}
+		if methodName == "channel.onboarding_select" {
+			handler = func(context.Context, Request) (any, error) {
+				return successfulOperatorChannelRuntimeResult("channel.onboarding_select"), nil
 			}
 			ok = true
 		}
