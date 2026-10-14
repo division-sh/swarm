@@ -337,19 +337,14 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err := gateruntime.Store(buckets, forkActivation); err != nil {
 				t.Fatal(err)
 			}
-			accumulator, err := json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
-			if err != nil {
-				t.Fatal(err)
-			}
-			seedWorkflowHeaderProjectionFixture(t, ctx, db, forkRunID, forkRunID, forkRunID, ".", "default", forkActivation.Stage, string(accumulator), now)
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, current_state,
-					gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-				) VALUES ($1, $2, $3, 'default', $4, '{}', '{}', $5, 1, $6, $6, $6)
-			`, forkRunID, forkRunID, forkRunID, forkActivation.Stage, string(accumulator), now); err != nil {
-				t.Fatalf("create fork root entity: %v", err)
-			}
+			// This component executes the inherited decision, so construction
+			// must retain its buckets rather than open a fresh child approval.
+			commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), forkRunID, runtimepipeline.WorkflowInstance{
+				InstanceID: forkRunID, StorageRef: forkRunID, EntityID: forkRunID, EntityType: "default",
+				WorkflowName: ".", WorkflowVersion: target.WorkflowVersion, Mode: "static", StageDefined: true,
+				CurrentState: forkActivation.Stage, Fields: map[string]any{}, StateBuckets: runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
+				EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
+			}, now)
 
 			projection, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, sourceRunID, sourceRunID)
 			if err != nil {
