@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+	"unicode"
 )
 
 func (p *PairingReadback) UnmarshalJSON(raw []byte) error {
@@ -59,4 +61,37 @@ func (r Result) SessionPreparationPending() (bool, error) {
 		return false, fmt.Errorf("%w: session preparation readback contradicts its retained responsibility", ErrInvalidRequest)
 	}
 	return true, nil
+}
+
+// SessionPairingPending consumes authenticated pairing progress, not account,
+// principal, executable readiness or permission to reconnect/poll automatically.
+func (r Result) SessionPairingPending(now time.Time) (bool, error) {
+	p := r.Pairing
+	if p == nil || p.Status == PairingStatusPreparing {
+		return r.SessionPreparationPending()
+	}
+	if p.Status != "awaiting_qr" && p.Status != "paired" && p.Status != "connected" {
+		return false, nil
+	}
+	if _, err := r.ProviderCredentialRequirement(); err != nil {
+		return false, err
+	}
+	o := r.Operation
+	if o.Posture != ActivationSessionConnection || o.Phase != PhaseActivatingProvider ||
+		o.IdentityOperationID != "" || o.ActivationRevision != 0 || o.FailureCode != "" || o.FailureMessage != "" ||
+		r.IdentityOperation != nil || r.Logout != nil || r.Readiness != nil && r.Readiness.Ready {
+		return false, fmt.Errorf("%w: pairing progress contradicts its retained responsibility", ErrInvalidRequest)
+	}
+	if p.Status == "awaiting_qr" {
+		if p.Code == "" || len(p.Code) > 4096 || strings.ContainsFunc(p.Code, unsafePairingCharacter) || p.Paired || !p.ExpiresAt.After(now) {
+			return false, fmt.Errorf("%w: pairing material is absent, expired or contradictory", ErrInvalidRequest)
+		}
+	} else if p.Code != "" || !p.ExpiresAt.IsZero() || p.Status == "paired" && !p.Paired || p.Status == "connected" && !p.Connected {
+		return false, fmt.Errorf("%w: paired progress contradicts its session evidence", ErrInvalidRequest)
+	}
+	return true, nil
+}
+
+func unsafePairingCharacter(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
