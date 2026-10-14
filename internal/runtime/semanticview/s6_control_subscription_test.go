@@ -49,6 +49,18 @@ func TestS6CompiledAgentControlSubscriptionAdmission(t *testing.T) {
 	}
 }
 
+func TestS6RootDotCannotBypassAgentControlAdmission(t *testing.T) {
+	for _, authored := range []string{"platform.boot", "platform.runtime_log", "event.replayed", "*", "platform.*", "event.*"} {
+		admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+			ConsumerKind: AuthoredSubscriptionConsumerAgent, ConsumerID: "root-listener", FlowID: ".", FlowPath: ".", Authored: authored,
+			LocalEvents: map[string]struct{}{authored: {}},
+		})
+		if admission.Admitted() || admission.Failure() != AuthoredSubscriptionFailureUnanchoredAgentOrigin || len(admission.RoutePatternsAt(".")) != 0 {
+			t.Fatalf("root execution projection bypassed control refusal for %s: %+v", authored, admission)
+		}
+	}
+}
+
 func TestS6ControlSubscriptionRefusalPreservesOtherConsumersAndScopes(t *testing.T) {
 	for _, kind := range []AuthoredSubscriptionConsumerKind{AuthoredSubscriptionConsumerNode, AuthoredSubscriptionConsumerTimer} {
 		for _, authored := range []string{"platform.boot", "platform.runtime_log", "event.replayed"} {
