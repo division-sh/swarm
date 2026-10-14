@@ -651,17 +651,17 @@ func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Con
 		return nil, err
 	}
 	target := handle.Attempt().Authority.Target
+	request := handle.Attempt().Authority.CompletionRequest
 	surfaceJSON, err := json.Marshal(surface)
 	if err != nil {
 		return nil, err
 	}
 	input, output := int64(1), int64(1)
+	usage := runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output}
+	usage.Evidence = runtimeeffects.CompletionEvidence{Request: request, CostProvenance: usage.CostProvenance()}
 	result, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
-		Usage: runtimeeffects.CompletionUsage{
-			ResolvedModel: "effect-test", Exactness: runtimeeffects.CompletionUsageExact,
-			InputTokens: &input, OutputTokens: &output,
-		},
+		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
 			Identity: target.AgentIdentity, Memory: target.Memory,
@@ -669,8 +669,9 @@ func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Con
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
-			Model: "effect-test", BackendProfile: "effect-test", Provider: "effect-test", Transport: "api",
-			ResolvedModel: "effect-test", InvocationType: "directive",
+			Model: request.RequestedModel, ModelAlias: request.ModelAlias,
+			BackendProfile: request.BackendProfile, Provider: request.Provider, Transport: request.Transport,
+			InvocationType: "directive",
 		},
 		Now: time.Now().UTC(),
 	})
@@ -691,6 +692,7 @@ func TestBoardStep_DrainedDirectiveStopsBeforeRemediation(t *testing.T) {
 	agent := mustBuildLLMAgent(t, models.AgentConfig{
 		ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity,
 		FlowPath: harness.Token.Identity.FlowInstance(), Role: "coordinator",
+		Model: "regular", ResolvedModel: "mock-regular",
 	}, runtime, boardEmitExecutor{}, nil)
 
 	ctx := runtimedelivery.WithoutClaim(harness.CompletionContext(t.Name()))
@@ -726,6 +728,15 @@ func TestBoardStep_DrainedDirectiveStopsBeforeRemediation(t *testing.T) {
 	}
 	if runtime.calls != 1 {
 		t.Fatalf("drained directive provider calls=%d, want one without remediation", runtime.calls)
+	}
+	if len(harness.Completions) != 1 {
+		t.Fatalf("drained directive completions=%d, want one", len(harness.Completions))
+	}
+	for _, settled := range harness.Completions {
+		if settled.Usage.Evidence.Request.ModelAlias != "regular" || settled.Usage.Evidence.Request.RequestedModel != "mock-regular" ||
+			settled.Usage.Evidence.Request.BackendProfile != "mock" || len(settled.Usage.Evidence.Models) != 0 || settled.Usage.ResolvedModel != "" {
+			t.Fatalf("drained fixture lost exact admitted identity or fabricated a mock observation: %+v", settled.Usage)
+		}
 	}
 	observed := observation()
 	if !observed.OriginSettled || observed.Disposition != runtimeeffects.CompletionSettlementDrained || !observed.Origin.Directive.Same(origin) {
