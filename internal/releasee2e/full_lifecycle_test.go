@@ -216,14 +216,14 @@ func runFullLifecycleScenario(t *testing.T, binary, root string, store releaseSt
 	process := start()
 	bundleHash := requireFullLifecycleHealth(t, process.rpc)
 	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "", 0)
-	lifecycleCard := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
+	lifecycleCard := waitForFullLifecycleCard(t, process, standing.RunID, "lifecycle_ready")
 	decideFullLifecycleCard(t, process.rpc, lifecycleCard, "lifecycle-gate-"+standing.RunID)
 	waitForFullLifecycleRunStatus(t, process.rpc, standing.RunID, "running")
 
 	switch scenario.Outcome {
 	case fullLifecycleGracefulRestart:
 		entityID := sendFullLifecycleTelegramUpdate(t, process, 1001, 42)
-		approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-first")
+		approveFullLifecycleEffect(t, process, standing.RunID, "graceful-first")
 		waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
 		if err := process.interruptAndWait(10 * time.Second); err != nil {
 			t.Fatalf("graceful lifecycle stop: %v\n%s", err, process.output.String())
@@ -236,7 +236,7 @@ func runFullLifecycleScenario(t *testing.T, binary, root string, store releaseSt
 		if got := sendFullLifecycleTelegramUpdate(t, process, 1002, 42); got != entityID {
 			t.Fatalf("graceful restart Telegram entity = %s, want stable %s", got, entityID)
 		}
-		approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-second")
+		approveFullLifecycleEffect(t, process, standing.RunID, "graceful-second")
 		waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
 	case fullLifecycleDefaultRefusal, fullLifecycleExplicitRecover, fullLifecycleDevAbandon:
 		pauseFullLifecycleRun(t, process.rpc, standing.RunID)
@@ -259,7 +259,7 @@ func runFullLifecycleScenario(t *testing.T, binary, root string, store releaseSt
 				t.Fatalf("explicit recovery run = %#v, want same paused run %s", recovered, standing.RunID)
 			}
 			continueFullLifecycleRun(t, process.rpc, standing.RunID)
-			approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered")
+			approveFullLifecycleEffect(t, process, standing.RunID, "recovered")
 			waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
 			assertFullLifecycleDeliveryCompleted(t, process.rpc, standing.RunID, checkpoint)
 		case fullLifecycleDevAbandon:
@@ -269,10 +269,10 @@ func runFullLifecycleScenario(t *testing.T, binary, root string, store releaseSt
 				t.Fatalf("dev restart reused abandoned run %s", standing.RunID)
 			}
 			assertFullLifecycleAbandonedPredecessor(t, process.rpc, standing.RunID, checkpoint)
-			nextLifecycleCard := waitForFullLifecycleCard(t, process.rpc, next.RunID, "lifecycle_ready")
+			nextLifecycleCard := waitForFullLifecycleCard(t, process, next.RunID, "lifecycle_ready")
 			decideFullLifecycleCard(t, process.rpc, nextLifecycleCard, "lifecycle-gate-"+next.RunID)
 			sendFullLifecycleTelegramUpdate(t, process, 2002, 84)
-			approveFullLifecycleEffect(t, process.rpc, next.RunID, "dev-next-generation")
+			approveFullLifecycleEffect(t, process, next.RunID, "dev-next-generation")
 			waitForFullLifecycleConvergence(t, process, next.RunID, 1)
 		}
 	default:
@@ -429,8 +429,9 @@ type fullLifecycleCardProjection struct {
 	DecisionCard fullLifecycleCard `json:"decision_card"`
 }
 
-func waitForFullLifecycleCard(t *testing.T, rpc *releaseRPCClient, runID, decision string) fullLifecycleCard {
+func waitForFullLifecycleCard(t *testing.T, process *releaseServeProcess, runID, decision string) fullLifecycleCard {
 	t.Helper()
+	rpc := process.rpc
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
 	var card fullLifecycleCard
@@ -465,7 +466,12 @@ func waitForFullLifecycleCard(t *testing.T, rpc *releaseRPCClient, runID, decisi
 		return detail.Kind == "decision_card" && card.CardID != "" && card.CardContentHash != "", nil
 	})
 	if err != nil {
-		t.Fatalf("wait for pending decision %s run=%s: %v; last=%#v", decision, runID, err, card)
+		diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer diagnosticCancel()
+		var diagnosis goldenDiagnosis
+		diagnosisErr := rpc.call(diagnosticCtx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+		events, eventsErr := listFullLifecycleEvents(diagnosticCtx, rpc, runID)
+		t.Fatalf("wait for pending decision %s run=%s: %v; last=%#v; diagnosis=%#v diagnosis_err=%v; events=%#v events_err=%v\n%s", decision, runID, err, card, diagnosis, diagnosisErr, events, eventsErr, process.output.String())
 	}
 	return card
 }
@@ -492,13 +498,13 @@ func decideFullLifecycleCard(t *testing.T, rpc *releaseRPCClient, card fullLifec
 	}
 }
 
-func approveFullLifecycleEffect(t *testing.T, rpc *releaseRPCClient, runID, key string) {
+func approveFullLifecycleEffect(t *testing.T, process *releaseServeProcess, runID, key string) {
 	t.Helper()
-	card := waitForFullLifecycleCard(t, rpc, runID, "send_telegram_message")
+	card := waitForFullLifecycleCard(t, process, runID, "send_telegram_message")
 	if card.ExecutionMode != "mock" {
 		t.Fatalf("connector decision card execution mode = %q, want mock", card.ExecutionMode)
 	}
-	decideFullLifecycleCard(t, rpc, card, "connector-"+key+"-"+card.CardID)
+	decideFullLifecycleCard(t, process.rpc, card, "connector-"+key+"-"+card.CardID)
 }
 
 func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) string {
