@@ -96,17 +96,7 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 			if _, admitted := options[field.Name]; !admitted {
 				return runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
 			}
-			if shape == reflect.TypeFor[LLMProviderLimitPolicy]() {
-				scalar, err := field.Value.Scalar()
-				if err != nil || scalar.Tag != "!!int" {
-					return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
-				}
-				var count int
-				if err := field.Value.Project(&count); err != nil || count <= 0 {
-					return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
-				}
-			}
-			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {
+			if err := validateConfigField(field, child, shape, owner); err != nil {
 				return err
 			}
 		}
@@ -134,6 +124,21 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func validateConfigField(field yamlsource.MappingField, child, shape reflect.Type, owner string) error {
+	if shape != reflect.TypeFor[LLMProviderLimitPolicy]() {
+		return validateConfigValue(field.Value, child, owner+"."+field.Name)
+	}
+	scalar, err := field.Value.Scalar()
+	if err != nil || scalar.Tag != "!!int" {
+		return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
+	}
+	var count int
+	if err := field.Value.Project(&count); err != nil || count <= 0 {
+		return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
 	}
 	return nil
 }
