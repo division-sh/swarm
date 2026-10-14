@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -161,6 +162,31 @@ func TestClaudeCLICompletion2270SelectedWitnessRelease(t *testing.T) {
 	rows, err := proof.read(t.Context())
 	if err != nil || !f.disposed || f.releases != 1 || f.reads != 2 || validateCompletion2270SingleInvocation(rows, f.attempt) != nil {
 		t.Fatalf("selected witness not captured before real disposal: %+v reads=%d releases=%d err=%v", rows, f.reads, f.releases, err)
+	}
+}
+
+func TestClaudeCLICompletion2270SelectedDecorationPreservesConcretePreflight(t *testing.T) {
+	manager := workspace.NewDockerManager()
+	req := selectedAPICapabilityRequest{Workspaces: manager}
+	proof := &completion2270InvocationProof{}
+	selected, err := completion2270ObserveSelectedWorkspace(req, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if concrete, ok := req.Workspaces.(*workspace.DockerManager); !ok || concrete != manager {
+		t.Fatal("selected decoration changed the concrete ordinary/preflight owner")
+	}
+	observed, ok := selected.Workspaces.(*completion2270ObservedWorkspace)
+	if !ok || observed.DockerManager != manager || observed.proof != proof || observed.selected {
+		t.Fatal("selected request did not retain the actual undecorated owner")
+	}
+	for _, lifecycle := range []cliapp.ServeWorkspaceLifecycle{nil, workspace.NewHostManager(), observed} {
+		if _, err := completion2270ObserveSelectedWorkspace(selectedAPICapabilityRequest{Workspaces: lifecycle}, proof); err == nil {
+			t.Fatal("selected observation admitted missing, non-Docker or duplicate decoration")
+		}
+	}
+	if _, err := completion2270ObserveSelectedWorkspace(req, nil); err == nil {
+		t.Fatal("selected observation admitted missing proof owner")
 	}
 }
 

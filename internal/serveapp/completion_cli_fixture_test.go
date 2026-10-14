@@ -107,6 +107,15 @@ type completion2270ObservedWorkspace struct {
 	captureErr  error
 }
 
+func completion2270ObserveSelectedWorkspace(req selectedAPICapabilityRequest, proof *completion2270InvocationProof) (selectedAPICapabilityRequest, error) {
+	manager, ok := req.Workspaces.(*workspace.DockerManager)
+	if !ok || manager == nil || proof == nil {
+		return req, errors.New("selected CLI observation requires its concrete Docker workspace owner")
+	}
+	req.Workspaces = &completion2270ObservedWorkspace{DockerManager: manager, proof: proof}
+	return req, nil
+}
+
 func (w *completion2270ObservedWorkspace) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (workspace.Lifecycle, error) {
 	lifecycle, err := w.DockerManager.RebindSourceProjection(projection, source)
 	if err != nil {
