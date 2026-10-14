@@ -3515,7 +3515,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]: else.emit_template") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1].emit_template") {
 		t.Fatalf("expected template branch payload completeness error for partial rule, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "geography is not statically provable") {
@@ -5186,9 +5186,13 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "entity.composite_score",
 	}
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.composite_score >= 0",
-	}}
+	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: entity.composite_score >= 0\n").OnComplete
+	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
+	var err error
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
