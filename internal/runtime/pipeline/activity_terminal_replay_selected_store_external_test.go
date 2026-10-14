@@ -482,8 +482,7 @@ func seedSelectedActivitySource(t *testing.T, ctx context.Context, selected gate
 	if err != nil {
 		t.Fatal(err)
 	}
-	creating := eventtest.ExistingRunRootIngress(intent.SourceEventID, "activity.source", "activity-proof", intent.SourceTaskID, payload, intent.ChainDepth, intent.SourceRunID, events.EventEnvelope{}, at)
-	creating = eventtest.InExecutionMode(creating, intent.ExecutionMode)
+	creating := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(intent.SourceEventID, "activity.source", "activity-proof", intent.SourceTaskID, payload, intent.ChainDepth, intent.SourceRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(intent.SourceRunID), at, intent.ExecutionMode)
 	storetest.CommitSemanticEvent(t, ctx, selected.events, creating)
 	plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: child, ConstructorInput: "activity.source", ResolvedKey: key,
