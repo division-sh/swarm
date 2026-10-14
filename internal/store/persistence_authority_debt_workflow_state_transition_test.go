@@ -28,6 +28,7 @@ func debtWorkflowStateSourceCopy(t *testing.T) string {
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	return copy
 }
 

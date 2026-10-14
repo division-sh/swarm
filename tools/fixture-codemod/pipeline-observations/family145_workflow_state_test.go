@@ -74,7 +74,8 @@ func workflowStateCurrentDeclaration(t *testing.T, path, function string) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	return family145ServedEventCountPrevious(t, path, function, requestKeyDeclaration(t, raw, function))
+	entry := servedObservationEarlierSource(t, path, function, requestKeyDeclaration(t, raw, function))
+	return family145ServedEventCountPrevious(t, path, function, entry)
 }
 
 func TestFamily145WorkflowStateTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
@@ -104,7 +105,11 @@ func TestFamily145WorkflowStateWholeChainPreservesEveryPollAndRefusalCut(t *test
 			t.Fatal("workflow state source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145ServedEventCountPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
+		if family145ServedEventCountPrevious(t, pin.File, pin.Function, entry) != pin.After {
 			t.Fatal("workflow state current source escaped its whole rule:", key, err)
 		}
 		after, count, err := workflowstate.Transform(pin.Before)
@@ -184,7 +189,8 @@ func workflowStateOwnedFile(t *testing.T, path string, file *ast.File) (int, int
 			if ok && workflowstate.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := family145ServedEventCountPrevious(t, path, fn.Name.Name, requestkey.Node(fn))
+				current := servedObservationEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
+				current = family145ServedEventCountPrevious(t, path, fn.Name.Name, current)
 				if workflowstate.Previous(workflowStatePins(t), path, fn.Name.Name, current) == current {
 					t.Error("workflow state caller escaped exact chain:", path, fn.Name.Name)
 				}

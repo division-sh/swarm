@@ -20,6 +20,7 @@ func TestPersistenceAuthorityDebtEventNameMetadataIsLocalAndSourceBound(t *testi
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	_, current := debtServedDebugTransitionStates()
 	baseline := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtCacheCollectorFrom, Sites: current}
 	data := marshalAuthorityDebtBaseline(baseline)
@@ -151,6 +152,7 @@ func TestPersistenceAuthorityDebtEventNameSourceManifestAndNativeBodyFailClosed(
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	if err := debtEventNameSourcePins(copy); err != nil {
 		t.Fatal(err)
 	}
@@ -163,14 +165,20 @@ func TestPersistenceAuthorityDebtEventNameSourceManifestAndNativeBodyFailClosed(
 		t.Fatal(err)
 	}
 	for _, body := range bodies {
-		mutant := strings.Replace(body.After, "{", "{ foreignEventNameSource();", 1)
-		if strings.Count(string(raw), body.After) != 1 {
+		declarations, err := debtServedDebugDeclarations(filepath.Join(copy, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := declarations[body.Function]
+		mutant := strings.Replace(current, "{", "{ foreignEventNameSource();", 1)
+		if current == "" || strings.Count(string(raw), current) != 1 || current == mutant {
 			t.Fatal("source hostile cut not unique:", body.Function)
 		}
-		debtWriteModuleSource(t, copy, file, strings.Replace(string(raw), body.After, mutant, 1))
+		debtWriteModuleSource(t, copy, file, strings.Replace(string(raw), current, mutant, 1))
 		if err := debtEventNameSourcePins(copy); err == nil {
 			t.Fatal("changed whole native source accepted:", body.Function)
 		}
+		debtWriteModuleSource(t, copy, file, string(raw))
 	}
 	debtWriteModuleSource(t, copy, file, string(raw))
 	debtWriteModuleSource(t, copy, manifest, "[]\n")

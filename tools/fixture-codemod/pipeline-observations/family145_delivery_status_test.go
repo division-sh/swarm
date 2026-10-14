@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 //go:embed family145-delivery-status-preimages.json
@@ -73,7 +74,12 @@ func TestFamily145DeliveryStatusWholeChainPreservesEveryPollAndRefusalCut(t *tes
 			t.Fatal("delivery status source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145EventNameCallerInverse(pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
+		entry = runphysical.Previous(sourceForkPins(t), pin.File, pin.Function, entry)
+		if family145EventNameCallerInverse(pin.Function, entry) != pin.After {
 			t.Fatal("delivery status current source escaped its whole rule:", key, err)
 		}
 		after, count, err := deliverystatus.Transform(pin.Before)
@@ -153,7 +159,9 @@ func deliveryStatusOwnedFile(t *testing.T, path string, file *ast.File) (int, in
 			if ok && deliverystatus.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := family145EventNameCallerInverse(fn.Name.Name, requestkey.Node(fn))
+				current := servedObservationEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
+				current = runphysical.Previous(sourceForkPins(t), path, fn.Name.Name, current)
+				current = family145EventNameCallerInverse(fn.Name.Name, current)
 				if deliverystatus.Previous(deliveryStatusPins(t), path, fn.Name.Name, current) == current {
 					t.Error("delivery status caller escaped exact chain:", path, fn.Name.Name)
 				}

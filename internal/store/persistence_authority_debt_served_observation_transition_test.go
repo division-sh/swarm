@@ -2,11 +2,13 @@ package store_test
 
 import (
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-const debtServedObservationCollectorTo = "3f79ecc1a0092b97797ae92ab064d9ea98149cc0be26f572f460df559e149fb6"
+const debtServedObservationCollectorTo = "51f998119a27523e0d4ae44aae8184a844745af6d8d0f66219c0d847978513f5"
 
 // Ruling6161771753: source-entry placement only, never additional debt credit.
 func debtServedObservationCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
@@ -33,6 +35,45 @@ func debtServedObservationCollectorTransition(base, current string, trusted, hea
 		}
 	}
 	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, trusted.Sites, trusted.Sites, proofs...)) == 0
+}
+
+func TestPersistenceAuthorityDebtServedObservationCollectorRetainsTrustedPredecessorCeiling(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	base, err := debtTrustedBase(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRoot := materializeDebtBase(t, root, base)
+	baseCollector, err := debtCollectorDigest(baseRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRaw, err := os.ReadFile(filepath.Join(baseRoot, debtBaselinePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trusted, err := debtBaselineWithCollector(baseRoot, baseRaw, baseCollector, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headRaw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := debtBaselineWithCollector(root, headRaw, debtServedObservationCollectorTo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This is retained-ceiling metadata proof, not a substitute for the census.
+	proof := debtDeliveryRetirementProof{Root: root, Actual: head.Sites}
+	prior := head
+	prior.Collector = debtPublicRollbackCollectorTo
+	if err := debtValidateCollectorIdentity(baseCollector, prior.Collector, trusted, prior, "", proof); err != nil {
+		t.Fatal("unchanged predecessor chain refused retained ceiling:", baseCollector, err)
+	}
+	if err := debtValidateCollectorIdentity(baseCollector, head.Collector, trusted, head, "", proof); err != nil {
+		t.Fatal("new entry-only collector refused retained ceiling:", err, authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites, proof))
+	}
 }
 
 func TestPersistenceAuthorityDebtServedObservationCollectorFingerprintIsExact(t *testing.T) {

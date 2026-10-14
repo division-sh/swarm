@@ -583,7 +583,8 @@ func debtEventNameSourcePins(root string) error {
 		return err
 	}
 	for _, body := range bodies {
-		if body.File != file || declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+		entry, err := debtServedObservationSourcePrevious(root, body.File, body.Function, declarations[body.Function])
+		if err != nil || body.File != file || entry != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("event name owner/assertion/polling cut changed: %s/%s", body.File, body.Function)
 		}
 	}

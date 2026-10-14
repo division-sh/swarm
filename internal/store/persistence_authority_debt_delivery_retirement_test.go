@@ -152,6 +152,7 @@ func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t 
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	bodies, err := debtDeliveryStatusBodies(root)
 	if err != nil {
 		t.Fatal(err)
@@ -278,6 +279,7 @@ func TestPersistenceAuthorityDebtDeliveryRetirementMetadataIsLocalAndSourceBound
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	_, current := debtServedDebugTransitionStates()
 	baseline := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtCacheCollectorFrom, Sites: current}
 	data := marshalAuthorityDebtBaseline(baseline)

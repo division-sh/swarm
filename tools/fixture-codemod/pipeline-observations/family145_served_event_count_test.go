@@ -75,7 +75,7 @@ func TestFamily145ServedEventCountWholeRuleRetainsEveryScopeAndAssertion(t *test
 			t.Fatal("served event count predecessor is not exact:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("served event count current source escaped its rule:", key, err)
 		}
 		after, count, err := servedeventcount.Transform(pin.Before)
@@ -218,6 +218,9 @@ func TestFamily145ServedEventCountUsesOriginalOwnerAndUnchangedCanonicalQuery(t 
 			t.Fatal(err)
 		}
 		after, err := os.ReadFile(filepath.Join("../../..", query))
+		if err == nil {
+			after = servedObservationEarlierToolOwnerSource(t, query, after)
+		}
 		if err != nil || string(before) != string(after) {
 			t.Fatal("canonical physical count was reinterpreted:", query, err)
 		}

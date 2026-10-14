@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -26,6 +27,7 @@ if err!=nil { return 0,err }; return count,nil
 // amendments. Every byte outside the exact declarations still matches history.
 func deliveryStatusEarlierOwnerSource(t *testing.T, path string, current, original []byte) []byte {
 	t.Helper()
+	current = servedObservationEarlierToolOwnerSource(t, path, current)
 	var err error
 	switch path {
 	case "internal/store/internal/backend/delivery/read_projections.go":
@@ -62,6 +64,58 @@ func deliveryStatusEarlierOwnerSource(t *testing.T, path string, current, origin
 		}
 	}
 	return current
+}
+
+// Tool-only correspondence for the reviewed additive reader chain. This does
+// does not add a collector inverse, occurrence transfer or accounting allowance.
+func servedObservationEarlierToolOwnerSource(t *testing.T, path string, current []byte) []byte {
+	t.Helper()
+	prior, err := servedObservationToolOwnerPrevious(path, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prior
+}
+
+func servedObservationToolOwnerPrevious(path string, current []byte) ([]byte, error) {
+	var pin struct {
+		current, previous string
+		names             []string
+	}
+	switch path {
+	case "internal/store/internal/backend/delivery/read_projections.go":
+		pin.current, pin.previous = "77456d1d968d550b5d11590bc6d4cddf3ac95aaba42318913c18cbff1da545ee", "f3102e2e31e761dd80917959af16b8e151471fa32c70378677ccf88e51ef4a63"
+		pin.names = []string{"CountExactRunNodeEventDeliveryStorageTx", "CountCurrentEventDeliveryOutcomeStorageTx"}
+	case "internal/store/internal/runtimepersistence/test_served_delivery_observation.go":
+		pin.current, pin.previous = "256de06dd68f2c2fe45eac7c02ae8726e022696e6d977db3ca74f981d3e865a7", "bb5b2b2ec0c32fc6153b712be59cf827c2e858e02b54a7c5cf541b60aac96be3"
+		pin.names = []string{"CountExactRunNodeEventDeliveryStorageForTest", "CountCurrentEventDeliveryOutcomeStorageForTest", "CountSubscriberEventReceiptOutcomeStorageForTest", "CountExactRunEventReplayScopeStorageForTest", "CountEventSubscriberReceiptStorageForTest"}
+	case "internal/store/storetest/served_delivery_observation.go":
+		pin.current, pin.previous = "4b886554c4ab96f56df19e070aece6c3d91fbc7c2fb223838b4d590b95cc6cd5", "cb8fc0e18c68ee00cb4fbb3af36eb965a529acbe91ab0c096e636396381526e2"
+		pin.names = []string{"CountExactRunNodeEventDeliveryStorage", "CountCurrentEventDeliveryOutcomeStorage", "CountSubscriberEventReceiptOutcomeStorage", "CountExactRunEventReplayScopeStorage", "CountEventSubscriberReceiptStorage"}
+	case "internal/store/internal/runtimepersistence/test_event_support.go":
+		pin.current, pin.previous = "b4b7fd3c33610f6758ef73c329c574789ecd18dc881416f5b431007f8f86a437", "b6da96ad49b2f38e1c8422bdc3e14e1173e79f908f7587619a81ba4ea7382134"
+		pin.names = []string{"ReadPhysicalPublicationEntityIdentityStorageForTest"}
+	default:
+		return current, nil
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(current)) != pin.current {
+		return nil, fmt.Errorf("reviewed additive native reader source changed: %s", path)
+	}
+	for _, name := range pin.names {
+		body, _, _, err := deliveryStatusSourceDeclaration(current, name)
+		if err != nil {
+			return nil, err
+		}
+		current, err = removePublicRollbackDeclaration(current, name, body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	previous, err := format.Source(current)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(previous)) != pin.previous {
+		return nil, fmt.Errorf("reviewed additive native reader changed retained bytes: %s: %v", path, err)
+	}
+	return previous, nil
 }
 
 func removePublicRollbackDeclaration(raw []byte, name, expected string) ([]byte, error) {

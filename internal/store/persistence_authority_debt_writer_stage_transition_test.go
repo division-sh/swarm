@@ -113,20 +113,20 @@ func TestPersistenceAuthorityDebtWriterStageSourcePinsRejectBodyAndManifestTampe
 	if err := json.Unmarshal(raw, &rows); err != nil || len(rows) != 11 {
 		t.Fatal("immutable eleven-body source evidence changed:", err)
 	}
-	var before, current strings.Builder
+	var before strings.Builder
 	before.WriteString("package serveapp\n")
-	current.WriteString("package serveapp\n")
 	for _, row := range rows {
 		before.WriteString(row.Before + "\n")
-		current.WriteString(row.After + "\n")
 	}
-	source := []byte(current.String())
 	manifest, err := os.ReadFile(filepath.Join(root, manifestPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	copy := t.TempDir()
-	debtWriteModuleSource(t, copy, sourcePath, string(source))
+	copy := debtServedDebugSourceCopy(t)
+	source, err := os.ReadFile(filepath.Join(copy, sourcePath))
+	if err != nil {
+		t.Fatal(err)
+	}
 	debtWriteModuleSource(t, copy, manifestPath, string(manifest))
 	if err := debtWriterStageSourcePins(copy, true); err != nil {
 		t.Fatal(err)

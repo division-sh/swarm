@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
 )
 
@@ -87,7 +88,7 @@ func TestFamily145ServedDebugWholeRulePreservesEveryBodyAndOwner(t *testing.T) {
 		}
 		seen[key] = true
 		if actual := family145ServedDebugCurrentDeclaration(t, row); actual != row.After {
-			t.Fatalf("current declaration differs from closed rule: %s", key)
+			t.Errorf("current declaration differs from closed rule: %s", key)
 		}
 		if row.After == "" {
 			if row.Function != "servedEventPublishDebugSummary" && row.Function != "servedEventPublishDebugQuery" {
@@ -143,7 +144,13 @@ func family145ServedDebugCurrentDeclaration(t *testing.T, row servedDebugPreimag
 	}
 	for _, declaration := range file.Decls {
 		if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Name.Name == row.Function {
-			current := family145RunPhysicalPrevious(row.File, row.Function, family145NodeString(function))
+			current := sourceBlobPreviousDeclaration(t, row.File, row.Function, family145NodeString(function))
+			current = runphysical.Previous(runIdentityPins, row.File, row.Function, current)
+			current = runphysical.Previous(runDeliveryLivePins(t), row.File, row.Function, current)
+			current = runphysical.Previous(sourceForkPins(t), row.File, row.Function, current)
+			current = family145RunScalarCallerInverse(row.Function, current)
+			current = family145WorkflowStateCallerInverse(row.Function, current)
+			current = family145RunPhysicalPrevious(row.File, row.Function, current)
 			current = family145RequestKeyCallerInverse(row.Function, current)
 			current = family145ChannelIntentCallerInverse(row.Function, current)
 			current = family145ForkNoticeCallerInverse(row.Function, current)

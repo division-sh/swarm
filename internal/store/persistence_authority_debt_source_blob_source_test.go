@@ -233,11 +233,16 @@ func debtSourceBlobRejectChangedLiveSources(t *testing.T, root string, bodies []
 		copy := t.TempDir()
 		debtSourceBlobCopySourceEvidence(t, root, copy)
 		raw, err := os.ReadFile(filepath.Join(copy, body.File))
-		if err != nil || strings.Count(string(raw), body.After) != 1 {
+		if err != nil {
+			t.Fatal(err)
+		}
+		declarations, err := debtServedDebugDeclarations(filepath.Join(copy, body.File))
+		current := declarations[body.Function]
+		if err != nil || current == "" || strings.Count(string(raw), current) != 1 {
 			t.Fatal("source blob live hostility lost exact declaration:", body.Function, err)
 		}
-		mutant := strings.Replace(body.After, "{", "{foreignLiveSource();", 1)
-		debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), body.After, mutant, 1))
+		mutant := strings.Replace(current, "{", "{foreignLiveSource();", 1)
+		debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), current, mutant, 1))
 		if _, err := debtSourceBlobResetPrevious(copy, reset.File, reset.Function, bodies[2].After); err == nil {
 			t.Fatal("supplied exact result bypassed changed live capture/assertion:", body.Function)
 		}

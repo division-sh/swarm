@@ -140,6 +140,7 @@ func debtServedDebugSourceCopy(t *testing.T) string {
 		debtWriteModuleSource(t, copy, file, "package serveapp\n"+source)
 	}
 	debtRunIdentityCopySourceEvidence(t, root, copy)
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	return copy
 }
 

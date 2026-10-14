@@ -73,7 +73,11 @@ func TestFamily145RunScalarWholeChainPreservesPredicatesAssertionsAndCuts(t *tes
 			t.Fatal("scalar source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145DeliveryStatusCallerInverse(pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
+		if family145DeliveryStatusCallerInverse(pin.Function, entry) != pin.After {
 			t.Fatal("scalar current source escaped its whole rule:", key, err)
 		}
 		after, count, err := runscalar.Transform(pin.Before)
@@ -173,7 +177,8 @@ func runScalarOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
 			if ok && id.Name == "servedEventPublishScalarCount" {
 				calls++
 				allowed[id.Pos()] = true
-				current := family145DeliveryStatusCallerInverse(fn.Name.Name, requestkey.Node(fn))
+				current := servedObservationEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
+				current = family145DeliveryStatusCallerInverse(fn.Name.Name, current)
 				if runscalar.Previous(runScalarPins(t), path, fn.Name.Name, current) == current {
 					t.Error("scalar caller escaped complete source-pinned chain:", path, fn.Name.Name)
 				}
