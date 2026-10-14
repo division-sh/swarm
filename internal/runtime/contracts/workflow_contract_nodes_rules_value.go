@@ -29,7 +29,8 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 			if index != len(items)-1 {
 				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s has no predicate but is not the last row; rows after it are unreachable. Add a when/case/range, or move it last to make it the default branch.", index, item.Location()))
 			}
-			if row.AdvancesTo == "" && !row.Terminate && row.Emit.Empty() && row.Activity.Empty() && !row.DataAccumulation.HasWrites() && row.Compute == nil && row.FanOut == nil {
+			if strings.TrimSpace(row.AdvancesTo) == "" && row.Emit.EventType() == "" && !row.Emit.HasFields() && row.Activity.Tool == "" && !row.DataAccumulation.HasWrites() &&
+				(row.Compute == nil || row.Compute.Operation == ComputeOpUnknown) && row.FanOut == nil {
 				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s is empty; a default row must advance, emit, set data or gates. A block that matches nothing already succeeds and records no_match.", index, item.Location()))
 			}
 			row.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}

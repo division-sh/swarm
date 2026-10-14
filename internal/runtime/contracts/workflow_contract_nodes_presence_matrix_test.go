@@ -227,7 +227,7 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("clear=%#v", h.Clear)
 			}
 		}},
-		{"rules", "rule", "[{else: true, emit: task.done}]", "{else: true, emit: task.done}", [8]bool{true, false, false, false, true, true, false, false}, func(t *testing.T, h SystemNodeEventHandler) {
+		{"rules", "rule", "[{emit: task.done}]", "{emit: task.done}", [8]bool{true, false, false, false, true, true, false, false}, func(t *testing.T, h SystemNodeEventHandler) {
 			if len(h.Rules) != 1 || h.Rules[0].Emit.Event != "task.done" {
 				t.Fatalf("rules=%#v", h.Rules)
 			}
@@ -238,7 +238,7 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 			proveNodePresence(t, nodePresenceShapes(tc.scalar, tc.sequence, tc.mapping), tc.accepted, func(shape nodePresenceShape) string {
 				base := "description: ready\n"
 				if tc.field == "on_success" {
-					base += "rules: [{else: true}]\n"
+					base += "rules: [{when: true}]\n"
 				}
 				if shape.name == "missing" {
 					return base

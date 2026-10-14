@@ -150,7 +150,7 @@ func TestScalar2556DiagnosticPreservesAuthoredFieldNames(t *testing.T) {
 
 func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 	for _, tc := range []struct{ slot, handler string }{
-		{"rule.when", "rules:\n  - when: %s\n  - else: true"},
+		{"rule.when", "rules:\n  - when: %s"},
 		{"on_complete.condition", "on_complete:\n  - condition: %s\n    emit: proof.done"},
 		{"guard.check", "guard: {check: %s}"},
 		{"guard.checks.check", "guard:\n  checks:\n    - check: %s"},
@@ -166,15 +166,25 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n"+handler)
 				repo := repoRootForBootverifyTest(t)
 				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
-				if err == nil || bundle != nil || !strings.Contains(err.Error(), tc.slot+" must be a CEL predicate") || !strings.Contains(err.Error(), "nodes.yaml:") {
-					t.Fatalf("invalid predicate reached an executable bundle: %v, %v", bundle, err)
+				if err != nil {
+					t.Fatalf("source must defer ordinary CEL validation to the executable owner: %v", err)
+				}
+				findings := checkConditionExpressionValidation(&checkerContext{source: semanticview.Wrap(bundle)})
+				found := false
+				for _, finding := range findings {
+					if finding.CheckID == "condition_expression_validation" && finding.Severity == SeverityHardInvalidity && strings.Contains(finding.Message, sentinel) && strings.Contains(finding.Message, "nodes.yaml:") && !strings.Contains(finding.Message, "internal default marker") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("ordinary invalid CEL lost its native cause/source or bypassed verification: %#v", findings)
 				}
 			})
 		}
 	}
 }
 
-func TestScalar2556ReaderCensusExcludesOnlyInternalDefaults(t *testing.T) {
+func TestScalar2556ReaderCensusRetainsEveryNonemptyExpression(t *testing.T) {
 	for _, expression := range []string{"else", "ELSE", "eLsE"} {
 		readers := pipeline.WorkflowHandlerExecutableReaders(nil, runtimeidentity.ExecutableNode{}, "proof.requested", contracts.SystemNodeEventHandler{
 			Activity: contracts.ActivitySpec{Input: map[string]contracts.ExpressionValue{
@@ -183,7 +193,7 @@ func TestScalar2556ReaderCensusExcludesOnlyInternalDefaults(t *testing.T) {
 			Guard: &contracts.GuardSpec{Check: expression},
 			Rules: []contracts.HandlerRuleEntry{{Condition: expression}},
 		})
-		if len(readers) != 2 || readers[0].Expression != expression || readers[1].ConditionContext != pipeline.WorkflowConditionContextGuard {
+		if len(readers) != 3 || readers[0].Expression != expression || readers[1].ConditionContext != pipeline.WorkflowConditionContextGuard || readers[2].ConditionContext != pipeline.WorkflowConditionContextRule {
 			t.Fatalf("non-default expression hidden from validation: %#v", readers)
 		}
 	}

@@ -818,7 +818,6 @@ name: coordinator-flow
 func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := decodeNodeTestYAML([]byte(`
-else: true
 compute:
   store_as: entity.composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
@@ -835,7 +834,6 @@ emit: root.done
 rules:
   - when: payload.ok
     advances_to: done
-  - else: true
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-EMIT") {
 		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-EMIT", err)
@@ -846,8 +844,7 @@ func TestSystemNodeEventHandlerDecode_RejectsRuleLevelSetsGate(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte(`
 rules:
-  - else: true
-    sets_gate: approved
+  - sets_gate: approved
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), `rule field "sets_gate" is not supported.`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want rule-level sets_gate rejection", err)
@@ -919,8 +916,7 @@ rules:
       monotonicity:
         - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
     emit: treasury.throttle_recorded
-  - default: true
-    emit: scan.default_requested
+  - emit: scan.default_requested
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -933,7 +929,7 @@ rules:
 		`payload.mode == "quick" && payload.target == "repository"`,
 		`entity.spend_ratio >= policy.warning_pct / 100 && entity.spend_ratio < policy.throttle_pct / 100`,
 		`entity.spend_ratio >= policy.throttle_pct / 100 && entity.spend_ratio < 1.0`,
-		"else",
+		"",
 	}
 	wantKinds := []PolicySheetRowKind{
 		PolicySheetRowKindWhen,
@@ -974,8 +970,7 @@ rules:
       default: fail
   - when: computed.template_path == "templates/service/go"
     emit: repo.service_template_selected
-  - default: true
-    emit: repo.other_template_selected
+  - emit: repo.other_template_selected
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -1030,8 +1025,7 @@ rules:
       into: computed.validation.deploy_manifest
   - when: computed.validation.deploy_manifest.valid == false
     emit: deploy.manifest_invalid
-  - default: true
-    emit: deploy.manifest_accepted
+  - emit: deploy.manifest_accepted
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -1082,8 +1076,7 @@ rules:
       into: computed.rendered_bundle
   - when: computed.rendered_bundle.format == "yaml"
     emit: bundle.rendered
-  - default: true
-    emit: bundle.render_failed
+  - emit: bundle.render_failed
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -1138,8 +1131,7 @@ rules:
 rules:
   - when: payload.mode == "case"
     emit: scan.case_requested
-  - else: true
-    emit: scan.default_requested
+  - emit: scan.default_requested
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
@@ -1152,11 +1144,11 @@ rules:
 	if got := handler.Rules[0].PolicyRow.Kind; got != PolicySheetRowKindWhen {
 		t.Fatalf("rules[0].PolicyRow.Kind = %q, want when", got)
 	}
-	if got := handler.Rules[1].DisplayLabel("rules", 1); got != "rules[1]: else" || handler.Rules[1].Emit.EventType() != "scan.default_requested" {
+	if got := handler.Rules[1].DisplayLabel("rules", 1); got != "rules[1]: default" || handler.Rules[1].Emit.EventType() != "scan.default_requested" {
 		t.Fatalf("rules[1] presentation or output changed: %#v", handler.Rules[1])
 	}
-	if got := handler.Rules[1].Condition; got != "else" {
-		t.Fatalf("rules[1].Condition = %q, want else", got)
+	if got := handler.Rules[1].Condition; got != "" {
+		t.Fatalf("rules[1].Condition = %q, want predicate omission", got)
 	}
 	if got := handler.Rules[1].PolicyRow.Kind; got != PolicySheetRowKindDefault {
 		t.Fatalf("rules[1].PolicyRow.Kind = %q, want default", got)
@@ -1178,7 +1170,7 @@ rules:
       equals: deep
     emit: scan.deep_requested
 `,
-			contains: "require an else/default row",
+			contains: "must end with a predicate-less default row",
 		},
 		{
 			name: "duplicate case key",
@@ -1192,8 +1184,7 @@ rules:
       selector: payload.mode
       equals: deep
     emit: scan.deep_b
-  - default: true
-    emit: scan.default
+  - emit: scan.default
 `,
 			contains: "duplicate case key",
 		},
@@ -1211,8 +1202,7 @@ rules:
       gte: 5
       lt: 15
     advances_to: overlap
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "overlapping literal ranges",
 		},
@@ -1224,8 +1214,7 @@ rules:
       value: entity.spend_ratio
       gte: payload.warning_ratio
     advances_to: warning
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "dynamic bound",
 		},
@@ -1238,8 +1227,7 @@ rules:
       gte: policy.warning_ratio
       lt: policy.throttle_ratio
     advances_to: warning
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "requires monotonicity",
 		},
@@ -1259,8 +1247,7 @@ rules:
       monotonicity:
         - policy.warning_ratio <= policy.throttle_ratio <= 1.0
     advances_to: throttle
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "overlapping ranges",
 		},
@@ -1272,8 +1259,7 @@ rules:
       selector: fan_out.count
       equals: 3
     advances_to: fanout
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "unsupported root",
 		},
@@ -1285,8 +1271,7 @@ rules:
       selector: 'payload.mode=="admin"||payload.mode'
       equals: deep
     advances_to: injected
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `,
 			contains: "simple dotted path",
 		},
@@ -1478,12 +1463,11 @@ func TestSystemNodeEventHandlerDecode_DerivesPolicyDisplayFromPredicateAndPositi
     advances_to: ok
   - when: payload.ok
     advances_to: retry
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
-	if len(handler.Rules) != 3 || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when payload.ok" || handler.Rules[1].DisplayLabel("rules", 1) != "rules[1]: when payload.ok" || handler.Rules[2].DisplayLabel("rules", 2) != "rules[2]: else" ||
+	if len(handler.Rules) != 3 || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when payload.ok" || handler.Rules[1].DisplayLabel("rules", 1) != "rules[1]: when payload.ok" || handler.Rules[2].DisplayLabel("rules", 2) != "rules[2]: default" ||
 		handler.Rules[0].AdvancesTo != "ok" || handler.Rules[1].AdvancesTo != "retry" || handler.Rules[2].AdvancesTo != "fallback" {
 		t.Fatalf("derived presentation lost position or row outcomes: %#v", handler.Rules)
 	}
@@ -1574,7 +1558,7 @@ func TestSystemNodeEventHandlerDecode_RejectsEmptyAuthoredRows(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "rules sequence", raw: "rules:\n  - {}\n", want: "EMPTY-AUTHORED-RULE"},
+		{name: "rules sequence", raw: "rules:\n  - {}\n", want: "DIALECT-RULES-DEFAULT"},
 		{name: "rules keyed", raw: "rules:\n  selected: {}\n", want: "DIALECT-RULES-ORDER"},
 		{name: "on complete sequence", raw: "on_complete:\n  - {}\n", want: "EMPTY-AUTHORED-RULE"},
 	} {
@@ -1601,7 +1585,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 		{name: "null rules", raw: "rules: null\n", want: "DIALECT-RULES-ORDER"},
 		{name: "null on complete", raw: "on_complete: null\n", want: "DIALECT-OC-ORDER"},
 		{name: "duplicate keyed label", raw: "rules:\n  selected: {else: true}\n  selected: {else: true}\n", want: "DIALECT-RULES-ORDER"},
-		{name: "duplicate canonical row field", raw: "rules:\n  - else: true\n    emit: first\n    emit: second\n", want: `duplicate effective YAML key "emit"`},
+		{name: "duplicate canonical row field", raw: "rules:\n  - emit: first\n    emit: second\n", want: `duplicate effective YAML key "emit"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
@@ -1610,7 +1594,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
 			if tc.name == "duplicate canonical row field" {
-				for _, want := range []string{`$["rules"][0]["emit"]`, "nodes.yaml:3:5", "nodes.yaml:4:5"} {
+				for _, want := range []string{`$["rules"][0]["emit"]`, "nodes.yaml:2:5", "nodes.yaml:3:5"} {
 					if !strings.Contains(err.Error(), want) {
 						t.Fatalf("duplicate row field lost exact source ownership %q: %v", want, err)
 					}
@@ -1642,8 +1626,8 @@ handler:
 		})
 	}
 	var handler SystemNodeEventHandler
-	err := decodeNodeTestMember([]byte("template: &rule {else: true, advances_to: done}\nhandler:\n  rules: [*rule]\n"), "handler", &handler)
-	if err != nil || len(handler.Rules) != 1 || handler.Rules[0].AdvancesTo != "done" || handler.Rules[0].Condition != "else" || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: else" {
+	err := decodeNodeTestMember([]byte("template: &rule {advances_to: done}\nhandler:\n  rules: [*rule]\n"), "handler", &handler)
+	if err != nil || len(handler.Rules) != 1 || handler.Rules[0].AdvancesTo != "done" || handler.Rules[0].Condition != "" || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: default" {
 		t.Fatalf("ordered alias lost its predicate, target or derived display: %#v, %v", handler, err)
 	}
 }
@@ -1687,7 +1671,6 @@ clear:
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := decodeNodeTestYAML([]byte(`
-else: true
 compute:
   operation: pick_or_average
   description: choose the strongest score
@@ -1710,7 +1693,7 @@ compute:
 
 func TestHandlerRuleEntryDecode_RejectsInertComputeParams(t *testing.T) {
 	var rule HandlerRuleEntry
-	err := decodeNodeTestYAML([]byte("else: true\ncompute:\n  operation: pick_or_average\n  params: {strategy: strict}\n"), &rule)
+	err := decodeNodeTestYAML([]byte("compute:\n  operation: pick_or_average\n  params: {strategy: strict}\n"), &rule)
 	if err == nil || !strings.Contains(err.Error(), `compute field "params" is not supported`) {
 		t.Fatalf("inert compute.params accepted: %v", err)
 	}
@@ -1719,7 +1702,6 @@ func TestHandlerRuleEntryDecode_RejectsInertComputeParams(t *testing.T) {
 func TestHandlerRuleEntryDecode_AcceptsPickOrAverageOperation(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := decodeNodeTestYAML([]byte(`
-else: true
 compute:
   operation: pick_or_average
   store_as: entity.composite
@@ -1739,7 +1721,6 @@ compute:
 func TestHandlerRuleEntryDecode_RejectsWeightedSumOperation(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := decodeNodeTestYAML([]byte(`
-else: true
 compute:
   operation: weighted_sum
   store_as: entity.composite
@@ -1754,7 +1735,6 @@ compute:
 func TestHandlerRuleEntryDecode_RejectsLegacyOutputFieldAlias(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := decodeNodeTestYAML([]byte(`
-else: true
 compute:
   operation: pick_or_average
   output_field: composite
@@ -2560,8 +2540,7 @@ func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t 
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte(`
 rules:
-  - else: true
-    emit:
+  - emit:
       fields:
         scan_id: payload.scan_id
 `), &handler)
@@ -2898,15 +2877,14 @@ rules:
       event: rule.needs_human
       fields:
         amount: payload.amount
-  - else: true
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := handler.OnSuccess.Emit.EventType(); got != "handler.succeeded" {
 		t.Fatalf("OnSuccess.Emit.EventType = %q, want handler.succeeded", got)
 	}
-	if got := len(handler.Rules); got != 2 {
-		t.Fatalf("Rules len = %d, want 2", got)
+	if got := len(handler.Rules); got != 1 {
+		t.Fatalf("Rules len = %d, want 1 (no-op default removed)", got)
 	}
 	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
 		t.Fatalf("HandlerEmitEvents = %#v", got)
@@ -2930,8 +2908,7 @@ rules:
     emit:
       fields:
         bucket: "medium"
-  - else: true
-    emit:
+  - emit:
       fields:
         bucket: "low"
 `), &handler); err != nil {
@@ -2967,7 +2944,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidRulesEmitTemplateSpecializat
 		contains string
 	}{
 		{
-			name: "missing_else",
+			name: "missing_default",
 			raw: `
 emit:
   event: account.bucketed
@@ -2977,7 +2954,7 @@ rules:
       fields:
         bucket: '"high"'
 `,
-			contains: "require an else/default row",
+			contains: "must end with a predicate-less default row",
 		},
 		{
 			name: "field_conflict",
@@ -2987,8 +2964,7 @@ emit:
   fields:
     bucket: '"base"'
 rules:
-  - else: true
-    emit:
+  - emit:
       fields:
         bucket: '"low"'
 `,
@@ -3004,8 +2980,7 @@ rules:
     emit:
       fields:
         bucket: '"high"'
-  - else: true
-    emit:
+  - emit:
       event: account.dropped
       fields:
         bucket: '"low"'
@@ -3018,8 +2993,7 @@ rules:
 emit:
   event: account.bucketed
 rules:
-  - else: true
-    emit:
+  - emit:
       target: sender
       fields:
         bucket: '"low"'
@@ -3034,8 +3008,7 @@ emit:
 on_success:
   emit: account.audit
 rules:
-  - else: true
-    emit:
+  - emit:
       fields:
         bucket: '"low"'
 `,
@@ -3074,8 +3047,7 @@ emit: handler.default
 on_success:
   emit: handler.succeeded
 rules:
-  - else: true
-    emit: rule.done
+  - emit: rule.done
 `,
 			contains: "handler-top-level emit is only allowed on single-emit handlers",
 		},
@@ -3085,8 +3057,7 @@ rules:
 on_success:
   emit: handler.succeeded
 rules:
-  - else: true
-    emit: rule.done
+  - emit: rule.done
 on_complete:
   - emit: flow.complete
 `,
@@ -3098,8 +3069,7 @@ on_complete:
 on_success:
   emit: handler.succeeded
 rules:
-  - else: true
-    emit: rule.done
+  - emit: rule.done
 fan_out:
   items_from: payload.items
   as: line_item
@@ -3114,8 +3084,7 @@ fan_out:
 on_success:
   emit: handler.succeeded
 rules:
-  - else: true
-    fan_out:
+  - fan_out:
       items_from: payload.items
       as: line_item
       identity: line_item.id
@@ -3129,8 +3098,7 @@ rules:
 on_success:
   action: notify
 rules:
-  - else: true
-    emit: rule.done
+  - emit: rule.done
 `,
 			contains: "on_success field",
 		},
