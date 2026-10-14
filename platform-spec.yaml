@@ -11701,13 +11701,21 @@ tool_model:
         refusals, and replacement, reset, unbind, logout or source retirement must join the original construction,
         SDK callbacks and private-store work before releasing possession. Fresh account checkpointing remains the
         separate canonical pairing-admission operation; pending storage preparation supplies none of its authority.
-        CLI connect first consumes server selection and credential admission without reading a secret. Only the
+        CLI connect first consumes server selection and credential admission without reading a secret. Explicit
+        replacement consumes the non-executing onboarding_select projection before input and uses its exact
+        selection fence and replacement in the first Start, never a credential-less effectful Start. Only the
         exact selected declaration's explicit provider credential role authorizes hidden input and exact-operation
         retry; signing credentials remain separate. A validated empty requirement never prompts or reads stdin.
         Explicit inapplicable replacement refuses before input. Pending connect/resume returns that operation
         truthfully as not READY with an explicit swarm channel resume continuation, not automatic polling or
         reconnect. READY output requires succeeded responsibility and current readiness evidence; historical
         success, failed/retired state, genuine prerequisite blockage and malformed progress remain refusals.
+        Authenticated awaiting_qr readback with exact retained identity, nonempty unexpired pairing material and
+        contradictory-evidence checks is actionable nonterminal progress even at an unchanged operation revision.
+        Paired/connected progress remains nonterminal and not READY; it never substitutes for claim or confirmation.
+        Human/JSON may disclose pairing material only on the authenticated output surface; quiet returns only the
+        operation identity. QR expiry, terminal history and malformed progress fail closed. Explicit resume advances
+        once; these progress states do not authorize automatic polling, replacement or reconnect.
       session_state_join: >
         The WhatsApp connection owner fences and joins every pinned SDK private-store method, not only Swarm callbacks.
         Closing database/sql or the upstream callback queue is not proof that an existing SDK transaction has finished.
@@ -12574,7 +12582,7 @@ tool_model:
         identity: operator_account_binding
         registration: public_ingress.provider_registration
         readiness: ConnectedChannelReadiness exact-current projection
-        api: /v1/rpc channel.onboarding_start|channel.onboarding_get|channel.onboarding_retry and channel.list
+        api: /v1/rpc channel.onboarding_select|channel.onboarding_start|channel.onboarding_get|channel.onboarding_retry and channel.list
         cli: swarm channel connect|reconnect|rebind|resume|list|status|unbind
       context_coordinate_rule: >
         Every candidate, operation, pre-binding intent, learned activation, provider effect, compiled executable plan,
@@ -12657,6 +12665,15 @@ tool_model:
         references for that admitted activation; stale or incomplete evidence fails currentness rather than substituting
         an original key or recreating credentials. Ordinary secrets writes and readback do not hot-activate ingress.
       credential_rule: >
+        Explicit credential replacement first consumes authenticated, non-executing onboarding_select readback from
+        the same declaration resolver as Start. It neither reserves an operation nor reads or writes credentials,
+        opens SDK state, or launches effects. Ambiguous or inapplicable selections fail before secret input. A transient
+        selection fence binds the selected principal, verb, complete declaration and live coordinates, proof choice
+        and client language, never secret bytes or display labels. Start re-resolves and rejects a changed fence before
+        reservation or mutation, then consumes the replacement in that first Start; no credential-less Start may run
+        on the old value before explicit replacement input. This fence is not persisted or credential write authority.
+        Credential-required readback binds the exact retained operation and selected role; effective operation-owned
+        keys may differ from base reservations. Only the canonical credential owner validates and writes those keys.
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
         values and reusable or unkeyed secret digests are forbidden in semantic request hashes, API idempotency rows,
         selected-store rows, logs, traces, progress, errors, and readback. The credential subsystem alone may create and
@@ -36762,6 +36779,13 @@ api_specification:
             minItems: 1
             uniqueItems: true
             items: {type: string, minLength: 1}
+      ChannelOnboardingSelection:
+        type: object
+        additionalProperties: false
+        required: [candidate, selection_fence]
+        properties:
+          candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
+          selection_fence: {type: string, minLength: 1, description: Transient exact-selection comparison only; no persisted or credential-write authority.}
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
@@ -41152,6 +41176,21 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
+    channel.onboarding_select:
+      tier: must_have
+      description: Resolve one exact onboarding declaration and its provider credential requirement without reservation, credential observation or writes, SDK state, or effects. Start must revalidate the transient selection fence before mutation.
+      scope: {required: [control:channels]}
+      params:
+      - {name: verb, required: true, schema: {type: string, enum: [connect, reconnect, rebind]}}
+      - {name: provider, required: true, schema: {type: string, minLength: 1}}
+      - {name: bundle, required: false, schema: {type: string, pattern: '^bundle-v2:sha256:[0-9a-f]{64}$'}}
+      - {name: interface, required: false, schema: {type: string, minLength: 1}}
+      - {name: target, required: false, schema: {type: string, minLength: 1}}
+      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
+      - {name: client_language, required: false, schema: {type: string, minLength: 1}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingSelection'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT]
     channel.onboarding_start:
       tier: must_have
       description: Reserve and advance one durable exact-context connected-channel connect, reconnect, or rebind journey. Provider secret material is transient write-only input and is absent from request identity, durable rows, logs, errors, and readback.
@@ -41192,6 +41231,11 @@ api_specification:
             type: string
             minLength: 1
             writeOnly: true
+        - name: expected_selection
+          required: false
+          schema:
+            type: string
+            minLength: 1
         - name: save_proof
           required: false
           schema:
