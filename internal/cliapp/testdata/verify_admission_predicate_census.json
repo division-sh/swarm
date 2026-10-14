@@ -1779,7 +1779,7 @@
     "owner": "internal/runtime/runtime.go::AuthorActivityEventDescriptors",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "6b1425175250c557600d155f5e9dc7cd5f617ea178d29194e5f0b063f0c0402f"
+    "body_sha256": "9218a9c14c6a3ce30d8ad5de30e4dc9fb65d3271233da75ff20ccfa12b4a8952"
   },
   {
     "owner": "internal/runtime/runtime.go::CanonicalBootProgressName",
