@@ -18,7 +18,7 @@ import (
 
 // Preparation observes the original live owner. It neither opens a connection
 // nor grants an unlink permit; selected teardown and journal admission follow.
-func (c *RuntimeConnection) PrepareSessionLogout(ctx context.Context, expected channelonboarding.Operation) (target channelonboarding.SessionLogoutTarget, err error) {
+func (c *RuntimeConnection) PrepareSessionLogout(ctx context.Context, expected channelonboarding.Operation) (target channelonboarding.SessionLogoutPreparation, err error) {
 	work, err := c.begin(ctx)
 	if err != nil {
 		return target, err
@@ -36,14 +36,14 @@ func (c *RuntimeConnection) PrepareSessionLogout(ctx context.Context, expected c
 		return target, err
 	}
 	defer provider.CloseExecution()
-	target = channelonboarding.SessionLogoutTarget{OperationID: op.OperationID, OperationRevision: op.Revision,
+	target = channelonboarding.SessionLogoutPreparation{OperationID: op.OperationID, OperationRevision: op.Revision,
 		OccurrenceID: observed.OccurrenceID, TargetSelector: op.TargetSelector,
-		Account: observed.Admission, Coordinate: op.Coordinate}
+		Account: observed.Admission, Coordinate: op.Coordinate, ProcessBinding: c.processBinding}
 	if !observed.Connected || !target.MatchesOperation(expected) {
-		return channelonboarding.SessionLogoutTarget{}, errRuntimeConnection
+		return channelonboarding.SessionLogoutPreparation{}, errRuntimeConnection
 	}
 	if err := work.Context().Err(); err != nil {
-		return channelonboarding.SessionLogoutTarget{}, err
+		return channelonboarding.SessionLogoutPreparation{}, err
 	}
 	return target, nil
 }
@@ -67,7 +67,7 @@ func (c *RuntimeConnection) DispatchSessionLogout(ctx context.Context, responsib
 	done := make(chan error, 1)
 	go func() {
 		err := executeSessionLogout(owned, settlementCtx, occurrence, handle, func(ctx context.Context) error {
-			return c.requireOriginalLogoutOccurrence(ctx, responsibility)
+			return c.requireCurrentLogoutDispatch(ctx, responsibility)
 		})
 		done <- errors.Join(err, work.Done(), tail.Done())
 	}()
@@ -79,6 +79,27 @@ func (c *RuntimeConnection) DispatchSessionLogout(ctx context.Context, responsib
 	case <-c.ctx.Done():
 		return context.Cause(c.ctx)
 	}
+}
+
+func (c *RuntimeConnection) requireCurrentLogoutDispatch(ctx context.Context, op channelonboarding.TeardownOperation) error {
+	if err := c.requireOriginalLogoutOccurrence(ctx, op); err != nil {
+		return err
+	}
+	reader, ok := c.store.(interface {
+		IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error)
+	})
+	authority, found := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok || !found || authority.Kind != runtimeeffects.AuthorityChannelLogout {
+		return errRuntimeConnection
+	}
+	current, err := reader.IsExternalEffectAuthorityCurrent(ctx, authority)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return errRuntimeConnection
+	}
+	return c.requireOriginalLogoutOccurrence(ctx, op)
 }
 
 // Journal/history settlement is accepted process work, not renewed execution
@@ -138,6 +159,9 @@ func (c *RuntimeConnection) requireOriginalLogoutOccurrence(ctx context.Context,
 		target.Account != c.sessionAccount() || !target.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||
 		occurrence == nil || occurrence.occurrenceID != target.OccurrenceID || !c.state.ownsConnectedOccurrence(ctx, occurrence) ||
 		occurrence.client.Store.Deleted || occurrence.client.Store.ID == nil || occurrence.client.Store.ID.ToNonAD().String() != target.Account.AccountRef {
+		return errRuntimeConnection
+	}
+	if target.ProcessBinding != c.processBinding {
 		return errRuntimeConnection
 	}
 	return ctx.Err()

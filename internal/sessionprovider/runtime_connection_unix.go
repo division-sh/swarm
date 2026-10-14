@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -35,27 +36,29 @@ type RuntimeConnectionOptions struct {
 	Credentials     operatorchannel.CredentialCurrentness
 	Plan            packs.SatisfactionPlan
 	Incoming        *RuntimeIncomingOptions
+	ProcessBinding  processbinding.Binding
 }
 
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
-	lifecycle   chan struct{}
-	parent      *worklifetime.RuntimeOccurrence
-	work        *worklifetime.Lease
-	ctx         context.Context
-	cancel      context.CancelFunc
-	closed      chan struct{}
-	closeErr    error
-	state       *sessionState
-	captures    *captureStore
-	directory   string
-	store       channelonboarding.Store
-	operation   channelonboarding.Operation
-	account     atomic.Pointer[operatorchannel.SessionAccountAdmission]
-	incoming    *runtimeIncoming
-	plan        packs.SatisfactionPlan
-	credentials operatorchannel.CredentialCurrentness
+	lifecycle      chan struct{}
+	parent         *worklifetime.RuntimeOccurrence
+	work           *worklifetime.Lease
+	ctx            context.Context
+	cancel         context.CancelFunc
+	closed         chan struct{}
+	closeErr       error
+	state          *sessionState
+	captures       *captureStore
+	directory      string
+	store          channelonboarding.Store
+	operation      channelonboarding.Operation
+	account        atomic.Pointer[operatorchannel.SessionAccountAdmission]
+	incoming       *runtimeIncoming
+	plan           packs.SatisfactionPlan
+	credentials    operatorchannel.CredentialCurrentness
+	processBinding processbinding.Binding
 }
 
 // OpenRuntimeConnection resumes paired state only after its original selected
@@ -97,7 +100,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 	}
 	owned, cancel := context.WithCancel(work.Context())
 	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1),
-		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory}
+		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
 	if err := c.open(opts.Incoming); err != nil {
@@ -135,6 +138,10 @@ func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOpt
 	}
 	if err := validateRuntimeIncoming(ctx, opts.Incoming, opts.Store, op); err != nil {
 		return nil, empty, err
+	}
+	if !opts.ProcessBinding.IsZero() && (opts.ProcessBinding.Validate() != nil || opts.ProcessBinding.BundleHash != op.Coordinate.BundleHash ||
+		opts.ProcessBinding.RuntimeInstanceID != op.Coordinate.RuntimeInstanceID) {
+		return nil, empty, errRuntimeConnection
 	}
 	return parent, op, nil
 }
