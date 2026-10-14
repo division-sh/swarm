@@ -333,7 +333,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id, e.inherited_fan_out_origin,
 				e.payload_schema_bundle_hash, e.payload_schema_flow_id, e.payload_schema_event_key,
 				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)`,
-			source: eventProjectionSource, runAlias: "e",
+			source: "events e", runAlias: "e",
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
@@ -548,6 +548,9 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 		if spec.source != "" {
 			spec.query += " FROM " + spec.source + " WHERE " + spec.runAlias + ".run_id = $1"
+		}
+		if family == FamilyEvents {
+			spec.query += " AND e.event_name <> '" + excludedEventName + "'"
 		}
 		spec.parts = []projectionPart{{query: spec.query, alias: alias}}
 	}
