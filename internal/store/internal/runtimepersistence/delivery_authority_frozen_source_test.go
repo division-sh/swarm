@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
 
@@ -52,11 +53,21 @@ func TestDeliveryAuthorityActivationPreservesRecordedFrozenSourceBothStores(t *t
 				}
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				for repeat := 0; repeat < 2; repeat++ {
+					probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(restore)
 					commit, err := fixture.store.(interface {
 						ActivateDeliveryAuthorityOutcome(context.Context, deliverylifecycle.ExecutionAuthority) (deliverylifecycle.ActivationCommit, error)
 					}).ActivateDeliveryAuthorityOutcome(ctx, authority)
 					if err != nil || !commit.Acknowledged {
 						t.Fatalf("activation did not acknowledge: %+v %v", commit, err)
+					}
+					counts := probe.Snapshot()
+					restore()
+					if counts.Active != 0 || counts.Total.WriteCommits != 1 || counts.Total.Revision.LockPhases != 0 || counts.Total.Revision.QueryCalls != 0 || counts.Total.Revision.QueryRowCalls != 0 || counts.Total.Revision.ExecCalls != 0 {
+						t.Errorf("frozen activation declared revision work: %+v", counts)
 					}
 					after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					if !reflect.DeepEqual(before, after) {
@@ -81,24 +92,36 @@ func TestDeliveryAuthorityActivationPreservesLiveEligibilityBothStores(t *testin
 				ctx := testAuthorActivityContext()
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-				if _, err := fixture.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
-					t.Fatal(err)
-				}
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateLaunching} {
+					if _, err := fixture.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StateRunning}); err != nil {
+						t.Fatal(err)
+					}
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "freeze.delivery", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					if err := insertCanonicalEventRecordFixture(ctx, fixture.store, event); err != nil {
 						t.Fatal(err)
 					}
 					prior := seedDeliveryStateFixture(t, ctx, fixture.store, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("live-" + string(deliveryState))}, deliveryState, nil)
+					if _, err := fixture.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
+						t.Fatal(err)
+					}
 					authority, err := deliverylifecycle.NewNormalExecutionAuthority(prior.Authority.SourceArtifact(), uuid.NewString(), prior.Authority.Generation()+1)
 					if err != nil {
 						t.Fatal(err)
 					}
-					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(restore)
 					if err := fixture.store.(interface {
 						ActivateDeliveryAuthority(context.Context, deliverylifecycle.ExecutionAuthority) error
 					}).ActivateDeliveryAuthority(ctx, authority); err != nil {
 						t.Fatal(err)
+					}
+					counts := probe.Snapshot()
+					restore()
+					if counts.Active != 0 || counts.Total.WriteCommits != 1 || counts.Total.Revision.LockPhases != 1 || counts.Total.Revision.QueryCalls == 0 {
+						t.Fatalf("eligible delivery activation lost its revision accounting: %+v", counts)
 					}
 					got, err := fixture.store.Snapshot(ctx, prior.DeliveryID)
 					if err != nil || !got.Authority.Equal(authority) || got.ClaimVersion != prior.ClaimVersion || got.ActiveSessionID != prior.ActiveSessionID || got.Status != prior.Status || !reflect.DeepEqual(got.Route, prior.Route) {
@@ -106,10 +129,6 @@ func TestDeliveryAuthorityActivationPreservesLiveEligibilityBothStores(t *testin
 					}
 					if deliveryState == deliverylifecycle.StateLaunching && !got.ClaimExpiresAt.Before(prior.ClaimExpiresAt) {
 						t.Fatal("live predecessor attempt was not made reclaimable")
-					}
-					after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					if reflect.DeepEqual(before["run_fork_revision_heads"], after["run_fork_revision_heads"]) || reflect.DeepEqual(before["run_fork_revisions"], after["run_fork_revisions"]) {
-						t.Fatal("eligible delivery activation lost its revision accounting")
 					}
 				}
 			})
