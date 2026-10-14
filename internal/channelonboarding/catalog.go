@@ -72,6 +72,23 @@ func (c Candidate) MarshalJSON() ([]byte, error) {
 	}{readback: readback(c), Capabilities: c.Plan.Capabilities().Vector()})
 }
 
+func (c *Candidate) UnmarshalJSON(raw []byte) error {
+	type readback Candidate
+	var decoded struct {
+		readback
+		ProviderCredentialRole *string `json:"provider_credential_role"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	if decoded.ProviderCredentialRole == nil {
+		return fmt.Errorf("channel candidate readback requires an explicit provider credential role")
+	}
+	*c = Candidate(decoded.readback)
+	c.ProviderCredentialRole = *decoded.ProviderCredentialRole
+	return nil
+}
+
 func (c Candidate) Validate() error {
 	if err := c.ValidateDeclaration(); err != nil {
 		return err

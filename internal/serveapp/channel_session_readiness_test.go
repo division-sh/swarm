@@ -22,7 +22,7 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 	f := newServeBootstrapTestFixture(t, backend)
 	serveBootstrapWireFixture(t, "paired", f.owner)
 	seedServePairedDevice(t, f)
-	if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+	if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 		t.Fatal(err)
 	}
 	wait, stop := context.WithTimeout(f.ctx, 5*time.Second)
@@ -70,7 +70,7 @@ func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			result := make(chan error, 1)
-			go func() { result <- f.adapter.ResumeSession(caller, op, f.candidate) }()
+			go func() { result <- awaitServeSessionBootstrapFixture(caller, f.adapter, op, f.candidate, true) }()
 			select {
 			case <-entered:
 			case err := <-result:
@@ -82,8 +82,15 @@ func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.
 			provider, observation, current, err := observer.ObserveSession(wait, op)
 			provider.CloseExecution()
 			stop()
-			if !errors.Is(err, context.DeadlineExceeded) || current || observation.Connected {
-				t.Fatal("pending paired readiness ignored cancellation or granted health", err, current, observation)
+			// Ruling6177967097 makes pending health a nonblocking projection,
+			// not a second constructor wait. Cancellation remains a refusal.
+			if err != nil || current || observation.Connected {
+				t.Fatal("pending paired readiness waited or granted health", err, current, observation)
+			}
+			provider, observation, current, err = observer.ObserveSession(wait, op)
+			provider.CloseExecution()
+			if !errors.Is(err, context.Canceled) || current || observation.Connected {
+				t.Fatal("canceled paired readiness became successful observation", err, current, observation)
 			}
 			cancel()
 			select {

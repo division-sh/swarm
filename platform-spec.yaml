@@ -11703,6 +11703,28 @@ tool_model:
         Callback ownership binds exactly once before connect to the exact client occurrence, and callback failure
         fences that transport before recording its retained failure evidence.
         Session execution remains unavailable until its complete admitted connection implementation is installed.
+      session_request_progress: >
+        The retained onboarding operation owns session progress. Start, Retry and Get may return that same operation
+        while its admitted runtime owner is still preparing private session/device state; pending preparation is not
+        successful bootstrap, QR availability, paired account, connection readiness or executable business authority.
+        No public phase or successor is created merely because a request stops waiting. The existing pairing
+        readback explicitly reports status preparing with no code, expiry, paired or connected authority;
+        absence of pairing alone and unchanged phase/revision do not establish pending preparation.
+        Result projection must not reacquire the preparation wait.
+        Private preparation remains counted and owned after its admitted request handoff, and launches no SDK dial.
+        A live explicit onboarding request advances the same prepared connection; its cancellation still fences its
+        pending SDK dial/handshake. Startup restoration explicitly awaits that same owner before retained identity
+        and recovery work; this does not introduce another retry or reconnect policy. Failed or closed attempts remain
+        refusals, and replacement, reset, unbind, logout or source retirement must join the original construction,
+        SDK callbacks and private-store work before releasing possession. Fresh account checkpointing remains the
+        separate canonical pairing-admission operation; pending storage preparation supplies none of its authority.
+        CLI connect first consumes server selection and credential admission without reading a secret. Only the
+        exact selected declaration's explicit provider credential role authorizes hidden input and exact-operation
+        retry; signing credentials remain separate. A validated empty requirement never prompts or reads stdin.
+        Explicit inapplicable replacement refuses before input. Pending connect/resume returns that operation
+        truthfully as not READY with an explicit swarm channel resume continuation, not automatic polling or
+        reconnect. READY output requires succeeded responsibility and current readiness evidence; historical
+        success, failed/retired state, genuine prerequisite blockage and malformed progress remain refusals.
       session_state_join: >
         The WhatsApp connection owner fences and joins every pinned SDK private-store method, not only Swarm callbacks.
         Closing database/sql or the upstream callback queue is not proof that an existing SDK transaction has finished.
@@ -36757,7 +36779,7 @@ api_specification:
             additionalProperties: false
             required: [status, paired, connected]
             properties:
-              status: {type: string, enum: [not_started, awaiting_qr, qr_expired, paired, connected, failed, stopped, recovery_required]}
+              status: {type: string, enum: [preparing, not_started, awaiting_qr, qr_expired, paired, connected, failed, stopped, recovery_required]}
               code: {type: string, minLength: 1, maxLength: 4096}
               expires_at: {$ref: '#/components/schemas/Timestamp'}
               paired: {type: boolean}
