@@ -1964,6 +1964,12 @@ func ReadPublicationEventIdentityStorageForTest(ctx context.Context, selected an
 	return out, nil
 }
 
+func ReadPhysicalPublicationEntityIdentityStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadPhysicalPublicationEntityIdentityStorageTx(ctx, tx, eventID)
+	})
+}
+
 func ReadServedEventRunIDStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return "", err

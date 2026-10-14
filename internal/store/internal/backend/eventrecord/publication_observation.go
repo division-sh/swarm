@@ -100,6 +100,15 @@ func ReadPublicationEventIdentityStorageTx(ctx context.Context, tx *sql.Tx, even
 	return out, nil
 }
 
+func ReadPhysicalPublicationEntityIdentityStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var entityID string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(CAST(entity_id AS TEXT),'') FROM events WHERE event_id=$1`, eventID).Scan(&entityID)
+	if err != nil {
+		return "", err
+	}
+	return entityID, nil
+}
+
 type OperatorReferenceStorage struct{ SourceEventID, ReferenceEventID string }
 
 func ReadOperatorReferenceStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (OperatorReferenceStorage, error) {

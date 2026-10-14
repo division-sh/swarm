@@ -3311,9 +3311,9 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
 		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
 	}
-	requestedEventID := waitServedEventPublishEventID(t, db, reader, backend, root.RunID, "producer/validation.requested")
+	requestedEventID := waitServedEventPublishEventID(t, reader, backend, root.RunID, "producer/validation.requested")
 
-	requestedPayload := servedEventPayloadObject(t, db, backend, requestedEventID)
+	requestedPayload := servedEventPayloadObject(t, reader, backend, requestedEventID)
 	if requestedPayload["candidate"] != "candidate-1" {
 		t.Fatalf("%s requested payload = %#v, want authored candidate", backend, requestedPayload)
 	}
@@ -3328,27 +3328,22 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 	if targetFlow != "validator" || targetInstance == "" {
 		t.Fatalf("%s projected route target = %s/%s, want concrete validator instance", backend, targetFlow, targetInstance)
 	}
-	startedEventID := waitServedEventPublishEventID(t, db, reader, backend, root.RunID, targetInstance+"/validation.started")
-	startedPayload := servedEventPayloadObject(t, db, backend, startedEventID)
+	startedEventID := waitServedEventPublishEventID(t, reader, backend, root.RunID, targetInstance+"/validation.started")
+	startedPayload := servedEventPayloadObject(t, reader, backend, startedEventID)
 	if startedPayload["candidate"] != "candidate-1" || startedPayload["validation_case_id"] != validationCaseID {
 		t.Fatalf("%s downstream payload = %#v, want explicit candidate and projected validation_case_id %s", backend, startedPayload, validationCaseID)
 	}
-	if current := servedEventPayloadObject(t, db, backend, requestedEventID); !reflect.DeepEqual(current, requestedPayload) {
+	if current := servedEventPayloadObject(t, reader, backend, requestedEventID); !reflect.DeepEqual(current, requestedPayload) {
 		t.Fatalf("%s source payload changed after handler execution: before=%#v after=%#v", backend, requestedPayload, current)
 	}
 
 	requireServedParitySettlementPostconditions(t, endpoint, reader, backend, root.RunID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
 
-func servedEventPayloadObject(t *testing.T, db *sql.DB, backend, eventID string) map[string]any {
+func servedEventPayloadObject(t *testing.T, reader servedEventCountReader, backend, eventID string) map[string]any {
 	t.Helper()
-	query := "SELECT payload FROM events WHERE event_id = ?"
-	args := []any{eventID}
-	if backend == "postgres" {
-		query = "SELECT payload::text FROM events WHERE event_id = $1::uuid"
-	}
-	var raw string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+	raw, err := readServedPublicationPayloadText(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
 	}
 	var payload map[string]any
@@ -3435,14 +3430,14 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for dynamic event.publish proof")
 	}
-	runServedDynamicAutoEmitProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, reader, "sqlite", bundleHash, blocked, release, &releaseOnce)
 }
 
 func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	var reader receiverProofStateReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	t.Helper()
-	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	sourceRoot := writeServedDynamicAutoEmitFixture(t)
@@ -3465,14 +3460,14 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
-	runServedDynamicAutoEmitProof(t, endpoint, db, reader, "postgres", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, reader, "postgres", bundleHash, blocked, release, &releaseOnce)
 }
 
 // Typed input routing derives this concrete path from the declared instance_id
 // business key; the retired create action used that key verbatim as its path.
 const servedTypedCreationInstancePath = "operating/ti-637499c0f9a5eda60519f6d3"
 
-func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
+func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, reader receiverProofStateReader, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "opco.bootstrap_requested", "bundle_hash": bundleHash, "payload": map[string]any{"owner": "operator"}, "idempotency_key": "issue-1384-" + backend + "-bootstrap"})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
@@ -3512,9 +3507,9 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
-	autoEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, autoEventName)
-	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
-	assertServedDynamicAutoEmitPayload(t, db, backend, autoEventID, map[string]any{"instance_id": instanceID, "product_id": "product-1"})
+	autoEventID := waitServedEventPublishEventID(t, reader, backend, runID, autoEventName)
+	autoEntityID := servedEventPublishEventEntityID(t, reader, backend, autoEventID)
+	assertServedDynamicAutoEmitPayload(t, reader, backend, autoEventID, map[string]any{"instance_id": instanceID, "product_id": "product-1"})
 	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, lifecycleNode)
 	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, lifecycleNode)
@@ -3523,13 +3518,13 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, autoEventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	if got := servedEventPublishReceiptCountBySubscribers(t, db, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
+	if got := servedEventPublishReceiptCountBySubscribers(t, reader, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
 		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
 	componentEventName := servedTypedCreationInstancePath + "/component_scaffold.spawn_requested"
-	componentEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, componentEventName)
-	assertServedDynamicAutoEmitPayload(t, db, backend, componentEventID, map[string]any{"product_id": "product-1"})
-	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
+	componentEventID := waitServedEventPublishEventID(t, reader, backend, runID, componentEventName)
+	assertServedDynamicAutoEmitPayload(t, reader, backend, componentEventID, map[string]any{"product_id": "product-1"})
+	componentEntityID := servedEventPublishEventEntityID(t, reader, backend, componentEventID)
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
@@ -5096,9 +5091,9 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	}
 	waitServedEventPublishDeliveryStatusCount(t, reader, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
-	autoEventID := waitServedEventPublishEventID(t, db, reader, backend, runID, autoEventName)
+	autoEventID := waitServedEventPublishEventID(t, reader, backend, runID, autoEventName)
 	waitServedEventPublishDeliveryStatusCount(t, reader, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
-	entityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
+	entityID := servedEventPublishEventEntityID(t, reader, backend, autoEventID)
 	if entityID == "" {
 		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedInspectionRunDebugSummary(reader, runID))
 	}
@@ -5797,61 +5792,34 @@ func servedEventPublishReceiptOutcomeCount(t *testing.T, reader servedEventCount
 	return count
 }
 
-func servedEventPublishReceiptCountBySubscribers(t *testing.T, db *sql.DB, backend, eventID string, subscriberIDs ...string) int {
+func servedEventPublishReceiptCountBySubscribers(t *testing.T, reader servedEventCountReader, backend, eventID string, subscriberIDs ...string) int {
 	t.Helper()
 	if len(subscriberIDs) == 0 {
 		t.Fatal("subscriberIDs is required")
 	}
-	var query string
-	args := []any{eventID}
-	switch backend {
-	case "postgres":
-		placeholders := make([]string, 0, len(subscriberIDs))
-		for _, subscriberID := range subscriberIDs {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
-			args = append(args, subscriberID)
-		}
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
-	case "sqlite":
-		placeholders := make([]string, 0, len(subscriberIDs))
-		for _, subscriberID := range subscriberIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, subscriberID)
-		}
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s receipt subscriber count query failed: %v\n%s", backend, err, query)
+	count, err := readServedSubscriberReceiptCount(context.Background(), reader, eventID, subscriberIDs)
+	if err != nil {
+		t.Fatalf("%s receipt subscriber count query failed: %v", backend, err)
 	}
 	return count
 }
 
-func waitServedEventPublishEventID(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, runID, eventName string) string {
+func waitServedEventPublishEventID(t *testing.T, reader receiverProofStateReader, backend, runID, eventName string) string {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
-		args = []any{runID, eventName}
-	case "sqlite":
-		query = `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
-		args = []any{runID, eventName}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
-		var eventID string
-		err := db.QueryRowContext(context.Background(), query, args...).Scan(&eventID)
+		eventID, err := readServedRunNamedPublicationIdentity(context.Background(), reader, runID, eventName)
 		if err == nil && strings.TrimSpace(eventID) != "" {
 			return strings.TrimSpace(eventID)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("%s event id query failed: %v\n%s", backend, err, query)
+			t.Fatalf("%s event id query failed: %v", backend, err)
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s timed out waiting for event %q in run %s\n%s", backend, eventName, runID, servedInspectionRunDebugSummary(reader, runID))
@@ -5860,43 +5828,25 @@ func waitServedEventPublishEventID(t *testing.T, db *sql.DB, reader receiverProo
 	}
 }
 
-func servedEventPublishEventEntityID(t *testing.T, db *sql.DB, backend, eventID string) string {
+func servedEventPublishEventEntityID(t *testing.T, reader servedEventCountReader, backend, eventID string) string {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT COALESCE(entity_id::text, '') FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT COALESCE(entity_id, '') FROM events WHERE event_id = ?`
-		args = []any{eventID}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var entityID string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&entityID); err != nil {
+	entityID, err := readServedPublicationEntityIdentity(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event entity_id %s: %v", backend, eventID, err)
 	}
 	return strings.TrimSpace(entityID)
 }
 
-func assertServedDynamicAutoEmitPayload(t *testing.T, db *sql.DB, backend, eventID string, want map[string]any) {
+func assertServedDynamicAutoEmitPayload(t *testing.T, reader servedEventCountReader, backend, eventID string, want map[string]any) {
 	t.Helper()
-	var raw string
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT payload::text FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT payload FROM events WHERE event_id = ?`
-		args = []any{eventID}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+	raw, err := readServedPublicationPayloadText(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
 	}
 	var payload map[string]any

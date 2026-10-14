@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 )
 
 func ReadPostgresExactPipelineReceiptOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
@@ -120,5 +122,20 @@ func CountExactRunEventReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, run
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes
 		WHERE run_id=$1 AND event_id=$2 AND scope=$3`, runID, eventID, scope).Scan(&count)
+	return count, err
+}
+
+func CountEventSubscriberReceiptStorageTx(ctx context.Context, tx *sql.Tx, eventID string, subscribers []string) (int, error) {
+	if len(subscribers) == 0 {
+		return 0, fmt.Errorf("receipt subscriber identities are required")
+	}
+	args := []any{eventID}
+	places := make([]string, len(subscribers))
+	for index, subscriber := range subscribers {
+		args = append(args, subscriber)
+		places[index] = fmt.Sprintf("$%d", index+2)
+	}
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_id IN (`+strings.Join(places, ",")+`)`, args...).Scan(&count)
 	return count, err
 }

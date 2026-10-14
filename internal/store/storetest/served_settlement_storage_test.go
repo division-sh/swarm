@@ -182,3 +182,105 @@ func assertServedSettlementPortRefusals(t *testing.T, owner any, reads []func(co
 		}
 	}
 }
+
+func TestServedPublicationLookupStorageKeepsPhysicalNullEntityPayloadAndSubscriberDisjunctionBothStores(t *testing.T) {
+	for _, backend := range servedSettlementOwners() {
+		t.Run(backend.name, func(t *testing.T) {
+			owner := backend.open(t)
+			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
+			run, entity := uuid.NewString(), uuid.NewString()
+			wantPayloadText := `{"z":true,"nested":{"n":2}}`
+			if backend.name == "postgres" {
+				wantPayloadText = `{"z": true, "nested": {"n": 2}}`
+			}
+			RequireRun(t, ctx, owner, RunFixture{Origin: ScenarioSetupOrigin(), RunID: run})
+			for _, entityID := range []string{"", entity} {
+				event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("fixture.lookup."+entityID), "fixture", "", []byte(`{"z":true,"nested":{"n":2}}`), 0, run, events.EventEnvelope{EntityID: entityID}, time.Now().UTC())
+				CommitSemanticEventWithInitialFacts(t, ctx, owner, event, nil, pipelineobligation.ScopeSubscribed, AcknowledgedPipelineDisposition())
+				if got, err := ReadPhysicalPublicationEntityIdentityStorage(ctx, owner, event.ID()); err != nil || got != entityID {
+					t.Fatalf("physical nullable entity=%q error=%v want=%q", got, err, entityID)
+				}
+				if got, err := ReadWorkflowTimerEventIdentity(ctx, owner, run, string(event.Type())); err != nil || got != event.ID() {
+					t.Fatalf("exact unordered run/name identity=%q error=%v", got, err)
+				}
+				if got, err := ReadTemplateEventPayloadText(ctx, owner, event.ID()); err != nil || got != wantPayloadText {
+					t.Fatalf("physical payload text was interpreted or serialized: %q error=%v", got, err)
+				}
+				assertServedReceiptSubscriberDisjunction(t, ctx, owner, event.ID())
+			}
+			if got, err := ReadPhysicalPublicationEntityIdentityStorage(ctx, owner, uuid.NewString()); !errors.Is(err, sql.ErrNoRows) || got != "" {
+				t.Fatalf("absence confused with physical NULL: %q error=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestServedPublicationLookupStorageRefusesForeignCancelledAndClosedOwnershipBothStores(t *testing.T) {
+	id := uuid.NewString()
+	reads := []func(context.Context, any) (string, error){
+		func(ctx context.Context, owner any) (string, error) {
+			return ReadPhysicalPublicationEntityIdentityStorage(ctx, owner, id)
+		},
+		func(ctx context.Context, owner any) (string, error) {
+			return ReadWorkflowTimerEventIdentity(ctx, owner, id, "missing.lookup")
+		},
+		func(ctx context.Context, owner any) (string, error) {
+			return ReadTemplateEventPayloadText(ctx, owner, id)
+		},
+	}
+	for _, backend := range servedSettlementOwners() {
+		t.Run(backend.name, func(t *testing.T) {
+			owner := backend.open(t)
+			for _, read := range reads {
+				assertServedPublicationLookupRefusals(t, owner, read)
+			}
+			count := func(ctx context.Context, owner any) (int, error) {
+				return CountEventSubscriberReceiptStorage(ctx, owner, id, []string{"pipeline"})
+			}
+			assertServedSettlementPortRefusals(t, owner, []func(context.Context, any) (int, error){count})
+			if err := owner.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			for _, read := range reads {
+				if value, err := read(context.Background(), owner); err == nil || value != "" {
+					t.Fatalf("closed owner manufactured lookup evidence: %q error=%v", value, err)
+				}
+			}
+			if value, err := count(context.Background(), owner); err == nil || value != 0 {
+				t.Fatalf("closed owner manufactured subscriber evidence: %d error=%v", value, err)
+			}
+		})
+	}
+}
+
+func assertServedPublicationLookupRefusals(t *testing.T, owner any, read func(context.Context, any) (string, error)) {
+	t.Helper()
+	if value, err := read(context.Background(), owner); !errors.Is(err, sql.ErrNoRows) || value != "" {
+		t.Fatalf("missing physical row manufactured lookup evidence: %q error=%v", value, err)
+	}
+	for _, foreign := range []any{nil, &sql.DB{}, &sql.Tx{}, struct{}{}} {
+		if value, err := read(context.Background(), foreign); err == nil || value != "" {
+			t.Fatalf("foreign %T manufactured lookup evidence: %q error=%v", foreign, value, err)
+		}
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if value, err := read(cancelled, owner); !errors.Is(err, context.Canceled) || value != "" {
+		t.Fatalf("cancelled lookup manufactured evidence: %q error=%v", value, err)
+	}
+}
+
+func assertServedReceiptSubscriberDisjunction(t *testing.T, ctx context.Context, owner any, eventID string) {
+	t.Helper()
+	for _, query := range []struct {
+		ids  []string
+		want int
+	}{{[]string{"pipeline"}, 1}, {[]string{"pipeline", "pipeline", "foreign"}, 1}, {[]string{"foreign"}, 0}, {[]string{"workflow-runtime", "__runtime_replay_scope__"}, 0}} {
+		if count, err := CountEventSubscriberReceiptStorage(ctx, owner, eventID, query.ids); err != nil || count != query.want {
+			t.Fatalf("subscriber IN witness became additive/type/outcome restricted: %v count=%d error=%v want=%d", query.ids, count, err, query.want)
+		}
+	}
+	if count, err := CountEventSubscriberReceiptStorage(ctx, owner, eventID, nil); err == nil || count != 0 {
+		t.Fatalf("empty subscriber set manufactured evidence: count=%d error=%v", count, err)
+	}
+}

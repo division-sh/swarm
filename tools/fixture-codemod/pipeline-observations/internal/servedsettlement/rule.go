@@ -54,7 +54,11 @@ type Splice struct {
 }
 
 func Call(set *token.FileSet, call *ast.CallExpr, caller, callee string) (Splice, error) {
-	change, ok := Changes[callee]
+	return CallWithChanges(set, call, caller, callee, Changes)
+}
+
+func CallWithChanges(set *token.FileSet, call *ast.CallExpr, caller, callee string, changes map[string]Change) (Splice, error) {
+	change, ok := changes[callee]
 	if !ok || len(call.Args) <= change.Argument {
 		return Splice{}, fmt.Errorf("unknown served settlement call shape: %s", callee)
 	}
@@ -93,7 +97,11 @@ func callerReader(caller, argument string) (string, error) {
 }
 
 func Signature(set *token.FileSet, fn *ast.FuncDecl) (Splice, error) {
-	change, ok := Changes[fn.Name.Name]
+	return SignatureWithChanges(set, fn, Changes)
+}
+
+func SignatureWithChanges(set *token.FileSet, fn *ast.FuncDecl, changes map[string]Change) (Splice, error) {
+	change, ok := changes[fn.Name.Name]
 	if !ok {
 		return Splice{}, fmt.Errorf("unknown served settlement declaration")
 	}
@@ -174,6 +182,14 @@ func statementRange(source, first, next string) (int, int, error) {
 }
 
 func Transform(source string) (string, int, error) {
+	return transform(source, Changes, OwnerBody)
+}
+
+func TransformLookup(source string) (string, int, error) {
+	return transform(source, LookupChanges, LookupOwnerBody)
+}
+
+func transform(source string, changes map[string]Change, ownerBody func(string, string) (string, error)) (string, int, error) {
 	const prefix = "package proof\n"
 	set := token.NewFileSet()
 	file, err := parser.ParseFile(set, "source.go", prefix+source, parser.AllErrors)
@@ -184,7 +200,7 @@ func Transform(source string) (string, int, error) {
 	if !ok || fn.Recv != nil || fn.Body == nil {
 		return "", 0, fmt.Errorf("served settlement requires a complete named function")
 	}
-	edits, calls, err := declarationEdits(set, fn)
+	edits, calls, err := declarationEdits(set, fn, changes)
 	if err != nil {
 		return "", 0, err
 	}
@@ -196,7 +212,7 @@ func Transform(source string) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	after, err := OwnerBody(fn.Name.Name, string(raw))
+	after, err := ownerBody(fn.Name.Name, string(raw))
 	if err != nil {
 		return "", 0, err
 	}
@@ -204,10 +220,10 @@ func Transform(source string) (string, int, error) {
 	return after, calls, err
 }
 
-func declarationEdits(set *token.FileSet, fn *ast.FuncDecl) ([]Splice, int, error) {
+func declarationEdits(set *token.FileSet, fn *ast.FuncDecl, changes map[string]Change) ([]Splice, int, error) {
 	var edits []Splice
-	if _, ok := Changes[fn.Name.Name]; ok {
-		edit, err := Signature(set, fn)
+	if _, ok := changes[fn.Name.Name]; ok {
+		edit, err := SignatureWithChanges(set, fn, changes)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -224,11 +240,11 @@ func declarationEdits(set *token.FileSet, fn *ast.FuncDecl) ([]Splice, int, erro
 		if !ok {
 			return true
 		}
-		if _, ok := Changes[ident.Name]; !ok {
+		if _, ok := changes[ident.Name]; !ok {
 			return true
 		}
 		called[ident] = true
-		edit, cause := Call(set, call, fn.Name.Name, ident.Name)
+		edit, cause := CallWithChanges(set, call, fn.Name.Name, ident.Name, changes)
 		if cause != nil || ident.Obj != nil {
 			err = fmt.Errorf("unclassified/shadowed served settlement call: %s: %v", ident.Name, cause)
 		} else {
@@ -238,7 +254,7 @@ func declarationEdits(set *token.FileSet, fn *ast.FuncDecl) ([]Splice, int, erro
 	})
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		if ident, ok := node.(*ast.Ident); ok {
-			if _, target := Changes[ident.Name]; target && !called[ident] {
+			if _, target := changes[ident.Name]; target && !called[ident] {
 				err = fmt.Errorf("served settlement callable alias/reference is not a direct typed call: %s", ident.Name)
 			}
 		}

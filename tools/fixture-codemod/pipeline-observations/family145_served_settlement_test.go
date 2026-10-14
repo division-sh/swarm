@@ -37,7 +37,7 @@ func TestFamily145ServedSettlementWholeTypedChainPreservesEveryCallerAndTemporal
 			t.Fatal("served settlement escaped typed argument/body transformations:", pin.Function, count, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedSettlementEarlierDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("served settlement current unique declaration changed:", pin.Function, err)
 		}
 		finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
@@ -116,7 +116,7 @@ func TestFamily145ServedSettlementCompleteOwnerAndCallerInventoryHasNoSQLCarrier
 				continue
 			}
 			key := filepath.ToSlash(relative) + "/" + fn.Name.Name
-			if expected[key] == "" || family145NodeString(fn) != expected[key] {
+			if expected[key] == "" || servedSettlementEarlierDeclaration(t, filepath.ToSlash(relative), fn.Name.Name, family145NodeString(fn)) != expected[key] {
 				return fmt.Errorf("unrecorded/changed served settlement caller or owner: %s", key)
 			}
 			if _, owner := servedsettlement.Changes[fn.Name.Name]; owner && strings.Contains(family145NodeString(fn.Type), "sql.DB") {
@@ -131,17 +131,31 @@ func TestFamily145ServedSettlementCompleteOwnerAndCallerInventoryHasNoSQLCarrier
 }
 
 func servedSettlementDeclarationUsesOwner(fn *ast.FuncDecl) bool {
-	if _, owner := servedsettlement.Changes[fn.Name.Name]; owner {
+	return servedDeclarationUsesChanges(fn, servedsettlement.Changes)
+}
+
+func servedDeclarationUsesChanges(fn *ast.FuncDecl, changes map[string]servedsettlement.Change) bool {
+	if _, owner := changes[fn.Name.Name]; owner {
 		return true
 	}
 	found := false
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		if ident, ok := node.(*ast.Ident); ok {
-			if _, owner := servedsettlement.Changes[ident.Name]; owner {
+			if _, owner := changes[ident.Name]; owner {
 				found = true
 			}
 		}
 		return true
 	})
 	return found
+}
+
+func servedSettlementEarlierDeclaration(t *testing.T, file, function, current string) string {
+	t.Helper()
+	for _, pin := range servedPublicationLookupPins(t) {
+		if pin.File == file && pin.Function == function {
+			return servedPublicationLookupEarlierDeclaration(t, file, function, current)
+		}
+	}
+	return current
 }

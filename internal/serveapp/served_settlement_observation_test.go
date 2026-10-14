@@ -70,3 +70,67 @@ func readServedExactReplayScopeCount(ctx context.Context, reader servedEventCoun
 	}
 	return count, nil
 }
+
+func readServedRunNamedPublicationIdentity(ctx context.Context, reader servedEventCountReader, runID, eventName string) (string, error) {
+	if reader == nil {
+		return "", fmt.Errorf("named publication lookup requires the original selected reader")
+	}
+	var id string
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		id, err = storetest.ReadWorkflowTimerEventIdentity(ctx, reader, runID, eventName)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func readServedPublicationPayloadText(ctx context.Context, reader servedEventCountReader, eventID string) (string, error) {
+	if reader == nil {
+		return "", fmt.Errorf("publication payload lookup requires the original selected reader")
+	}
+	var raw string
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		raw, err = storetest.ReadTemplateEventPayloadText(ctx, reader, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func readServedPublicationEntityIdentity(ctx context.Context, reader servedEventCountReader, eventID string) (string, error) {
+	if reader == nil {
+		return "", fmt.Errorf("publication entity lookup requires the original selected reader")
+	}
+	var id string
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		id, err = storetest.ReadPhysicalPublicationEntityIdentityStorage(ctx, reader, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func readServedSubscriberReceiptCount(ctx context.Context, reader servedEventCountReader, eventID string, subscribers []string) (int, error) {
+	if reader == nil {
+		return 0, fmt.Errorf("subscriber receipt count requires the original selected reader")
+	}
+	var count int
+	err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountEventSubscriberReceiptStorage(ctx, reader, eventID, subscribers)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}

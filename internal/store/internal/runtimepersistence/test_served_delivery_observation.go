@@ -51,6 +51,12 @@ func CountExactRunEventReplayScopeStorageForTest(ctx context.Context, selected a
 	})
 }
 
+func CountEventSubscriberReceiptStorageForTest(ctx context.Context, selected any, eventID string, subscribers []string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountEventSubscriberReceiptStorageTx(ctx, tx, eventID, subscribers)
+	})
+}
+
 func ReadTemplateEventDeliveryDiagnosticsForTest(ctx context.Context, selected any, event string) ([]TemplateDeliveryDiagnosticStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) ([]TemplateDeliveryDiagnosticStorage, error) {
 		return delivery.ReadTemplateEventDeliveryDiagnosticsTx(ctx, tx, event)

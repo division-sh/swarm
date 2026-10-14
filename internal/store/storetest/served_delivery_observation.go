@@ -105,3 +105,7 @@ func CountSubscriberEventReceiptOutcomeStorage(ctx context.Context, selected any
 func CountExactRunEventReplayScopeStorage(ctx context.Context, selected any, runID, eventID, scope string) (int, error) {
 	return private.CountExactRunEventReplayScopeStorageForTest(ctx, selected, runID, eventID, scope)
 }
+
+func CountEventSubscriberReceiptStorage(ctx context.Context, selected any, eventID string, subscribers []string) (int, error) {
+	return private.CountEventSubscriberReceiptStorageForTest(ctx, selected, eventID, subscribers)
+}

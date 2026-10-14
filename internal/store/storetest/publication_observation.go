@@ -65,3 +65,7 @@ func ReadOperatorReferenceStorage(ctx context.Context, selected any, eventID str
 func ReadPublicationDeliveryTargetEncodings(ctx context.Context, selected any, eventID string) ([]string, error) {
 	return private.ReadPublicationDeliveryTargetEncodingsForTest(ctx, selected, eventID)
 }
+
+func ReadPhysicalPublicationEntityIdentityStorage(ctx context.Context, selected any, eventID string) (string, error) {
+	return private.ReadPhysicalPublicationEntityIdentityStorageForTest(ctx, selected, eventID)
+}
