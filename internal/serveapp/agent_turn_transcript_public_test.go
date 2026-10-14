@@ -40,6 +40,7 @@ func readStandingPublicTranscript(t *testing.T, baseURL, runID string, wantTurns
 					var exact operatorread.OperatorPublicConversationTurnDetail
 					requireServedJSONRPCResult(t, endpoint, "conversation.get_turn", map[string]any{"session_id": session.SessionID, "turn_id": turn.TurnID}, &exact)
 					shared := operatorread.OperatorConversationTurnListItem{
+						CompletionEvidence: exact.Turn.CompletionEvidence.Clone(), ResolvedModel: exact.Turn.ResolvedModel,
 						TurnID: exact.Turn.TurnID, ExecutionMode: exact.Turn.ExecutionMode, Ordinal: exact.Turn.Ordinal,
 						CompletedAt: exact.Turn.CompletedAt, DurationMS: exact.Turn.DurationMS,
 						TriggerEventID: exact.Turn.TriggerEventID, TriggerEventType: exact.Turn.TriggerEventType,

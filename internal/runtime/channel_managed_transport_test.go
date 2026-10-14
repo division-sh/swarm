@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/tools"
@@ -43,8 +44,16 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 	})
 	actor.Identity.RunID = correlation.RunIDFromContext(ctx)
 	actor.Model = "regular"
-	actor.ResolvedLLMBackend = "claude_cli"
 	actor.Type = "generic"
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, nil, actor)
+	if err != nil {
+		t.Fatalf("resolve managed channel fixture actor: %v", err)
+	}
+	actor = resolved.Actor
 	var intentErr error
 	actor.Intent, intentErr = agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.channel-sender.intent", "Exercise exact managed channel transport.")
 	if intentErr != nil {
@@ -80,7 +89,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			authority := effects.NormalAgentAuthority(token, "managed-channel-transport", time.Now().Add(time.Minute))
 			authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: actor.Identity.RunID, AgentID: actor.ID, AgentIdentity: actor.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{}, FlowInstance: actor.CanonicalFlowPath(), EntityID: actor.EntityID}
 			surface, err := managedcapabilities.New(managedcapabilities.Plan{
-				ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "claude", Transport: "cli", ProviderContract: "channel-transport-protocol-proof",
+				ActorIdentity: actor.Identity, RuntimeMode: profile.RuntimeMode, Provider: profile.Provider, Transport: profile.Transport, ProviderContract: "channel-transport-protocol-proof",
 				Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: authority.ID, RunID: authority.Target.RunID, SessionID: authority.Target.SessionID, TurnOrdinal: 1},
 				Tools: []managedcapabilities.PlannedTool{{Name: definition.Name, DefinitionHash: llm.ToolDefinitionIdentity(definition), Capability: toolcapabilities.Capability{Name: definition.Name, Visible: true, Callable: true}, Bindings: []managedcapabilities.DeliveryBinding{
 					{Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__channel.ops.deliver", RequiredEvidenceKind: "mcp_listed"},
@@ -106,7 +115,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			if err != nil {
 				t.Fatal(err)
 			}
-			frame, err := agentframe.Complete(agentframe.SessionSeed{AgentIdentity: actor.Identity, Role: actor.Role, Intent: intent, ProviderPrompt: providerPrompt, RuntimeMode: "task", Provider: "claude", Transport: "cli", ModelAlias: "regular", Model: "protocol-proof"}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: input}, agentframe.Completion{BundleHash: source.BundleHash(), Surface: surface})
+			frame, err := agentframe.Complete(agentframe.SessionSeed{AgentIdentity: actor.Identity, Role: actor.Role, Intent: intent, ProviderPrompt: providerPrompt, RuntimeMode: profile.RuntimeMode, Provider: profile.Provider, Transport: profile.Transport, ModelAlias: actor.Model, Model: actor.ResolvedModel}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: input}, agentframe.Completion{BundleHash: source.BundleHash(), Surface: surface})
 			if err != nil {
 				t.Fatal(err)
 			}
