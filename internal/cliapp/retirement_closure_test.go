@@ -106,42 +106,48 @@ func TestRetirementClosureMergedEnvDelegation(t *testing.T) {
 	}
 }
 
-func TestRetirementClosureMergedLayerOverride(t *testing.T) {
+func TestRetirementClosureSelectedDocumentMergeIsolation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	repo, global := t.TempDir(), userGlobalUnifiedConfigPath()
-	writeRuntimeConfigText(t, global, "runtime: {<<: {recovery_on_startup: true}}\n")
+	repo, global := t.TempDir(), ignoredUserGlobalConfigPath(t)
+	writeSingleDeploymentConfig(t, global, "runtime: {<<: {recovery_on_startup: true}}\nllm: {session: {rotate_after_turns: 7}}\n")
 	writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "runtime: {recovery_on_startup: false}\n")
+	selected := filepath.Join(repo, ".swarm", "swarm.yaml")
+	writeSingleDeploymentConfig(t, selected, "runtime: {<<: {recovery_on_startup: false}}\n")
 	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Config.Runtime.RecoveryOnStartup {
-		t.Fatal("later override lost")
-	}
-	if origin := got.KeyOrigins["runtime.recovery_on_startup"]; origin.Layer != unifiedLayerProject {
-		t.Fatalf("wrong origin: %#v", origin)
+	if got.Config.Runtime.RecoveryOnStartup || got.Config.LLM.Session.RotateAfterTurns != 40 || got.Path != selected {
+		t.Fatalf("single-document merge/default isolation lost: path=%q recovery=%t rotation=%d", got.Path, got.Config.Runtime.RecoveryOnStartup, got.Config.LLM.Session.RotateAfterTurns)
 	}
 }
 
-func TestRetirementClosureTypedValueTrustAndPathChecks(t *testing.T) {
+// USER #1801/6170905244 removes source trust tiers, not typed/secret refusals.
+func TestRetirementClosureSelectedTypedValues(t *testing.T) {
 	for _, row := range []struct {
 		body, want string
 	}{
-		{"serve: {<<: {api_listen_addr: 0.0.0.0:8090}}\n", "project config may only set loopback"},
-		{"paths: {<<: {platform_spec_path: ../outside}}\n", "parent-directory escapes"},
-		{"platform: {packs: {platform_dirs: ['safe', '../outside']}}\n", "not allowed in project_config"},
-		{"llm: {models: {default: {anthropic: &path ../outside}}}\npaths: {platform_spec_path: *path}\n", "parent-directory escapes"},
-		{"serve: {api_listen_addr: 127.0.0.1:8090}\npaths: {platform_spec_path: platform-spec.yaml}\n", ""},
-		{"serve: {api_listen_addr: ''}\npaths: {platform_spec_path: ''}\n", ""},
+		{"serve: {<<: {api_listen_addr: 0.0.0.0:8090}}\n", ""},
+		{"store: {sqlite: {path: ../operator-state.db}}\n", ""},
+		{"serve: {api_listen_addr: 127.0.0.1:8090}\n", ""},
+		{"serve: {api_listen_addr: ''}\n", ""},
+		{"database: {<<: {password: synthetic-inline-secret}}\n", "plaintext secret"},
+		{"runtime: {<<: {max_concurrent_agents: 2}}\n", "recognized but not yet supported"},
+		{"serve: null\n", "must be a YAML mapping"},
+		{"serve: {<<: {unknown: true}}\n", "unknown config key"},
 	} {
 		t.Run(row.body, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			repo := t.TempDir()
-			writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), row.body)
-			_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
+			path := filepath.Join(repo, ".swarm", "swarm.yaml")
+			writeSingleDeploymentConfig(t, path, row.body)
+			loaded, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 			if row.want == "" {
 				if err != nil {
 					t.Fatal(err)
+				}
+				if loaded.Path != path {
+					t.Fatalf("selected source lost: %q", loaded.Path)
 				}
 			} else if err == nil || !strings.Contains(err.Error(), row.want) {
 				t.Fatalf("error = %v, want %q", err, row.want)
@@ -150,82 +156,68 @@ func TestRetirementClosureTypedValueTrustAndPathChecks(t *testing.T) {
 	}
 }
 
-func TestRetirementClosureLayerExpansionPrecedenceAndOrigins(t *testing.T) {
+func TestRetirementClosureSingleDocumentExpansionAndIsolation(t *testing.T) {
 	forms := []string{
 		"runtime: {recovery_on_startup: %s}\n",
 		"runtime: {<<: {recovery_on_startup: %s}}\n",
 		"llm: {models: {default: {anthropic: &value %s}}}\nruntime: {recovery_on_startup: *value}\n",
 	}
-	for first := 0; first < 3; first++ {
-		for last := first + 1; last < 4; last++ {
-			for from, lower := range forms {
-				for to, upper := range forms {
-					t.Run(fmt.Sprintf("layers=%d-%d/forms=%d-%d", first, last, from, to), func(t *testing.T) {
-						isolateCLIAPIConfigEnv(t)
-						repo, explicit := t.TempDir(), filepath.Join(t.TempDir(), "swarm.yaml")
-						paths := []string{userGlobalUnifiedConfigPath(), filepath.Join(repo, "swarm.yaml"), filepath.Join(repo, ".swarm", "swarm.yaml"), explicit}
-						for _, path := range paths {
-							if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-								t.Fatal(err)
-							}
+	for _, selection := range []string{"deployment", "locator", "flag"} {
+		for from, ignored := range forms {
+			for to, selected := range forms {
+				t.Run(fmt.Sprintf("%s/forms=%d-%d", selection, from, to), func(t *testing.T) {
+					isolateCLIAPIConfigEnv(t)
+					repo := t.TempDir()
+					for _, path := range []string{ignoredUserGlobalConfigPath(t), filepath.Join(repo, "swarm.yaml"), filepath.Join(repo, ".swarm", "swarm.yaml")} {
+						writeSingleDeploymentConfig(t, path, fmt.Sprintf(ignored, "true")+"database: {pool_size: 17}\n")
+					}
+					path := filepath.Join(repo, ".swarm", "swarm.yaml")
+					opts := unifiedConfigLoadOptions{RepoRoot: repo}
+					if selection != "deployment" {
+						path = filepath.Join(t.TempDir(), "operator.yaml")
+						if selection == "locator" {
+							t.Setenv("SWARM_CONFIG", path)
+						} else {
+							opts.ExplicitPath = path
 						}
-						names := []unifiedConfigLayerName{unifiedLayerUserGlobal, unifiedLayerProject, unifiedLayerLocalOperator, unifiedLayerExplicit}
-						writeRuntimeConfigText(t, paths[first], fmt.Sprintf(lower, "true"))
-						writeRuntimeConfigText(t, paths[last], fmt.Sprintf(upper, "false"))
-						opts := unifiedConfigLoadOptions{RepoRoot: repo}
-						if last == 3 {
-							opts.ExplicitPath = explicit
-						}
-						got, err := loadUnifiedConfigForTest(t, opts)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if got.Config.Runtime.RecoveryOnStartup {
-							t.Fatal("precedence lost")
-						}
-						origin := got.KeyOrigins["runtime.recovery_on_startup"]
-						if origin.Layer != names[last] || origin.Path != paths[last] {
-							t.Fatalf("wrong origin: %#v", origin)
-						}
-						for key := range got.KeyOrigins {
-							if strings.Contains(key, "<<") {
-								t.Fatalf("raw merge origin survived: %s", key)
-							}
-						}
-					})
-				}
+					}
+					writeSingleDeploymentConfig(t, path, fmt.Sprintf(selected, "false"))
+					got, err := loadUnifiedConfigForTest(t, opts)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got.Config.Runtime.RecoveryOnStartup || got.Config.Database.PoolSize != 5 || got.Path != path {
+						t.Fatalf("selected expansion/isolation lost: path=%q recovery=%t pool=%d", got.Path, got.Config.Runtime.RecoveryOnStartup, got.Config.Database.PoolSize)
+					}
+				})
 			}
 		}
 	}
 }
 
-func TestRetirementClosureEnvDelegationTrustClearsAndReplacement(t *testing.T) {
-	for _, layer := range []unifiedConfigLayerName{unifiedLayerUserGlobal, unifiedLayerProject, unifiedLayerLocalOperator, unifiedLayerExplicit} {
-		t.Run(string(layer), func(t *testing.T) {
+func TestRetirementClosureSelectedEnvDelegationAndReplacement(t *testing.T) {
+	for _, selection := range []string{"deployment", "locator", "flag"} {
+		t.Run(selection, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
-			repo, explicit := t.TempDir(), filepath.Join(t.TempDir(), "swarm.yaml")
-			paths := map[unifiedConfigLayerName]string{unifiedLayerUserGlobal: userGlobalUnifiedConfigPath(), unifiedLayerProject: filepath.Join(repo, "swarm.yaml"), unifiedLayerLocalOperator: filepath.Join(repo, ".swarm", "swarm.yaml"), unifiedLayerExplicit: explicit}
-			if err := os.MkdirAll(filepath.Dir(paths[layer]), 0700); err != nil {
-				t.Fatal(err)
-			}
-			writeRuntimeConfigText(t, paths[layer], "database: {<<: {password_env: SWARM_REVIEW_DB_SECRET}}\n")
+			repo := t.TempDir()
+			path := filepath.Join(repo, ".swarm", "swarm.yaml")
 			t.Setenv("SWARM_REVIEW_DB_SECRET", "dummy-not-a-credential")
 			opts := unifiedConfigLoadOptions{RepoRoot: repo}
-			if layer == unifiedLayerExplicit {
-				opts.ExplicitPath = explicit
-			}
-			got, err := loadUnifiedConfigForTest(t, opts)
-			if layer == unifiedLayerProject {
-				if err == nil || !strings.Contains(err.Error(), "not allowed in project_config") || !strings.Contains(err.Error(), "SWARM_REVIEW_DB_SECRET") {
-					t.Fatalf("project delegation not blocked: %v", err)
+			if selection != "deployment" {
+				path = filepath.Join(t.TempDir(), "operator.yaml")
+				if selection == "locator" {
+					t.Setenv("SWARM_CONFIG", path)
+				} else {
+					opts.ExplicitPath = path
 				}
-				return
 			}
+			writeSingleDeploymentConfig(t, path, "database: {<<: {password_env: SWARM_REVIEW_DB_SECRET}}\n")
+			got, err := loadUnifiedConfigForTest(t, opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.KeyOrigins["database.password_env"].Layer != layer {
-				t.Fatalf("wrong delegation origin: %#v", got.KeyOrigins)
+			if got.Path != path || got.Config.Database.PasswordEnv != "SWARM_REVIEW_DB_SECRET" {
+				t.Fatalf("wrong selected delegation: path=%q env=%q", got.Path, got.Config.Database.PasswordEnv)
 			}
 			findings := doctorSwarmEnvFindings(repo, opts.ExplicitPath)
 			found := false
@@ -243,7 +235,7 @@ func TestRetirementClosureEnvDelegationTrustClearsAndReplacement(t *testing.T) {
 		t.Run(clearing, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			repo, explicit := t.TempDir(), filepath.Join(t.TempDir(), "swarm.yaml")
-			writeRuntimeConfigText(t, userGlobalUnifiedConfigPath(), "database: {<<: {password_env: SWARM_REVIEW_DB_SECRET}}\n")
+			writeSingleDeploymentConfig(t, ignoredUserGlobalConfigPath(t), "database: {<<: {password_env: SWARM_REVIEW_DB_SECRET}}\n")
 			writeRuntimeConfigText(t, explicit, clearing)
 			t.Setenv("SWARM_REVIEW_DB_SECRET", "dummy-not-a-credential")
 			got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicit})
@@ -253,18 +245,14 @@ func TestRetirementClosureEnvDelegationTrustClearsAndReplacement(t *testing.T) {
 			if got.Config.Database.PasswordEnv == "SWARM_REVIEW_DB_SECRET" {
 				t.Fatal("old secret reference survived")
 			}
-			if clearing == "database: null\n" {
-				if _, ok := got.KeyOrigins["database.password_env"]; ok {
-					t.Fatalf("stale descendant origin: %#v", got.KeyOrigins)
-				}
-			} else if got.KeyOrigins["database.password_env"].Layer != unifiedLayerExplicit {
-				t.Fatal("clear/replacement lost origin")
+			if got.Path != explicit {
+				t.Fatal("clear/replacement lost selected source")
 			}
 		})
 	}
 }
 
-func TestRetirementClosureDuplicatesRemainLayerLocal(t *testing.T) {
+func TestRetirementClosureDuplicatesRemainDocumentLocal(t *testing.T) {
 	for _, body := range []string{
 		"runtime: {recovery_on_startup: true, recovery_on_startup: false}\n",
 		"runtime: {<<: {recovery_on_startup: true}, recovery_on_startup: false}\n",
@@ -273,11 +261,16 @@ func TestRetirementClosureDuplicatesRemainLayerLocal(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			repo, explicit := t.TempDir(), filepath.Join(t.TempDir(), "swarm.yaml")
-			writeRuntimeConfigText(t, userGlobalUnifiedConfigPath(), body)
-			writeRuntimeConfigText(t, explicit, "runtime: {recovery_on_startup: false}\n")
+			writeSingleDeploymentConfig(t, ignoredUserGlobalConfigPath(t), body)
+			writeRuntimeConfigText(t, explicit, body)
 			_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicit})
 			if err == nil || !strings.Contains(err.Error(), "duplicate") {
-				t.Fatalf("later layer hid duplicate: %v", err)
+				t.Fatalf("selected duplicate was admitted: %v", err)
+			}
+			writeRuntimeConfigText(t, explicit, "runtime: {recovery_on_startup: false}\n")
+			loaded, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicit})
+			if err != nil || loaded.Config.Runtime.RecoveryOnStartup {
+				t.Fatalf("ignored duplicate affected valid selected document: %v", err)
 			}
 		})
 	}
@@ -286,7 +279,7 @@ func TestRetirementClosureDuplicatesRemainLayerLocal(t *testing.T) {
 func TestRetirementClosureExpandedPresenceAndEmptyMap(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo, explicit := t.TempDir(), filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, userGlobalUnifiedConfigPath(), "paths: {<<: {swarm_dir: /tmp/operator-state}}\nruntime: {<<: {recovery_on_startup: true}}\n")
+	writeSingleDeploymentConfig(t, ignoredUserGlobalConfigPath(t), "paths: {<<: {swarm_dir: /tmp/operator-state}}\nruntime: {<<: {recovery_on_startup: false}}\nllm: {session: {rotate_after_turns: 7}}\n")
 	writeRuntimeConfigText(t, explicit, "paths: {<<: {swarm_dir: ''}}\nruntime: {}\n")
 	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicit})
 	if err != nil {
@@ -295,11 +288,8 @@ func TestRetirementClosureExpandedPresenceAndEmptyMap(t *testing.T) {
 	if !got.CLI.Paths.SwarmDirSet || got.CLI.Paths.SwarmDir != "" {
 		t.Fatalf("explicit empty presence lost: %#v", got.CLI.Paths)
 	}
-	if !got.Config.Runtime.RecoveryOnStartup || got.KeyOrigins["runtime.recovery_on_startup"].Layer != unifiedLayerUserGlobal {
-		t.Fatal("empty mapping incorrectly cleared prior fields")
-	}
-	if got.KeyOrigins["paths.swarm_dir"].Layer != unifiedLayerExplicit {
-		t.Fatal("empty leaf override lost origin")
+	if !got.Config.Runtime.RecoveryOnStartup || got.Config.LLM.Session.RotateAfterTurns != 40 || got.Path != explicit {
+		t.Fatal("empty mapping did not preserve built-in defaults or selected source")
 	}
 }
 
