@@ -37,6 +37,10 @@ func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := agentidentity.Identity{RunID: busInternalTestRunID, Name: name, Route: agentidentity.Route{Presence: agentidentity.RouteRoot}}
+	lookup, err := pipeline.NewFlowInstanceLookupScope(source, native.SourceFact(), busInternalTestRunID, nil, []flowidentity.RunScopedFlowInstance{native.Owner()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	header := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "root.ready", "historical-proof", "", []byte(`{}`), 0, actor.RunID, events.EventEnvelope{}, time.Now().UTC())
 	for _, cell := range []struct {
@@ -60,8 +64,9 @@ func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			projection := selectedRunTargetOwnerProjection{
 				source: source, required: true,
-				context: withSelectedTargetOwnerLookupScope(constructionIndexContext(t, source), selectedTargetOwnerLookupScope{observations: []pipeline.FlowInstanceObservation{cell.owner}}),
-				agents:  map[agentidentity.Identity]ActiveAgentDescriptor{actor: {Identity: actor}},
+				context:   withSelectedTargetOwnerLookupScope(constructionIndexContext(t, source), selectedTargetOwnerLookupScope{lookup: lookup, observations: []pipeline.FlowInstanceObservation{cell.owner}}),
+				instances: FlowInstanceIndexFixture(cell.owner),
+				agents:    map[agentidentity.Identity]ActiveAgentDescriptor{actor: {Identity: actor}},
 			}
 			intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor,
 				TargetBlueprint:   events.RouteIdentity{FlowID: header.FlowID, FlowInstance: header.FlowInstance},
