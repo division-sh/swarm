@@ -114,9 +114,24 @@ classification change, transferred credit or ceiling increase.
 Boundary receipt PASS4.813s includes event admitted-persistence, closed delivery
 SQL owners and run lifecycle guards. Vet -composites=false and pinned U1000
 pass for the changed native/domain/tool subtree. This is not a claim that all
-repository vet or the entire codemod package is green. Signed complexity atcba:
-cognitive30/50 stays557/196; cyclo259/59, no hotspot growth. Final signed read-only
-ratchet and repair-delta quality receipt are recorded at the checkpoint.
+repository vet or the entire codemod package is green. Final signed read-only
+ratchet at25dc349b8f5a9a90c5b6479055ba4b3c9569d45b is PASS86.697s with
+refresh disabled, comparing the existing authenticated push-event predecessor
+366ef25c98. Final signed complexity at that same head keeps cognitive30/50 at
+557/196 and cyclomatic30/50 at259/59, with no hotspot growth. Repair-delta U1000
+and git diff --check pass. Receipt names are final-signed-readonly-ratchet,
+final-complexity and final-tool-unused; no later code change is covered by these
+receipts. A documentation-only checkpoint amendment carries them unchanged.
+
+Approximate activity split, reconstructed from command timestamps rather than
+a task timer: source/caller editing20-25min, history/source composition and
+repair20-25min, proof/quality work and waiting15-20min. These intervals overlap:
+the original race journeys, historical package and first census ran alongside
+editing/composition. Batch execution began22:17Z; the final signed read-only
+ratchet completed23:24Z. The required wait until the00:12Z checkpoint window is
+not migration work and is not included in the measured rate. The179 validated
+removals over about67min of active batch elapsed time are approximately160/h;
+acceptance credit still requires reviewer-b's verdict.
 
 Watchlist: no new node or semantic split; existing #2542/#2151 mapping remains
 sufficient. Architecture feedback stays there: the larger shared serving raw
