@@ -332,7 +332,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	}
 	handlers := ""
 	if settings.includeEventStartReviewBranch {
-		handlers += "    ticket.opened:\n      rules:\n        - when: |-\n                  true\n          advances_to: active\n        - when: |-\n                  true\n          advances_to: review\n        - else: true\n"
+		handlers += "    ticket.opened:\n      rules:\n        - when: |-\n                  true\n          advances_to: active\n        - when: |-\n                  true\n          advances_to: review\n"
 	} else {
 		handlers += "    ticket.opened:\n      advances_to: active\n"
 	}
