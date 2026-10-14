@@ -108,7 +108,7 @@ func issue2564H2CommittedStageEvidence(t *testing.T, rt issue2564H2Fixture, runI
 }
 
 func issue2564H2ValidateRule(selection storetest.HandlerSelectionStorageEvidence, index int) error {
-	display := "rules[1]: else"
+	display := "rules[1]: default"
 	if index == 0 {
 		display = "rules[0]: when _entity.current_state == 's1'"
 	} else if index != 1 {
@@ -150,7 +150,7 @@ func TestIssue2564H2CommitStageRejectsWrongEvidence(t *testing.T) {
 			}
 		})
 	}
-	selection := storetest.HandlerSelectionStorageEvidence{Context: "handler_rules", Disposition: "selected", FlowPath: "hub", Family: "handler_rule", SemanticPath: `nodes["hub-node"].handlers["hub.bump"].rules[1]`, DisplayLabel: "rules[1]: else"}
+	selection := storetest.HandlerSelectionStorageEvidence{Context: "handler_rules", Disposition: "selected", FlowPath: "hub", Family: "handler_rule", SemanticPath: `nodes["hub-node"].handlers["hub.bump"].rules[1]`, DisplayLabel: "rules[1]: default"}
 	if err := issue2564H2ValidateRule(selection, 1); err != nil {
 		t.Fatal(err)
 	}
