@@ -270,7 +270,8 @@ func TestReviewedSharedCoordinator2617RefusesUnlistedCurrentPairs(t *testing.T) 
 			continue
 		}
 		count++
-		current, err := reviewedSharedCoordinatorBody2617(row, packet)
+		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		current, err := reviewedSharedCoordinatorCurrentBody2617(row, actual, packet)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -284,7 +285,7 @@ func TestReviewedSharedCoordinator2617RefusesUnlistedCurrentPairs(t *testing.T) 
 			case "source":
 				mutant.Successor = strings.Replace(current, "func ", "func Unreviewed", 1)
 			}
-			if _, err := reviewedSharedCoordinatorBody2617(mutant, packet); err == nil {
+			if _, err := reviewedSharedCoordinatorCurrentBody2617(mutant, current, packet); err == nil {
 				t.Fatalf("shared coordinator accepted %s mutation for %s", field, row.Function)
 			}
 		}
