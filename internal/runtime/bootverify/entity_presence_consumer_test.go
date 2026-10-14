@@ -23,7 +23,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				case "guard":
 					handler.Guard = &rc.GuardSpec{Check: value + ` == "fallback"`}
 				case "rule":
-					handler.Rules = mustBootHandlerFixture(t, "rules:\n  - when: "+value+` == "fallback"`+"\n  - else: true\n").Rules
+					handler.Rules = mustBootHandlerFixture(t, "rules:\n  - when: "+value+` == "fallback"`+"\n").Rules
 				case "write":
 					handler.DataAccumulation = rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(value)}}}
 				case "emit":
