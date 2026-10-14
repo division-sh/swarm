@@ -24194,7 +24194,7 @@ test_specification:
       proves:
       - catalog.runtime.numeric_deployment_feed
     local_preflight:
-      owner: internal/testplanning finite selection, cmd/swarm-test local execution, and internal/testtiming native results
+      owner: internal/testplanning finite selection, cmd/swarm-test local execution and attempt/status ownership, internal/testtiming native results, and .github/workflows/ci.yml exact-head admission
       entry: go run ./cmd/swarm-test preflight
       selection: >-
         Preflight is local-only informational proof, not a fourth hosted tier or completed core/lifecycle/full.
@@ -24233,7 +24233,7 @@ test_specification:
         Complete tagged candidate-overlay, redundant test linkage, blocked-SQL/runtime origin and native unused
         analysis remain outside the finite selection; their existing affected/hosted proofs remain mandatory.
         Any changed Go source (including tests, build-tagged source and non-store callers), go.mod/go.sum/go.work/
-        go.work.sum, platform-spec.yaml, .github/test-proof-plan.yaml, or path in internal/store/ or
+        go.work.sum (including nested module/workspace inputs), platform-spec.yaml, .github/test-proof-plan.yaml, or path in internal/store/ or
         internal/storetest/ requires the unchanged TestPersistenceAuthorityDebtRatchet and
         TestNativeFixtureFamiliesDoNotReceiveRawAuthority roots, with their native child obligations, once in the
         same internal/store phase with the existing actual20m command timeout. Named store trees include the

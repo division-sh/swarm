@@ -74,9 +74,9 @@ For the single complete-command measurement, use
 `/usr/bin/time -p go run ./cmd/swarm-test preflight`: the outer time includes
 launcher compilation, while the retained receipt separates discovery/setup and
 each actual phase including build/TestMain and joined cleanup. The receipt's
-`end_to_end_seconds` covers compiled-command entry through joined execution and
-persisted proof, including early repository/status admission. Terminal status
-publication latency is printed separately;
+`end_to_end_seconds` covers compiled-command entry through joined execution,
+including early repository/status admission. Receipt persistence and terminal
+publication follow; terminal publication latency is printed separately;
 retain the outer launcher-to-exit time separately, without subtracting compile
 time. `queue_wait_seconds` is zero: preflight never enters the shared slot queue.
 `execution_seconds` includes package build/TestMain and actual commands;
