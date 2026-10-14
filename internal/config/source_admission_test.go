@@ -183,7 +183,8 @@ func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) 
 			t.Fatalf("duplicate %q admitted: %v", source, err)
 		}
 	}
-	for _, source := range []string{"", "runtime: null", "workspace: {}", "workspace: null"} {
+	// USER #1801/6170905244: omitted/empty containers remain valid; null refuses.
+	for _, source := range []string{"", "runtime: {}", "workspace: {}"} {
 		if err := decodeConfigSourceTest(source, &cfg); err != nil {
 			t.Fatalf("supported presence %q: %v", source, err)
 		}
