@@ -4763,9 +4763,16 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 		TargetField: "revision_count",
 		Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
 	}}
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.revision_count < 3",
-	}}
+	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: entity.revision_count < 3\n").OnComplete
+	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
+	var err error
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref, valid := handler.OnComplete[0].DeclarationIdentity(); !valid || !strings.HasSuffix(ref.SemanticPath(), ".on_complete[0]") {
+		t.Fatalf("completion fixture lacks the exact admitted declaration: %v", ref)
+	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
