@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
@@ -380,7 +381,7 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {
 	region := trace.StartRegion(ctx, "whatsapp.bootstrap.request-wait")
 	defer region.End()
-	owned, incoming, release, err := s.selectRuntime(ctx, candidate)
+	owned, incoming, processBinding, release, err := s.selectRuntime(ctx, candidate)
 	if err != nil || owned == nil || release == nil || ctx.Err() != nil {
 		if owned == nil || release == nil {
 			err = errors.Join(err, channelonboarding.ErrInvalidRequest)
@@ -395,7 +396,7 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	}
 	// Selection retains counted work before launch. The original attempt joins
 	// construction and releases it even after its requesting caller stops waiting.
-	go s.completeSessionAttempt(ctx, owned, op, candidate, attempt, bootstrap, incoming, release)
+	go s.completeSessionAttempt(ctx, owned, op, candidate, attempt, bootstrap, incoming, processBinding, release)
 	select {
 	case <-attempt.done:
 		return errors.Join(attempt.err, context.Cause(ctx))
@@ -405,7 +406,7 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	}
 }
 
-func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool, incoming *sessionprovider.RuntimeIncomingOptions, release func() error) (err error) {
+func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool, incoming *sessionprovider.RuntimeIncomingOptions, processBinding processbinding.Binding, release func() error) (err error) {
 	region := trace.StartRegion(owned, "whatsapp.bootstrap.owned-attempt")
 	defer region.End()
 	defer func() {
@@ -416,7 +417,7 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 		return context.Cause(ctx)
 	}
 	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, InvocationState: s.invocationState, OperationID: op.OperationID,
-		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming}
+		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming, ProcessBinding: processBinding}
 	var connection *sessionprovider.RuntimeConnection
 	if bootstrap {
 		connection, err = sessionprovider.OpenRuntimeBootstrap(owned, options)
