@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,6 +230,67 @@ func TestAgentFirstClaimProfileFaultCASBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAgentFirstClaimProfileReadbackRefusesInexactEvidenceBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newAgentClaimProfileFixture(t, backend)
+			_, first, _ := f.claim(t)
+			before := profileFixtureSnapshot(t, f)
+			for _, name := range []string{"missing_row", "event", "run", "route", "source", "generation", "unclaimed"} {
+				t.Run(name, func(t *testing.T) {
+					bad := first.Snapshot
+					switch name {
+					case "missing_row":
+						bad.DeliveryID = uuid.NewString()
+					case "event":
+						bad.EventID = uuid.NewString()
+					case "run":
+						bad.RunID = uuid.NewString()
+					case "route":
+						bad.Route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "global", FlowInstance: "sibling"})
+					case "source", "generation":
+						source, generation := f.source, f.authority.Generation()
+						if name == "source" {
+							var err error
+							source, err = correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+							if err != nil || source.Matches(f.source) {
+								t.Fatalf("independent source control: %v", err)
+							}
+						} else {
+							generation++
+						}
+						var err error
+						bad.Authority, err = deliverylifecycle.NewNormalExecutionAuthority(source, f.authority.ExecutionID(), generation)
+						if err != nil {
+							t.Fatal(err)
+						}
+					case "unclaimed":
+						bad.ClaimVersion = 0
+					}
+					if _, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, bad); err == nil {
+						t.Fatal("inexact historical profile read accepted")
+					}
+					if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
+						t.Fatal("refused profile read changed complete storage")
+					}
+				})
+			}
+			foreign := newAgentClaimProfileFixture(t, backend)
+			_, foreignClaim, foreignCapture := foreign.claim(t)
+			foreignBefore := profileFixtureSnapshot(t, foreign)
+			if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, foreignClaim.Claim, foreignCapture, AgentClaimProfileMissing, deliverylifecycle.Claim{}); err == nil {
+				t.Fatal("missing exact claim row accepted capture mutation")
+			}
+			if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
+				t.Fatal("missing-row fault changed destination storage")
+			}
+			if after := profileFixtureSnapshot(t, foreign); !reflect.DeepEqual(foreignBefore, after) {
+				t.Fatal("missing-row fault changed independent source storage")
+			}
+		})
 	}
 }
 
