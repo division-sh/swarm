@@ -15,7 +15,7 @@ import (
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
 // captured by run-fork revisioning, including persisted connect-route evidence.
-// It excludes live worker claim tokens, lease expiry and physical update/handoff stamps;
+// It excludes live worker claim generations/tokens, lease expiry and physical update/handoff stamps;
 // historical readback is never a capability or proof of current ownership.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
@@ -36,7 +36,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
 		NextEligibleAt            *time.Time                       `json:"next_eligible_at"`
-		ClaimVersion              int64                            `json:"claim_version"`
+		SettledClaimVersion       *int64                           `json:"settled_claim_version"`
 		ActiveSessionID           string                           `json:"active_session_id"`
 		ReasonCode                string                           `json:"reason_code"`
 		Failure                   *runtimefailures.Envelope        `json:"failure"`
@@ -107,9 +107,9 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,
 		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.Recipient.ID(),
 		Status: status, RetryCount: fact.RetryCount, MaxRetries: fact.MaxRetries,
-		FinalSelection: fact.FinalSelection,
-		ClaimVersion:   fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
-		ReasonCode: strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
+		FinalSelection:  fact.FinalSelection,
+		ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
+		ReasonCode:      strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
 		CreatedAt: fact.CreatedAt.UTC(),
 	}
 	if fact.NextEligibleAt != nil {
@@ -120,6 +120,12 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	}
 	if fact.SettledAt != nil {
 		snapshot.SettledAt = fact.SettledAt.UTC()
+	}
+	if (fact.SettledClaimVersion != nil) != !snapshot.SettledAt.IsZero() {
+		return Snapshot{}, fmt.Errorf("%w: historical claim generation requires exact settlement evidence", ErrConflict)
+	}
+	if fact.SettledClaimVersion != nil {
+		snapshot.ClaimVersion = *fact.SettledClaimVersion
 	}
 	if err := validateHistoricalSnapshot(snapshot); err != nil {
 		return Snapshot{}, err
@@ -149,7 +155,7 @@ func validateHistoricalLifecycleShape(snapshot Snapshot) error {
 			return fmt.Errorf("%w: historical pending delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusInProgress:
-		if snapshot.ClaimVersion == 0 || snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
+		if snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical in-progress delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusFailed:

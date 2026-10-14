@@ -20789,6 +20789,11 @@ run_model:
         receipt; missing, duplicate or contradictory receipts cannot authorize the receiver phase.
         Delivery admission and semantic settlement times remain historical facts; the physical updated_at clock is not
         reconstructed or substituted from them, and historical delivery readback leaves that physical clock unset.
+        Historical delivery facts omit live claim generations. Only an exact settled outcome records settled_claim_version,
+        including zero for cancellation before a claim; historical readback restores that outcome coordinate but never
+        grants live execution authority. Pending, in-progress and retry-scheduled history retains its lifecycle classification
+        without a claim generation; the raw claim_version field and a settlement generation without settlement evidence
+        are refused. Current claim fencing and exact dead-letter/terminal-barrier settlement joins remain unchanged.
         Historical final selection is read only from that revisioned delivery payload, never joined from today's
         selection table. Missing tags, malformed facts and contradictory status/presence pairs fail closed. Fresh
         fork-local pending deliveries start with absent selection; source final-selection history remains unchanged.

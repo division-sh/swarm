@@ -266,10 +266,19 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if err := json.Unmarshal(claimFact, &claimFields); err != nil {
 						t.Fatal(err)
 					}
-					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at"} {
+					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at", "claim_version", "settled_claim_version"} {
 						if _, exists := claimFields[forbidden]; exists {
 							t.Fatalf("real claimed delivery revision contains %s", forbidden)
 						}
+					}
+					if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, runID); err != nil {
+						t.Fatal(err)
+					}
+					captured := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, routeEvidenceHead(t, ctx, fixture.db, runID))
+					assertRouteEvidenceEqual(t, captured.Route, route)
+					if captured.Status != runtimedelivery.StatusInProgress || captured.ClaimVersion != 0 ||
+						!captured.StartedAt.Equal(claimed.Snapshot.StartedAt) || captured.Authority.Validate() == nil {
+						t.Fatalf("broad capture must retain in-progress evidence, not live generation or authority: %#v", captured)
 					}
 					settled, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 					if err != nil {
