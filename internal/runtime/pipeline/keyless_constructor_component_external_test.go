@@ -20,6 +20,11 @@ import (
 // evidence of installed agents, route publication or public activation.
 func commitKeylessConstructorComponent(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, coordinator *pipeline.PipelineCoordinator, source semanticview.Source) {
 	t.Helper()
+	commitKeylessConstructorComponentAt(t, ctx, selected, coordinator, source, time.Now().UTC().Truncate(time.Microsecond))
+}
+
+func commitKeylessConstructorComponentAt(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, coordinator *pipeline.PipelineCoordinator, source semanticview.Source, at time.Time) {
+	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	if !found {
 		t.Fatal("constructor component requires its exact source fact")
@@ -30,7 +35,6 @@ func commitKeylessConstructorComponent(t *testing.T, ctx context.Context, select
 		BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact,
 		WorkflowInstances: coordinator, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
-	at := time.Now().UTC().Truncate(time.Microsecond)
 	plan, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: identity, OccurredAt: at,
 	})

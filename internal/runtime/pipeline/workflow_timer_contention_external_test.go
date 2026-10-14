@@ -16,7 +16,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -181,7 +180,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 		for _, scenario := range scenarios {
 			t.Run(tc.name+"/"+scenario, func(t *testing.T) {
 				selected := tc.open(t)
-				runID, entityID := uuid.NewString(), uuid.NewString()
+				runID := uuid.NewString()
+				entityID := runID
 				bundle := workflowTimerServedLifecycleBundle(t, false)
 				ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 				source := semanticview.Wrap(bundle)
@@ -233,24 +233,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				bus, pc, capture := newRuntime()
 				identity := testRunScopedWorkflowInstanceForRun(runID, runID)
 				at := time.Now().UTC().Add(-time.Hour)
-				instance, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, identity, runtimepipeline.WorkflowInstance{
-					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "waiting", StageDefined: true, EnteredStageAt: at, CreatedAt: at, EntityType: "test_entity", Fields: map[string]any{},
-				}, at)
-				if err != nil {
-					t.Fatal(err)
-				}
-				command, err := flowactivationfixture.Command(ctx, instance, lifecycle, at)
-				if err != nil {
-					t.Fatal(err)
-				}
-				construction, err := selected.events.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
-				if err != nil || !construction.Acknowledged || !construction.Created {
-					t.Fatalf("construct timer instance: %+v, %v", construction, err)
-				}
-				if err := pc.FinalizeInitialEntryLifecycle(ctx, construction.Lifecycle); err != nil {
-					t.Fatal(err)
-				}
+				commitKeylessConstructorComponentAt(t, ctx, selected, pc, source, at)
 				activations := selected.events.(runtimepipeline.WorkflowTimerActivationPersistence)
 				rows, err := activations.ListWorkflowTimerActivations(ctx, runID, entityID, true)
 				if err != nil || len(rows) != 1 {
