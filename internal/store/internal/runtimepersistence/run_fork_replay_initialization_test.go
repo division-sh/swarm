@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,12 +21,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -427,12 +430,224 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if !reflect.DeepEqual(after, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 				t.Fatal("duplicate activation mutated durable history")
 			}
+			t.Run("fresh_claim_recovery_and_exact_settlement", func(t *testing.T) {
+				childCtx := correlation.WithRunID(ctx, child.ForkRunID)
+				fresh := restartedEventDeliveryRouteReadbackStore(t, childCtx, fixture).(deliverylifecycle.Store)
+				beforeHandoff := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				for _, pending := range children {
+					observation, err := fresh.ObserveDeliveryContinuation(childCtx, pending.Authority, pending.DeliveryID)
+					if err != nil || observation.Disposition != deliverylifecycle.ClaimDeferred || observation.Invariant != nil {
+						t.Fatalf("historical replay escaped its pending pipeline handoff: %+v err=%v", observation, err)
+					}
+					refused, err := fresh.ClaimDelivery(childCtx, pending.Authority, prepared.Event.Event(), pending.Route)
+					if _, acquired := refused.Acquired(); err != nil || acquired || refused.Disposition != deliverylifecycle.ClaimDeferred || refused.Renewal.Acknowledged {
+						t.Fatalf("historical first claim bypassed the pipeline handoff: %+v err=%v", refused, err)
+					}
+				}
+				if !reflect.DeepEqual(beforeHandoff, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+					t.Fatal("deferred historical claims changed durable evidence")
+				}
+				if err := acknowledgePipelineEventFixture(childCtx, fresh, childEventID); err != nil {
+					t.Fatalf("accept replay through the existing pipeline settlement/handoff owner: %v", err)
+				}
+				children = admitHistoricalReplayReceiverClaimFixtures(t, childCtx, fresh, children, fact)
+				immutableBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				inventory, err := fresh.InspectDeliveryRecovery(childCtx, fact)
+				if err != nil {
+					t.Fatal(err)
+				}
+				foundFork := false
+				for _, run := range inventory.Runs {
+					if run.RunID == child.ForkRunID {
+						foundFork = true
+						if run.Pending != 2 || run.InProgress != 0 || run.Failed != 0 {
+							t.Fatalf("fresh recovery lost the exact two historical obligations: %+v", run)
+						}
+					}
+				}
+				if !foundFork {
+					t.Fatal("fresh recovery omitted the fork's historical obligations")
+				}
+				for _, pending := range children {
+					if pending.Route.Target.Route().EntityID != "" || pending.Route.Initialization.Empty() {
+						t.Fatal("recovery conflated the empty actor with historical construction")
+					}
+					single, err := fresh.ObserveDeliveryContinuation(childCtx, pending.Authority, pending.DeliveryID)
+					if err != nil || single.Disposition != deliverylifecycle.ClaimAcquired || single.Invariant != nil || single.Wake != (deliverylifecycle.ContinuationWake{}) {
+						t.Fatalf("fresh historical continuation lost exact eligibility: %+v err=%v", single, err)
+					}
+					batch, err := fresh.ObserveDeliveryContinuations(childCtx, pending.Authority, []string{pending.DeliveryID})
+					if err != nil || len(batch) != 1 || !reflect.DeepEqual(single, batch[0]) {
+						t.Fatalf("fresh historical batch changed exact eligibility: %+v err=%v", batch, err)
+					}
+					page, err := fresh.ScanDeliveryContinuations(childCtx, pending.Authority, deliverylifecycle.ContinuationCursor{}, 64)
+					if err != nil {
+						t.Fatal(err)
+					}
+					matched := 0
+					for _, item := range page.Items {
+						if item.DeliveryID != pending.DeliveryID {
+							continue
+						}
+						matched++
+						if item.Disposition != deliverylifecycle.ClaimAcquired || item.Invariant != nil || item.Wake != (deliverylifecycle.ContinuationWake{}) ||
+							!reflect.DeepEqual(item.Snapshot, pending) || !reflect.DeepEqual(item.Event, prepared.Event.Event()) {
+							t.Fatalf("fresh historical scan changed its event/route/authority: %+v", item)
+						}
+					}
+					unchanged, err := fresh.Snapshot(childCtx, pending.DeliveryID)
+					if err != nil || matched != 1 || !reflect.DeepEqual(pending, unchanged) || unchanged.ClaimVersion != 0 {
+						t.Fatalf("fresh observations mutated or omitted the pending historical obligation: matches=%d %+v err=%v", matched, unchanged, err)
+					}
+					first, err := fresh.ClaimDelivery(childCtx, pending.Authority, prepared.Event.Event(), pending.Route)
+					claimed, acquired := first.Acquired()
+					if err != nil || !acquired || !first.Acknowledged || !first.Renewal.Acknowledged || claimed.Claim.Version() != 1 ||
+						claimed.Snapshot.DeliveryID != pending.DeliveryID || !reflect.DeepEqual(claimed.Snapshot.Route, pending.Route) {
+						t.Fatalf("fresh historical first claim: %+v err=%v", first, err)
+					}
+					if err := ExpireExactDeliveryClaimFaultForTest(childCtx, fresh, claimed.Claim); err != nil {
+						t.Fatal(err)
+					}
+					recoveredStore := restartedEventDeliveryRouteReadbackStore(t, childCtx, fixture).(deliverylifecycle.Store)
+					expired, err := recoveredStore.Snapshot(childCtx, pending.DeliveryID)
+					if err != nil || expired.Status != deliverylifecycle.StatusInProgress || expired.ClaimVersion != 1 {
+						t.Fatalf("fresh expired historical claim: %+v err=%v", expired, err)
+					}
+					assertClaimHistoryContinuations(t, childCtx, recoveredStore, expired, deliverylifecycle.ClaimReclaimable, false)
+					second, err := recoveredStore.ClaimDelivery(childCtx, pending.Authority, prepared.Event.Event(), pending.Route)
+					resumed, acquired := second.Acquired()
+					if err != nil || !acquired || !second.Acknowledged || second.Previous != deliverylifecycle.ClaimReclaimable ||
+						resumed.Claim.Version() != claimed.Claim.Version()+1 || resumed.Snapshot.DeliveryID != pending.DeliveryID ||
+						!reflect.DeepEqual(resumed.Snapshot.Route, pending.Route) {
+						t.Fatalf("fresh historical recovery changed its exact dependency/claim: %+v err=%v", second, err)
+					}
+					beforeStale := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					if _, err := recoveredStore.SettleSuccess(childCtx, claimed.Claim, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); !errors.Is(err, deliverylifecycle.ErrConflict) {
+						t.Fatalf("stale historical claim settled its successor: %v", err)
+					}
+					if !reflect.DeepEqual(beforeStale, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("stale historical settlement changed durable evidence")
+					}
+					settled, err := recoveredStore.SettleSuccess(childCtx, resumed.Claim, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection())
+					if err != nil || !settled.MatchesSettlementClaim(resumed.Claim) || settled.Status != deliverylifecycle.StatusDelivered ||
+						!reflect.DeepEqual(settled.Route, pending.Route) {
+						t.Fatalf("exact recovered historical settlement: %+v err=%v", settled, err)
+					}
+					outcomes, err := recoveredStore.Outcomes(childCtx, pending.DeliveryID)
+					if err != nil || len(outcomes) != 1 || outcomes[0].ClaimVersion != resumed.Claim.Version() || outcomes[0].Outcome != string(deliverylifecycle.StatusDelivered) {
+						t.Fatalf("historical recovery did not settle exactly once: %+v err=%v", outcomes, err)
+					}
+				}
+				immutableAfter := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				for _, table := range []string{"events", "committed_replay_scopes", "flow_instances", "entity_state", "workflow_instance_initial_materializations", "run_fork_delivery_event_replays"} {
+					prior, existed := immutableBefore[table]
+					current, exists := immutableAfter[table]
+					if !existed || !exists || !reflect.DeepEqual(prior, current) {
+						t.Fatalf("claim/recovery mutated immutable publication, lineage or construction table %s", table)
+					}
+				}
+				exact, found, err := restartedEventDeliveryRouteReadbackStore(t, childCtx, fixture).(preparedPublishEventReadbackStore).LoadPreparedPublishEvent(childCtx, childEventID)
+				if err != nil || !found || !reflect.DeepEqual(prepared, exact) {
+					t.Fatalf("fresh recovery changed the original prepared publication: found=%t err=%v", found, err)
+				}
+			})
 			sourceAfter, err := reader.DeliverySnapshotsForEvent(ctx, trigger.ID())
 			if err != nil || !reflect.DeepEqual(sourceDeliveries, sourceAfter) {
+				for _, prior := range sourceDeliveries {
+					for _, current := range sourceAfter {
+						if prior.DeliveryID == current.DeliveryID && !reflect.DeepEqual(prior, current) {
+							t.Logf("source delivery %s status=%s->%s route_equal=%t authority=%s/%d->%s/%d claim_version=%d->%d updated=%s->%s",
+								prior.DeliveryID, prior.Status, current.Status, reflect.DeepEqual(prior.Route, current.Route),
+								prior.Authority.ExecutionID(), prior.Authority.Generation(), current.Authority.ExecutionID(), current.Authority.Generation(),
+								prior.ClaimVersion, current.ClaimVersion, prior.UpdatedAt.Format(time.RFC3339Nano), current.UpdatedAt.Format(time.RFC3339Nano))
+						}
+					}
+				}
 				t.Fatalf("child replay changed source deliveries: %v\nbefore=%+v\nafter=%+v", err, sourceDeliveries, sourceAfter)
 			}
 		})
 	}
+}
+
+func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Context, selected deliverylifecycle.Store, pending []deliverylifecycle.Snapshot, source correlation.SourceArtifactFact) []deliverylifecycle.Snapshot {
+	t.Helper()
+	coordinate := agenttopology.SourceCoordinate{BundleHash: source.BundleHash()}
+	records := make([]manager.PersistedAgent, len(pending))
+	desired := make([]agenttopology.DesiredAgent, len(pending))
+	for i, delivery := range pending {
+		records[i] = agentFixtureStaticRecord(t, delivery.Route.AgentIdentity)
+		records[i].Config.FlowID = delivery.Route.Initialization.ConstructionTarget().Route().FlowID
+		if records[i].Config.EntityID != "" {
+			t.Fatal("historical actor fixture must remain exactly entityless")
+		}
+		plan, err := delivery.Route.AgentIdentity.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision, err := manager.AgentConfigPlanRevision(records[i].Config, plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		desired[i] = agenttopology.DesiredAgent{Identity: plan, Source: coordinate, ConfigRevision: revision}
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected.(agentfixture.Store), plan, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := agenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, agenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, record := range records {
+		record.Topology = admission
+		registered, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
+			DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Identity: record.Config.Identity, AgentID: record.Config.ID,
+			Trigger: "historical-claim-proof", TargetEpoch: 1, TargetGeneration: 1, TargetPhase: manager.AgentLifecycleRegistered,
+			ConfigRevision: desired[i].ConfigRevision, RunMode: manager.AgentRunModeStopped, Agent: &record, Topology: admission, Now: record.StartedAt,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
+			DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: record.Config.Identity, AgentID: record.Config.ID,
+			Trigger: "historical-claim-proof", ExpectedEpoch: registered.RuntimeEpoch, ExpectedGeneration: registered.Generation, ExpectedPhase: registered.Phase,
+			TargetEpoch: registered.RuntimeEpoch, TargetGeneration: registered.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
+			ConfigRevision: desired[i].ConfigRevision, RunMode: manager.AgentRunModeStandard, Topology: admission, Now: record.StartedAt.Add(time.Microsecond),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	rebound := make([]deliverylifecycle.Snapshot, len(pending))
+	for i, prior := range pending {
+		rebound[i], err = selected.Snapshot(ctx, prior.DeliveryID)
+		if err != nil || !rebound[i].Authority.Equal(authority) || !reflect.DeepEqual(prior.Route, rebound[i].Route) || rebound[i].ClaimVersion != 0 || rebound[i].Status != deliverylifecycle.StatusPending {
+			t.Fatalf("existing authority activation changed historical obligation ownership: %+v err=%v", rebound[i], err)
+		}
+	}
+	return rebound
 }
 
 func replayInitializedReceiverSource(t *testing.T) semanticview.Source {
