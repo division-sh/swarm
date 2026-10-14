@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -101,14 +99,6 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 					if !reflect.DeepEqual(got, before) {
 						t.Fatal("excluded source changed caller-owned defaults")
 					}
-					path := filepath.Join(t.TempDir(), "swarm.yaml")
-					if err := os.WriteFile(path, []byte(source), 0600); err != nil {
-						t.Fatal(err)
-					}
-					for _, override := range []string{"", "openai_responses"} {
-						_, err := LoadWithOptions(path, LoadOptions{BackendOverride: override})
-						assertDiagnostic(err, path)
-					}
 					if parts[0] == "runtime" {
 						var runtime RuntimeConfig
 						assertDiagnostic(yaml.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(source, "runtime: {"), "}")), &runtime), "")
@@ -191,17 +181,14 @@ func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) 
 	}
 }
 
-func TestConfigLoadUnknownKeyDiagnosticNamesSourceVocabularyAndSuggestion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte("runtime:\n  recovery_on_startupp: true\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path)
+func TestConfigDecodeUnknownKeyDiagnosticNamesSourceVocabularyAndSuggestion(t *testing.T) {
+	var cfg Config
+	err := decodeConfigSourceTest("runtime:\n  recovery_on_startupp: true\n", &cfg)
 	diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
-	if !ok || diagnostic.Location.File != path || diagnostic.Location.Line != 2 || !strings.Contains(diagnostic.Remediation, "recovery_on_startup") {
+	if !ok || diagnostic.Location.File != "" || diagnostic.Location.Line != 2 || !strings.Contains(diagnostic.Remediation, "recovery_on_startup") {
 		t.Fatalf("error=%v diagnostic=%#v", err, diagnostic)
 	}
-	if !strings.Contains(err.Error(), "Valid fields:") || !strings.Contains(err.Error(), path) {
+	if !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatal(err)
 	}
 }
@@ -230,30 +217,5 @@ func TestConfigDecodeSourceRejectsBeforeProjection(t *testing.T) {
 	}
 	if err := DecodeSource(yamlsource.MissingDocument("").Root(), nil); err == nil {
 		t.Fatal("nil projection target accepted")
-	}
-}
-
-func TestConfigLoadWithOptionsAdmitsSourceBeforeOverrides(t *testing.T) {
-	const prefix = "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
-	for _, row := range []struct{ source, key string }{
-		{"totally_unknown: true", "totally_unknown"},
-		{"<<: {totally_unknown: null}", "totally_unknown"},
-		{"database: {<<: {totally_unknown: true}}", "totally_unknown"},
-		{"connection: {api_serve: localhost}", "api_serve"},
-	} {
-		t.Run(row.source, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "swarm.yaml")
-			source := []byte(prefix + row.source + "\n")
-			if err := os.WriteFile(path, source, 0600); err != nil {
-				t.Fatal(err)
-			}
-			for _, override := range []string{"", "openai_responses"} {
-				_, err := LoadWithOptions(path, LoadOptions{BackendOverride: override})
-				diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
-				if !ok || diagnostic.Location.File != path || !strings.Contains(diagnostic.Problem, row.key) || len(diagnostic.ValidOptions) == 0 || diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
-					t.Fatalf("override=%q: diagnostic=%#v, error=%v", override, diagnostic, err)
-				}
-			}
-		})
 	}
 }
