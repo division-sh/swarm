@@ -140,3 +140,122 @@ func TestSingleDeploymentConfigDoesNotTreatDefaultDirectoryAsAbsence(t *testing.
 		t.Fatalf("existing invalid default path silently selected built-in defaults: %v", err)
 	}
 }
+
+func TestSingleDeploymentConfigDoesNotTreatBrokenSymlinkAsAbsence(t *testing.T) {
+	for _, target := range []string{"missing.yaml", "swarm.yaml"} {
+		t.Run(target, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root := t.TempDir()
+			path := filepath.Join(root, ".swarm", "swarm.yaml")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+			if err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("broken deployment entry silently selected defaults: %v", err)
+			}
+		})
+	}
+}
+
+func TestSingleDeploymentConfigReadsValidDefaultSymlink(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := t.TempDir()
+	selected := filepath.Join(root, ".swarm", "swarm.yaml")
+	target := filepath.Join(t.TempDir(), "operator.yaml")
+	writeSingleDeploymentConfig(t, target, "runtime:\n  recovery_on_startup: false\n")
+	if err := os.MkdirAll(filepath.Dir(selected), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, selected); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+	if err != nil || loaded.Path != selected || !loaded.DeploymentConfigured() || loaded.Config.Runtime.RecoveryOnStartup {
+		t.Fatalf("valid selected symlink lost path, intent or contents: path=%q error=%v", loaded.Path, err)
+	}
+}
+
+func TestSingleDeploymentConfigKeepsSecretAndSplitRefusals(t *testing.T) {
+	for _, selection := range []string{"deployment", "locator", "flag"} {
+		for _, row := range []struct{ body, key, refusal string }{
+			{"database: {password: private-value-not-for-diagnostics}\n", "database.password", "plaintext secret"},
+			{"runtime: {max_concurrent_agents: 2}\n", "runtime.max_concurrent_agents", "recognized but not yet supported"},
+			{"llm: {claude_cli: {retries: 2}}\n", "llm.claude_cli.retries", "recognized but not yet supported"},
+		} {
+			t.Run(selection+"/"+row.key, func(t *testing.T) {
+				isolateCLIAPIConfigEnv(t)
+				root := t.TempDir()
+				selected := filepath.Join(root, ".swarm", "swarm.yaml")
+				opts := RuntimeConfigLoadOptions{RepoRoot: root}
+				if selection != "deployment" {
+					selected = filepath.Join(root, "operator.yaml")
+					if selection == "locator" {
+						t.Setenv("SWARM_CONFIG", selected)
+					} else {
+						opts.ExplicitPath = selected
+					}
+				}
+				writeSingleDeploymentConfig(t, selected, row.body)
+				loaded, err := LoadRuntimeConfigWithOptions(opts)
+				if err == nil || !strings.Contains(err.Error(), row.key) || !strings.Contains(err.Error(), row.refusal) || strings.Contains(err.Error(), "private-value-not-for-diagnostics") {
+					t.Fatalf("secret or unsupported key refusal changed: %v", err)
+				}
+				found := false
+				for _, diagnostic := range loaded.Diagnostics {
+					if diagnostic.blocker() && diagnostic.Key == row.key && diagnostic.Path == selected {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("refusal lost selected path/key: %#v", loaded.Diagnostics)
+				}
+			})
+		}
+	}
+}
+
+func TestSingleDeploymentConfigNullContainerRefusalNamesSelectedFile(t *testing.T) {
+	for _, selection := range []string{"deployment", "locator", "flag"} {
+		for _, row := range []struct{ body, key string }{
+			{"runtime: null\n", "runtime"},
+			{"llm:\n  provider_limits: null\n", "llm.provider_limits"},
+			{"platform:\n  packs:\n    platform_dirs: null\n", "platform.packs.platform_dirs"},
+			{"connection: null\n", "connection"},
+			{"serve: null\n", "serve"},
+			{"paths: null\n", "paths"},
+		} {
+			t.Run(selection+"/"+row.key, func(t *testing.T) {
+				isolateCLIAPIConfigEnv(t)
+				root := t.TempDir()
+				selected := filepath.Join(root, ".swarm", "swarm.yaml")
+				opts := RuntimeConfigLoadOptions{RepoRoot: root}
+				if selection != "deployment" {
+					selected = filepath.Join(root, "operator.yaml")
+					if selection == "locator" {
+						t.Setenv("SWARM_CONFIG", selected)
+					} else {
+						opts.ExplicitPath = selected
+					}
+				}
+				writeSingleDeploymentConfig(t, selected, row.body)
+				loaded, err := LoadRuntimeConfigWithOptions(opts)
+				if err == nil || !strings.Contains(err.Error(), selected) {
+					t.Fatalf("selected null container admitted or lost its file: %v", err)
+				}
+				found := false
+				for _, diagnostic := range loaded.Diagnostics {
+					if diagnostic.Kind == unifiedConfigDiagnosticParseFailed && diagnostic.Path == selected && diagnostic.Key == row.key && diagnostic.Line > 0 && diagnostic.Column > 0 && strings.Contains(diagnostic.Remediation, "omit") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("null refusal lost key, coordinates or teaching: %#v", loaded.Diagnostics)
+				}
+			})
+		}
+	}
+}
