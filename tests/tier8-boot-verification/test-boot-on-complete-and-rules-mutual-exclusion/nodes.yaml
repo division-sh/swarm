@@ -10,4 +10,3 @@ test-node:
       rules:
         - when: payload.type == "a"
           advances_to: routed
-        - else: true

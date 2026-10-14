@@ -33,7 +33,7 @@ func TestOrderedRuleCollectionsRejectAlternateShapes(t *testing.T) {
 					}
 				}
 				if context == "rules" {
-					for _, want := range []string{"evaluated top to bottom", "    - when: payload.kind == 'a'", "      emit: routed.a", "    - else: true", "rows are identified by position"} {
+					for _, want := range []string{"evaluated top to bottom", "    - when: payload.kind == 'a'", "      emit: routed.a", "    - emit: routed.other", "rows are identified by position", "no_match"} {
 						if !strings.Contains(err.Error(), want) {
 							t.Fatalf("collection teaching lost the ruled ordered example %q: %v", want, err)
 						}
@@ -84,7 +84,7 @@ func assertRetiredRuleNameDiagnostic(t *testing.T, err error, context, key strin
 	}
 }
 
-func TestOrderedRuleCollectionsPreserveEmptyAliasesAndBankedRows(t *testing.T) {
+func TestOrderedRuleCollectionsPreserveEmptyAliasesAndDerivedDefault(t *testing.T) {
 	for _, context := range []string{"rules", "on_complete"} {
 		for _, source := range []string{
 			context + ": []\n",
@@ -96,9 +96,9 @@ func TestOrderedRuleCollectionsPreserveEmptyAliasesAndBankedRows(t *testing.T) {
 			}
 		}
 	}
-	handler, err := ruleTestHandler("_note: &rows [{emit: first}, {default: true, emit: second}]\nrules: *rows\n")
-	if err != nil || len(handler.Rules) != 2 || handler.Rules[0].Condition != "" || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]" ||
+	handler, err := ruleTestHandler("_note: &rows [{when: false, emit: first}, {emit: second}]\nrules: *rows\n")
+	if err != nil || len(handler.Rules) != 2 || handler.Rules[0].Condition != "false" || handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: when false" ||
 		handler.Rules[0].Emit.EventType() != "first" || handler.Rules[1].PolicyRow.Kind != PolicySheetRowKindDefault || handler.Rules[1].Emit.EventType() != "second" {
-		t.Fatalf("collection cut changed predicate-less/default alias/order semantics: %#v, %v", handler, err)
+		t.Fatalf("collection cut changed alias/order/derived-default semantics: %#v, %v", handler, err)
 	}
 }
