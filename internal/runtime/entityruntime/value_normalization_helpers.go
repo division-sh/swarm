@@ -71,14 +71,6 @@ func normalizeIntegerFieldValue(fieldName string, value any) (any, error) {
 	return int64(floatValue), nil
 }
 
-func normalizeNumericFieldValue(fieldName string, value any) (any, error) {
-	normalized, err := canonicaljson.NormalizeRuntimeNumber(value)
-	if err != nil {
-		return nil, fieldTypeError(fieldName, "must be numeric")
-	}
-	return normalized, nil
-}
-
 func normalizeBooleanFieldValue(fieldName string, value any) (any, error) {
 	boolean, ok := value.(bool)
 	if !ok {
