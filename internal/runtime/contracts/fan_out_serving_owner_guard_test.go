@@ -101,7 +101,8 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 	}
 	groupAllowed := map[string]string{
 		obligationPackage + ".PublicationGroup.ClaimBatch":                  busPackage + ".EventBus.PrepareFanOutPublications",
-		pipelinePath + ".FanOutObligationOwner.BeginFanOutPublicationGroup": pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn",
+		pipelinePath + ".FanOutObligationOwner.BeginFanOutPublicationGroup": "",
+		pipelinePath + ".FanOutObligationOwner.BeginFanOutEvaluation":       pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn",
 		obligationPackage + ".PublicationGroup.Claim":                       "",
 		obligationPackage + ".PublicationGroup.RecordPrepared":              busPackage + ".EventBus.prepareEnginePublicationsWithMember",
 		obligationPackage + ".PublicationGroup.Seal":                        busPackage + ".EventBus.SealFanOutPublications",
@@ -174,7 +175,7 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 				if object == nil {
 					t.Fatalf("missing selected-store facade %s", typeName)
 				}
-				for _, name := range []string{"ClaimFanOutIntent", "BeginFanOutPublicationGroup", "LoadFanOutEvaluation", "CommitFanOutChunk", "ReleaseFanOutClaim", "ReleaseFanOutRetryable", "BlockFanOutClaim"} {
+				for _, name := range []string{"ClaimFanOutIntent", "BeginFanOutEvaluation", "BeginFanOutPublicationGroup", "LoadFanOutEvaluation", "CommitFanOutChunk", "ReleaseFanOutClaim", "ReleaseFanOutRetryable", "BlockFanOutClaim"} {
 					if method, _, _ := types.LookupFieldOrMethod(types.NewPointer(object.Type()), true, pkg.Types, name); method != nil {
 						t.Errorf("ungranted serving method remains on public selected-store facade: %s.%s", typeName, name)
 					}

@@ -189,6 +189,7 @@ func (i FanOutEvaluationInput) Validate(intent fanoutobligation.Intent) error {
 
 type FanOutObligationOwner interface {
 	FanOutSummaryOwner
+	BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error)
 	BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error)
 	ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
 	LoadFanOutEvaluation(context.Context, fanoutobligation.Claim) (FanOutEvaluationInput, error)
@@ -198,6 +199,16 @@ type FanOutObligationOwner interface {
 	BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error)
 	CancelRunFanOut(context.Context, string, string, time.Time) error
 }
+
+// Evaluation-load failures retain the pump's blocking disposition independently
+// of publication-group acquisition failures (which can yield or retry).
+type FanOutEvaluationLoadError struct {
+	Cause error
+	Stage string
+}
+
+func (e *FanOutEvaluationLoadError) Error() string { return e.Cause.Error() }
+func (e *FanOutEvaluationLoadError) Unwrap() error { return e.Cause }
 
 // FanOutClaimSettlement carries selected-store commit truth independently of
 // post-commit cleanup errors.

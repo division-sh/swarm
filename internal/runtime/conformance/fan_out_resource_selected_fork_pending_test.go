@@ -47,12 +47,12 @@ type selectedDeploymentSettlementOwner struct {
 	committed chan string
 }
 
-func (o selectedDeploymentSettlementOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
-	group, err := o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+func (o selectedDeploymentSettlementOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
+	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, validate)
 	if group == nil || err != nil {
-		return group, err
+		return input, group, err
 	}
-	return selectedDeploymentSettlementGroup{PublicationGroup: group, committed: o.committed}, nil
+	return input, selectedDeploymentSettlementGroup{PublicationGroup: group, committed: o.committed}, nil
 }
 
 type selectedDeploymentSettlementGroup struct {

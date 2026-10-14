@@ -119,11 +119,21 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		return fanOutTurnAwaitScan, errors.Join(cause, releaseErr, blockErr)
 	}
 
-	input, err := owner.LoadFanOutEvaluation(ctx, claim)
-	if err != nil {
-		return blockClaim("load_evaluation", -1, err, nil)
+	evaluationCtx := runtimecorrelation.WithSourceArtifactFact(ctx, pc.sourceArtifactFact)
+	evaluationCtx = runtimecorrelation.WithRunID(evaluationCtx, intent.Request.Key.RunID)
+	input, group, groupErr := owner.BeginFanOutEvaluation(evaluationCtx, claim, func(input FanOutEvaluationInput) error { return input.Validate(intent) })
+	if group != nil {
+		defer func() { turnErr = errors.Join(turnErr, group.Close(context.WithoutCancel(evaluationCtx))) }()
 	}
-	if err := input.Validate(intent); err != nil {
+	var loadErr *FanOutEvaluationLoadError
+	if errors.As(groupErr, &loadErr) {
+		stage := loadErr.Stage
+		if stage == "" {
+			stage = "load_evaluation"
+		}
+		return blockClaim(stage, -1, loadErr.Cause, nil)
+	}
+	if err := input.Validate(intent); groupErr == nil && err != nil {
 		return blockClaim("validate_evaluation", -1, err, nil)
 	}
 	planner, ok := pc.bus.(FanOutPublicationPlanner)
@@ -143,27 +153,23 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 	workCtx := runtimecorrelation.WithSourceArtifactFact(ctx, pc.sourceArtifactFact)
 	workCtx = runtimecorrelation.WithRunID(workCtx, intent.Request.Key.RunID)
-	if intent.Request.Deployment == nil {
+	if intent.Request.Deployment == nil && groupErr == nil {
 		workCtx = runtimecorrelation.WithInboundEvent(workCtx, input.Trigger)
 	}
-	group, err := owner.BeginFanOutPublicationGroup(workCtx, claim)
-	if group != nil {
-		defer func() { turnErr = errors.Join(turnErr, group.Close(context.WithoutCancel(workCtx))) }()
-	}
-	if err != nil {
-		_, failureKind := fanOutPrecommitFailure(err)
+	if groupErr != nil {
+		_, failureKind := fanOutPrecommitFailure(groupErr)
 		switch failureKind {
 		case fanOutFailureYield:
-			return fanOutTurnYielded, err
+			return fanOutTurnYielded, groupErr
 		case fanOutFailureRetry:
-			retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, nil, err, turnStarted)
+			retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, nil, groupErr, turnStarted)
 			if retryReleased {
 				release = false
 				return fanOutTurnRetryWait, retryErr
 			}
 			return fanOutTurnAwaitScan, retryErr
 		default:
-			return blockClaim("begin_publication_group", -1, err, nil)
+			return blockClaim("begin_publication_group", -1, groupErr, nil)
 		}
 	}
 	if group == nil {
