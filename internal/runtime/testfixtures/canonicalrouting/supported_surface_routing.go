@@ -31,16 +31,16 @@ direct:
   event_handlers:
     rules.selected:
       rules:
-        - else: true
+        - when: true
     rules.fallback:
       rules:
         - when: |-
                   false
-        - else: true
+        - when: true
     rules.evaluation_failed:
       rules:
         - when: payload.proof > 0
-        - else: true
+        - when: true
     complete.selected:
       on_complete:
         - condition: true
