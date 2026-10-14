@@ -213,6 +213,7 @@ type StartInput struct {
 	ProviderCredential string
 	SaveProof          bool
 	ClientLanguage     string
+	ExpectedSelection  string
 }
 
 type RetryInput struct {
@@ -256,31 +257,17 @@ func NewService(opts ServiceOptions) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
-	if s == nil || !input.Verb.Valid() {
-		return Result{}, fmt.Errorf("%w: an explicit connect, reconnect, or rebind verb is required", ErrInvalidRequest)
-	}
-	principal, err := s.identities.Principal()
+	principal, candidate, err := s.resolveStartCandidate(ctx, input)
 	if err != nil {
 		return Result{}, err
 	}
-	catalog, err := s.catalog()
-	if err != nil {
-		return Result{}, err
-	}
-	candidate, err := catalog.Resolve(input.Selection)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := s.qualifyProvider(candidate); err != nil {
-		return Result{}, err
-	}
-	if input.ClientLanguage != "" {
-		profile, err := candidate.Plan.NativeInboxProfile()
+	if input.ExpectedSelection != "" {
+		selection, err := selectedStartRequirement(principal, candidate, input)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: client_language requires the native_inbox extension: %w", ErrInvalidRequest, err)
+			return Result{}, err
 		}
-		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
-			return Result{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		if selection.SelectionFence != input.ExpectedSelection {
+			return Result{}, fmt.Errorf("%w: channel selection changed before credential admission", ErrConflict)
 		}
 	}
 	reservations := credentialReservations(candidate)
