@@ -23,11 +23,11 @@ Complete retained canonical request/hash equality stays in the selected store.
 | Transitive consumer | Facts consumed and refusal obligation | Execution proof / lifecycle selection |
 | --- | --- | --- |
 | Store LoadDataRunCreationOperation -> validateStoredRunCreationReceipt -> BindRunCreationRequest | Read-time validated retained command and receipt, no guessed rejected pins. | TestRunCreationRequestBindingAcrossSelectedStores; TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores; TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores, api-llm-bus-full. Store feed-only sibling TestDecodeFeedOnlyRunCreationReceipt, broad-02. |
-| API executeDataShowRunCreationOperation | Nil binding refuses; validates binding against record before presenting payload-free metadata. | Same three API roots; TestDataShowSelectedStoreAllViewsAndOperationDetailsAcrossSelectedStores where present is a sibling, not inferred qualification. Exact selected roots will be copied from the final bound plan. |
-| CLI loadRunCreationRequestBinding | Only OPERATION_MISSING means absence; every other RPC error propagates; standalone validation and exact requested run ID. | catalog-required-verify; compiled same-run retry controls are required before push (not yet credited). |
+| API executeDataShowRunCreationOperation | Nil binding refuses; validates binding against record before presenting payload-free metadata. | Same three API roots; TestDataShowOperationReadFamilyAcrossSelectedStores is a sibling, not inferred qualification. Exact selected roots will be copied from the final bound plan. |
+| CLI loadRunCreationRequestBinding | Only OPERATION_MISSING means absence; every other RPC error propagates; standalone validation and exact requested run ID. | catalog-required-verify; TestRequestBindingCompiledRetryBothStores, hitl-releasee2e-rest (execution pending). |
 | CLI runCommandStart, initial binding load | Original bundle and event/data initiation; reconstructs the retained request rather than today's head. | TestDurableDataOperationAggregatePublicRestartBothStores, hitl-releasee2e-rest, created and rejected CLI retries after head movement and restart. |
-| CLI runCommandStart, conflict recovery load | Exact recovered bundle/initiation; schema binding; original head/pins; retained command is the last equality owner. | Compiled retry mismatch/head and non-absence controls required before push, not JSON-only assertions. |
-| CLI buildRunDataEnvelope -> validateRunDataBindingSchemas and rebindRunDataEnvelope | Original source identity/ref/schema/CAS, ordered complete import/pin set, exact explicit pin unless selector was head. | Same compiled retry/restart family; pure file-lowering tests are siblings, not substitute replay proof. |
+| CLI runCommandStart, conflict recovery load | Exact recovered bundle/initiation; schema binding; original head/pins; retained command is the last equality owner. | TestRequestBindingCompiledRetryBothStores covers same-run initial reconstruction and explicit/payload/intent refusal; the raced conflict recovery load is not implied by a sequential retry. |
+| CLI buildRunDataEnvelope -> validateRunDataBindingSchemas and rebindRunDataEnvelope | Original source identity/ref/schema/CAS, ordered complete import/pin set, exact explicit pin unless selector was head. | TestRequestBindingCompiledRetryBothStores and existing restart; pure file-lowering tests are siblings, not substitute replay proof. |
 | RunCreationOperationRecord.RequestBinding | Transient read projection excluded from record JSON, no second builder/validator. | R10 wire/detachment and selected-store/public readback. |
 
 The live symbol census covers internal/**/*.go excluding tests, including every
@@ -78,7 +78,13 @@ CLI retry/reconstruction including mismatched intent/head/non-absence refusal;
 compiled public restart; affected census/guards, debt, complexity, native Linux
 unused and clean preflight. The existing restart root is actual compiled replay
 after head advancement, but does not alone prove the required CLI negative
-controls. Those remain explicit open proof, not claimed credit. No local tier
+controls. The separate TestRequestBindingCompiledRetryBothStores uses the real
+compiled CLI and selected retained host for creation/reconstruction, explicit
+version versus advanced head, changed input and event intent. Its non-absence
+control forwards that host unchanged except for an HTTP 503 at the binding
+read, proves that exact read is reached and no run.start is forwarded, and
+checks retained receipts/head afterward. It synthesizes no successful RPC
+result or store fact. Execution remains open, not claimed credit. No local tier
 or server2 booking is planned.
 
 #2617 priority is retained. Its published donor paths on the current inspected
