@@ -115,17 +115,23 @@ func TestRunStopDrainsRecoveryBeforeMutationAndRequiredPublicationBothStores(t *
 				stopBus := f.bus
 				if separateBus {
 					var err error
-					stopBus, err = newScopedTestEventBus(f.store, runtimebus.EventBusOptions{})
+					stopBus, err = newScopedTestEventBus(f.store, runtimebus.EventBusOptions{ContractBundle: f.source})
 					if err != nil {
 						t.Fatal(err)
 					}
 				}
 				f.subscribe(t, f.event.Type())
 				i, release := newStopClaimInterceptor(t, f.event.ID())
-				child := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
+				source, err := events.NewFlowOwnedControlRoutingSource(f.event.RoutingSource().Route())
+				if err != nil {
+					t.Fatal(err)
+				}
+				child := eventtest.ChildForProducerWithRoutingSource(
 					uuid.NewString(), f.event.Type(), eventtest.Producer(events.EventProducerPlatform, "runtime"),
-					"", []byte(`{}`), f.event.ChainDepth()+1, f.event.RunID(), f.event.ID(), events.EventEnvelope{}, time.Now().UTC(),
-				), f.event.ExecutionMode())
+					"", []byte(`{}`), f.event.ChainDepth()+1,
+					events.EventLineage{RunID: f.event.RunID(), ParentEventID: f.event.ID(), ExecutionMode: f.event.ExecutionMode()},
+					events.EventEnvelope{}, source, time.Now().UTC(),
+				)
 				// The admitted recovery cannot finish before this real publication's
 				// selected-store mutation and synchronous dispatch finish. Stop must
 				// not hold a run/database mutation while waiting for that work.

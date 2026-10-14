@@ -41,7 +41,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalStateForTest(t, func(t *testing.T, runID string) pipeline.WorkflowProjectionNativeFixtureForTest {
-				return workflowProjectionNativeFixture(t, backend, runID)
+				selected, _, reopen := openTimerReplayNativeStore(t, backend)
+				return workflowProjectionNativeFixtureWithWrites(t, selected, reopen, runID, 2)
 			})
 		})
 	}

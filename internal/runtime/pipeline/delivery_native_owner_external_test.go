@@ -303,7 +303,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		if err != nil || !found {
 			t.Fatalf("load exact native attachment plan: found=%t error=%v", found, err)
 		}
-		admit, closeOwner := newTimerReplayAttachmentOwnerForSource(t, ctx, selected, fact)
+		admit, closeOwner := newTimerReplayAttachmentOwner(t, ctx, selected)
 		return admit(readiness.Plan), readiness.Plan, closeOwner
 	}
 	fixture.MutationHistory = func(ctx context.Context, run, entity string) []pipeline.PipelineNativeMutationRowForTest {

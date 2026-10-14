@@ -8,6 +8,30 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
+func requireExistingRootConstructionDependency(t *testing.T, h *runtimeHarness, event events.Event, route events.DeliveryRoute) {
+	t.Helper()
+	owner := flowidentity.RunScopedFlowInstance{RunID: event.RunID(), Route: flowidentity.StoredRoute(".", event.RunID(), event.RunID())}
+	receipt, err := h.rt.Pipeline.LoadFlowConstructionPublication(catalogRunContext(h, event.RunID()), owner, event.RunID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: event.RunID(), EntityID: receipt.Identity.EntityID})
+	if !events.SameDeliveryTargetOwnership(route.Initialization.ConstructionTarget(), want) ||
+		route.Initialization.CreatingEventID() != receipt.CreatingInput.EventID ||
+		!owner.MatchesAgentRoute(route.AgentIdentity) || route.Initialization.ReceiverRoute() != route.AgentIdentity.Route {
+		t.Fatal("declared root receiver lost its exact original construction or borrowed child ownership")
+	}
+	if _, historical := route.Initialization.HistoricalConstruction(); historical {
+		t.Fatal("native root construction was reinterpreted as historical")
+	}
+	if err := route.Initialization.ValidateEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	if err := route.Initialization.ValidateRoute(route); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func requireDeclaredAgentReceiverOwnership(t *testing.T, runID string, node, agent deliverylifecycle.Snapshot) {
 	t.Helper()
 	target := node.Route.Target.Route()

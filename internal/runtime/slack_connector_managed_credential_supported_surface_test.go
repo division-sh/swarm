@@ -43,7 +43,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -69,7 +69,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
@@ -477,7 +477,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 	t.Helper()
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -498,6 +498,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
+		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         backend.persistence,
@@ -505,7 +506,6 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		PipelineObligations: backend.obligations,
 		DeliveryStore:       backend.deliveryStore,
 		ManagedCredentials:  managedStore,
-		FlowRoutes:          bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)

@@ -1,13 +1,12 @@
 package manager
 
-// The existing agent and route owners install, verify and retire exact-attempt resources. Their receipts cannot substitute for durable readiness progress.
+// Agent owners install, verify and retire exact-attempt resources. Their receipts cannot substitute for durable readiness progress.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -16,38 +15,6 @@ import (
 	"sort"
 	"strings"
 )
-
-func (am *AgentManager) publishPersistedDynamicFlowRoute(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
-	publisher := am.roles.RouteRestorer
-	if publisher == nil {
-		return nil, fmt.Errorf("event bus does not support process publication for persisted flow-instance route %s", req.Identity.Route.InstancePath)
-	}
-	return publisher.PublishPersistedFlowInstanceRouteForAttempt(ctx, req, attempt)
-}
-
-func (am *AgentManager) retireFlowRouteAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, publication runtimebus.FlowRoutePublicationHandle) (result error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			result = fmt.Errorf("retire flow route attempt %s: %v", attempt.ID(), recovered)
-		}
-	}()
-	if err := attempt.Validate(); err != nil {
-		return err
-	}
-	if err := identity.Validate(); err != nil {
-		return err
-	}
-	if identity.RunID != attempt.RunID() || identity.Route.InstancePath != attempt.InstancePath() {
-		return errors.New("flow retirement identity differs from activation attempt")
-	}
-	if publication != nil {
-		return publication.Retire()
-	}
-	if am.roles.RouteRestorer == nil {
-		return errors.New("exact flow route attempt retirement owner is required")
-	}
-	return am.roles.RouteRestorer.RetireFlowInstanceRouteForAttempt(identity, attempt)
-}
 
 func (am *AgentManager) loadDynamicFlowPersistedAgents(
 	ctx context.Context,
@@ -395,17 +362,6 @@ func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runt
 		if revision != item.ConfigRevision {
 			return fmt.Errorf("declared agent topology changed at %s: expected_revision=%s actual_revision=%s", item.Identity.Description(), item.ConfigRevision, revision)
 		}
-	}
-	return nil
-}
-
-func (am *AgentManager) verifyDynamicFlowRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	verifier := am.roles.RouteVerifier
-	if verifier == nil || !verifier.HasFlowInstanceRoute(identity) {
-		return fmt.Errorf("dynamic flow route %s is not process-ready", identity.Key())
-	}
-	if err := verifier.VerifyFlowInstanceRoute(ctx, identity); err != nil {
-		return fmt.Errorf("verify dynamic flow route %s: %w", identity.Key(), err)
 	}
 	return nil
 }

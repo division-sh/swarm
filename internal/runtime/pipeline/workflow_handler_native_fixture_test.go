@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -39,6 +40,7 @@ type WorkflowHandlerNativeFixtureForTest struct {
 	PublishedEvent        func(context.Context, string) (events.Event, error)
 	PhysicalCounts        func(context.Context) (WorkflowEnginePhysicalCountsForTest, error)
 	ConflictingEntityType func(context.Context, string, string) (int64, error)
+	ForeignDeclaration    func(context.Context, flowidentity.RunScopedFlowInstance) error
 	MissingHeader         func(context.Context, string, string) (int64, error)
 	MissingFields         func(context.Context, string, string) (int64, error)
 	Draining              func(context.Context, string, string) (int64, error)
@@ -123,7 +125,7 @@ func nativeHandlerEngineExistingEntityWithModuleForTest(t *testing.T, open func(
 		t.Fatal(err)
 	}
 	run := correlation.RunIDFromContext(ctx)
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: run, StorageRef: run, EntityID: entityID, WorkflowName: ".",
 		WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
 		Fields: cloneMap(fields), EntityType: "test_entity",

@@ -2,7 +2,6 @@ package pinrouting
 
 import (
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -12,6 +11,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestCompiledGraphHasNoMaterializedReplacementSelector(t *testing.T) {
+	if _, present := reflect.TypeOf(CompiledConnectGraph{}).MethodByName("SelectRouteDependencies"); present {
+		t.Fatal("compiled graph exports retired materialized-route replacement selection")
+	}
+}
 
 func scopedCandidateGraph(t *testing.T) (CompiledConnectGraph, ConnectRoutePlan, ConnectRoutePlan) {
 	t.Helper()
@@ -165,63 +170,5 @@ func TestCompiledGraphScopeRetainsMalformedSamePinCandidateForRefusal(t *testing
 	}
 	if plans := ledger.Plans(); len(plans) != 1 || plans[0].Resolution() != events.ConnectPlanResolved || len(plans[0].Candidates()) != 1 || plans[0].Candidates()[0].Outcome() != events.ConnectCandidatePathMismatch {
 		t.Fatalf("malformed-path refusal ledger = %#v", plans)
-	}
-}
-
-func TestCompiledGraphDependencySelectionFollowsNestedConnectChain(t *testing.T) {
-	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
-		{id: "outer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "outer.ready"}}},
-		{id: "middle", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "middle.ready"}}, outputs: []runtimecontracts.FlowOutputEventPin{{Event: "middle.done"}}},
-		{id: "inner", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "inner.ready"}}},
-		{id: "unrelated", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "other.done"}}},
-	}, []runtimecontracts.FlowConnect{
-		{Event: "outer.ready", From: "outer", To: "middle", Rename: "middle.ready"},
-		{Event: "middle.done", From: "middle", To: "inner", Rename: "inner.ready"},
-	})
-	graph := CompileConnectGraph(source)
-	if issues := graph.Issues(); len(issues) != 0 {
-		t.Fatalf("compiled graph issues = %#v", issues)
-	}
-	if plans := graph.Plans(); len(plans) != 2 {
-		t.Fatalf("compiled plans = %d, want two connected edges", len(plans))
-	}
-	for _, tc := range []struct {
-		changed  string
-		context  []string
-		affected []string
-	}{
-		{changed: "outer", context: []string{"middle", "outer"}, affected: []string{"middle"}},
-		{changed: "middle", context: []string{"inner", "middle", "outer"}, affected: []string{"inner"}},
-		{changed: "inner", context: []string{"middle"}},
-		{changed: "unrelated"},
-	} {
-		t.Run(tc.changed, func(t *testing.T) {
-			selected := graph.SelectRouteDependencies([]string{tc.changed}, nil)
-			if !slices.Equal(selected.ContextFlowPaths, tc.context) || !slices.Equal(selected.AffectedFlowPaths, tc.affected) {
-				t.Fatalf("selection = %#v, want context=%#v affected=%#v", selected, tc.context, tc.affected)
-			}
-		})
-	}
-}
-
-func TestCompiledGraphDependencySelectionLoadsCompleteAffectedObserverContext(t *testing.T) {
-	graph := CompiledConnectGraph{}
-	dependencies := []RouteOwnerDependency{
-		{SourceFlowPath: "producer", ReceiverFlowPath: "observer"},
-		{SourceFlowPath: "other", ReceiverFlowPath: "observer"},
-		{SourceFlowPath: "unrelated", ReceiverFlowPath: "elsewhere"},
-	}
-	for _, changed := range []string{"producer", "other"} {
-		t.Run(changed, func(t *testing.T) {
-			selected := graph.SelectRouteDependencies([]string{changed}, dependencies)
-			if !slices.Equal(selected.AffectedFlowPaths, []string{"observer"}) ||
-				!slices.Equal(selected.ContextFlowPaths, []string{"observer", "other", "producer"}) {
-				t.Fatalf("selected %#v: complete observer context required without unrelated owners", selected)
-			}
-		})
-	}
-	selected := graph.SelectRouteDependencies([]string{"observer"}, dependencies)
-	if len(selected.AffectedFlowPaths) != 0 || !slices.Equal(selected.ContextFlowPaths, []string{"other", "producer"}) {
-		t.Fatalf("observer activation selected %#v", selected)
 	}
 }

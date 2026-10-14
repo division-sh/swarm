@@ -363,7 +363,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		PayloadAdmitter:             payloadAdmitter,
 		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
-		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
+		RecipientPlanMaterializer:   guard.MaterializeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if lifecycleManager == nil {

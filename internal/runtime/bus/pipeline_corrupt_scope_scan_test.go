@@ -15,7 +15,7 @@ func TestPipelineScanReturnsCorruptScopeToStartupConsumerOnSQLiteAndPostgres(t *
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
 			logger := &recordingLoggerHook{}
-			bus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{Logger: logger})
+			bus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{ContractBundle: fixture.source, Logger: logger})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -53,7 +53,7 @@ func TestPipelineScanBoundsCorruptScopeSettlementAndContinuesOnSQLiteAndPostgres
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
 			logger := &recordingLoggerHook{}
-			bus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{Logger: logger})
+			bus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{ContractBundle: fixture.source, Logger: logger})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}

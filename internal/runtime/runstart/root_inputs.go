@@ -69,7 +69,11 @@ func DeriveRootInputSet(source semanticview.Source) (RootInputSet, error) {
 	routable := make([]string, 0, len(declared))
 	topology := routingtopology.Build(source)
 	for _, eventType := range declared {
-		if len(routeTable.Resolve(eventType)) > 0 || rootInputRoutableInTopology(topology, eventType) {
+		receivers, err := routeTable.PubsubDeclarationDefinitions(semanticview.RootExecutionFlowID(source), []string{eventType})
+		if err != nil {
+			return RootInputSet{}, err
+		}
+		if len(receivers) > 0 || rootInputRoutableInTopology(topology, eventType) {
 			routable = append(routable, eventType)
 		}
 	}

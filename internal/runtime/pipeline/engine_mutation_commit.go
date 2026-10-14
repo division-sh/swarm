@@ -89,6 +89,8 @@ func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistence
 type WorkflowEngineStateRecord struct {
 	Identity         runtimeflowidentity.RunScopedFlowInstance
 	EntityID         string
+	ParentInstance   string
+	InstanceKey      string
 	WorkflowName     string
 	WorkflowVersion  string
 	Mode             string
@@ -114,9 +116,8 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
-	r.Identity = r.Identity.Normalize()
-	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
-		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	if err := r.validateConstructionIdentity(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("workflow engine state record requires workflow and current state")
@@ -166,6 +167,24 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	return nil
 }
 
+func (r WorkflowEngineStateRecord) validateConstructionIdentity() error {
+	r.Identity = r.Identity.Normalize()
+	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
+		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	}
+	construction, err := DecodeWorkflowInstanceRecordedHeader(r.Identity.Route, r.Config)
+	if err != nil {
+		return err
+	}
+	if construction.ParentRoute().FlowInstance != r.ParentInstance {
+		return fmt.Errorf("workflow engine state parent disagrees with exact construction identity")
+	}
+	if (r.Mode == "template") != (r.InstanceKey != "") {
+		return fmt.Errorf("workflow engine state key presence disagrees with its declaration mode")
+	}
+	return nil
+}
+
 type WorkflowEngineMutationCommand struct {
 	State                   WorkflowEngineStateRecord
 	Writer                  *mutationlog.Writer
@@ -176,7 +195,6 @@ type WorkflowEngineMutationCommand struct {
 	Lifecycle               WorkflowLifecycleMutationPlan
 	ProposedEffects         []WorkflowEngineProposedEffect
 	Publications            []runtimeengine.DurablePublicationPlan
-	RouteRetirement         *WorkflowEngineRouteRetirement
 	DeliverySuccess         *WorkflowEngineDeliverySuccess
 	PostCommit              WorkflowEnginePostCommitPlan
 	FanOutIntent            *fanoutobligation.IntentRequest
@@ -213,13 +231,6 @@ func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
 		return fmt.Errorf("workflow engine delivery success requires the exact handler_completed effect")
 	}
 	return nil
-}
-
-// WorkflowEngineRouteRetirement declares that the exact persisted route must
-// be retired in the same selected-store transaction as terminal workflow state.
-type WorkflowEngineRouteRetirement struct {
-	Identity            runtimeflowidentity.RunScopedFlowInstance
-	ActivationAttemptID string
 }
 
 // WorkflowEnginePostCommitPlan carries semantic work that is legal only after
@@ -262,7 +273,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 			return fmt.Errorf("entity tool mutation source: %w", err)
 		}
 		if c.AcceptedEvent != nil || c.GateRouteAdmissionRunID != "" || len(c.ProposedEffects) != 0 || len(c.Publications) != 0 ||
-			c.RouteRetirement != nil || c.DeliverySuccess != nil || c.PostCommit.FlowDeactivation != nil ||
+			c.DeliverySuccess != nil || c.PostCommit.FlowDeactivation != nil ||
 			c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil ||
 			c.Lifecycle.StageEntry != nil || len(c.Lifecycle.Timers) != 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 {
 			return fmt.Errorf("entity tool attribution permits only the exact field mutation")
@@ -289,7 +300,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 		if c.State.ExpectedState != c.State.CurrentState || c.Lifecycle.StageEntry != nil ||
 			len(c.Lifecycle.Timers) == 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 ||
-			len(c.ProposedEffects) != 0 || len(c.Publications) != 0 || c.RouteRetirement != nil ||
+			len(c.ProposedEffects) != 0 || len(c.Publications) != 0 ||
 			c.PostCommit.FlowDeactivation != nil || c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil {
 			return fmt.Errorf("preserved constructed state permits only accepted-event timer reactions and exact settlement")
 		}
@@ -360,12 +371,6 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 		seen[eventID] = struct{}{}
 	}
-	if retirement := c.RouteRetirement; retirement != nil {
-		identity := retirement.Identity.Normalize()
-		if identity.Validate() != nil || identity != c.State.Identity || c.State.Transition.CreatesState() || strings.TrimSpace(c.State.Status) != "terminated" {
-			return fmt.Errorf("workflow engine route retirement requires the exact terminal state route")
-		}
-	}
 	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
 		if c.State.Status != "terminated" {
 			return fmt.Errorf("stage mutation cannot declare operational flow retirement")
@@ -432,6 +437,7 @@ func workflowEngineStateRecord(
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
+		ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
@@ -461,7 +467,6 @@ type CommittedWorkflowEngineMutation struct {
 	Stage           runtimeengine.CommittedStage
 	Publications    []runtimeengine.CommittedDurablePublication
 	Lifecycle       CommittedWorkflowLifecycleMutation
-	RouteRetirement *WorkflowEngineRouteRetirement
 	DeliverySuccess *runtimedelivery.Claim
 	PostCommit      WorkflowEnginePostCommitPlan
 }
@@ -483,11 +488,6 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 	}
 	if err := r.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed workflow engine lifecycle: %w", err)
-	}
-	if retirement := r.RouteRetirement; retirement != nil {
-		if retirement.Identity.Validate() != nil {
-			return fmt.Errorf("committed workflow engine route retirement requires exact identity")
-		}
 	}
 	if r.DeliverySuccess != nil {
 		if err := r.DeliverySuccess.Validate(); err != nil {

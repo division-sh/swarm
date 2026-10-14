@@ -11,13 +11,14 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
-	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -227,15 +228,20 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 					t.Fatal("run completion changed its constructed operating instance")
 				}
 				ctx := servedControlProofAuthorActivityContext(t, rt)
-				var active []bus.ActiveFlowInstanceDescriptor
-				var err error
-				if rt.Backend == "postgres" {
-					active, err = rt.Postgres.ListActiveFlowInstanceDescriptorsForKey(ctx, setup.RunID, "operating", "entity.operating_instance_id", key)
-				} else {
-					active, err = rt.SQLite.ListActiveFlowInstanceDescriptorsForKey(ctx, setup.RunID, "operating", "entity.operating_instance_id", key)
+				request, err := pipeline.NewExactFlowInstanceLookup(rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Options.SourceArtifactFact,
+					flowidentity.RunScopedFlowInstance{RunID: setup.RunID, Route: flowidentity.RouteForInstancePath(operating.Entity.FlowInstance)})
+				if err != nil {
+					t.Fatal(err)
 				}
-				if err != nil || len(active) != 0 {
-					t.Fatalf("completed run retained an active operating route: descriptors=%+v err=%v", active, err)
+				var observed pipeline.FlowInstanceObservation
+				var found bool
+				if rt.Backend == "postgres" {
+					observed, found, err = rt.Postgres.LookupFlowInstance(ctx, request)
+				} else {
+					observed, found, err = rt.SQLite.LookupFlowInstance(ctx, request)
+				}
+				if err != nil || !found || observed.Identity().EntityID != operating.Entity.EntityID || observed.InstanceKey() != key || observed.RunState() != runlifecycle.StateCompleted {
+					t.Fatalf("completed run lost occupied operating identity: observation=%+v found=%t err=%v", observed, found, err)
 				}
 			}
 			t.Log("root-triggered operating creations=4; complete typed ordered results: 2026-Q1=[int64(11), int64(22)], 2026-Q2=[int64(111), int64(222)]")

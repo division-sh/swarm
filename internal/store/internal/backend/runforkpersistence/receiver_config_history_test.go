@@ -47,12 +47,14 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				jsonType = "JSONB"
 			}
 			for _, ddl := range []string{
-				`CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)`,
+				`CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT, origin_service_id TEXT, origin_generation BIGINT, forked_from_run_id TEXT, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id TEXT)`,
 				`CREATE TEMP TABLE run_fork_revision_heads (run_id TEXT PRIMARY KEY, last_revision BIGINT NOT NULL DEFAULT 0, updated_at TEXT)`,
 				`CREATE TEMP TABLE run_fork_revisions (run_id TEXT, revision BIGINT, recorded_at TEXT)`,
 				fmt.Sprintf(`CREATE TEMP TABLE run_fork_fact_revisions (run_id TEXT, revision BIGINT, family TEXT, fact_key TEXT, fact %s, present BOOLEAN)`, jsonType),
 				`CREATE TEMP TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
-				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE entity_mutations (run_id TEXT, mutation_id TEXT, entity_id TEXT, domain TEXT, path TEXT, new_value %s, caused_by_event TEXT, created_at TEXT)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id TEXT, instance_path TEXT, entity_id TEXT, projection %s)`, jsonType),
 			} {
 				if _, err := tx.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -76,18 +78,22 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			config := string(encoded)
-			if _, err := tx.Exec(`INSERT INTO runs VALUES ($1)`, runID); err != nil {
+			if _, err := tx.Exec(`INSERT INTO runs (run_id,origin_kind) VALUES ($1,'deployment')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tx.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'deployment','','','2026-09-21T00:00:00Z')`, runID, entityID, path); err != nil {
 				t.Fatal(err)
 			}
-			insertHeader := `INSERT INTO flow_instances (run_id,instance_path,entity_id,entity_type,slug,name,config,stage_defined,flow_template,mode,status,current_state,entered_state_at,created_at,updated_at)
-				VALUES ($1,$2,$3,'deployment','','',$4,TRUE,'consumer','template','active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
-			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState); err != nil {
+			insertHeader := `INSERT INTO flow_instances (run_id,instance_path,entity_id,entity_type,slug,name,config,stage_defined,flow_template,mode,parent_instance,instance_key,status,current_state,entered_state_at,created_at,updated_at)
+				VALUES ($1,$2,$3,'deployment','','',$4,TRUE,'consumer','template',$6,$7,'active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
+			metadata := plan.Entities[0].MaterializationMetadata
+			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState, instance.ParentRoute.FlowInstance, metadata.InstanceKey); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, strings.Replace(config, "v1", "foreign-run", 1), plan.Entities[0].CurrentState); err != nil {
+			if _, err := tx.Exec(`INSERT INTO workflow_instance_initial_materializations (run_id,instance_path,entity_id,projection) VALUES ($1,$2,$3,$4)`, runID, path, entityID, string(metadata.InitialMaterialization)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, strings.Replace(config, "v1", "foreign-run", 1), plan.Entities[0].CurrentState, "44444444-4444-4444-8444-444444444444", metadata.InstanceKey); err != nil {
 				t.Fatal(err)
 			}
 			var persisted string
@@ -96,6 +102,17 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			}
 			effects := runforkrevision.NewEffects()
 			if err := effects.AddFact(runID, runforkrevision.FamilyEntityMetadata, entityID); err != nil {
+				t.Fatal(err)
+			}
+			const mutationID = "55555555-5555-4555-8555-555555555555"
+			initialState, err := json.Marshal(plan.Entities[0].CurrentState)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(`INSERT INTO entity_mutations (run_id,mutation_id,entity_id,domain,path,new_value,created_at) VALUES ($1,$2,$3,'lifecycle_state','',$4,'2026-09-21T00:00:00Z')`, runID, mutationID, entityID, string(initialState)); err != nil {
+				t.Fatal(err)
+			}
+			if err := effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
 				t.Fatal(err)
 			}
 			finalize := runforkrevision.FinalizeSQLite

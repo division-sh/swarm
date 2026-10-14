@@ -46,7 +46,7 @@ func TestSelectedProviderTurnRetainsActualBusinessOriginBothStores(t *testing.T)
 			event = eventtest.TargetRouted(event, route.Target.Route())
 			req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
 			constructHistoricalSourceFixture(t, ctx, selected, req)
-			route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+			route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, actor.Route)
 			if err != nil {
 				t.Fatal(err)
 			}

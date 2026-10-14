@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestPublicationWildcardProjectionPreservesExactCachedRoute(t *testing.T) {
+func TestPublicationWildcardProjectionPreservesDetachedBindings(t *testing.T) {
 	for _, mode := range []string{"root", "static", "template"} {
 		t.Run(mode, func(t *testing.T) {
 			repo := canonicalrouting.RepoRoot(t)
@@ -25,29 +25,22 @@ func TestPublicationWildcardProjectionPreservesExactCachedRoute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			paths := []string{"source"}
+			flowID, ids := "source", []string{""}
 			if mode == "root" {
-				paths = []string{""}
+				flowID = "."
+			} else if mode == "template" {
+				ids = []string{"one", "two"}
 			}
-			if mode == "template" {
-				paths = []string{"source/one", "source/two"}
-				for _, instance := range []string{"one", "two"} {
-					if err := routes.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-						Identity: testRunScopedFlowRoute(flowidentity.DeriveRoute("source", instance)),
-					}); err != nil {
-						t.Fatal(err)
-					}
-				}
+			var instances []flowidentity.Instance
+			for _, id := range ids {
+				instances = append(instances, runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, id, eventBusTestRunID))
 			}
 			for repeat := 0; repeat < 3; repeat++ {
-				for _, path := range paths {
-					name := "result.direct"
-					if path != "" {
-						name = path + "/" + name
-					}
-					got := routes.ResolveForRun(eventBusTestRunID, name)
+				for _, instance := range instances {
+					key := instance.InstancePath + "/result.direct"
+					got := routes.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, key)
 					if len(got) != 2 {
-						t.Fatalf("%s: subscribers=%+v, want exact and wildcard; connects are not pubsub aliases", name, got)
+						t.Fatalf("%s: subscribers=%+v, want exact and wildcard; connections are not pubsub aliases", key, got)
 					}
 					wildcards := 0
 					for i, subscriber := range got {
@@ -55,8 +48,8 @@ func TestPublicationWildcardProjectionPreservesExactCachedRoute(t *testing.T) {
 							continue
 						}
 						wildcards++
-						if subscriber.LocalizedEvent != "result.direct" || (path != "" && subscriber.Path != path) {
-							t.Fatalf("wrong matched receiver projection: %+v", subscriber)
+						if subscriber.LocalizedEvent != "result.direct" || subscriber.Path != instance.InstancePath {
+							t.Fatalf("wrong receiver projection: %+v", subscriber)
 						}
 						node, ok := subscriber.Recipient.Node()
 						if !ok {
@@ -64,32 +57,21 @@ func TestPublicationWildcardProjectionPreservesExactCachedRoute(t *testing.T) {
 						}
 						resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, subscriber.LocalizedEvent)
 						if !resolved.Matched || resolved.HandlerEventKey != "result.*" {
-							t.Fatalf("matched route has no exact handler: %+v", resolved)
+							t.Fatalf("matched binding has no exact handler: %+v", resolved)
 						}
-						got[i].LocalizedEvent = "poisoned.cache"
+						got[i].LocalizedEvent, got[i].Path = "poisoned.binding", "foreign"
 					}
 					if wildcards != 1 {
-						t.Fatalf("wildcard routes=%d", wildcards)
+						t.Fatalf("wildcard bindings=%d", wildcards)
 					}
-					if mode == "template" && len(routes.ResolveForRun(eventtest.UUID("foreign-run"), name)) != 0 {
-						t.Fatal("another run acquired a concrete template subscriber")
+					if got, err := routes.PubsubReceiverDefinitions(eventtest.UUID("foreign-run"), instance, []string{key}); err == nil || len(got) != 0 {
+						t.Fatalf("another run acquired this receiver: bindings=%+v err=%v", got, err)
 					}
-				}
-			}
-			for _, hostile := range []string{"foreign/result.direct", "source/three/result.direct", "source/one/result.direct/extra"} {
-				if got := routes.ResolveForRun(eventBusTestRunID, hostile); len(got) != 0 {
-					t.Fatalf("hostile %s acquired routes %+v", hostile, got)
-				}
-			}
-			if mode == "template" {
-				if err := routes.RemoveFlowInstanceRoute(testRunScopedFlowRoute(flowidentity.DeriveRoute("source", "one"))); err != nil {
-					t.Fatal(err)
-				}
-				if got := routes.ResolveForRun(eventBusTestRunID, "source/one/result.direct"); len(got) != 0 {
-					t.Fatalf("removed instance kept cached routes: %+v", got)
-				}
-				if got := routes.ResolveForRun(eventBusTestRunID, "source/two/result.direct"); len(got) != 2 {
-					t.Fatalf("removing first instance damaged second: %+v", got)
+					for _, hostile := range []string{"foreign/result.direct", "source/three/result.direct", key + "/extra", instance.InstancePath + "/result.unknown"} {
+						if got := routes.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, hostile); len(got) != 0 {
+							t.Fatalf("hostile %s acquired bindings %+v", hostile, got)
+						}
+					}
 				}
 			}
 		})

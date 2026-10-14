@@ -96,7 +96,7 @@ func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCas
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	entityID := runID
 	now := canonicalWorkflowTimerTime(time.Now().UTC())
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+	instance := materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, EntityType: "test_entity", Fields: map[string]any{},
 	})

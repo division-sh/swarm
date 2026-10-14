@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -38,7 +39,8 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan); err != nil {
+	instances, err := ConstructedInstances(req.Source, req.Plan)
+	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
@@ -46,7 +48,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission), instances)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -58,12 +60,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		Message: "selected-contract route admission is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
 	}}
-	if selectedRouteHistoryHasSourceRouteFacts(req.Plan) {
-		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
-			Code:    runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			Message: "source route rows are current operational state and remain evidence-only until selected route reconstruction is separately approved",
-		})
-	}
 	if incompleteRoutes {
 		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
 			Code:    runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
@@ -81,7 +77,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		NonMutating:                    true,
 		RouteReconstructionSupported:   false,
 		ContractSelection:              selection,
-		SourceRouteFactsPresent:        selectedRouteHistoryHasSourceRouteFacts(req.Plan),
 		SelectedRouteEvents:            routeEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
 		FrontierAdmissionOwner:         req.FrontierAdmission.Owner,
@@ -93,24 +88,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		InvalidPaths:                   selectedRouteHistoryInvalidPaths(),
 		UnsupportedBlockers:            blockers,
 	}, nil
-}
-
-func selectedRouteHistoryHasSourceRouteFacts(plan runfork.RunForkPlan) bool {
-	if hasUnsupportedBlocker(plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
-		return true
-	}
-	for _, blocker := range plan.ReplayResumeAdmission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerFlowRouteHistoryUnproven {
-			return true
-		}
-	}
-	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
-		if strings.TrimSpace(disposition.Fact) == runfork.RunForkReplayResumeFactRouteHistory &&
-			strings.TrimSpace(disposition.Disposition) == runfork.RunForkReplayResumeDispositionFailClosedBlocker {
-			return true
-		}
-	}
-	return false
 }
 
 type selectedRouteHistoryEvent struct {
@@ -171,11 +148,11 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID string, history []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID string, history []selectedRouteHistoryEvent, instances []runtimeflowidentity.Instance) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(history))
 	incomplete := false
 	for _, event := range history {
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, runID, event.eventName, event.routingSource)
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, runID, event.eventName, event.routingSource, instances)
 		if err != nil {
 			return nil, false, err
 		}
@@ -185,7 +162,11 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 		if eventIncomplete {
 			disposition = runfork.RunForkSelectedContractDispositionFailClosed
 		}
-		local, err := contractFrontierRecipients(routeTable.ResolveIndependentPubsubFromSource(runID, events.EventType(event.eventName), event.routingSource), events.EventType(event.eventName))
+		definitions, err := contractFrontierPubsubDefinitions(routeTable, selectedSource, runID, events.EventType(event.eventName), event.routingSource, instances)
+		if err != nil {
+			return nil, false, err
+		}
+		local, err := contractFrontierRecipients(definitions, events.EventType(event.eventName))
 		if err != nil {
 			return nil, false, err
 		}
@@ -272,8 +253,8 @@ func selectedRouteHistoryBlockedSiblings() []runfork.RunForkSelectedContractExec
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
-			Reason:      "dynamic flow-instance route reconstruction needs fork-local flow-instance ownership before route persistence",
+			Owner:       "internal/runtime/pipeline.FlowInstanceIndexReader",
+			Reason:      "dynamic flow-instance execution needs admitted fork-local instance evidence before recipient planning",
 		},
 		{
 			Concept:     "recipient_delivery_writes",
@@ -312,14 +293,4 @@ func selectedRouteHistoryInvalidPaths() []runfork.RunForkSelectedContractExecuti
 			Reason:      "operator surfaces may consume route admission but must not own selected route reconstruction semantics",
 		},
 	}
-}
-
-func hasUnsupportedBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
-	code = strings.TrimSpace(code)
-	for _, blocker := range blockers {
-		if strings.TrimSpace(blocker.Code) == code {
-			return true
-		}
-	}
-	return false
 }

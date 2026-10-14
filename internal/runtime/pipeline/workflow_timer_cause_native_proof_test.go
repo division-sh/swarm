@@ -61,7 +61,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 					entityID := runID
 					at := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Hour))
 					identity := testRunScopedWorkflowInstanceFromContext(f.Context, runID)
-					instance := workflowTimerMaterializedInstance(f.Context, entityID, runID, WorkflowInstance{
+					instance := workflowTimerMaterializedInstance(t, f.Coordinator.SemanticSource(), f.Context, entityID, runID, WorkflowInstance{
 						WorkflowVersion: f.Coordinator.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: initialStage,
 						CreatedAt: at, EnteredStageAt: at,
 					})

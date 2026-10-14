@@ -278,19 +278,6 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
 }
 
-func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {
-	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
-	entityID := strings.TrimSpace(descriptor.EntityID)
-	if flowInstance == "" || entityID == "" {
-		return events.RouteIdentity{}
-	}
-	return events.RouteIdentity{
-		FlowID:       strings.TrimSpace(flowID),
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}.Normalized()
-}
-
 func uniqueRoutes(in []events.RouteIdentity) []events.RouteIdentity {
 	out := make([]events.RouteIdentity, 0, len(in))
 	seen := map[events.RouteIdentity]struct{}{}

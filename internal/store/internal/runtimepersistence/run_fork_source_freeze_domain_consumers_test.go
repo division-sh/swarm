@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -32,10 +31,7 @@ type forkedDomainConsumerSurface interface {
 	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
-	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
-	RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
-	ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
+	pipeline.FlowInstanceIndexReader
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
 
@@ -83,6 +79,9 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			child.EntityID = entityID
 			created := fixture.forkedAt.Add(-time.Minute)
 			constructHistoricalSourceFixture(t, ctx, surface.(agentFixtureFlowStore), pipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: parent, OccurredAt: created,
+			})
+			constructHistoricalSourceFixture(t, ctx, surface.(agentFixtureFlowStore), pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, Instance: child, OccurredAt: created,
 				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "domain",
 				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"domain","instance_key":"domain"}`), 0, fixture.sourceRun, events.EventEnvelope{}, created),
@@ -99,13 +98,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			opts := completeWorkflowTestCoordinatorOptions(pipeline.NewWorkflowPersistence(selected), selected)
 			opts.Module = runForkGateWorkflowModule{source: source}
 			writer := pipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts)
-			route := runtimebus.FlowInstanceRouteRecord{
-				Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")}, EventPattern: "freeze/domain/input",
-				SubscriberType: "node", SubscriberID: "freeze-node", SourceFlow: "freeze",
-			}
-			if err := surface.UpsertFlowInstanceRoute(ctx, route); err != nil {
-				t.Fatal(err)
-			}
+			receiver := runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: child.Route()}
 			eventID := uuid.NewString()
 			insertForkedConsumerEvent(t, fixture, eventID, "freeze.domain", fixture.forkedAt.Add(-time.Minute))
 
@@ -140,19 +133,16 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				}
 			}
 
-			requireForkedSourceRefusal(t, "upsert flow route", surface.UpsertFlowInstanceRoute(ctx, route))
-			requireForkedSourceRefusal(t, "delete flow route", surface.DeleteFlowInstanceRoute(ctx, route.Identity))
-			requireForkedSourceRefusal(t, "rollback flow route", surface.RollbackFlowInstanceRoute(ctx, route.Identity))
-			routes, err := surface.ListFlowInstanceRoutes(ctx)
+			lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, receiver)
 			if err != nil {
 				t.Fatal(err)
 			}
-			foundRoute := false
-			for _, listed := range routes {
-				foundRoute = foundRoute || listed == route.Identity
+			observed, found, err := surface.LookupFlowInstance(ctx, lookup)
+			if err != nil || !found || observed.Identity() != child {
+				t.Fatalf("native construction disappeared after source freeze: %+v found=%t err=%v", observed, found, err)
 			}
-			if !foundRoute {
-				t.Fatalf("run-independent structural route disappeared after source freeze: %#v", routes)
+			if err := observed.ValidateSelection(lookup); err != nil {
+				t.Fatal(err)
 			}
 
 			requireForkedSourceRefusal(t, "record dead letter", surface.RecordDeadLetter(ctx, runtimedeadletters.Record{

@@ -63,7 +63,12 @@ func TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores(t *testing.T) {
 			settleErr := handle.Settle(context.WithoutCancel(ctx), runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true})
 			return "", errors.Join(context.Canceled, settleErr)
 		}
-		harness := newDirectiveAmbiguityHarness(t, backend, agent)
+		// The flow-owned timeout uses the artifact's real declaration; the
+		// independently created runtime actor still has no construction target.
+		harness := newDirectiveAmbiguityHarnessInFlow(t, backend, agent, "global")
+		if harness.agentRecord.Config.EntityID != "" || harness.agentRecord.Config.Identity.FlowInstance() != "global" {
+			t.Fatal("timeout actor must remain entityless in its declared fixture scope")
+		}
 		_, err := harness.manager.SendDirective(harness.workContext(t), harness.request)
 		if !errors.Is(err, agentcontrol.ErrDirectiveCanceled) {
 			t.Fatalf("Manager did not return typed canceled evidence: %v", err)

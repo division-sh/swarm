@@ -13,10 +13,24 @@ func TestRootExportDoesNotMaskConnectedReceiverWithoutRegistration(t *testing.T)
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newConnectRoutePlanStaticStore()
 	// The receiver entity exists, but its executable registration is absent.
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: newRouteTable(source)})
+	routes := derivedRouteTableFixture(t, source)
+	routes.connectDefinitions = nil
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routes,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	installConnectionSourceConstruction(t, eb, source, ".")
+	instance := ConstructedFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID)
+	observed := constructionIndexObservation(t, source, busInternalTestRunID, instance, "")
+	store.installIndexObservation(observed)
+	header, err := observed.WorkflowInstance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.workflowInstances = append(store.workflowInstances, header)
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
 	evt := connectRoutePlanRootProducerEvent(uuid.NewString(), "root.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatal(err)

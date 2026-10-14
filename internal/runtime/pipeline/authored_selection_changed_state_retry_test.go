@@ -78,7 +78,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 				if err := fixture.RequireRun(ctx, runID); err != nil {
 					t.Fatal(err)
 				}
-				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 					EntityType: "test_entity", CurrentState: "queued", Fields: map[string]any{"marker": "unchanged"},
 				})); err != nil {

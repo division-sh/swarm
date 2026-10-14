@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -22,11 +22,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -35,6 +37,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -67,13 +70,14 @@ func (standingDispatchWorkflowModule) WorkflowNodes() []runtimepipeline.Workflow
 func (standingDispatchWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type completeEventDispatchFixture struct {
-	store    completeEventDispatchStore
-	ctx      context.Context
-	bus      *runtimebus.EventBus
-	event    events.Event
-	agentID  string
-	identity agentidentity.Identity
-	source   semanticview.Source
+	store            completeEventDispatchStore
+	ctx              context.Context
+	bus              *runtimebus.EventBus
+	event            events.Event
+	agentID          string
+	identity         agentidentity.Identity
+	source           semanticview.Source
+	rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
 }
 
 type completeEventDispatchGeneration struct {
@@ -129,15 +133,7 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture := newCompleteEventDispatchFixture(t, backend, surface == "decision_obligation")
-				subscriptions := []string{string(fixture.event.Type())}
-				admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-					AgentID: fixture.agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
-				})
-				if err != nil {
-					t.Fatalf("admit complete-event route: %v", err)
-				}
-				fixture.bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{Identity: fixture.identity})
-				ch := runtimebustest.SubscribeIdentity(t, fixture.bus, fixture.identity, admission)
+				ch := fixture.subscribe(t, fixture.event.Type())
 				defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 
 				if err := fixture.updateChainDepth(-1); err == nil {
@@ -156,11 +152,6 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
-			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "global/agents.yaml#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
-			if err != nil {
-				t.Fatalf("resolve complete-event agent intent: %v", err)
-			}
-			fixture.source = completeEventAgentSource(fixture.agentID, string(fixture.event.Type()), intent)
 			work, err := fixture.store.PipelineObligations().ClaimEvent(
 				fixture.ctx,
 				fixture.event.ID(),
@@ -271,6 +262,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		backend,
 		decisionObligation,
 		runlifecyclefixture.ScenarioSetupOrigin(),
+		nil,
 	)
 }
 
@@ -279,9 +271,19 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	backend string,
 	decisionObligation bool,
 	origin runtimerunlifecycle.RunOrigin,
+	source semanticview.Source,
 	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
 ) completeEventDispatchFixture {
 	t.Helper()
+	constructSource := source == nil
+	if constructSource {
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyCompleteEventDispatch(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("load complete-event native source: %v", err)
+		}
+		source = semanticview.Wrap(bundle)
+	}
 	var selected completeEventDispatchStore
 	switch backend {
 	case "sqlite":
@@ -291,7 +293,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	opts := runtimebus.EventBusOptions{}
+	opts := runtimebus.EventBusOptions{ContractBundle: source}
 	for _, reader := range originReaders {
 		opts.Durable.RunOrigins = reader(selected)
 	}
@@ -299,7 +301,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
@@ -329,7 +331,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			ServiceID: origin.ServiceID(),
 			FlowPath:  backend,
 
-			Source: authorActivityTestSourceArtifactFact,
+			Source: testSourceArtifactFact(source),
 		})
 		if err != nil {
 			t.Fatalf("reconcile standing recovery fixture: %v", err)
@@ -343,10 +345,43 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
 	}
+	var rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
+	if constructSource {
+		constructionCtx := runtimecorrelation.WithRunID(ctx, runID)
+		for _, coordinate := range []struct{ flow, key string }{{".", ""}, {"source-flow", "one"}} {
+			identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, coordinate.flow, coordinate.key, runID)
+			if coordinate.flow == "." {
+				committed := seedCompleteEventDispatchRoot(t, constructionCtx, selected.(componentFlowConstructionStore), bus, source, identity, createdAt)
+				rootConstruction = &committed
+				continue
+			}
+			instance := runtimepipeline.WorkflowInstance{
+				InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+				ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+				WorkflowName: coordinate.flow, WorkflowVersion: source.WorkflowVersion(), InstanceKey: coordinate.key, CreatedAt: createdAt,
+			}
+			if coordinate.flow != "." {
+				instance.EntityType = "work"
+				instance.Fields = map[string]any{"instance_key": coordinate.key}
+			}
+			seedComponentFlowConstruction(t, constructionCtx, selected.(componentFlowConstructionStore), source, instance)
+			if coordinate.flow == "source-flow" {
+				sourceRoute = events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
+			}
+		}
+	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
+	eventType := events.EventType("custom.replay.checked")
+	if constructSource {
+		eventType, err = runtimepinrouting.AdmitPublicationIdentity(sourceRoute.FlowID, "custom.replay.checked",
+			eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID))
+		if err != nil {
+			t.Fatalf("admit complete-event publication identity: %v", err)
+		}
+	}
 	event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		eventID,
-		events.EventType("custom.replay.checked"),
+		eventType,
 		eventtest.Producer(events.EventProducerNode, "declarative-node"),
 		"event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task","text":"complete snapshot"}`),
@@ -357,10 +392,18 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		createdAt,
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, completeEventAgentOwnerURI(agentID))
+	ownerURI := completeEventAgentOwnerURI(agentID)
+	if source != nil {
+		scope, found := source.FlowScopeByID(semanticview.RootExecutionFlowID(source))
+		if !found || scope.AgentURIs[agentID] == "" {
+			t.Fatal("complete-event fixture requires its declared root agent")
+		}
+		ownerURI = scope.AgentURIs[agentID]
+	}
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, ownerURI)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
-		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
+		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity, source: source, rootConstruction: rootConstruction,
 	}
 	if decisionObligation {
 		fixture.insertDecisionObligation(t)
@@ -368,20 +411,71 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	return fixture
 }
 
+func seedCompleteEventDispatchRoot(t *testing.T, ctx context.Context, selected componentFlowConstructionStore, bus *runtimebus.EventBus, source semanticview.Source, identity runtimeflowidentity.Instance, at time.Time) runtimepipeline.CommittedFlowInstanceActivation {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("complete-event root requires its admitted source")
+	}
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	workflow := newEventBusWorkflowCoordinator(bus, selected, newFixtureWorkflowModule(t, bundle))
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: testSourceArtifactFact(source).BundleHash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: testSourceArtifactFact(source),
+		SemanticSource: source, WorkflowInstances: workflow, WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	t.Cleanup(func() {
+		if err := planner.Shutdown(); err != nil {
+			t.Error(err)
+		}
+		if _, err := owner.RetireAndWait(context.Background()); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: identity, OccurredAt: at})
+	if err != nil {
+		t.Fatalf("prepare complete-event root and receiver: %v", err)
+	}
+	committed, err := selected.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{Plan: plan})
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("commit complete-event root and receiver: result=%+v err=%v", committed, err)
+	}
+	if err := workflow.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+		t.Fatalf("finalize complete-event root: %v", err)
+	}
+	return committed
+}
+
 func (f completeEventDispatchFixture) subscribe(t testing.TB, eventTypes ...events.EventType) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
 	subscriptions := make([]string, 0, len(eventTypes))
 	for _, eventType := range eventTypes {
-		subscriptions = append(subscriptions, string(eventType))
+		local := string(eventType)
+		if strings.Contains(local, "/") {
+			declaration, err := runtimepinrouting.PublicationDeclarationForSourceEvent(eventType, f.event.RoutingSource())
+			if err != nil {
+				t.Fatalf("admit complete-event carrier publication: %v", err)
+			}
+			local = declaration.Local()
+		}
+		subscriptions = append(subscriptions, local)
 	}
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(f.source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: f.agentID, FlowID: semanticview.RootExecutionFlowID(f.source), Subscriptions: subscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit complete-event route: %v", err)
 	}
 	f.bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{Identity: f.identity})
-	return runtimebustest.SubscribeIdentity(t, f.bus, f.identity, admission)
+	return runtimebustest.SubscribeIdentity(t, f.bus, f.identity, admission.CarrierOnly())
 }
 
 func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, selected storetest.RunFixtureStore, runID string, startedAt time.Time) {
@@ -470,7 +564,7 @@ func (f completeEventDispatchFixture) insertDecisionObligationFor(t *testing.T, 
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: event.RunID(), Anchor: anchor, ExecutionMode: executionmode.Mock,
-		Snapshot: snapshot, BundleHash: authorActivityTestBundleHash, CreatedAt: event.CreatedAt(),
+		Snapshot: snapshot, BundleHash: testSourceArtifactFact(f.source).BundleHash(), CreatedAt: event.CreatedAt(),
 	})
 	if err != nil {
 		t.Fatalf("admit decision route card: %v", err)
@@ -510,24 +604,31 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	seen chan<- events.Event,
 ) *completeEventDispatchGeneration {
 	t.Helper()
+	fact := testSourceArtifactFact(f.source)
+	bundle, found := semanticview.Bundle(f.source)
+	if !found || f.rootConstruction == nil {
+		t.Fatal("complete-event manager requires its original native construction")
+	}
+	workflow := newEventBusWorkflowCoordinator(f.bus, f.store, newFixtureWorkflowModule(t, bundle))
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
+		BundleHash:        fact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create complete-event work owner: %v", err)
 	}
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
+		return &completeEventRecordingAgent{id: cfg.ID, agentType: cfg.Type, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: fact,
 		SemanticSource:     f.source,
+		WorkflowInstances:  workflow,
 		DeliveryStore:      f.store,
 		ExecutionPosture:   executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
-			RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus,
+			AgentRoutes:       f.bus,
+			CreationPublisher: f.bus, DeliveryRuntime: f.bus,
 			LifecycleState: f.store,
 		},
 		WorkOwner:         owner,
@@ -540,7 +641,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 			t.Errorf("close complete-event dispatch generation: %v", err)
 		}
 	})
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundleHash := fact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(f.source, coordinate)
 	if err != nil {
@@ -575,60 +676,23 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
 		t.Fatalf("install complete-event startup topology: %v", err)
 	}
+	if _, err := grant.MarkProbesSettled(f.ctx, nil); err != nil {
+		t.Fatalf("settle complete-event component startup probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(f.ctx); err != nil {
+		t.Fatalf("admit complete-event component generation: %v", err)
+	}
 	if err := manager.ReconcileStaticTopologyForStartup(f.ctx, f.source); err != nil {
 		t.Fatalf("reconcile complete-event static topology: %v", err)
 	}
-	blueprints, err := manager.PreRunAgentMaterializationBlueprints()
-	if err != nil {
-		t.Fatalf("compile complete-event declaration materialization: %v", err)
+	if err := manager.FinalizeCommittedFlowInstanceActivation(runtimecorrelation.WithRunID(f.ctx, f.event.RunID()), *f.rootConstruction); err != nil {
+		t.Fatalf("attach complete-event original constructed receiver: %v", err)
 	}
-	if len(blueprints) != 1 {
-		t.Fatalf("complete-event declaration count = %d, want 1", len(blueprints))
-	}
-	record, err := blueprints[0].Materialize(f.event.RunID())
-	if err != nil {
-		t.Fatalf("materialize complete-event run identity: %v", err)
-	}
-	if record.Config.Identity != f.identity {
-		t.Fatalf("complete-event materialized identity = %#v, want %#v", record.Config.Identity, f.identity)
-	}
-	record.Topology = admission
-	// Delivery finalization activates an admitted lifecycle; it cannot create it.
-	if err := manager.MaterializeAdmittedAgent(runtimecorrelation.WithRunID(f.ctx, f.event.RunID()), record); err != nil {
-		t.Fatalf("construct complete-event admitted agent lifecycle: %v", err)
+	records, err := f.store.LoadAgents(f.ctx)
+	if err != nil || len(records) != 1 || records[0].Config.Identity != f.identity {
+		t.Fatalf("complete-event original constructed receiver changed: records=%+v err=%v", records, err)
 	}
 	return generation
-}
-
-func completeEventAgentSource(agentID, subscription string, intent runtimeagentintent.Resolved) semanticview.Source {
-	ownerURI := completeEventAgentOwnerURI(agentID)
-	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "global"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{subscription: {}},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			agentID: {
-				ID: agentID, Type: "recording", Role: "complete-event-proof", Model: "regular",
-				Intent:         runtimeagentintent.Source{Kind: runtimeagentintent.SourceInline, Inline: "Prove complete event dispatch."},
-				ResolvedIntent: intent, Subscriptions: []string{subscription},
-			},
-		},
-		AgentURIs: map[string]string{agentID: ownerURI},
-	}
-	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
-		},
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{"global/" + agentID: {Kind: "agent", FlowID: "global", LocalID: agentID, Full: ownerURI}},
-			ByURI:  map[string]runtimecontracts.ContractURIRef{ownerURI: {Kind: "agent", FlowID: "global", LocalID: agentID, Full: ownerURI}},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
 }
 
 func completeEventAgentOwnerURI(agentID string) string {
@@ -680,13 +744,14 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 
 type completeEventRecordingAgent struct {
 	id            string
+	agentType     string
 	subscriptions []events.EventType
 	seen          chan<- events.Event
 }
 
 func (a *completeEventRecordingAgent) ID() string { return a.id }
 
-func (*completeEventRecordingAgent) Type() string { return "recording" }
+func (a *completeEventRecordingAgent) Type() string { return a.agentType }
 
 func (a *completeEventRecordingAgent) Subscriptions() []events.EventType {
 	return append([]events.EventType(nil), a.subscriptions...)

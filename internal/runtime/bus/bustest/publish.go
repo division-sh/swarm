@@ -30,7 +30,7 @@ func CommitPublish(
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	result := runtimebus.CommittedPublication{AppendOutcome: outcome, RouteTopology: command.RouteTopology}
+	result := runtimebus.CommittedPublication{AppendOutcome: outcome}
 	if outcome == runtimebus.EventAppendExactDuplicate {
 		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()

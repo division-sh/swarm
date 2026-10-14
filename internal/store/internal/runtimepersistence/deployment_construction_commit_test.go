@@ -74,11 +74,6 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 					Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("operator"), Now: at, TTL: time.Hour},
 					Root:        runtimebus.FlowInstanceActivationCommand{Plan: plan},
 				}
-				for _, construction := range plan.ConstructionPlans() {
-					command.Root.RouteTopology = append(command.Root.RouteTopology, runtimebus.FlowInstanceRouteRecordSet{
-						Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-					})
-				}
 				owner := selected.(runtimebus.DeploymentRunCreationCommitOwner)
 				fault := errors.New("injected deployment physical COMMIT acknowledgment loss")
 				var commits atomic.Int32
