@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -1725,85 +1724,85 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
-	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	for _, backend := range []string{"postgres", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected fanInBarrierConformanceStore
+			if backend == "postgres" {
+				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
+			} else {
+				selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, testAuthorActivityRuntimeContext(context.Background()))
+			}
+			runID, entityID := constructTrackedWorkflowMutationFixture(t, selected)
+			if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
+				t.Fatalf("trackedMutationStateMatchesEntityState(workflow): %v", err)
+			}
+		})
+	}
+}
 
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-
+func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrierConformanceStore) (string, string) {
+	t.Helper()
 	requireMutationSurface(t, selected)
-
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "stages:\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
 	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
-	eventBus, err := newScopedTestEventBus(t, selected, durableConformanceEventBusOptions(selected, runtimebus.EventBusOptions{ContractBundle: module.source}))
-	if err != nil {
-		t.Fatalf("construct workflow mutation event bus: %v", err)
+	bundle, ok := runtimesemanticview.Bundle(module.source)
+	if !ok || bundle == nil {
+		t.Fatal("workflow mutation fixture requires its admitted source bundle")
 	}
-	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:        executionposture.Live,
-		Module:                  module,
-		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
-		RunLifecycle:            selected,
-		PipelineObligations:     selected.PipelineObligations(),
-		DeliveryStore:           selected,
-		DeadLetters:             selected,
-		DecisionCards:           selected,
-		ProposedEffects:         selected,
-		HumanTasks:              selected,
-		DecisionCardDraftExpiry: selected,
-		HumanTaskExpiry:         selected,
-		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
+	fact := conformanceSourceArtifactFact(t, module.source)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), fact), runID)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact,
 	})
-
-	entityID := uuid.NewString()
+	runtime := newFanInBarrierRuntimeForSource(t, selected, module.source, fact, 1)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	{
-		construction1761Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-		construction1761At := enteredAt
-		construction1761Instance, construction1761Lifecycle, err := pipeline.PrepareInitialEntryLifecycle(construction1761Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
-			InstanceID:      "mutation-flow",
-			StorageRef:      "mutation-flow",
-			EntityID:        entityID,
-			WorkflowName:    "mutation-flow",
-			WorkflowVersion: "1.0.0",
-			CurrentState:    "done",
-			EnteredStageAt:  enteredAt,
-			CreatedAt:       enteredAt,
-			Fields:          map[string]any{"status": "closed"},
-			Gates:           map[string]bool{"g_done": true},
-			StateBuckets: map[string]any{
-				"evidence": map[string]any{"score": 2},
-				"notes":    map[string]any{"count": 1},
-			},
-			EntityType: "test_entity",
-		}, construction1761At)
-		if err != nil {
-			t.Fatalf("prepare fixture initial lifecycle: %v", err)
-		}
-		construction1761Command, err := flowactivationfixture.Command(construction1761Ctx, construction1761Instance, construction1761Lifecycle, construction1761At)
-		if err != nil {
-			t.Fatalf("prepare fixture activation command: %v", err)
-		}
-		construction1761Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1761Ctx, construction1761Command)
-		if err != nil {
-			t.Fatalf("seed workflow instance: %v", err)
-		}
-		if err == nil && !construction1761Committed.Acknowledged {
-			t.Fatal("fixture activation was not acknowledged")
-		}
-		if construction1761Committed.Acknowledged && construction1761Committed.Created {
-			if finalizeErr := pipeline.FinalizeInitialEntryLifecycle(construction1761Ctx, construction1761Committed.Lifecycle); finalizeErr != nil {
-				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
-			}
-		}
+	parent := runtimeflowidentity.Stored(module.source, runtimesemanticview.RootExecutionFlowID(module.source), runID, runID, runID, "")
+	plan, err := runtime.manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: module.source, Instance: parent, OccurredAt: enteredAt,
+	})
+	if err != nil {
+		t.Fatalf("prepare workflow mutation construction: %v", err)
 	}
-
-	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
-		t.Fatalf("trackedMutationStateMatchesEntityState(workflow): %v", err)
+	if len(plan.Children) != 1 || plan.Children[0].Identity.TemplateID != "mutation-flow" {
+		t.Fatal("workflow mutation fixture requires its exact compiled keyless child")
 	}
+	child := &plan.Children[0]
+	if child.Instance.CurrentState != "done" || child.Instance.InstanceKey != "" {
+		t.Fatalf("workflow mutation constructor changed initial stage or key: %+v", child.Instance)
+	}
+	// Preserve the original component state without inventing construction evidence.
+	child.Instance.Fields = map[string]any{"status": "closed"}
+	child.Instance.Gates = map[string]bool{"g_done": true}
+	child.Instance.StateBuckets = map[string]any{
+		"evidence": map[string]any{"score": 2},
+		"notes":    map[string]any{"count": 1},
+	}
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Identity.Route()}
+	child.Instance, child.Lifecycle, err = runtime.pipeline.PrepareInitialEntryLifecycle(ctx, owner, child.Instance, enteredAt)
+	if err != nil {
+		t.Fatalf("prepare workflow mutation initial lifecycle: %v", err)
+	}
+	committed, err := runtime.bus.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("commit workflow mutation construction: result=%+v err=%v", committed, err)
+	}
+	if err := runtime.manager.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		t.Fatalf("finalize workflow mutation construction: %v", err)
+	}
+	stored, found, err := runtime.pipeline.Load(ctx, owner)
+	if err != nil || !found {
+		t.Fatalf("read constructed workflow mutation target: found=%v err=%v", found, err)
+	}
+	if stored.CurrentState != "done" || stored.Fields["status"] != "closed" || !stored.Gates["g_done"] ||
+		mustCanonicalJSON(nil, stored.StateBuckets["evidence"]) != `{"score":2}` ||
+		mustCanonicalJSON(nil, stored.StateBuckets["notes"]) != `{"count":1}` {
+		t.Fatalf("constructed workflow lost the original mutation evidence: %+v", stored)
+	}
+	return runID, child.Identity.EntityID
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {

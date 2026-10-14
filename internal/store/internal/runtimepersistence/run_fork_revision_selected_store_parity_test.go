@@ -18,6 +18,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -212,13 +213,17 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, State: sourceState, StartedAt: at.Add(-time.Minute),
 		BundleHash: authorActivityTestBundleHash,
 	})
+	commitPreparedWorkflowAggregateFixture(t, ctx, store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+		InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "fork_entity",
+		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
+		Name: "Snapshot Entity", CurrentState: "ready", Fields: map[string]any{"name": "Snapshot Entity"},
+		CreatedAt: at, EnteredStageAt: at,
+	}, at)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	seedWorkflowHeaderProjectionFixture(t, ctx, tx, runID, entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", at)
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Snapshot Entity' WHERE run_id=$1 AND instance_path='flow-a/1'`, runID)
 	physicalEvent := mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO events (
 			event_class,event_id,run_id,event_name,entity_id,scope,payload,payload_bytes,execution_mode,
@@ -251,12 +256,6 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 			($1,$2,$3,'lifecycle_state','','null','"ready"',$4,'platform','sqlite-parity','seed',$5),
 			($6,$2,$3,'authored_field','name','null','"Snapshot Entity"',$4,'platform','sqlite-parity','seed',$5)
 	`, uuid.NewString(), runID, entityID, eventID, at, uuid.NewString())
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `
-		INSERT INTO entity_state (
-			run_id,entity_id,flow_instance,entity_type,name,current_state,gates,fields,bookkeeping,accumulator,
-			revision,entered_state_at,created_at,updated_at
-		) VALUES ($1,$2,'flow-a/1','fork_entity','Snapshot Entity','ready','{}','{"name":"Snapshot Entity"}','{}','{}',1,$3,$3,$3)
-	`, runID, entityID, at)
 	effects, err := runforkrevision.ForRun(runID, runforkrevision.AllFamilies()...)
 	if err != nil {
 		t.Fatal(err)

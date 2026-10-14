@@ -163,9 +163,8 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnloa
 }
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
-	ctx := context.Background()
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -174,7 +173,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	cfg := &config.Config{}
-	rt, err := NewRuntime(testAuthorActivityContext(ctx), completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
+	rt, err := NewRuntime(ctx, completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
 		Config:       cfg,
 		ManagerStore: selected,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
@@ -205,7 +204,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("InstallStartupGrant: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(ctx)); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	plan, err := grant.SourceSetPlan(ctx)
@@ -234,13 +233,13 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err != nil {
 		t.Fatalf("compile bundle-owned admission: %v", err)
 	}
-	contextDef := testBundleContext(t, runtimeTestBundleHash, "inbound.telegram")
+	contextDef := testBundleContext(t, bundleHash, "inbound.telegram")
 	contextDef.SourceArtifactFact = fact
 	contextDef.Source = module.source
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: runtimeTestBundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
+		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
 		RunID: "run-primary", Generation: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
 	}}

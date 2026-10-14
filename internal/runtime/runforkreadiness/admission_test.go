@@ -226,7 +226,7 @@ func TestAdmissionRequiresPositiveSealForEmptyProjection(t *testing.T) {
 }
 
 func TestSelectedReadinessRequiresCompleteConstruction(t *testing.T) {
-	for _, change := range []string{"exact", "imported_state", "missing_config", "malformed_config", "foreign_route_config", "unknown_config_control", "missing_stage", "missing_entry_clock", "unknown_mode", "wrong_mode", "missing_flow_template", "wrong_flow_template"} {
+	for _, change := range []string{"exact", "imported_state", "missing_config", "malformed_config", "foreign_route_config", "unknown_config_control", "missing_stage", "missing_entry_clock", "unknown_mode", "wrong_mode", "missing_flow_template", "wrong_flow_template", "missing_receipt", "wrong_parent", "wrong_instance_key", "foreign_run", "foreign_entity"} {
 		t.Run(change, func(t *testing.T) {
 			req := templateAdmissionRequest(t)
 			entity := &req.Plan.Entities[0]
@@ -254,10 +254,31 @@ func TestSelectedReadinessRequiresCompleteConstruction(t *testing.T) {
 				metadata.FlowTemplate = ""
 			case "wrong_flow_template":
 				metadata.FlowTemplate = "foreign"
+			case "missing_receipt":
+				metadata.InitialMaterialization = nil
+			case "wrong_parent":
+				metadata.ParentInstance = "foreign"
+			case "wrong_instance_key":
+				metadata.InstanceKey = "foreign"
+			case "foreign_run":
+				req.Plan.SourceRunID = uuid.NewString()
+			case "foreign_entity":
+				entity.EntityID = uuid.NewString()
 			}
-			_, err := Project(req.Plan, req.Source, req.RecipientPlanning, req.SourceModes, req.ModelOptions)
+			before, err := json.Marshal(req.Plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := Project(req.Plan, req.Source, req.RecipientPlanning, req.SourceModes, req.ModelOptions)
 			if (err == nil) != (change == "exact") {
 				t.Fatalf("construction admission %s: %v", change, err)
+			}
+			if err != nil && projection != nil {
+				t.Fatal("rejected construction retained a projection")
+			}
+			after, marshalErr := json.Marshal(req.Plan)
+			if marshalErr != nil || string(before) != string(after) {
+				t.Fatalf("construction admission mutated fixed evidence: %v", marshalErr)
 			}
 		})
 	}
@@ -385,13 +406,9 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 		t.Fatal(err)
 	}
 	constructed.EntityID = entityID
+	metadata := selectedAgentConstructionMetadata(t, effective.Source(), runID, constructed, "item", entered)
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: "event-b", Revision: 7}, Entities: []runfork.RunForkEntityState{{
-		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-			FlowTemplate: "consumer", Mode: "template", StageDefined: graph.StageCount() != 0,
-			EntityType: "deployment", FlowInstance: "consumer/item",
-			FlowConfig: selectedAgentHeaderConfig(t, constructed),
-		},
+		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: metadata,
 	}}}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
 	target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/item", EntityID: entityID})

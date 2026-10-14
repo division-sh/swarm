@@ -528,11 +528,11 @@ func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map
 		return nil, nil
 	}
 	// This native revision-capture test shadows runs with a transaction-local
-	// one-column TEMP table. It cannot create a semantic runtime run. Require
-	// that exact schema and insert in the same named test, not a file exemption.
+	// immutable-origin stub, without mutable lifecycle or runtime-run columns.
+	// Require its exact deployment origin in the same test, not a file exemption.
 	const scope = "TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores"
-	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
-	const insert = "INSERT INTO runs VALUES ($1)"
+	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT, origin_service_id TEXT, origin_generation BIGINT, forked_from_run_id TEXT, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id TEXT)"
+	const insert = "INSERT INTO runs (run_id,origin_kind) VALUES ($1,'deployment')"
 	schemas, inserts := 0, 0
 	approved := map[token.Pos]bool{}
 	ast.Inspect(file, func(node ast.Node) bool {
@@ -562,8 +562,8 @@ func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map
 func TestReceiverHistoryMinimalRunFixtureClassificationIsExact(t *testing.T) {
 	const path = "internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go"
 	const scope = "TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores"
-	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
-	const insert = "INSERT INTO runs VALUES ($1)"
+	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT, origin_service_id TEXT, origin_generation BIGINT, forked_from_run_id TEXT, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id TEXT)"
+	const insert = "INSERT INTO runs (run_id,origin_kind) VALUES ($1,'deployment')"
 	const extra = "UPDATE runs SET status='running' WHERE run_id=$1"
 	source := "package fixture\nfunc " + scope + "() { use(" + strconv.Quote(schema) + "); use(" + strconv.Quote(insert) + ") }\n"
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
@@ -576,7 +576,8 @@ func TestReceiverHistoryMinimalRunFixtureClassificationIsExact(t *testing.T) {
 		{"wrong-function", path, strings.ReplaceAll(source, scope, "Other"), false},
 		{"missing-schema", path, strings.Replace(source, strconv.Quote(schema), `"SELECT 1"`, 1), false},
 		{"non-temporary-schema", path, strings.Replace(source, "CREATE TEMP TABLE", "CREATE TABLE", 1), false},
-		{"semantic-schema", path, strings.Replace(source, "run_id TEXT PRIMARY KEY)", "run_id TEXT PRIMARY KEY, status TEXT)", 1), false},
+		{"semantic-schema", path, strings.Replace(source, "forked_from_event_id TEXT)", "forked_from_event_id TEXT, status TEXT)", 1), false},
+		{"changed-origin", path, strings.Replace(source, "'deployment'", "'fork_materialization'", 1), false},
 		{"duplicate-schema", path, strings.Replace(source, "use(", "use("+strconv.Quote(schema)+"); use(", 1), false},
 		{"duplicate-insert", path, strings.Replace(source, "use(", "use("+strconv.Quote(insert)+"); use(", 1), false},
 		{"changed-insert", path, strings.Replace(source, insert, "INSERT INTO runs (run_id,bundle_hash) VALUES ($1,$2)", 1), false},

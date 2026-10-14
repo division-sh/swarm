@@ -121,6 +121,40 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 						}
 					}
 				}
+				// A second publication before attachment completes reuses the
+				// original constructor, but creates its own durable deliveries.
+				later := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), event.Type(), "operator", "", event.Payload(), 0, runID, events.EventEnvelope{}, src, event.CreatedAt().Add(time.Second))
+				laterPlans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: later}})
+				if err != nil || len(laterPlans) != 1 {
+					t.Fatalf("prepare second pending-attachment publication: %v", err)
+				}
+				laterCommand := laterPlans[0].(bus.EnginePublicationPlan).PublicationCommand()
+				if len(laterCommand.Activations) != 0 || len(laterCommand.Commit.DeliveryRoutes) != consumer.count {
+					t.Fatalf("pending reuse changed construction/cardinality: %+v", laterCommand)
+				}
+				if _, err := store.CommitPublication(ctx, laterCommand); err != nil {
+					t.Fatal(err)
+				}
+				for _, route := range laterCommand.Commit.DeliveryRoutes {
+					if !route.Recipient.IsAgent() {
+						continue
+					}
+					if route.Initialization.CreatingEventID() != event.ID() || !route.Initialization.ConstructionTarget().ExistingEntity() || !route.Target.ExistingEntity() {
+						t.Fatalf("second publication replaced its original constructor: %+v", route)
+					}
+					snapshot, err := store.Snapshot(ctx, mustReceiverDeliveryID(t, later.ID(), route))
+					if err != nil || snapshot.EventID == event.ID() || !reflect.DeepEqual(snapshot.Route, route.Normalized()) {
+						t.Fatalf("second publication lost its own exact delivery: %+v %v", snapshot, err)
+					}
+					beforeClaim := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					claim, err := store.ClaimDelivery(ctx, snapshot.Authority, laterCommand.Commit.Event.Event(), route)
+					if err != nil || claim.Disposition != deliverylifecycle.ClaimDeferred || !reflect.DeepEqual(beforeClaim, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatalf("second publication bypassed attachment or mutated attempts: %+v %v", claim, err)
+					}
+				}
+				if err := eventBus.ReleaseEnginePublications(ctx, laterPlans); err != nil {
+					t.Fatal(err)
+				}
 				// Reconstruct EventBus and consume the durable publication rather
 				// than electing another initializer from now-existing state.
 				if err := eventBus.ReleaseEnginePublications(ctx, plans); err != nil {

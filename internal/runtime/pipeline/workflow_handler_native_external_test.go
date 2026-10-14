@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -113,6 +114,9 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 		},
 		ConflictingEntityType: func(ctx context.Context, run, entity string) (int64, error) {
 			return storetest.SetWorkflowProjectionConflictingEntityType(ctx, selected, run, entity)
+		},
+		ForeignDeclaration: func(ctx context.Context, owner flowidentity.RunScopedFlowInstance) error {
+			return storetest.SetWorkflowProjectionForeignDeclaration(t, ctx, selected, owner)
 		},
 		MissingHeader: func(ctx context.Context, run, path string) (int64, error) {
 			return storetest.RemoveWorkflowProjectionHeader(ctx, selected, run, path)

@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -464,6 +465,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			name:           "state only workflow join timeout",
 			fixture:        "examples/routing/fan-in/barrier",
 			eventName:      "portfolio.setup",
+			inputFlow:      "portfolio",
+			inputPayload:   `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
 			stateOnly:      true,
 			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
@@ -516,7 +519,23 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			sourceRunID := uuid.NewString()
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002215, 0).UTC()
-			if test.stateOnly {
+			if test.stateOnly && test.inputFlow != "" {
+				// The state-only cut still needs the actual constructed receiver
+				// of its connected event; a bare event is not topology evidence.
+				event := seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, test.eventName, at,
+					executionmode.Live, nil, selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)})
+				parent := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), sourceRunID, sourceRunID, sourceRunID, "")
+				child, err := flowidentity.KeyedChild(loaded.Source, parent, test.inputFlow, "portfolio")
+				if err != nil {
+					t.Fatal(err)
+				}
+				command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child, test.eventName)
+				writeCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRunID)
+				committed, err := pg.CommitFlowInstanceActivation(writeCtx, command)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
+				}
+			} else if test.stateOnly {
 				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
@@ -525,16 +544,14 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				if test.fanOutBarrier {
 					input.payload = []byte(`{"items":["first","second"]}`)
 				}
-				seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route}, input)
+				seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route}, input)
 			}
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceEventID})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
-			replayAdmission := runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(
-				runfork.RunForkSelectedContractReplayResumeAdmission(plan),
-			)
+			replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 			if test.stateOnly {
 				if !replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady {
 					t.Fatalf("state-only replay admission = %#v", replayAdmission)
@@ -601,7 +618,6 @@ func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Con
 		{name: "timers", query: `SELECT COUNT(*)::text FROM timers WHERE run_id = $1::uuid`},
 		{name: "readiness", query: `SELECT COUNT(*)::text FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid`},
 		{name: "agents", query: `SELECT COUNT(*)::text FROM agents WHERE $1::uuid IS NOT NULL`},
-		{name: "routes", query: `SELECT COUNT(*)::text FROM routing_rules WHERE $1::uuid IS NOT NULL`},
 		{name: "flow_instances", query: `SELECT COUNT(*)::text FROM flow_instances WHERE $1::uuid IS NOT NULL`},
 		{name: "execution_lineage", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`},
 		{name: "runtime_executions", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1::uuid`},
@@ -620,7 +636,6 @@ func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Cont
 	out := map[string]int{}
 	for _, table := range []string{
 		"agents",
-		"routing_rules",
 		"flow_instances",
 		"flow_instance_runtime_readiness",
 		"timers",
@@ -741,7 +756,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	// ownership. The selected contract replaces this receiver with its root node.
 	historicalNode := mustRunForkRootNode("source-only-node")
 	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Mock,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Mock,
 		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(historicalNode), Target: events.MustExistingEntityTarget(historicalTarget)}})
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -868,19 +883,6 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("recovered route truth = %#v", recoveredRoutes)
 	}
 
-	var copiedCurrentRoutes int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM routing_rules
-		WHERE flow_instance = 'flow-a/1'
-		  AND is_materialized = true
-	`).Scan(&copiedCurrentRoutes); err != nil {
-		t.Fatalf("count current route rows: %v", err)
-	}
-	if copiedCurrentRoutes != 0 {
-		t.Fatalf("selected route recovery copied current routing_rules rows = %d, want 0", copiedCurrentRoutes)
-	}
-
 	var sourceCopiedEvents int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -998,7 +1000,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -1085,6 +1087,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	})
 	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
 		ExecutionPosture:    executionposture.Live,
 		WorkOwner:           workOwner,
@@ -1092,10 +1095,11 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		ContractBundle:      loaded.Source,
 		SourceArtifactFact:  loaded.SourceArtifactFact,
 		Durable: bus.DurableDependencies{
+			Instances: workflowPersistence, ConstructionPublications: workflowPersistence,
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg,
+
+			ActiveAgents: pg, PreparedEvents: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
@@ -1128,7 +1132,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		Module:                  workflowOwner,
 		ExecutionPosture:        executionposture.Live,
 		SourceArtifactFact:      loaded.SourceArtifactFact,
-		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
+		Persistence:             workflowPersistence,
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,
@@ -1254,7 +1258,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		t.Fatalf("construct persisted source run bundle identity: %v", err)
 	}
 	loaded := LoadedSelectedContractSource{Source: semanticview.Wrap(bundle), SourceArtifactFact: persistedSource}
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -1333,7 +1337,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	laterEventID := "00000000-0000-4000-8000-000000000001"
 	earlierAt := time.Unix(1700002201, 0).UTC()
 	laterAt := earlierAt.Add(time.Second)
-	earlierEvent := seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, earlierEventID, "item.received", earlierAt, executionmode.Live,
+	earlierEvent := seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, earlierEventID, "item.received", earlierAt, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	payload, _ := json.Marshal(map[string]any{"entity_id": sourceRunID})
 	laterEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -1382,9 +1386,9 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
-	seedSelectedConstructedAgentRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, at)
+	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	agent := &selectedContractForkTestAgent{}
+	agent := &selectedContractForkTestAgent{source: loaded.Source}
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
@@ -1448,11 +1452,11 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002202, 0).UTC()
-	seedSelectedConstructedAgentRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, at)
+	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	agent := &selectedContractForkTestAgent{}
+	agent := &selectedContractForkTestAgent{source: loaded.Source}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
@@ -1750,7 +1754,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			entityID := sourceRunID
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002203, 0).UTC()
-			seedSelectedConstructedAgentRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, at)
+			seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
 			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3055,7 +3059,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002403, 0).UTC()
-	seedSelectedConstructedAgentRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, at)
+	seedSelectedConstructedAgentRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, at)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3793,7 +3797,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	sourceEventID := uuid.NewString()
 	diagnosticEventID := uuid.NewString()
 	at := time.Unix(1700002215, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -3888,7 +3892,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
 	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
 	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -4000,7 +4004,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
 	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
 	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -4062,7 +4066,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	turnID := uuid.NewString()
 	at := time.Unix(1700002300, 0).UTC()
 	entityID = sourceRunID
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	agentIdentity := selectedContractTestAgentIdentityForRun(t, sourceRunID, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
@@ -4168,7 +4172,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	forkAt := at.Add(30 * time.Second)
 	agentRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "validation-coordinator", "flow-a/1")
 	entityID = sourceRunID
-	sourceEvent := seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	sourceEvent := seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node"), agentRoute})
 	agentIdentity := agentRoute.AgentIdentity
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
@@ -4301,7 +4305,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	at := time.Unix(1700002305, 0).UTC()
 	after := at.Add(time.Minute)
 	entityID = sourceRunID
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	agentIdentity := selectedContractTestAgentIdentityForRun(t, sourceRunID, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
@@ -4421,7 +4425,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002315, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -4491,7 +4495,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002320, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
@@ -4550,7 +4554,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002325, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "ghost.event", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "ghost.event", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -4614,7 +4618,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002335, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -4666,7 +4670,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	sourceEventID := uuid.NewString()
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700002350, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
+	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, afterEventID, at.Add(time.Second))
@@ -4910,33 +4914,23 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), selectedContractGuardEvent(t, "fork-event",
-		"item.received", runfork.RunForkSelectedContractExecutionOwner, "source-event"),
-
-		bus.PublishRecipientPlan{
-			RoutedRecipients: []bus.PublishDiagnosticRecipient{
-				{
-					Type:        "agent",
-					ID:          "target-agent",
-					RouteSource: "selected_contracts",
-				},
-				{
-					Type:        "node",
-					ID:          mustRunForkRootNode("test-node").Key(),
-					RouteSource: "selected_contracts",
-				},
-			},
-		})
+	routes, err := guard.materializeRemainingDeliveryRoutes(selectedContractGuardEvent(t, "fork-event",
+		"item.received", runfork.RunForkSelectedContractExecutionOwner, "source-event"), nil)
 	if err != nil {
-		t.Fatalf("MaterializeNodeDeliveryRoutes: %v", err)
+		t.Fatalf("MaterializeDeliveryRoutes: %v", err)
 	}
-	if len(routes) != 1 ||
+	if len(routes) != 2 ||
 		!routes[0].Recipient.IsNode() ||
 		routes[0].Recipient.ID() != mustRunForkRootNode("test-node").Key() ||
 		!routes[0].Target.Empty() ||
 		routes[0].Handler.Empty() ||
 		!routes[0].Handler.Node().Equal(mustRunForkRootNode("test-node")) {
-		t.Fatalf("materialized routes = %#v, want target node route only", routes)
+		t.Fatalf("materialized routes = %#v, want exact target node route and admitted agent", routes)
+	}
+	wantAgent := selectedContractTestRootAgentIdentity(t, "target-agent")
+	wantAgent.RunID = "fork-run"
+	if routes[1].Recipient.ID() != "target-agent" || !routes[1].Recipient.IsAgent() || routes[1].AgentIdentity != wantAgent || !routes[1].Target.Empty() || !routes[1].Handler.Empty() {
+		t.Fatalf("materialized agent = %#v, want exact child-run identity without borrowed target", routes[1])
 	}
 }
 
@@ -5170,6 +5164,7 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 type selectedContractForkTestAgent struct {
 	mu       sync.Mutex
 	cfg      runtimeactors.AgentConfig
+	source   semanticview.Source
 	runIDs   []string
 	eventIDs []string
 }
@@ -5213,11 +5208,16 @@ func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.
 	a.mu.Lock()
 	a.runIDs = append(a.runIDs, strings.TrimSpace(evt.RunID()))
 	a.eventIDs = append(a.eventIDs, strings.TrimSpace(evt.ID()))
-	agentID := strings.TrimSpace(a.cfg.ID)
+	cfg, source := a.cfg, a.source
 	a.mu.Unlock()
 
+	routingSource, err := pinrouting.AdmitAgentExecutionRoutingSource(source, cfg, cfg.EffectiveEntityID(), nil)
+	if err != nil {
+		return nil, err
+	}
+	envelope := events.EnvelopeForSourceRoute(evt.NormalizedEnvelope(), routingSource.Route())
 	return []events.Event{
-		eventtest.Child("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt, evt.NormalizedEnvelope(), time.Now().UTC()),
+		eventtest.ChildWithLineageAndRoutingSource("", events.EventType("task.completed"), cfg.ID, "", json.RawMessage(`{}`), 0, events.LineageFromEvent(evt), envelope, routingSource, time.Now().UTC()),
 	}, nil
 }
 

@@ -18,6 +18,7 @@ import (
 )
 
 type flowActivationAttemptTestStore interface {
+	nativeReadinessFixtureStore
 	storetest.RunFixtureStore
 	runtimestartupownership.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
@@ -46,14 +47,14 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected, _, _ := tc.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
 			requireReadinessRun(t, ctx, selected, runID, hash)
 			paths := []string{"account/batch-a", "account/batch-b"}
 			for _, path := range paths {
-				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, hash)
+				seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
 			}
 			acquire := runtimestartupownership.AcquireRequest{OwnerID: "flow-batch-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
 			process, err := selected.AcquireProcessCapability(ctx, acquire)
@@ -175,7 +176,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			runID, path := uuid.NewString(), "account/attempt"
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
 			requireReadinessRun(t, ctx, selected, runID, hash)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, hash)
+			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
 			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 			if err != nil || !found {
 				t.Fatalf("load readiness: found=%v err=%v", found, err)

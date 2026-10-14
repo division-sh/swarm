@@ -751,18 +751,16 @@ func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
 	if got, want := plan.instanceKey.Readback().SourcePath, "payload.external_chat_id"; got != want {
 		t.Fatalf("typed source = %q, want %q", got, want)
 	}
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: AdmitConnectRouteMatchValues(map[string]string{
+	material, failure := InstanceKeyMaterialForConnectRoutePlan(plan,
+		AdmitConnectRouteMatchValues(map[string]string{
 			"payload.external_chat_id": "chat-authoritative",
 			"payload.chat_id":          "chat-conflicting",
-		}),
-		Descriptors: []Descriptor{
-			{EntityID: "ent-authoritative", FlowInstance: "consumer/authoritative", AddressFields: map[string]string{"entity.chat_id": "chat-authoritative"}},
-			{EntityID: "ent-conflicting", FlowInstance: "consumer/conflicting", AddressFields: map[string]string{"entity.chat_id": "chat-conflicting"}},
-		},
-	})
-	if !materialized.Failure.Empty() || materialized.Target.FlowInstance != "consumer/authoritative" {
-		t.Fatalf("materialized target/failure = %#v/%q, want renamed-source consumer/authoritative", materialized.Target, materialized.Failure)
+		}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "chat_id" || material.Keys[0].Value != "chat-authoritative" {
+		t.Fatalf("compiled key material/failure = %#v/%q, want chat_id from authoritative renamed source", material, failure)
+	}
+	if projected := MaterializeConnectRoutePlan(plan); projected.Failure != ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
 	}
 }
 
@@ -902,42 +900,17 @@ func TestCompileConnectPlansUsesOrdinaryKeyedReportRouting(t *testing.T) {
 			if key.Mode != tc.mode || key.Field != "period_id" || key.SourceKind != "payload" || key.SourcePath != "payload.period_id" {
 				t.Fatalf("report key = %#v, want exact period selection from the connection", key)
 			}
-			source := semanticview.Wrap(bundle)
-			first := events.RouteIdentity{FlowID: plan.receiver.flowID.value, FlowInstance: flowidentity.InstancePath(source, plan.receiver.flowID.value, "period-1"), EntityID: "period-1-entity"}
-			second := events.RouteIdentity{FlowID: plan.receiver.flowID.value, FlowInstance: flowidentity.InstancePath(source, plan.receiver.flowID.value, "period-2"), EntityID: "period-2-entity"}
-			descriptors := []Descriptor{
-				{FlowInstance: first.FlowInstance, EntityID: first.EntityID, AddressFields: map[string]string{"entity.period_id": "period-1"}},
-				{FlowInstance: second.FlowInstance, EntityID: second.EntityID, AddressFields: map[string]string{"entity.period_id": "period-2"}},
-			}
-			for _, target := range []events.RouteIdentity{first, second} {
-				period := "period-1"
-				if target == second {
-					period = "period-2"
-				}
-				result := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.period_id": period}), Descriptors: descriptors})
-				if !result.Failure.Empty() || result.Target != target || len(result.TargetSet) != 0 {
-					t.Fatalf("period %q materialization = %#v, want only exact receiver %#v", period, result, target)
+			for _, period := range []string{"period-1", "period-2", "period-3"} {
+				material, failure := InstanceKeyMaterialForConnectRoutePlan(plan, AdmitConnectRouteMatchValues(map[string]string{"payload.period_id": period}))
+				if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "period_id" || material.Keys[0].Value != period {
+					t.Fatalf("period %q compiled material = %#v failure=%s", period, material, failure.Code())
 				}
 			}
-			for _, refusal := range []struct {
-				name        string
-				period      string
-				descriptors []Descriptor
-				failure     ConnectRoutePlanFailure
-			}{
-				{name: "missing period", descriptors: descriptors, failure: ConnectFailureInstanceSourceValueMissing},
-				{name: "unknown period", period: "period-3", descriptors: descriptors, failure: ConnectFailureTargetUnresolved},
-				{name: "ambiguous period", period: "period-1", descriptors: []Descriptor{
-					descriptors[0],
-					{FlowInstance: second.FlowInstance, EntityID: second.EntityID, AddressFields: map[string]string{"entity.period_id": "period-1"}},
-				}, failure: ConnectFailureTargetAmbiguous},
-			} {
-				t.Run(refusal.name, func(t *testing.T) {
-					result := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.period_id": refusal.period}), Descriptors: refusal.descriptors})
-					if result.Failure != refusal.failure || !result.Target.Empty() || len(result.TargetSet) != 0 {
-						t.Fatalf("materialization = %#v, want exact refusal %s without a guessed recipient", result, refusal.failure.Code())
-					}
-				})
+			if material, failure := InstanceKeyMaterialForConnectRoutePlan(plan, AdmitConnectRouteMatchValues(nil)); failure != ConnectFailureInstanceSourceValueMissing || len(material.Keys) != 0 {
+				t.Fatalf("missing period material=%#v failure=%s, want exact source-value refusal", material, failure.Code())
+			}
+			if projected := MaterializeConnectRoutePlan(plan); projected.Failure != ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+				t.Fatalf("static projection elected a keyed report receiver: %#v", projected)
 			}
 		})
 	}
@@ -1183,15 +1156,9 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-				MatchValues: AdmitConnectRouteMatchValues(tc.matchValues),
-				Descriptors: []Descriptor{
-					{EntityID: "ent-authoritative", FlowInstance: "account/authoritative", AddressFields: map[string]string{"entity.account_id": "acct-authoritative"}},
-					{EntityID: "ent-conflicting", FlowInstance: "account/conflicting", AddressFields: map[string]string{"entity.account_id": "acct-conflicting"}},
-				},
-			})
-			if !materialized.Failure.Empty() || materialized.Target.FlowInstance != "account/authoritative" {
-				t.Fatalf("materialized target/failure = %#v/%q, want renamed-source account/authoritative", materialized.Target, materialized.Failure)
+			material, failure := InstanceKeyMaterialForConnectRoutePlan(plan, AdmitConnectRouteMatchValues(tc.matchValues))
+			if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-authoritative" {
+				t.Fatalf("compiled material/failure = %#v/%q, want account_id from authoritative renamed source", material, failure)
 			}
 		})
 	}
@@ -1476,6 +1443,39 @@ func (s targetFreeProviderFixtureSource) FlowInputEventPin(flowID, event string)
 	return s.Source.FlowInputEventPin(flowID, event)
 }
 
+func TestMaterializeConnectRoutePlanProjectsOnlyCompiledStaticTargets(t *testing.T) {
+	first := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("static-one")}
+	second := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: eventtest.UUID("static-two")}
+	root := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, true, ".", ".", runtimecontracts.FlowModeStatic, "", "work.ready", "work.ready")
+	for _, test := range []struct {
+		name string
+		plan ConnectRoutePlan
+		want ConnectRoutePlanMaterialization
+	}{
+		{name: "root admitted separately", plan: ConnectRoutePlan{receiver: root, target: first}, want: ConnectRoutePlanMaterialization{}},
+		{name: "static singular", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionStatic, target: first}, want: ConnectRoutePlanMaterialization{Target: first}},
+		{name: "static set", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionStatic, targetSet: []events.RouteIdentity{first, second}}, want: ConnectRoutePlanMaterialization{TargetSet: []events.RouteIdentity{first, second}}},
+		{name: "empty static", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionStatic}, want: ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}},
+		{name: "zero plan", want: ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}},
+		{name: "keyed receiver", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionInstanceKey}, want: ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}},
+		{name: "keyed cannot borrow singular", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionInstanceKey, target: first}, want: ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}},
+		{name: "keyed cannot borrow set", plan: ConnectRoutePlan{resolutionKind: ConnectResolutionInstanceKey, targetSet: []events.RouteIdentity{first, second}}, want: ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := MaterializeConnectRoutePlan(test.plan)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("static projection = %+v, want %+v", got, test.want)
+			}
+			if len(got.TargetSet) != 0 {
+				got.TargetSet[0].FlowInstance = "hostile"
+				if !reflect.DeepEqual(MaterializeConnectRoutePlan(test.plan), test.want) {
+					t.Fatal("returned target set mutated the compiled plan")
+				}
+			}
+		})
+	}
+}
+
 func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -1484,7 +1484,6 @@ func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testi
 	}{
 		{name: "plan", typeValue: reflect.TypeOf(ConnectRoutePlan{}), forbidden: []string{"Address", "Map"}},
 		{name: "instance key", typeValue: reflect.TypeOf(ConnectRoutePlanInstanceKey{}), forbidden: []string{"Fields", "Mappings", "OnMissing", "OnConflict"}},
-		{name: "materialization input", typeValue: reflect.TypeOf(ConnectRoutePlanMaterializationInput{}), forbidden: []string{"SupportedAddressTargets"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, field := range tc.forbidden {
@@ -1493,6 +1492,10 @@ func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testi
 				}
 			}
 		})
+	}
+	projection := reflect.TypeOf(MaterializeConnectRoutePlan)
+	if projection.NumIn() != 1 || projection.In(0) != reflect.TypeOf(ConnectRoutePlan{}) {
+		t.Fatal("static materializer accepts external instance or descriptor authority")
 	}
 }
 
@@ -1524,7 +1527,7 @@ func TestCompileConnectPlansUsesSelectInputResolution(t *testing.T) {
 		t.Fatalf("ResolutionKind = %q, want %q", got, want)
 	}
 	if !plan.RequiresRuntimeResolution() {
-		t.Fatal("select resolution should require runtime descriptor resolution")
+		t.Fatal("select resolution should require native instance resolution")
 	}
 	if got, want := plan.instanceKey.Mode(), runtimecontracts.FlowInputResolutionModeSelect; got != want {
 		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
@@ -1536,37 +1539,12 @@ func TestCompileConnectPlansUsesSelectInputResolution(t *testing.T) {
 		t.Fatalf("InstanceKey source = %#v, want payload.account_id", source)
 	}
 
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	material, failure := InstanceKeyMaterialForConnectRoutePlan(plan, AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material/failure = %#v/%q, want account_id acct-1", material, failure)
 	}
-	if got, want := materialized.Target.FlowInstance, "account/one"; got != want {
-		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
-	}
-
-	missing := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-	})
-	if missing.Failure != ConnectFailureTargetUnresolved {
-		t.Fatalf("missing Failure = %q, want %q", missing.Failure, ConnectFailureTargetUnresolved)
-	}
-
-	ambiguous := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []Descriptor{
-			{EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-			{EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-		},
-	})
-	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
-		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	if projected := MaterializeConnectRoutePlan(plan); projected.Failure != ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a select receiver: %#v", projected)
 	}
 }
 
@@ -1600,7 +1578,7 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 		t.Fatalf("ResolutionKind = %q, want %q", got, want)
 	}
 	if !plan.RequiresRuntimeResolution() {
-		t.Fatal("select-or-create resolution should require runtime descriptor resolution")
+		t.Fatal("select-or-create resolution should require native instance resolution")
 	}
 	if got, want := plan.instanceKey.Mode(), runtimecontracts.FlowInputResolutionModeSelectOrCreate; got != want {
 		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
@@ -1612,19 +1590,12 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 		t.Fatalf("InstanceKey source = %#v, want payload.account_id", source)
 	}
 
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	material, failure := InstanceKeyMaterialForConnectRoutePlan(plan, AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material/failure = %#v/%q, want account_id acct-1", material, failure)
 	}
-	if got, want := materialized.Target.FlowInstance, "account/one"; got != want {
-		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
+	if projected := MaterializeConnectRoutePlan(plan); projected.Failure != ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a select-or-create receiver: %#v", projected)
 	}
 }
 

@@ -1,15 +1,71 @@
 package bus
 
 import (
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
+
+func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testing.T) {
+	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("terminal-receiver")}
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("terminal-event"), "work.requested", "test", "", []byte(`{}`), 0, eventtest.UUID("terminal-run"),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
+	evaluation, err := events.NewConnectPlanEvaluation(events.AdmitConnectPlanIdentity(sha256.Sum256([]byte("terminal-plan"))), events.ConnectPlanResolutionBlocked, []events.RouteIdentity{target}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{evaluation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := RoutePlan{AuthorityOwner: routePlanSourceConnectRoutePlan, AuthorityState: RoutePlanAuthorityCanonicalFailedClosed,
+		TargetFailure: pinrouting.FailureTargetUnreachableTerminated, ConnectEvaluation: ledger}
+	if !plan.authorizesTerminalTargetDiagnostic(event) {
+		t.Fatal("exact terminal diagnostic refused")
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*RoutePlan)
+	}{
+		{"failure code alone", func(p *RoutePlan) { p.ConnectEvaluation = events.ConnectEvaluationLedger{} }},
+		{"wrong owner", func(p *RoutePlan) { p.AuthorityOwner = 0 }},
+		{"wrong disposition", func(p *RoutePlan) { p.AuthorityState = RoutePlanAuthorityCanonicalMatched }},
+		{"different failure", func(p *RoutePlan) { p.TargetFailure = pinrouting.FailureTargetNotSubscribed }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed := plan
+			test.change(&changed)
+			if changed.authorizesTerminalTargetDiagnostic(event) {
+				t.Fatal("unproven terminal diagnostic admitted")
+			}
+		})
+	}
+	foreign := target
+	foreign.EntityID = eventtest.UUID("foreign-terminal-receiver")
+	if blockedConnectTargetsMatch(ledger, []events.RouteIdentity{foreign}) || blockedConnectTargetsMatch(ledger, []events.RouteIdentity{target, foreign}) {
+		t.Fatal("blocked ledger authorized a different or additional target")
+	}
+	unresolved, err := events.NewConnectPlanEvaluation(evaluation.PlanIdentity(), events.ConnectPlanRuntimeResolutionRequired, []events.RouteIdentity{target}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unresolvedLedger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{unresolved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blockedConnectTargetsMatch(unresolvedLedger, []events.RouteIdentity{target}) {
+		t.Fatal("unresolved ledger substituted for blocked terminal evidence")
+	}
+}
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	routes := []plannedDeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "consumer-node")), Target: events.RouteIdentity{

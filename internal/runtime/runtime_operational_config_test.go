@@ -16,7 +16,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -55,7 +54,6 @@ func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) er
 type recoveryGuardEventStore struct {
 	runtimeagentcontrol.DirectiveOperationStore
 	missing                 []events.PersistedReplayEvent
-	routes                  []runtimeflowidentity.RunScopedFlowInstance
 	directiveReconcileCalls atomic.Int32
 	directiveReconcileErr   error
 }
@@ -78,16 +76,6 @@ func (*recoveryGuardEventStore) ListEventDeliveryRecipients(context.Context, str
 	return nil, nil
 }
 func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return true }
-func (*recoveryGuardEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-func (*recoveryGuardEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
-func (s *recoveryGuardEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
-}
-
 func (*recoveryGuardEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
 	return nil, nil
 }
@@ -119,9 +107,6 @@ func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, st
 }
 func (*minimalRuntimeEventStore) SupportsPersistedReplay() bool { return false }
 
-func (*minimalRuntimeEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return nil, nil
-}
 func (*minimalRuntimeEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
 	return nil, nil
 }
@@ -317,9 +302,6 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			Event: eventtest.RunCreatingRootIngress("evt-1",
 				"support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
-		routes: []runtimeflowidentity.RunScopedFlowInstance{
-			{RunID: "99999999-9999-4999-8999-999999999901", Route: runtimeflowidentity.DeriveRoute("child", "inst-1")},
-		},
 	}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:               eventStore,
@@ -348,10 +330,11 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 
 func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	scheduleStore := &recoveryDisabledScheduleStore{}
 	eventStore := &recoveryGuardEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		EventStore:            eventStore,
@@ -360,15 +343,16 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 			LifecycleCensus: managerStore, DirectiveOperations: eventStore,
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SourceArtifactFact: fact,
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {
@@ -378,9 +362,10 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	scheduleStore := &recoveryDisabledScheduleStore{}
 	managerStore := &recoveryGuardManagerStore{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:            &minimalRuntimeEventStore{},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -389,15 +374,16 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T
 			LifecycleCensus: managerStore,
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SourceArtifactFact: fact,
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {
@@ -407,16 +393,18 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T
 
 func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	cfg := testOperationalRuntimeConfig()
 	cfg.Runtime.RecoveryOnStartup = true
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "other-bundle")}}
 	eventStore := &recoveryGuardEventStore{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg,
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg,
 		EventStore:              eventStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 		GenericScheduleStore:    scheduleStore,
 		TimerObligationReader:   scheduleStore,
 		Options: RuntimeOptions{
+			SourceArtifactFact:               fact,
 			SelfCheck:                        false,
 			WorkflowModule:                   module,
 			LLMRuntime:                       noopLLMRuntime{},
@@ -426,7 +414,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if got := scheduleStore.loadCalls.Load(); got != 0 {
@@ -466,22 +454,24 @@ func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *tes
 
 func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	stores := []*recoveryGuardEventStore{{}, {}}
 	runtimes := make([]*Runtime, 0, len(stores))
 	for _, eventStore := range stores {
-		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+		rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 			EventStore:              eventStore,
 			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 			Options: RuntimeOptions{
-				SelfCheck:      false,
-				WorkflowModule: module,
-				LLMRuntime:     noopLLMRuntime{},
+				SourceArtifactFact: fact,
+				SelfCheck:          false,
+				WorkflowModule:     module,
+				LLMRuntime:         noopLLMRuntime{},
 			}})
 
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
-		if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+		if err := rt.Start(ctx); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		runtimes = append(runtimes, rt)

@@ -11,9 +11,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -21,10 +21,8 @@ import (
 func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
 	for _, backend := range activityTerminalReplayStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(t, context.Background())
 			selected, closeStore, reopen := openActivityReplayStore(t, backend.name)
 			runID := uuid.NewString()
-			requireActivityReplayRun(t, ctx, selected, runID)
 			var httpCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				httpCalls.Add(1)
@@ -34,9 +32,10 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 			output := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))
 			tool, _ = tool.WithSchemas(tool.InputSchema(), output)
 
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{
 				"telegram.send_message": tool,
-			}})
+			})
+			ctx := requireActivityReplayRun(t, selected, source, runID)
 			plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
 				"telegram.send_message": {"ok": true},
 			})
@@ -44,10 +43,10 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 				t.Fatalf("NewMockResponsePlan: %v", err)
 			}
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
-			seedSelectedActivitySource(t, ctx, selected, intent)
 			intent.Tool = "telegram.send_message"
 			intent.ActivityID = "telegram_send_message"
 			intent.ExecutionMode = executionmode.Mock
+			ctx = effects.WithExecutionMode(ctx, intent.ExecutionMode)
 			intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"chat_id": "42", "text": "hello"})
 
 			firstBus := newActivityJournalProofBus(t, selected, source)
@@ -55,6 +54,7 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 				MockConnectorResponses: plan,
 			})
+			intent = seedSelectedActivitySource(t, ctx, selected, first, intent)
 			if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, first, nil, intent); err != nil {
 				t.Fatalf("execute initial mock activity: %v", err)
 			}

@@ -278,7 +278,7 @@ func TestSelectedContractWorkflowRecipientProjectionGuardUsesBoundCopyAndExactCh
 	if err != nil || expected.Recipients[0].Path != "fork-run" {
 		t.Fatalf("guard did not consume bound copy: %#v, %v", expected, err)
 	}
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), evt, runtimebus.PublishRecipientPlan{})
+	routes, err := guard.materializeRemainingDeliveryRoutes(evt, nil)
 	if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != "fork-run" {
 		t.Fatalf("materializer did not consume bound copy: %#v, %v", routes, err)
 	}
@@ -297,7 +297,7 @@ func TestSelectedContractWorkflowRecipientProjectionGuardUsesBoundCopyAndExactCh
 		if err := guard.AuthorizeEvent(context.Background(), wrong); err == nil || !strings.Contains(err.Error(), "exact child run") {
 			t.Fatalf("wrong-run event admitted: %v", err)
 		}
-		if _, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), wrong, runtimebus.PublishRecipientPlan{}); err == nil {
+		if _, err := guard.MaterializeDeliveryRoutes(context.Background(), wrong, runtimebus.PublishRecipientPlan{}); err == nil {
 			t.Fatal("wrong-run materialization admitted")
 		}
 		if err := guard.Authorize(context.Background(), wrong, runtimebus.PublishRecipientPlan{}); err == nil || !strings.Contains(err.Error(), "exact child run") {
@@ -306,6 +306,27 @@ func TestSelectedContractWorkflowRecipientProjectionGuardUsesBoundCopyAndExactCh
 	}
 	if _, err := newSelectedContractRecipientPlanPublishGuard(planning, source, selectedContractWorkflowProjection{}); err == nil {
 		t.Fatal("guard accepted unbound child run")
+	}
+}
+
+func TestSelectedContractRecipientMaterializerRejectsDiagnosticOnlyEvidence(t *testing.T) {
+	source := testWorkflowRecipientSource(t)
+	selected := testAgentFrontierRecipient(mustTestAgentPlan(selectedContractTestRootAgentIdentity(t, "target-agent")), "item.received", "", "selected_contracts")
+	guard, err := newSelectedContractRecipientPlanPublishGuard(testRecipientProjectionPlanning(selected), source, testWorkflowRecipientProjection(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard.ExpectForkEvent("fork-event", "source-event")
+	evt := selectedContractGuardEvent(t, "fork-event", "item.received", runfork.RunForkSelectedContractExecutionOwner, "source-event")
+	for _, actual := range []runtimebus.PublishRecipientPlan{
+		{},
+		{Recipients: []string{"target-agent"}, PersistedRecipients: []string{"target-agent"}},
+		{RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{Type: "agent", ID: "target-agent", RouteSource: "selected_contracts"}}},
+		{SubscriptionRecipients: []string{"target-agent"}},
+	} {
+		if routes, err := guard.MaterializeDeliveryRoutes(context.Background(), evt, actual); err == nil || len(routes) != 0 {
+			t.Fatalf("diagnostic IDs substituted for canonical recipient intents: routes=%+v err=%v", routes, err)
+		}
 	}
 }
 

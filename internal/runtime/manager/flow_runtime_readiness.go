@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -47,7 +46,6 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 	attemptOrdinal      uint64
 	observed            *runtimepipeline.DynamicFlowRuntimeReadiness
 	source              dynamicFlowRuntimeReadinessSource
-	topologyDurable     bool
 	processOnly         bool
 	preAdmission        bool
 	admittedPreRun      bool
@@ -280,36 +278,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		activationAccepted = true
 		return nil
 	}
-	if !admission.processPrepared && !phase.Includes(runtimepipeline.FlowAttachmentRouteInstalled) {
-		flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.RunID, req.Instance.Route())
-		if err != nil {
-			return fmt.Errorf("resolve dynamic flow route identity %s: %w", readiness.InstancePath, err)
-		}
-		if !admission.topologyDurable {
-			committed, commitErr := am.installFlowInstanceRoute(ctx, flowIdentity, req)
-			if !committed.Acknowledged {
-				return fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged")))
-			}
-			if commitErr != nil {
-				acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, commitErr))
-				followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-				defer cancel()
-				ctx = followupCtx
-			}
-		}
-		publication, err := am.publishPersistedDynamicFlowRoute(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity:            flowIdentity,
-			Instance:            req.Instance,
-			ActivationVariables: flowActivationVars(req),
-		}, active.receipt)
-		if err != nil {
-			return fmt.Errorf("publish dynamic flow route %s: %w", readiness.InstancePath, err)
-		}
-		am.dynamicFlowReadinessMu.Lock()
-		active.publication = publication
-		am.dynamicFlowReadinessMu.Unlock()
-	}
-	if err := am.verifyDynamicFlowRoute(ctx, flowIdentity); err != nil {
+	// route_installed records attachment progress, not mutable route membership.
+	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
 		return err
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentAgentsRegistered); err != nil {

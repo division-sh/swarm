@@ -82,15 +82,6 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.FlowActivation == nil {
 		roles.FlowActivation, _ = candidate.(FlowInstanceActivationCommitter)
 	}
-	if roles.RouteInstaller == nil {
-		roles.RouteInstaller, _ = candidate.(FlowInstanceRouteContextInstaller)
-	}
-	if roles.RouteVerifier == nil {
-		roles.RouteVerifier, _ = candidate.(FlowInstanceRouteContextVerifier)
-	}
-	if roles.RouteRestorer == nil {
-		roles.RouteRestorer, _ = candidate.(PersistedFlowInstanceRouteRestorer)
-	}
 	if roles.FlowTermination == nil {
 		roles.FlowTermination, _ = candidate.(FlowInstanceTerminalMutationOwner)
 	}
@@ -132,9 +123,6 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	}
 	if roles.DirectiveTargets == nil {
 		roles.DirectiveTargets, _ = candidate.(AgentDirectiveRunTargetResolver)
-	}
-	if roles.FlowRoutes == nil {
-		roles.FlowRoutes, _ = candidate.(runtimebus.FlowInstanceRoutePersistence)
 	}
 }
 

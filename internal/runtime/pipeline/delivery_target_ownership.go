@@ -25,8 +25,9 @@ type DeliveryTargetOwnerCandidate struct {
 // receiver-selection policy. Missing companion rows are admitted by the reader
 // as active state-only ownership; an existing inactive companion is not absent.
 type DeliveryTargetAvailability struct {
-	stage    string
-	inactive bool
+	stage      string
+	inactive   bool
+	terminated bool
 }
 
 // TerminalReceiverError is a proven receiver-state refusal, not an inactive
@@ -40,12 +41,28 @@ func (e *TerminalReceiverError) Error() string {
 	return fmt.Sprintf("receiver target owner is unavailable: terminal state %q in flow %q", e.Stage, e.FlowID)
 }
 
+// TerminatedReceiverError proves occupied, non-executable construction.
+// Unknown lifecycle spellings remain independent admission errors.
+type TerminatedReceiverError struct {
+	FlowID string
+}
+
+func (e *TerminatedReceiverError) Error() string {
+	return fmt.Sprintf("receiver target owner is unavailable: lifecycle is terminated in flow %q", e.FlowID)
+}
+
 func NewDeliveryTargetAvailability(stage, status string, terminated bool) DeliveryTargetAvailability {
-	return DeliveryTargetAvailability{stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active")}
+	return DeliveryTargetAvailability{
+		stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active"),
+		terminated: status == "terminated" || status == "active" && terminated,
+	}
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
 	if a.inactive {
+		if a.terminated {
+			return &TerminatedReceiverError{FlowID: flowID}
+		}
 		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
 	}
 	if a.stage != "" {
@@ -242,6 +259,35 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.NewExistingEntityTarget(existing[0])
 	}
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
+}
+
+// AdmitDeliveryTargetLookupCoordinate supplies lookup identity, not execution
+// permission. A declaration comes from the admitted handler, never a stored path.
+func AdmitDeliveryTargetLookupCoordinate(req DeliveryTargetOwnershipRequest) (events.RouteIdentity, error) {
+	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
+	if !req.Recipient.IsNode() || !admitted {
+		return events.RouteIdentity{}, fmt.Errorf("node target lookup requires its admitted handler")
+	}
+	node, _ := req.Recipient.Node()
+	if !node.Equal(req.Handler.Node()) {
+		return events.RouteIdentity{}, fmt.Errorf("node target lookup disagrees with its handler recipient")
+	}
+	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
+		return events.RouteIdentity{}, err
+	}
+	flowID := req.Handler.ExecutionFlowID(req.Source)
+	blueprint := req.Blueprint.Normalized()
+	if blueprint.FlowID != "" && blueprint.FlowID != flowID {
+		return events.RouteIdentity{}, fmt.Errorf("target lookup declaration %q disagrees with handler declaration %q", blueprint.FlowID, flowID)
+	}
+	if flowID == semanticview.RootExecutionFlowID(req.Source) {
+		return selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, true)
+	}
+	if blueprint.FlowInstance == "" {
+		return events.RouteIdentity{}, fmt.Errorf("non-root target lookup requires an exact instance coordinate")
+	}
+	blueprint.FlowID = flowID
+	return blueprint, nil
 }
 
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity, exactTarget bool) (events.RouteIdentity, error) {

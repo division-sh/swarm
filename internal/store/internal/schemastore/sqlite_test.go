@@ -20,10 +20,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	// runtime_startup_authority_facts becomes runtime_process_generation;
-	// retiring runtime_startup_authority_repairs removes one platform table.
-	if len(platformPlans) != 108 {
-		t.Fatalf("platform table plan count = %d, want 108 after runtime_startup_authority_repairs retirement, including turn lifetime and emit stage evidence", len(platformPlans))
+	if len(platformPlans) != 107 {
+		t.Fatalf("platform table plan count = %d, want 107 after startup and instance-route mirror retirement", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
@@ -75,6 +73,9 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 		if sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), retired) {
 			t.Fatalf("retired %s table remains authoritative", retired)
 		}
+	}
+	if sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), "routing_rules") {
+		t.Fatal("retired instance-route mirror remains in the platform schema")
 	}
 	for _, column := range []string{
 		"payload_schema_bundle_hash",
@@ -376,7 +377,6 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"agent_sessions",
 		"agent_turns",
 		"agent_conversation_audits",
-		"routing_rules",
 		"mailbox",
 		"api_idempotency",
 		"conversation_forks",

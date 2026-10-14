@@ -49,6 +49,14 @@ func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected 
 	}
 	options.ExecutionPosture = executionposture.Live
 	options.ReceiverExecution = eventreceiver.NormalExecution()
+	admitted, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	admittedFact, found := correlation.SourceArtifactFactFromContext(admitted)
+	if !found || !fact.Matches(admittedFact) {
+		t.Fatal("native timer coordinator requires its admitted bus source")
+	}
 	options.SourceArtifactFact = fact
 	options.Persistence = pipeline.NewWorkflowPersistence(selected)
 	options.DeliveryStore = selected
@@ -71,13 +79,14 @@ func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected 
 func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *contracts.WorkflowContractBundle) pipeline.WorkflowTimerCauseReplayFixtureForTest {
 	t.Helper()
 	selected, _, _ := openTimerReplayNativeStore(t, backend)
-	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
-	storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
-	ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
-	admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
 	source := semanticview.Wrap(bundle)
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer")
+	ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
+	admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact,
+		WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact),
+	}, "platform.stage_timer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +100,7 @@ func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *cont
 	}
 	pc := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{
 		Module: proposedEffectProofModule{source: source, nodes: nodes}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-	}, authorActivityTestSourceArtifactFact)
+	}, fact)
 	bus.SetInterceptors(pc)
 	t.Cleanup(func() {
 		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -44,6 +44,7 @@ func TestJoinReceiverReadConsumesHeaderAndOptionalFields(t *testing.T) {
 	complete := pipeline.WorkflowTargetPersistenceRecord{Presence: pipeline.WorkflowTargetPersistenceCompleteFieldless,
 		Lifecycle: pipeline.WorkflowLifecycleCompanionPersistenceRecord{FlowInstance: constructed.InstancePath,
 			WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "template", Status: "active", Config: raw,
+			ParentInstance: constructed.ParentRoute.FlowInstance, InstanceKey: "one",
 			CreatedAt: at, State: header}}
 	for _, fields := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fieldless", true: "fields"}[fields], func(t *testing.T) {

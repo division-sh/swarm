@@ -159,9 +159,9 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":          "name: constructed-target-transition\n",
-		"review/schema.yaml":   "name: review\nstages:\n  active: {}\n  done: {}\n  settled: {}\n",
-		"review/entities.yaml": "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n",
-		"review/events.yaml":   "finish.requested:\nsettle.requested:\n",
+		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
+		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
+		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
   execution_type: system_node
   subscribes_to: [finish.requested, settle.requested]
@@ -173,14 +173,17 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 `,
 	}, nil)
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
+	f.constructKeylessRoot(t)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
 	root := runtimeflowidentity.Stored(semanticview.Wrap(f.bundle), ".", runID, runID, runID, "")
-	child, err := runtimeflowidentity.KeylessChild(semanticview.Wrap(f.bundle), root, "review")
+	child, err := runtimeflowidentity.KeyedChild(semanticview.Wrap(f.bundle), root, "review", "review")
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
 	req.Instance = child
+	req.ConstructorInput, req.ResolvedKey = "review.created", "preserved"
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "review.created", "constructor-fixture", "", []byte(`{"account_id":"preserved"}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -192,10 +195,11 @@ func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture
 	t.Helper()
 	// This is the native writer/contender proof, not handler execution: retain
 	// stage-entry authority from an actual declared and claimed occurrence.
-	node := mustPersistenceNode("review", "progress")
-	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("review/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
+	flowID := record.Identity.Route.ScopeKey
+	node := mustPersistenceNode(flowID, "progress")
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID})}
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID})}
 	if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +207,7 @@ func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	graph, found := f.bundle.WorkflowStageTopology("review")
+	graph, found := f.bundle.WorkflowStageTopology(flowID)
 	if !found {
 		t.Fatal("transition fixture lost its declared lifecycle")
 	}

@@ -62,6 +62,40 @@ func TestRunForkSnapshotOwnershipMetadataAuthority(t *testing.T) {
 	}
 }
 
+func TestRunForkConstructionOrderConsumesRecordedParents(t *testing.T) {
+	root := runfork.RunForkEntityState{EntityID: "actual-root", MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "actual-root-path",
+	}}
+	child := runfork.RunForkEntityState{EntityID: "actual-child", MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "unrelated-path-shape", ParentInstance: root.MaterializationMetadata.FlowInstance,
+	}}
+	input := []runfork.RunForkEntityState{child, root}
+	before := append([]runfork.RunForkEntityState(nil), input...)
+	ordered, err := runForkEntitiesInConstructionOrder(input)
+	if err != nil || len(ordered) != 2 || ordered[0].EntityID != root.EntityID || ordered[1].EntityID != child.EntityID || !reflect.DeepEqual(input, before) {
+		t.Fatalf("historical ordering lost actual parent or mutated input: %+v %v", ordered, err)
+	}
+	for _, variant := range []string{"absent_parent", "cyclic_parent", "duplicate_path", "missing_metadata"} {
+		t.Run(variant, func(t *testing.T) {
+			changedRoot, changedChild := *root.MaterializationMetadata, *child.MaterializationMetadata
+			changed := []runfork.RunForkEntityState{{EntityID: child.EntityID, MaterializationMetadata: &changedChild}, {EntityID: root.EntityID, MaterializationMetadata: &changedRoot}}
+			switch variant {
+			case "absent_parent":
+				changedChild.ParentInstance = "absent"
+			case "cyclic_parent":
+				changedRoot.ParentInstance = changedChild.FlowInstance
+			case "duplicate_path":
+				changedRoot.FlowInstance = changedChild.FlowInstance
+			case "missing_metadata":
+				changed[0].MaterializationMetadata = nil
+			}
+			if ordered, err := runForkEntitiesInConstructionOrder(changed); err == nil || ordered != nil {
+				t.Fatalf("accepted unproven historical ancestry %s: %+v %v", variant, ordered, err)
+			}
+		})
+	}
+}
+
 func TestRunForkSnapshotMetadataRejectsDuplicateOwnersBeforeAttachment(t *testing.T) {
 	for _, name := range []string{"duplicate_entities", "duplicate_metadata", "unreferenced_duplicate_metadata"} {
 		t.Run(name, func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +29,10 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 		FlowTemplate: "child", FlowInstance: "child", FlowConfig: config, Mode: "static",
 	}}
 	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun}
+	construction := historicalFlowInstanceConstructionCut{
+		plan:  runfork.RunForkPlan{SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Revision: 1}, Entities: []runfork.RunForkEntityState{state}},
+		route: identity.Route(),
+	}
 	for _, cell := range []struct {
 		name   string
 		mutate func(*pipeline.WorkflowInstance)
@@ -45,7 +50,7 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			header := exact
 			cell.mutate(&header)
-			found, err := matchesCapturedReceiver(sourceRun, forkRun, header, state)
+			_, found, err := construction.project(runlifecycle.Snapshot{RunID: forkRun}, header, identity)
 			if cell.name == "exact" {
 				if err != nil || !found {
 					t.Fatalf("exact captured receiver refused: found=%t err=%v", found, err)
@@ -55,12 +60,12 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 			}
 		})
 	}
-	cut := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{{EntityID: entityID, FlowInstance: "child", ConstructionKind: "constructed"}}}
-	if found, err := capturedReceiverMetadata(cut, sourceRun, forkRun, pipeline.WorkflowInstance{StorageRef: "later", EntityID: uuid.NewString()}); err != nil || found != nil {
+	cut := &runForkRevisionSnapshot{RunID: sourceRun, EntityMetadata: []runForkRevisionEntityMetadata{{EntityID: entityID, FlowInstance: "child", ConstructionKind: "constructed"}}}
+	if _, found, err := findProjectedFlowInstanceMetadata(cut, forkRun, "later"); err != nil || found {
 		t.Fatalf("later native receiver adopted absent history: %+v %v", found, err)
 	}
 	cut.EntityMetadata = append(cut.EntityMetadata, cut.EntityMetadata[0])
-	if found, err := capturedReceiverMetadata(cut, sourceRun, forkRun, exact); err == nil || found != nil {
+	if _, found, err := findProjectedFlowInstanceMetadata(cut, forkRun, exact.StorageRef); err == nil || found {
 		t.Fatalf("contradictory captured receivers admitted: %+v %v", found, err)
 	}
 }

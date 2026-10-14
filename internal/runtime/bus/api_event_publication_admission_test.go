@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -137,7 +138,8 @@ func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventP
 	}
 	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: schema}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &schema,
+		SourceArtifact: sourceartifactfixture.Artifact(),
+		RootSchema:     &schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
 		},
@@ -146,6 +148,7 @@ func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventP
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
+	bundle.Semantics.Version = "1.0.0"
 	source := semanticview.Wrap(bundle)
 	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "task.requested")
 	if err != nil {

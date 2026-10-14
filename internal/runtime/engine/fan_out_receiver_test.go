@@ -28,7 +28,11 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-receiver-event"), "task.completed", "operator", "", json.RawMessage(`{"items":["a","b"]}`), 0, eventtest.UUID("fan-out-receiver-run"), events.EventEnvelope{}, time.Now())
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "flow-1", FlowInstance: "flow-1", EntityID: "entity-1"})}
 			if initialized {
-				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+				receiver, routeErr := flowidentity.StoredRoute("flow-1", "flow-1", "flow-1").AgentIdentityRoute()
+				if routeErr != nil {
+					t.Fatal(routeErr)
+				}
+				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, receiver)
 			} else {
 				route.Target, err = events.NewExistingEntityTarget(route.Target.Route())
 			}

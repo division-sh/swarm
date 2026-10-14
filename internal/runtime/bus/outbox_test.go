@@ -17,12 +17,15 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -35,8 +38,6 @@ type recordingEventStore struct {
 type directRecipientTransactionalStore struct {
 	mu            sync.Mutex
 	descriptors   []runtimebus.ActiveAgentDescriptor
-	targetOwners  []runtimebus.ActiveTargetDescriptor
-	targetRunID   string
 	events        []events.Event
 	settlements   map[string]events.RouteSettlement
 	deliveries    map[string][]string
@@ -45,33 +46,6 @@ type directRecipientTransactionalStore struct {
 	active        []string
 	scopes        map[string]runtimepipelineobligation.CommittedScope
 	receipts      map[string]runtimepipelineobligation.DispositionKind
-}
-
-func (s *directRecipientTransactionalStore) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if runID != s.targetRunID {
-		return nil, nil
-	}
-	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
-}
-
-func (s *directRecipientTransactionalStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, paths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	owners, err := s.ListSelectedRunTargetOwners(ctx, runID)
-	var selected []runtimebus.ActiveTargetDescriptor
-	for _, owner := range owners {
-		if sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-			continue
-		}
-		for _, path := range paths {
-			if owner.FlowInstance == path {
-				selected = append(selected, owner)
-				break
-			}
-		}
-	}
-	return selected, err
 }
 
 type outboxClaimStore struct {
@@ -649,12 +623,24 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 		t.Fatalf("Begin: %v", err)
 	}
 	originalIdentity := runtimebustest.Identity(t, "agent-original", "flow-original")
-	store := &directRecipientTransactionalStore{
-		descriptors: []runtimebus.ActiveAgentDescriptor{{
-			Identity: originalIdentity, EntityID: eventtest.UUID("entity-original"),
-		}},
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyEngineOutboxTarget(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(bundle)
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
+	original := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "flow-original", "", runtimebustest.DefaultRunID)
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{{Identity: originalIdentity, EntityID: original.EntityID}},
+	}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		Durable: runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, root, ""),
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, original, ""),
+		)},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -671,7 +657,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	defer runtimebustest.Unsubscribe(eb, "agent-mutated")
 
 	payload := []byte(`{"value":"original"}`)
-	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: eventtest.UUID("entity-original")}}
+	targetSet := []events.RouteIdentity{{FlowID: "flow-original", FlowInstance: "flow-original", EntityID: original.EntityID}}
 	recipients := []string{"agent-original"}
 	intents := []runtimeengine.EmitIntent{{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-queued-snapshot"),
@@ -723,7 +709,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload()))
 	}
 	target := got.TargetRoute()
-	if target.FlowInstance != "flow-original" || target.EntityID != eventtest.UUID("entity-original") {
+	if target.FlowInstance != "flow-original" || target.EntityID != original.EntityID {
 		t.Fatalf("delivered target route = %#v, want original snapshot", target)
 	}
 	requireNoBusEvent(t, mutatedCh, "mutated recipient delivery")
@@ -942,10 +928,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 					testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-claim"), ""),
 				},
 			}}
-			eb, err := newScopedTestEventBus(store)
-			if err != nil {
-				t.Fatalf("NewEventBus: %v", err)
-			}
+			eb := newOutboxPublicationBus(t, store)
 			reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 			intent := runtimeengine.EmitIntent{
 				Event: eventtest.RunCreatingRootIngress(
@@ -1245,9 +1228,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	store := &directRecipientTransactionalStore{targetRunID: runtimebustest.DefaultRunID, targetOwners: []runtimebus.ActiveTargetDescriptor{{
-		ID: "review", FlowInstance: "review/inst-1", EntityID: runtimeflowidentity.EntityID("review/inst-1"),
-	}}}
+	store := &directRecipientTransactionalStore{}
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
@@ -1258,12 +1239,25 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 			"target-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
-	}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	root.Children[0].Parent = &root
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: sourceartifactfixture.Artifact(), RootSchema: &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "review": &root.Children[0]},
+		},
+	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "review"))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
+	}
+	bundle.Semantics.Version = "1.0.0"
+	source := semanticview.Wrap(bundle)
+	var observations []runtimepipeline.FlowInstanceObservation
+	for _, owner := range []struct{ flow, instance string }{{".", ""}, {"review", "inst-1"}} {
+		identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, owner.flow, owner.instance, runtimebustest.DefaultRunID)
+		observations = append(observations, runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, identity, owner.instance))
 	}
 	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: events.RouteIdentity{
 		FlowID:       "review",
@@ -1272,16 +1266,19 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent("task.started")}
 	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustExistingEntityTarget(wantBlueprint.Target)}
 	guardSawMaterializedRoute := false
+	materializerSawCanonicalRoute := false
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(observations...)},
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if len(plan.DeliveryRoutes) != 0 {
-				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
+			if len(plan.DeliveryRoutes) != 1 || !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+				t.Fatalf("materializer did not receive the canonical indexed route: %#v", plan.DeliveryRoutes)
 			}
-			return []runtimebus.DeliveryRouteBlueprint{wantBlueprint}, nil
+			materializerSawCanonicalRoute = true
+			return nil, nil
 		},
 		RecipientPlanGuard: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) error {
 			if err := ctx.Err(); err != nil {
@@ -1298,8 +1295,10 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RuntimeControl(eventtest.UUID("evt-outbox-materialized-route"),
-			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, runtimebustest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC()),
+		Event: eventtest.ChildForProducerWithRoutingSource(eventtest.UUID("evt-outbox-materialized-route"),
+			events.EventType("review/inst-1/task.started"), eventtest.Producer(events.EventProducerNode, "target-node"), "", []byte(`{}`), 1,
+			events.EventLineage{RunID: runtimebustest.DefaultRunID, ParentEventID: eventtest.UUID("outbox-materialized-parent"), ExecutionMode: executionmode.Live},
+			events.EventEnvelope{}, eventtest.ConcreteTemplateRoutingSource("review", "review/inst-1", runtimeflowidentity.EntityID("review/inst-1")), time.Now().UTC()),
 	}
 	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -1311,7 +1310,10 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	if !guardSawMaterializedRoute {
 		t.Fatal("recipient plan guard did not see materialized route")
 	}
-	if got := store.deliveryRoutes(intent.Event.ID()); !deliveryRoutesContain(got, want) {
+	if !materializerSawCanonicalRoute {
+		t.Fatal("recipient plan materializer did not consume the canonical indexed route")
+	}
+	if got := store.deliveryRoutes(intent.Event.ID()); len(got) != 1 || !deliveryRoutesContain(got, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", got, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1398,19 +1400,54 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 
 func TestEngineOutboxCommittedTargetRefusalPreservesDisposition(t *testing.T) {
 	store := &outboxClaimStore{}
-	eb, err := newScopedTestEventBus(store)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyRootOutputSingletonConnect(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
+	consumer := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "consumer", "", runtimebustest.DefaultRunID)
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{
+		Instances: runtimebus.FlowInstanceIndexFixture(
+			runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, root, ""),
+			runtimebus.TerminatedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, consumer),
+		),
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	intent := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(
-		uuid.NewString(), "child/output.done", "", "", []byte(`{}`), 0,
+		uuid.NewString(), "root.ready", "", "", []byte(`{"entity_id":"consumer-one"}`), 0,
 		runtimebustest.DefaultRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-			EntityID: uuid.NewString(), FlowInstance: "missing-flow",
+			FlowID: consumer.TemplateID, EntityID: consumer.EntityID, FlowInstance: consumer.InstancePath,
 		}), time.Now().UTC(),
 	)}
-	ctx := context.Background()
-	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
+	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	plans, err := eb.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("prepare exact terminated receiver: plans=%d err=%v", len(plans), err)
+	}
+	defer func() {
+		if err := eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); err != nil {
+			t.Error(err)
+		}
+	}()
+	plan := plans[0].(runtimebus.EnginePublicationPlan)
+	command := plan.PublicationCommand()
+	if command.Commit.DeadLetter == nil || command.Commit.DeadLetter.Failure.Detail.Code != "target_unreachable_terminated" || len(command.Commit.DeliveryRoutes) != 0 {
+		t.Fatalf("component did not authorize its exact terminated receiver: %+v", command.Commit)
+	}
+	committed, err := store.CommitPublication(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{proof}); err != nil {
 		t.Fatal(err)
 	}
 	if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {

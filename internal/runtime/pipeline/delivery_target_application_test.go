@@ -30,6 +30,9 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, semanticview.RootExecutionFlowID(source))); err != nil {
+		t.Fatalf("construct composition target structural root: %v", err)
+	}
 	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
@@ -50,6 +53,7 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	)
 	expected := map[string]any{"account_id": "account-1"}
 	instanceID := "composition-selected"
+	expected["instance_key"] = instanceID
 	identity := deriveFlowInstanceIdentity(source, "review", instanceID)
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 	owner := events.MustExistingEntityTarget(target)
@@ -78,9 +82,11 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	siblingID := "later-matching-sibling"
 	siblingPath := "review/" + siblingID
 	siblingEntityID := eventtest.UUID("later-matching-sibling")
+	siblingFields := cloneStringAnyMap(expected)
+	siblingFields["instance_key"] = siblingID
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: siblingID, StorageRef: siblingPath, EntityID: siblingEntityID,
-		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: expected,
+		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: siblingFields,
 		EntityType: "review_entity",
 	})); err != nil {
 		t.Fatalf("seed later matching sibling: %v", err)
@@ -126,10 +132,10 @@ func VerifyDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPay
 		t.Fatal(err)
 	}
 
-	entityID := eventtest.UUID("join-declaration-application-owner-" + backend)
+	entityID := testPipelineRunID
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "awaiting",
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "awaiting", Mode: "static",
 		Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed exact declaration target: %v", err)
@@ -305,12 +311,32 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
 		t.Fatal(err)
 	}
-	instancePath := "review/child/instance"
+	root := constructorUnitIdentity(t, source, testPipelineRunID, ".")
+	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, ".")); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := runtimeflowidentity.KeyedChild(source, root, "review", "chosen-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
+		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
+		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active",
+		EntityType: "review_entity", Fields: map[string]any{"instance_key": "chosen-parent"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	child, err := runtimeflowidentity.KeylessChild(source, parent, "review/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instancePath := child.InstancePath
 	entityID := eventtest.UUID("state-only-child-relabeled-as-parent-" + backend)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "instance", StorageRef: instancePath, EntityID: entityID,
-		WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(),
+		WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
 		CurrentState: "active", EntityType: "review_item", Fields: map[string]any{"marker": "unchanged"},
 		EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
 	})); err != nil {
@@ -401,8 +427,6 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			switch testCase.name {
 			case "lifecycle-only":
 				instance.Fields = map[string]any{}
-			case "wrong-descriptor":
-				instance.WorkflowName, instance.Mode = "other-flow", "template"
 			}
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatalf("construct %s native prestate: %v", testCase.name, err)
@@ -410,6 +434,10 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			var changed int64
 			var err error
 			switch testCase.name {
+			case "wrong-descriptor":
+				if err := fixture.ForeignDeclaration(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath)); err != nil {
+					t.Fatal(err)
+				}
 			case "lifecycle-only":
 				changed, err = fixture.MissingFields(ctx, testPipelineRunID, entityID)
 			case "terminated-status":
@@ -431,7 +459,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			}
 			switch testCase.name {
 			case "wrong-descriptor":
-				if before.Lifecycle.WorkflowName != "other-flow" || before.Lifecycle.Mode != "template" {
+				if before.Lifecycle.WorkflowName != "other-flow" || before.Lifecycle.Mode != "static" {
 					t.Fatal("wrong descriptor was not persisted")
 				}
 			case "terminated-status":
@@ -449,8 +477,14 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
-			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), testCase.wantError) {
-				t.Fatalf("invalid %s persistence error = %v, want %q", testCase.name, err, testCase.wantError)
+			_, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
+			var terminated *TerminatedReceiverError
+			if testCase.name == "terminated-status" {
+				if !errors.As(err, &terminated) || terminated.FlowID != "." {
+					t.Fatalf("terminated persistence error = %v, want exact root-flow refusal", err)
+				}
+			} else if err == nil || errors.As(err, &terminated) || !strings.Contains(err.Error(), testCase.wantError) {
+				t.Fatalf("invalid %s persistence error = %v, want independent %q", testCase.name, err, testCase.wantError)
 			}
 
 			after, err := fixture.Persistence.store.LoadTargetPersistence(ctx, stateOwner, runtimeidentity.NormalizeEntityID(entityID))

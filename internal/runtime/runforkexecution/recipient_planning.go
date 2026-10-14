@@ -181,8 +181,8 @@ func selectedContractRecipientPlanningBlockedSiblings() []runfork.RunForkSelecte
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
-			Reason:      "dynamic topology remains fail-closed without fork-local topology proof",
+			Owner:       "internal/runtime/pipeline.FlowInstanceIndexReader",
+			Reason:      "dynamic execution remains fail-closed without admitted fork-local instance evidence",
 		},
 		{
 			Concept:     "timer_reconstruction",
@@ -381,51 +381,73 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if !g.authorizesEvent(evt) {
 		return nil
 	}
-	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
+	sourceEventID, _, err := g.expectedRecipientPlanEvent(evt)
 	if err != nil {
 		return err
 	}
 	if len(actual.SubscriptionRecipients) > 0 {
 		return fmt.Errorf("selected-contract publish path cannot use live subscriptions as fork recipient truth")
 	}
-	selected, err := forkrecipient.CanonicalSet(expected.Recipients)
-	if err != nil {
-		return err
-	}
 	actuals, err := actual.RecipientActuals()
 	if err != nil {
 		return err
+	}
+	remaining, err := g.remainingRecipients(evt, actuals)
+	if err != nil {
+		return err
+	}
+	if len(remaining) != 0 {
+		return fmt.Errorf("selected-contract publish is missing %d selected execution authorities for source event %s", len(remaining), sourceEventID)
+	}
+	return nil
+}
+
+func (g *selectedContractRecipientPlanPublishGuard) remainingRecipients(evt events.Event, actuals []runtimebus.PublishRecipientActual) ([]forkrecipient.Evidence, error) {
+	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := forkrecipient.CanonicalSet(expected.Recipients)
+	if err != nil {
+		return nil, err
 	}
 	remaining := make(map[forkrecipient.Key]forkrecipient.Evidence, len(selected))
 	for _, recipient := range selected {
 		key, err := recipient.Key()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		remaining[key] = recipient
 	}
 	for _, actual := range actuals {
 		projected, err := selectedEvidenceFromActual(g.semanticSource, evt, actual)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		key, err := projected.Key()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		want, exists := remaining[key]
 		if !exists {
-			return fmt.Errorf("selected-contract publish has an unselected execution authority for source event %s", sourceEventID)
+			return nil, fmt.Errorf("selected-contract publish has an unselected execution authority for source event %s", sourceEventID)
 		}
 		if err := want.Satisfies(g.workflowProjection.root.RunID(), projected, actual.Route().AgentIdentity); err != nil {
-			return fmt.Errorf("selected-contract recipient for source event %s: %w", sourceEventID, err)
+			return nil, fmt.Errorf("selected-contract recipient for source event %s: %w", sourceEventID, err)
 		}
 		delete(remaining, key)
 	}
-	if len(remaining) != 0 {
-		return fmt.Errorf("selected-contract publish is missing %d selected execution authorities for source event %s", len(remaining), sourceEventID)
+	out := make([]forkrecipient.Evidence, 0, len(remaining))
+	for _, recipient := range selected {
+		key, err := recipient.Key()
+		if err != nil {
+			return nil, err
+		}
+		if _, missing := remaining[key]; missing {
+			out = append(out, recipient)
+		}
 	}
-	return nil
+	return out, nil
 }
 
 func selectedEvidenceFromActual(source semanticview.Source, evt events.Event, actual runtimebus.PublishRecipientActual) (forkrecipient.Evidence, error) {
@@ -464,7 +486,7 @@ func selectedEvidenceFromActual(source semanticview.Source, evt events.Event, ac
 	return forkrecipient.NewLocal(input)
 }
 
-func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
+func (g *selectedContractRecipientPlanPublishGuard) MaterializeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -474,11 +496,39 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err := g.AuthorizeEvent(ctx, evt); err != nil {
 		return nil, err
 	}
-	_, expected, err := g.expectedRecipientPlanEvent(evt)
+	if len(actual.SubscriptionRecipients) > 0 {
+		return nil, fmt.Errorf("selected-contract publish path cannot use live subscriptions as fork recipient truth")
+	}
+	actuals, err := actual.RecipientActuals()
 	if err != nil {
 		return nil, err
 	}
-	return selectedContractNodeDeliveryRoutes(g.semanticSource, expected.EventName, expected.Recipients)
+	return g.materializeRemainingDeliveryRoutes(evt, actuals)
+}
+
+func (g *selectedContractRecipientPlanPublishGuard) materializeRemainingDeliveryRoutes(evt events.Event, actuals []runtimebus.PublishRecipientActual) ([]runtimebus.DeliveryRouteBlueprint, error) {
+	remaining, err := g.remainingRecipients(evt, actuals)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := selectedContractNodeDeliveryRoutes(g.semanticSource, string(evt.Type()), remaining)
+	if err != nil {
+		return nil, err
+	}
+	for _, recipient := range remaining {
+		if !recipient.Recipient.IsAgent() {
+			continue
+		}
+		if _, _, connected := recipient.Connect(); connected {
+			return nil, fmt.Errorf("selected connect recipient requires canonical connect route production")
+		}
+		identity, err := recipient.AgentPlan.Live(evt.RunID())
+		if err != nil {
+			return nil, err
+		}
+		routes = append(routes, runtimebus.DeliveryRouteBlueprint{Recipient: recipient.Recipient, AgentIdentity: identity})
+	}
+	return routes, nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {

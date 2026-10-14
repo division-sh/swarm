@@ -149,12 +149,10 @@ func TestLocalReadinessForkRecipientBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-				Identity: identity, Instance: instance,
-			}); err != nil {
+			concrete, err := routes.PubsubReceiverDefinitions(catalogRuntimeRunID, instance, []string{"worker-flow/worker-001/worker.inspect"})
+			if err != nil {
 				t.Fatal(err)
 			}
-			concrete := routes.ResolveIndependentPubsubForRun(catalogRuntimeRunID, "worker-flow/worker-001/worker.inspect")
 			if len(concrete) != 1 {
 				t.Fatalf("concrete ordinary route should have one local consumer: %+v", concrete)
 			}
