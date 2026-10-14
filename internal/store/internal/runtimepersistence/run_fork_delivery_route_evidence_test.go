@@ -16,13 +16,16 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -95,6 +98,44 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					route := cell.route
 					if route.Recipient.IsAgent() {
 						route.AgentIdentity, err = agentPlan.Live(runID)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					var receiverAuthority runtimedelivery.ExecutionAuthority
+					if route.Recipient.IsAgent() {
+						// This component proves historical wire/claim evidence, not
+						// eligibility for a declared flow constructor or attachment.
+						selected := fixture.store.(agentfixture.Store)
+						ctx = correlation.WithRunID(ctx, runID)
+						record := agentFixtureStaticRecord(t, route.AgentIdentity)
+						record.Config.FlowID, record.Config.FlowPath = target.FlowID, target.FlowInstance
+						record.Config.EntityID = target.EntityID
+						fact, found := correlation.SourceArtifactFactFromContext(ctx)
+						if !found {
+							t.Fatal("component receiver requires the exact run source")
+						}
+						if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, fact); err != nil {
+							t.Fatalf("admit exact component receiver: %v", err)
+						}
+						plan := currentAgentFixtureSourceSet(t, ctx, selected)
+						if len(plan.Sources) != 1 {
+							t.Fatalf("component receiver sources=%#v, want one", plan.Sources)
+						}
+						grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+						if err != nil {
+							t.Fatal(err)
+						}
+						admitAgentFixtureFlowGrant(t, ctx, grant)
+						evidence, err := grant.Evidence()
+						if err != nil {
+							t.Fatal(err)
+						}
+						state, found, err := selected.LoadAgentLifecycleState(ctx, route.AgentIdentity)
+						if err != nil || !found || state.Phase != manager.AgentLifecycleRunning || state.ProcessBinding.GenerationGrantID != evidence.GrantID {
+							t.Fatalf("exact component receiver lifecycle: state=%#v found=%v err=%v", state, found, err)
+						}
+						receiverAuthority, err = runtimedelivery.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -181,6 +222,17 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					proveRouteEvidenceRollback(t, ctx, fixture, event, route)
 
+					if route.Recipient.IsAgent() {
+						if err := fixture.store.(interface {
+							ActivateDeliveryAuthority(context.Context, runtimedelivery.ExecutionAuthority) error
+						}).ActivateDeliveryAuthority(ctx, receiverAuthority); err != nil {
+							t.Fatalf("activate retained component receiver grant: %v", err)
+						}
+						armed := loadDeliverySnapshotFixture(t, ctx, fixture.store, event.ID(), route)
+						if armed.Authority.ExecutionID() != receiverAuthority.ExecutionID() || armed.Authority.Generation() != receiverAuthority.Generation() || armed.Authority.SourceArtifact() != receiverAuthority.SourceArtifact() {
+							t.Fatalf("delivery did not retain the exact admitted receiver grant: got=%#v want=%#v", armed.Authority, receiverAuthority)
+						}
+					}
 					claimed, err := claimDeliveryFixture(ctx, fixture.store, event, route)
 					if err != nil {
 						t.Fatal(err)
