@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -81,12 +80,8 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			}
 			operation.Actor = "changed caller"
 			operation.DataPinOverrides[0].VersionID = durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("a", 64))
-			dialect := authoractivityfixture.DialectSQLite
-			if backend == "postgres" {
-				dialect = authoractivityfixture.DialectPostgres
-			}
 			postCutEvent := uuid.NewString()
-			storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "staged-revision-proof"), []byte(`{"account_id":"post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
+			storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "staged-revision-proof"), []byte(`{"account_id":"post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 			fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
 			current, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
 			if err != nil || current.ForkPoint.Revision <= point.Revision {
