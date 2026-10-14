@@ -27,6 +27,30 @@ func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigAct
 	return newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 }
 
+func fanOutConstructedProducerForTest(t *testing.T, ctx context.Context, reader pipeline.FlowInstanceIndexReader, source semanticview.Source, runID string) flowidentity.Instance {
+	t.Helper()
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		t.Fatal("fan-out producer requires the admitted source fact")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(source, "producer"), "", "producer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, found, err := reader.LookupFlowInstance(ctx, request)
+	if err != nil || !found {
+		t.Fatalf("read acknowledged fan-out producer: found=%t err=%v", found, err)
+	}
+	if err := observation.ValidateSelection(request); err != nil {
+		t.Fatal(err)
+	}
+	return observation.Identity()
+}
+
 // The barrier tests exercise commit arbitration, not construction. Their
 // receivers nevertheless enter through the real constructor before mutation.
 func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f receiverConfigActivationFixture, flow string, at time.Time) (events.DeliveryRoute, pipeline.WorkflowEngineStateRecord) {
