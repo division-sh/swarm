@@ -130,8 +130,10 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record event
 		return false, err
 	}
 	if inserted && record.RunID != "" {
-		if err := attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID); err != nil {
-			return false, err
+		if runforkrevision.CapturesEvent(record.EventName) {
+			if err := attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID); err != nil {
+				return false, err
+			}
 		}
 		if err := attempt.AddEventCountDelta(record.RunID, 1); err != nil {
 			return false, err
