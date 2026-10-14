@@ -1,6 +1,7 @@
 package bootverify
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
-func scalar2556LoadedSource(t *testing.T, handler string) (*checkerContext, contracts.ScopedNodeRecord, string) {
+func scalar2556SourceBundle(t *testing.T, handler string) (*contracts.WorkflowContractBundle, string, error) {
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\n")
@@ -21,7 +22,16 @@ func scalar2556LoadedSource(t *testing.T, handler string) (*checkerContext, cont
 	nodes := "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n" + handler
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
 	repo := repoRootForBootverifyTest(t)
-	bundle := loadFixtureBundleAt(t, repo, root, contracts.DefaultPlatformSpecFile(repo))
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+	return bundle, nodes, err
+}
+
+func scalar2556LoadedSource(t *testing.T, handler string) (*checkerContext, contracts.ScopedNodeRecord, string) {
+	t.Helper()
+	bundle, nodes, err := scalar2556SourceBundle(t, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, record := range bundle.ScopedNodeRecords() {
 		if record.LogicalID == "worker" {
 			return &checkerContext{source: semanticview.Wrap(bundle)}, record, nodes
@@ -56,13 +66,32 @@ func TestScalar2556RuleDiagnosticCoordinatesUsePositions(t *testing.T) {
 	for _, collection := range []string{"rules", "on_complete"} {
 		for _, label := range []string{"", "named", "1", "0", "bracket]label"} {
 			t.Run(collection+"/"+label, func(t *testing.T) {
-				field, tail := "when", "        - when: true\n        - else: true\n"
+				field, tail := "when", "        - when: true\n"
 				if collection == "on_complete" {
 					field, tail = "condition", "        - condition: true\n          emit: proof.done\n"
 				}
 				row := "        - " + field + ": missing_root\n"
 				if label != "" {
 					row = "        - id: '" + label + "'\n          " + field + ": missing_root\n"
+					_, source, err := scalar2556SourceBundle(t, "      "+collection+":\n"+row+tail)
+					diagnostic, ok := contracts.AsLoaderDiagnostic(err)
+					line, column := 0, 0
+					for index, text := range strings.Split(source, "\n") {
+						if position := strings.Index(text, "id:"); position >= 0 {
+							line, column = index+1, position+1
+						}
+					}
+					if !ok || diagnostic.Code != "contract_loader.undefined_field" || diagnostic.Problem != `rule field "id" is not supported.` ||
+						!strings.HasSuffix(diagnostic.Location.File, "nodes.yaml") || !strings.HasSuffix(diagnostic.Location.YAMLPath, fmt.Sprintf("[%q][0][%q]", collection, "id")) ||
+						line == 0 || diagnostic.Location.Line != line || diagnostic.Location.Column != column || len(diagnostic.ValidOptions) == 0 {
+						t.Fatalf("retired label must fail at its own key, not a different row or CEL reference: %#v %v", diagnostic, err)
+					}
+					for _, option := range diagnostic.ValidOptions {
+						if option == "id" {
+							t.Fatal("unknown-id diagnostic recommends the retired label")
+						}
+					}
+					return
 				}
 				ctx, record, source := scalar2556LoadedSource(t, "      "+collection+":\n"+row+tail)
 				node, _ := record.Identity()
@@ -94,16 +123,16 @@ func TestScalar2556RuleDiagnosticCoordinatesUsePositions(t *testing.T) {
 
 func TestScalar2556NestedDiagnosticSourceOwnership(t *testing.T) {
 	for _, tc := range []struct{ name, handler string }{
-		{"rule activity escaped key", "      rules:\n        - else: true\n          activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              'value.part': missing_root\n"},
-		{"rule write", "      rules:\n        - else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
+		{"rule activity escaped key", "      rules:\n        - activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              'value.part': missing_root\n"},
+		{"rule write", "      rules:\n        - data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
 		{"completion write", "      on_complete:\n        - data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
-		{"rule emit escaped key", "      rules:\n        - else: true\n          emit:\n            event: proof.done\n            fields:\n              'value.part': missing_root\n"},
+		{"rule emit escaped key", "      rules:\n        - emit:\n            event: proof.done\n            fields:\n              'value.part': missing_root\n"},
 		{"completion emit", "      on_complete:\n        - emit:\n            event: proof.done\n            fields:\n              value: missing_root\n"},
-		{"template specialized", "      emit:\n        event: proof.done\n        fields:\n          inherited: 'text'\n      rules:\n        - else: true\n          emit:\n            fields:\n              value: missing_root\n"},
-		{"template inherited", "      emit:\n        event: proof.done\n        fields:\n          inherited: missing_root\n      rules:\n        - else: true\n          emit:\n            fields:\n              value: 'text'\n"},
-		{"formerly keyed rule", "      rules:\n        - when: missing_root\n        - else: true\n"},
-		{"formerly singleton rule write", "      rules:\n        - else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
-		{"rule fanout identity", "      rules:\n        - else: true\n          fan_out:\n            items_from: payload.items\n            as: element\n            identity: missing_root\n            emit:\n              event: proof.done\n              fields:\n                value: element\n"},
+		{"template specialized", "      emit:\n        event: proof.done\n        fields:\n          inherited: 'text'\n      rules:\n        - emit:\n            fields:\n              value: missing_root\n"},
+		{"template inherited", "      emit:\n        event: proof.done\n        fields:\n          inherited: missing_root\n      rules:\n        - emit:\n            fields:\n              value: 'text'\n"},
+		{"formerly keyed rule", "      rules:\n        - when: missing_root\n"},
+		{"formerly singleton rule write", "      rules:\n        - data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
+		{"rule fanout identity", "      rules:\n        - fan_out:\n            items_from: payload.items\n            as: element\n            identity: missing_root\n            emit:\n              event: proof.done\n              fields:\n                value: element\n"},
 		{"completion fanout emit", "      on_complete:\n        - fan_out:\n            items_from: payload.items\n            as: element\n            identity: element\n            emit:\n              event: proof.done\n              fields:\n                value: missing_root\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,7 +160,8 @@ func TestScalar2556DiagnosticPreservesAuthoredFieldNames(t *testing.T) {
 				if owner == "emit" {
 					body = "          emit:\n            event: proof.done\n            fields:\n              '" + key + "': missing_root\n"
 				}
-				ctx, record, source := scalar2556LoadedSource(t, "      rules:\n        - else: true\n"+body)
+				row := "        - " + strings.TrimPrefix(body, "          ")
+				ctx, record, source := scalar2556LoadedSource(t, "      rules:\n"+row)
 				node, _ := record.Identity()
 				matched := false
 				for _, reader := range handlerExecutableReaderExpressionsForSource(ctx.source, node, "proof.requested", record.Entry.EventHandlers["proof.requested"]) {
@@ -169,10 +199,12 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 				if err != nil {
 					t.Fatalf("source must defer ordinary CEL validation to the executable owner: %v", err)
 				}
-				findings := checkConditionExpressionValidation(&checkerContext{source: semanticview.Wrap(bundle)})
+				findings := Run(context.Background(), semanticview.Wrap(bundle), Options{}).Errors()
 				found := false
 				for _, finding := range findings {
-					if finding.CheckID == "condition_expression_validation" && finding.Severity == SeverityHardInvalidity && strings.Contains(finding.Message, sentinel) && strings.Contains(finding.Message, "nodes.yaml:") && !strings.Contains(finding.Message, "internal default marker") {
+					if finding.CheckID == "condition_expression_validation" && finding.Severity == SeverityHardInvalidity &&
+						strings.Contains(finding.Message, "CEL parse failed") && strings.Contains(finding.Message, sentinel) &&
+						strings.Contains(finding.Message, "nodes.yaml:") && !strings.Contains(finding.Message, "internal default marker") {
 						found = true
 					}
 				}
