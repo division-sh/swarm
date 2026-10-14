@@ -10,7 +10,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -18,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -46,6 +49,14 @@ func admitAgentClaimProfileFixture(t *testing.T, ctx context.Context, selected a
 	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, fact), uuid.NewString())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	identity := mustTestAgentIdentityForRun(correlation.RunIDFromContext(ctx), "profile-worker", "global")
+	return admitAgentClaimProfileIdentity(t, ctx, selected, identity, fact)
+}
+
+func admitAgentClaimProfileIdentity(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, identity agentidentity.Identity, fact correlation.SourceArtifactFact) agentClaimProfileFixture {
+	t.Helper()
+	if identity.RunID != correlation.RunIDFromContext(ctx) {
+		t.Fatal("profile fixture admission requires the exact run context")
+	}
 	record := agentFixtureStaticRecord(t, identity)
 	profile, err := selection.ResolveActiveBackend(selection.BackendAnthropic)
 	if err != nil {
@@ -59,32 +70,54 @@ func admitAgentClaimProfileFixture(t *testing.T, ctx context.Context, selected a
 	if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, fact); err != nil {
 		t.Fatal(err)
 	}
-	plan := currentAgentFixtureSourceSet(t, ctx, selected)
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+	authority := admitAgentClaimProfileAuthority(t, ctx, selected, fact)
+	return agentClaimProfileFixture{ctx: ctx, store: selected, authority: authority, record: record, source: fact, route: events.DeliveryRoute{
+		Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance()}),
+	}}
+}
+
+func admitAgentClaimProfileAuthority(t testing.TB, ctx context.Context, selected agentfixture.Store, fact correlation.SourceArtifactFact) deliverylifecycle.ExecutionAuthority {
+	t.Helper()
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
-		t.Fatal(err)
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("profile fixture requires its current complete source set: found=%t err=%v", found, err)
 	}
-	if _, err := grant.AdmitExecution(ctx); err != nil {
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+	if err != nil {
 		t.Fatal(err)
 	}
 	evidence, err := grant.Evidence()
 	if err != nil {
 		t.Fatal(err)
 	}
+	if evidence.State == startupownership.GrantPrepared {
+		evidence, err = grant.MarkProbesSettled(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if evidence.State == startupownership.GrantProbeSettled {
+		evidence, err = grant.AdmitExecution(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if evidence.State != startupownership.GrantAdmitted {
+		t.Fatalf("profile fixture grant is not admitted: %+v", evidence)
+	}
+	if err := grant.ProveCurrent(ctx); err != nil {
+		t.Fatal(err)
+	}
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
-		t.Fatal(err)
-	}
-	return agentClaimProfileFixture{ctx: ctx, store: selected, authority: authority, record: record, source: fact, route: events.DeliveryRoute{
-		Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
-		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "global", FlowInstance: "global"}),
-	}}
+	return authority
 }
 
 func (f agentClaimProfileFixture) claim(t *testing.T) (events.Event, deliverylifecycle.ClaimedObligation, deliverylifecycle.AgentClaimProfile) {
