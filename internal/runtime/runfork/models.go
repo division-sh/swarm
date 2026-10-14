@@ -411,8 +411,7 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 					if pending.EventID != candidate.SourceEventID || pending.Classification != RunForkPendingClassificationPending ||
 						pending.Status != "pending" || pending.RetryCount != 0 || pending.ActiveSessionID != "" ||
 						pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
-						pending.RoutingSource.Kind() != events.RoutingSourceDeploymentFeed ||
-						(candidate.Phase == RunForkDeploymentPendingPublication) != (pending.ContinuationHandoffAt == nil) {
+						pending.RoutingSource.Kind() != events.RoutingSourceDeploymentFeed {
 						return fmt.Errorf("fork deployment delivery %s contradicts fixed pending phase", deliveryID)
 					}
 				}
@@ -560,7 +559,6 @@ type RunForkPendingWork struct {
 	ActiveSessionID        string                  `json:"active_session_id,omitempty"`
 	CreatedAt              time.Time               `json:"created_at"`
 	StartedAt              *time.Time              `json:"started_at,omitempty"`
-	ContinuationHandoffAt  *time.Time              `json:"continuation_handoff_at,omitempty"`
 	DeliveredAt            *time.Time              `json:"delivered_at,omitempty"`
 	ReceiptOutcome         string                  `json:"receipt_outcome,omitempty"`
 	ReceiptAt              *time.Time              `json:"receipt_at,omitempty"`

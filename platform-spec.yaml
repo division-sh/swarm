@@ -20561,6 +20561,10 @@ run_model:
         missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
         Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
         grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
+        Historical delivery facts exclude live lease expiry and physical continuation-handoff stamps. Those coordinates
+        remain in the current delivery owner for execution fencing and dispatch, not in fork history. Deployment pending
+        publication versus pending receiver phase is determined solely by the exact retained successful platform/pipeline
+        receipt; missing, duplicate or contradictory receipts cannot authorize the receiver phase.
         Historical final selection is read only from that revisioned delivery payload, never joined from today's
         selection table. Missing tags, malformed facts and contradictory status/presence pairs fail closed. Fresh
         fork-local pending deliveries start with absent selection; source final-selection history remains unchanged.
