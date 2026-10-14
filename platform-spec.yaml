@@ -23076,12 +23076,12 @@ configuration_source_authority:
             gated production runtime owner promotes real behavior. Field presence/default seeding is not proof of
             supported config semantics, and #1858 MUST keep these controls fail-closed with no supported replacement.
           provider_limits_shape: >
-            `llm.provider_limits.<profile>` profile ids and
-            `llm.provider_limits.<profile>.models.<model>` model ids are dynamic map keys, but provider-limit policy
-            fields are finite: `rate_limit`, `rate_limit_max_wait`, `max_concurrency`,
-            `max_concurrency_max_wait`, and profile-level `models`. Unknown policy fields under a provider profile
-            or model policy MUST fail closed as unknown config keys before YAML struct decoding can silently ignore
-            them. Nested `models` maps under model-specific policy entries remain unsupported and fail closed.
+            `llm.provider_limits.<profile>` profile ids are dynamic map keys; each policy admits only
+            `max_concurrency`, a positive integer. `rate_limit`, `rate_limit_max_wait`,
+            `max_concurrency_max_wait`, and the profile-level `models` map are retired; their presence,
+            including empty or null values and merged keys, MUST fail closed. Global `llm.models` aliases remain supported.
+            Unknown policy fields under a provider profile MUST fail closed as unknown config keys before YAML
+            struct decoding can silently ignore them. A profile policy is not a per-model override map.
         platform:
           keys:
             packs.platform_dirs: supported_complete_development_replacement

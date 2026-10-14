@@ -42,14 +42,7 @@
 #     base_url: https://api.openai.com/v1 # OpenAI Responses endpoint base URL.
 #   provider_limits:
 #     anthropic:
-#       max_concurrency: 2 # Provider-wide concurrency limit.
-#       max_concurrency_max_wait: 30s # Maximum wait for provider-wide concurrency limiting.
-#       models:
-#         claude-sonnet-4-5:
-#           rate_limit: 10/m # Model-specific request rate limit.
-#           rate_limit_max_wait: 30s # Maximum wait for model-specific rate limiting.
-#       rate_limit: 30/m # Provider-wide request rate limit.
-#       rate_limit_max_wait: 30s # Maximum wait for provider-wide rate limiting.
+#       max_concurrency: 2 # Profile-wide concurrency limit.
 #   session:
 #     lock_ttl: 10s # How long a session lock can be held before it expires.
 #     rotate_after_turns: 40 # Rotate an LLM session after this many turns.
