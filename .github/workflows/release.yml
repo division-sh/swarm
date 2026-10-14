@@ -344,6 +344,13 @@ jobs:
               retained[heading + 1:heading + 1] = ['\n', *grouped]
           else:
               retained = ['## Changes by area\n\n', *grouped, *retained]
+          retained.extend([
+              '\n## Native binary requirements\n\n',
+              '- Linux amd64: built with CGO on Ubuntu 22.04; requires a compatible '
+              'glibc runtime (libc, libm and the x86-64 dynamic loader) and libgcc_s.so.1. '
+              'This is not a static or musl/Alpine binary.\n',
+              '- macOS arm64: built and smoke-tested natively on the macOS 15 arm64 runner.\n',
+          ])
           (temp / 'release-notes.md').write_text(''.join(retained), encoding='utf-8')
           PY
       - name: Publish only the complete verified asset set
