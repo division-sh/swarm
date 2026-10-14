@@ -71,19 +71,28 @@ func TestRuntimeConfigExcludedFieldsRefuseBeforeOverrides(t *testing.T) {
 							t.Fatalf("override=%q: excluded source admitted or misdiagnosed: result=%#v error=%v", override, loaded, err)
 						}
 						diagnostic := blockers[0]
-						if diagnostic.Key != fieldPath || diagnostic.Path != path || !strings.Contains(diagnostic.Message, fieldPath) {
+						key := fieldPath
+						passwordSourceRefusal := fieldPath == "database.password" && (literal == "''" || literal == "{}" || literal == "[]")
+						if passwordSourceRefusal {
+							key = `$["database"]["password"]`
+						}
+						if diagnostic.Key != key || diagnostic.Path != path {
 							t.Fatalf("override=%q: excluded-field diagnostic = %#v", override, diagnostic)
 						}
 						// Preserve the CLI's Split/secret distinction, while the
 						// component decoder retains its typed vocabulary oracle.
-						if fieldPath == "database.password" {
+						if passwordSourceRefusal {
+							if diagnostic.Kind != unifiedConfigDiagnosticParseFailed || diagnostic.Line == 0 || diagnostic.Column == 0 || !strings.Contains(diagnostic.Message, `field "password" is not supported`) || !strings.Contains(diagnostic.Message, "Valid fields:") || slices.Contains(diagnostic.ValidOptions, "password") || !slices.Contains(diagnostic.ValidOptions, "password_env") {
+								t.Fatalf("override=%q: located source refusal = %#v", override, diagnostic)
+							}
+						} else if fieldPath == "database.password" {
 							if diagnostic.Kind != unifiedConfigDiagnosticValidationFailed || !strings.Contains(diagnostic.Message, "unsupported plaintext secret material") || diagnostic.Remediation != "declare a file, secret key, or explicit env delegation field instead" {
 								t.Fatalf("override=%q: plaintext-secret refusal = %#v", override, diagnostic)
 							}
 						} else if diagnostic.Kind != unifiedConfigDiagnosticSplitUnsupported || !strings.Contains(diagnostic.Remediation, "tracked split:") || !strings.Contains(diagnostic.Remediation, "no supported replacement") {
 							t.Fatalf("override=%q: Split refusal = %#v", override, diagnostic)
 						}
-						if !strings.Contains(err.Error(), fieldPath) || !strings.Contains(err.Error(), diagnostic.Remediation) || strings.Contains(err.Error(), "RETIRED") {
+						if !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), diagnostic.Remediation) || strings.Contains(err.Error(), "RETIRED") {
 							t.Fatalf("override=%q: not explicit source rejection: %v", override, err)
 						}
 					}
