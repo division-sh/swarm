@@ -236,7 +236,14 @@ func TestChannelCLIRejectsInapplicableCredentialBeforeInput(t *testing.T) {
 				if req.Params["provider_credential"] != nil || req.Method == "channel.onboarding_retry" {
 					t.Fatal("inapplicable replacement reached credential admission", req)
 				}
-				return sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
+				result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
+				if verb != "resume" {
+					if req.Method != "channel.onboarding_select" {
+						t.Fatal("inapplicable replacement started work", req.Method)
+					}
+					return channelCLISelectionResult(result)
+				}
+				return result
 			})
 			in := &channelCredentialInput{}
 			args := []string{"channel", verb, "whatsapp", "--yes", "--credential-stdin"}
