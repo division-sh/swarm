@@ -312,13 +312,14 @@ func TestSingleDeploymentConfigInvalidDocumentCannotDelegateEnv(t *testing.T) {
 			if delegated := unifiedConfigDelegatedSwarmEnvSources(root, ""); len(delegated) != 0 {
 				t.Fatalf("refused document authorized env: %v", delegated)
 			}
-			for _, finding := range doctorSwarmEnvFindings(root, "") {
+			loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+			if err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
+				t.Fatalf("loader accepted refused env delegation: %v", err)
+			}
+			for _, finding := range doctorSwarmEnvFindings(loaded) {
 				if finding.Name == "SWARM_REVIEW_DB_SECRET" && finding.AcceptedBy != "" {
 					t.Fatalf("doctor credited refused document: %+v", finding)
 				}
-			}
-			if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root}); err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
-				t.Fatalf("loader accepted refused env delegation: %v", err)
 			}
 		})
 	}
@@ -338,13 +339,14 @@ func TestSingleDeploymentConfigIgnoredFilesCannotDelegateEnv(t *testing.T) {
 			if delegated := unifiedConfigDelegatedSwarmEnvSources(root, ""); len(delegated) != 0 {
 				t.Fatalf("ignored file authorized env: %v", delegated)
 			}
-			for _, finding := range doctorSwarmEnvFindings(root, "") {
+			loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+			if err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
+				t.Fatalf("loader accepted ignored env delegation: %v", err)
+			}
+			for _, finding := range doctorSwarmEnvFindings(loaded) {
 				if finding.Name == "SWARM_REVIEW_DB_SECRET" && finding.AcceptedBy != "" {
 					t.Fatalf("doctor credited ignored file: %+v", finding)
 				}
-			}
-			if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root}); err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
-				t.Fatalf("loader accepted ignored env delegation: %v", err)
 			}
 		})
 	}
