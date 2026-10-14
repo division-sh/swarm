@@ -59,7 +59,7 @@ func TestScalar2556PredicateConsumers(t *testing.T) {
 	}{
 		{"rule.when", func(s string) (string, error) {
 			var handler SystemNodeEventHandler
-			err := decodeNodeTestYAML([]byte("rules:\n  - when: "+s+"\n    emit: done\n  - else: true\n    emit: other\n"), &handler)
+			err := decodeNodeTestYAML([]byte("rules:\n  - when: "+s+"\n    emit: done\n  - emit: other\n"), &handler)
 			if err != nil {
 				return "", err
 			}
@@ -128,10 +128,13 @@ func TestScalar2556CompletionFallbackSelectionAndAssignment(t *testing.T) {
 	if len(handler.OnComplete) != 1 || handler.OnComplete[0].Condition != "" {
 		t.Fatalf("fallback: %#v", handler.OnComplete)
 	}
-	for _, scalar := range []string{"else", `'else'`, `"else"`} {
+	for _, scalar := range []string{`'else'`, `"else"`} {
 		if err := decodeNodeTestYAML([]byte("on_complete:\n  - condition: "+scalar+"\n    emit: done\n"), &handler); err == nil {
 			t.Fatalf("authored sentinel %s admitted", scalar)
 		}
+	}
+	if err := decodeNodeTestYAML([]byte("on_complete:\n  - condition: else\n    emit: done\n"), &handler); err != nil || handler.OnComplete[0].Condition != "else" {
+		t.Fatalf("unquoted reference must reach ordinary CEL validation unchanged: %#v, %v", handler, err)
 	}
 }
 
@@ -141,14 +144,14 @@ func TestScalar2556EveryValueSurface(t *testing.T) {
 		get          func(SystemNodeEventHandler) ExpressionValue
 	}{
 		{"handler emit", "emit:\n  event: done\n  fields:\n    value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Emit.Fields["value"] }},
-		{"rule emit", "rules:\n  - else: true\n    emit:\n      event: done\n      fields:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Emit.Fields["value"] }},
+		{"rule emit", "rules:\n  - emit:\n      event: done\n      fields:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Emit.Fields["value"] }},
 		{"completion emit", "on_complete:\n  - emit:\n      event: done\n      fields:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnComplete[0].Emit.Fields["value"] }},
-		{"success emit", "rules:\n  - else: true\non_success:\n  emit:\n    event: done\n    fields:\n      value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnSuccess.Emit.Fields["value"] }},
+		{"success emit", "rules:\n  - when: true\non_success:\n  emit:\n    event: done\n    fields:\n      value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnSuccess.Emit.Fields["value"] }},
 		{"handler fanout", "fan_out:\n  items_from: payload.items\n  as: element\n  identity: element\n  emit:\n    event: done\n    fields:\n      value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.FanOut.Emit.Fields["value"] }},
-		{"rule fanout", "rules:\n  - else: true\n    fan_out:\n      items_from: payload.items\n      as: element\n      identity: element\n      emit:\n        event: done\n        fields:\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].FanOut.Emit.Fields["value"] }},
+		{"rule fanout", "rules:\n  - fan_out:\n      items_from: payload.items\n      as: element\n      identity: element\n      emit:\n        event: done\n        fields:\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].FanOut.Emit.Fields["value"] }},
 		{"completion fanout", "on_complete:\n  - fan_out:\n      items_from: payload.items\n      as: element\n      identity: element\n      emit:\n        event: done\n        fields:\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.OnComplete[0].FanOut.Emit.Fields["value"] }},
-		{"rule activity", "rules:\n  - else: true\n    activity:\n      id: scalar_value_probe\n      tool: send\n      input:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Activity.Input["value"] }},
-		{"rule write", "rules:\n  - else: true\n    data_accumulation:\n      writes:\n        - target_field: count\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].DataAccumulation.Writes[0].Value }},
+		{"rule activity", "rules:\n  - activity:\n      id: scalar_value_probe\n      tool: send\n      input:\n        value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].Activity.Input["value"] }},
+		{"rule write", "rules:\n  - data_accumulation:\n      writes:\n        - target_field: count\n          value: ", func(h SystemNodeEventHandler) ExpressionValue { return h.Rules[0].DataAccumulation.Writes[0].Value }},
 		{"completion write", "on_complete:\n  - data_accumulation:\n      writes:\n        - target_field: count\n          value: ", func(h SystemNodeEventHandler) ExpressionValue {
 			return h.OnComplete[0].DataAccumulation.Writes[0].Value
 		}},

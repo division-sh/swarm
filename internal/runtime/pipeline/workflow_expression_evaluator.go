@@ -145,9 +145,6 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 		}, nil
 	}
-	if strings.EqualFold(expression, "else") {
-		expression = "true"
-	}
 	normalized := workflowExpressionKeywordReplacer.ReplaceAllStringFunc(expression, func(token string) string {
 		switch strings.ToUpper(strings.TrimSpace(token)) {
 		case "AND":

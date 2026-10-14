@@ -84,7 +84,7 @@ func TestExecutor_HandlerActivityCompletionSelectionKeepsCatalogOwnership(t *tes
 				t.Run(fmt.Sprintf("%s/selected_%t/explicit_%t", flow, selected, id != ""), func(t *testing.T) {
 					condition := "false"
 					if selected {
-						condition = "else"
+						condition = ""
 					}
 					source, node, handler := activitySelectionSource2287(t, flow, c.SystemNodeEventHandler{
 						Activity:   c.ActivitySpec{ID: id, Tool: "source_scrape", Input: map[string]c.ExpressionValue{"url": c.RefExpression("payload.url")}},
@@ -114,7 +114,7 @@ func TestExecutor_HandlerActivityCompletionSelectionKeepsCatalogOwnership(t *tes
 					}
 					if selected {
 						ref, _ := handler.OnComplete[0].DeclarationIdentity()
-						if fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow || ref.SemanticPath() != `nodes["scanner"].handlers["source.requested"].on_complete[0]` || fact.DisplayLabel() != "on_complete[0]: else" {
+						if fact.Disposition() != handlerselection.DispositionSelected || fact.Ref() != ref || ref.Flow().String() != flow || ref.SemanticPath() != `nodes["scanner"].handlers["source.requested"].on_complete[0]` || fact.DisplayLabel() != "on_complete[0]" {
 							t.Fatalf("handler activity lost selected completion identity: %#v", fact)
 						}
 					} else if fact.Disposition() != handlerselection.DispositionNoMatch || fact.Ref().Valid() {

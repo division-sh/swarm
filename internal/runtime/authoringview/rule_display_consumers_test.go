@@ -16,13 +16,13 @@ func TestContainedOperationPresentationKeepsRuleContextAndOperands(t *testing.T)
 		context string
 		labels  [2]string
 	}{
-		{"rules", [2]string{"handler.rules[0]: when payload.ready &&\npayload.allowed.data_accumulation", "handler.rules[1]: else.data_accumulation"}},
-		{"on_complete", [2]string{"handler.on_complete[0]: condition payload.ready &&\npayload.allowed.data_accumulation", "handler.on_complete[1]: else.data_accumulation"}},
+		{"rules", [2]string{"handler.rules[0]: when payload.ready &&\npayload.allowed.data_accumulation", "handler.rules[1].data_accumulation"}},
+		{"on_complete", [2]string{"handler.on_complete[0]: condition payload.ready &&\npayload.allowed.data_accumulation", "handler.on_complete[1].data_accumulation"}},
 	} {
 		t.Run(tc.context, func(t *testing.T) {
 			rows := []runtimecontracts.HandlerRuleEntry{
 				{Condition: "payload.ready &&\npayload.allowed", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
-				{Condition: "else", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
+				{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
 			}
 			handler := runtimecontracts.SystemNodeEventHandler{}
 			if tc.context == "rules" {
