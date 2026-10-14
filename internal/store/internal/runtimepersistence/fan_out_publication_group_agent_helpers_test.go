@@ -255,13 +255,13 @@ type publicationGroupAgentCrashOwner struct {
 	fault publicationGroupAgentCrashGroup
 }
 
-func (o publicationGroupAgentCrashOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	group, err := o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+func (o publicationGroupAgentCrashOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, validate)
 	if err != nil {
-		return nil, err
+		return input, group, err
 	}
 	o.fault.PublicationGroup = group
-	return o.fault, nil
+	return input, o.fault, nil
 }
 
 type publicationGroupAgentCrashExecutor struct {

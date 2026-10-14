@@ -78,6 +78,10 @@ type fanOutFailureTestOwner struct {
 	blocks       []FanOutBlockRequest
 }
 
+func (*fanOutFailureTestOwner) BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
+	return FanOutEvaluationInput{}, nil, &FanOutEvaluationLoadError{Cause: errors.New("failure-algebra test does not load")}
+}
+
 func (*fanOutFailureTestOwner) BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
 	return nil, errors.New("failure-algebra test does not begin publication groups")
 }

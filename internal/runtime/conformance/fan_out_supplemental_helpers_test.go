@@ -207,20 +207,16 @@ func (o *supplementalServingTurn) ClaimFanOutIntent(ctx context.Context, req pip
 	return i, c, found, err
 }
 
-func (o *supplementalServingTurn) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
-	in, err := o.FanOutObligationOwner.LoadFanOutEvaluation(ctx, claim)
-	if err == nil {
-		o.receipt.LoadedAt = time.Now()
-		p := o.probe
-		p.mu.Lock()
-		p.stats.Loaded++
-		if p.stats.Loaded > p.stats.PeakLoaded {
-			p.stats.PeakLoaded = p.stats.Loaded
-		}
-		p.mu.Unlock()
-		o.pause(ctx, "loaded", p.loadGate)
+func (o *supplementalServingTurn) observeLoadedEvaluation(ctx context.Context) {
+	o.receipt.LoadedAt = time.Now()
+	p := o.probe
+	p.mu.Lock()
+	p.stats.Loaded++
+	if p.stats.Loaded > p.stats.PeakLoaded {
+		p.stats.PeakLoaded = p.stats.Loaded
 	}
-	return in, err
+	p.mu.Unlock()
+	o.pause(ctx, "loaded", p.loadGate)
 }
 
 func (o *supplementalServingTurn) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
@@ -244,14 +240,17 @@ func (o *supplementalServingTurn) CommitFanOutChunk(ctx context.Context, command
 	return out, err
 }
 
-func (o *supplementalServingTurn) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
+func (o *supplementalServingTurn) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
 	started := time.Now()
-	group, err := o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, func(input pipeline.FanOutEvaluationInput) error {
+		o.observeLoadedEvaluation(ctx)
+		return validate(input)
+	})
 	elapsed := time.Since(started)
 	o.probe.mu.Lock()
 	o.probe.stats.GroupAdmission.add(elapsed)
 	o.probe.mu.Unlock()
-	return group, err
+	return input, group, err
 }
 
 func newSupplementalServingFixture(t *testing.T, backend string, p *supplementalServingProbe, wrap ...func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) *servingMatrixFixture {

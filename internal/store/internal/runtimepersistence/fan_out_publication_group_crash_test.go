@@ -69,12 +69,12 @@ type publicationGroupCrashOwner struct {
 	before  func(int)
 }
 
-func (o publicationGroupCrashOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	group, err := o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+func (o publicationGroupCrashOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, validate)
 	if err != nil || o.cut == "after_chunk_commit" {
-		return group, err
+		return input, group, err
 	}
-	return publicationGroupCrashGroup{PublicationGroup: group, control: o.control, before: o.before}, nil
+	return input, publicationGroupCrashGroup{PublicationGroup: group, control: o.control, before: o.before}, nil
 }
 
 func (o publicationGroupCrashOwner) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {

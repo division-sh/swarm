@@ -154,11 +154,7 @@ func (turn *servingMatrixTurn) ClaimFanOutIntent(ctx context.Context, req pipeli
 	return intent, claim, found, err
 }
 
-func (turn *servingMatrixTurn) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
-	input, err := turn.FanOutObligationOwner.LoadFanOutEvaluation(ctx, claim)
-	if err != nil {
-		return input, err
-	}
+func (turn *servingMatrixTurn) observeLoadedEvaluation() {
 	turn.loadedAt = time.Now()
 	p := turn.probe
 	p.mu.Lock()
@@ -171,7 +167,6 @@ func (turn *servingMatrixTurn) LoadFanOutEvaluation(ctx context.Context, claim f
 	}
 	p.mu.Unlock()
 	turn.pause(servingMatrixEvaluation)
-	return input, nil
 }
 
 func (turn *servingMatrixTurn) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
@@ -188,14 +183,17 @@ func (turn *servingMatrixTurn) CommitFanOutChunk(ctx context.Context, command pi
 	return committed, err
 }
 
-func (turn *servingMatrixTurn) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
+func (turn *servingMatrixTurn) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
 	if turn.probe.commitWithoutCancel {
 		ctx = context.WithoutCancel(ctx)
 	}
-	turn.groupAt = time.Now()
-	group, err := turn.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+	input, group, err := turn.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, func(input pipeline.FanOutEvaluationInput) error {
+		turn.observeLoadedEvaluation()
+		turn.groupAt = time.Now()
+		return validate(input)
+	})
 	turn.groupReturnedAt, turn.groupErr = time.Now(), err
-	return group, err
+	return input, group, err
 }
 
 func (turn *servingMatrixTurn) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
