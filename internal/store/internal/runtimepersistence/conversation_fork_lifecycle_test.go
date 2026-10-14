@@ -16,6 +16,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -550,6 +551,18 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 	}
 	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(s))
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, fmt.Sprintf("forkchat-test:%s:%d", prepared.RequestOccurrenceID, ordinal))
+	profile, err := llmselection.ResolveLiveBackend(prepared.Snapshot.SourceAgent.LLMBackend)
+	if err != nil {
+		t.Fatalf("resolve forkchat fixture profile: %v", err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, prepared.Snapshot.SourceAgent)
+	if err != nil {
+		t.Fatalf("resolve forkchat fixture actor: %v", err)
+	}
+	completionCtx = runtimeeffects.WithCompletionRequest(completionCtx, runtimeeffects.CompletionRequest{
+		ModelAlias: resolved.Actor.Model, RequestedModel: resolved.Actor.ResolvedModel,
+		BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport,
+	})
 	handle, err := runtimeeffects.BeginCompletion(completionCtx, "anthropic_api", []byte(prepared.RequestHash), nil)
 	if err != nil {
 		t.Fatalf("authorize forkchat completion: %v", err)
@@ -561,7 +574,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 		t.Fatalf("observe forkchat completion: %v", err)
 	}
 	input, output := int64(2), int64(1)
-	_, err = handle.SettleCompletion(completionCtx, runtimeeffects.CompletionSettlement{
+	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"test": true}},
 		Usage: runtimeeffects.CompletionUsage{
 			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
@@ -573,7 +586,9 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 			ResolvedModel: "test-model", InvocationType: "forkchat",
 		},
 		Now: now.UTC(),
-	})
+	}
+	bindCompletionEvidenceForTest(&settlement, handle.Attempt().Authority.CompletionRequest, []runtimeeffects.CompletionModelObservation{{Model: "test-model", Source: runtimeeffects.CompletionModelResponse}})
+	_, err = handle.SettleCompletion(completionCtx, settlement)
 	if err != nil {
 		t.Fatalf("settle forkchat completion: %v", err)
 	}

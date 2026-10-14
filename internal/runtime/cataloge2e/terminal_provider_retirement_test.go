@@ -110,17 +110,23 @@ func (p *terminalManagedProvider) ContinueManagedSession(ctx context.Context, se
 		return nil, err
 	}
 	frame := call.Frame()
+	request := handle.Attempt().Authority.CompletionRequest
+	usage := runtimeeffects.CompletionUsage{ResolvedModel: "terminal-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
+	usage.Evidence = runtimeeffects.CompletionEvidence{
+		Request: request, CostProvenance: usage.CostProvenance(),
+		Models: []runtimeeffects.CompletionModelObservation{{Model: usage.ResolvedModel, Source: runtimeeffects.CompletionModelResponse}},
+	}
 	settlement, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"terminal_proof": true}},
-		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "terminal-test", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID,
 			Identity: session.MemoryIdentity, Memory: session.Memory, SessionID: session.ID,
 			FlowInstance: target.FlowInstance, EntityID: target.EntityID, ParseOK: true,
 			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: observed.ID, CapabilitySurface: surfaceJSON},
 		Spend: runtimeeffects.CompletionSpend{EntityID: target.EntityID, FlowInstance: target.FlowInstance,
-			AgentID: target.AgentID, AgentIdentity: target.AgentIdentity, Model: "regular", ModelAlias: "regular",
-			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "terminal-test", InvocationType: "agent_turn"},
+			AgentID: target.AgentID, AgentIdentity: target.AgentIdentity, Model: request.RequestedModel, ModelAlias: request.ModelAlias,
+			BackendProfile: request.BackendProfile, Provider: request.Provider, Transport: request.Transport, ResolvedModel: usage.ResolvedModel, InvocationType: "agent_turn"},
 		Now: time.Now().UTC(),
 	})
 	if err == nil {

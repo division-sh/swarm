@@ -409,7 +409,7 @@ func completionSuccessorPayload(t testing.TB, adapter string, fixture completion
 			Message: assistant, ToolCalls: assistant.ToolCalls, Raw: []byte(`{"response":"settled"}`),
 			ToolOutputAuthority: &runtimellm.ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()},
 		},
-		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Usage: settlement.Usage.Clone(),
 	}
 	document.Projection.SessionID = fixture.sessionID
 	document.Projection.ExpectedTurnCount = 0

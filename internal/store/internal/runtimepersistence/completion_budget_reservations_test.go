@@ -13,6 +13,8 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -274,7 +276,19 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 			t.Fatalf("prepare budget-race forkchat authority: %v", err)
 		}
 		authority := forkChatCompletionAuthority(prepared, 1)
-		return authority, fixture.normal.contextFor(authority)
+		profile, err := llmselection.ResolveLiveBackend(llmselection.BackendOpenAIResponses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, prepared.Snapshot.SourceAgent)
+		if err != nil {
+			t.Fatalf("resolve forkchat budget fixture actor: %v", err)
+		}
+		ctx := runtimeeffects.WithCompletionRequest(fixture.normal.contextFor(authority), runtimeeffects.CompletionRequest{
+			ModelAlias: resolved.Actor.Model, RequestedModel: resolved.Actor.ResolvedModel,
+			BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport,
+		})
+		return authority, ctx
 	default:
 		t.Fatalf("unsupported budget race authority kind %q", kind)
 		return runtimeeffects.Authority{}, nil

@@ -232,13 +232,19 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, event ev
 		return nil, err
 	}
 	target := handle.Attempt().Authority.Target
+	request := handle.Attempt().Authority.CompletionRequest
 	input, output := int64(1), int64(1)
+	usage := runtimeeffects.CompletionUsage{
+		ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
+		InputTokens: &input, OutputTokens: &output,
+	}
+	usage.Evidence = runtimeeffects.CompletionEvidence{
+		Request: request, CostProvenance: usage.CostProvenance(),
+		Models: []runtimeeffects.CompletionModelObservation{{Model: usage.ResolvedModel, Source: runtimeeffects.CompletionModelResponse}},
+	}
 	settled, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
-		Usage: runtimeeffects.CompletionUsage{
-			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
-			InputTokens: &input, OutputTokens: &output,
-		},
+		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
 			Identity: target.AgentIdentity,
@@ -248,8 +254,9 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, event ev
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
-			Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http",
-			ResolvedModel: "test-model", InvocationType: "task",
+			Model: request.RequestedModel, ModelAlias: request.ModelAlias,
+			BackendProfile: request.BackendProfile, Provider: request.Provider, Transport: request.Transport,
+			ResolvedModel: usage.ResolvedModel, InvocationType: "task",
 		},
 		Now: time.Now().UTC(),
 	})

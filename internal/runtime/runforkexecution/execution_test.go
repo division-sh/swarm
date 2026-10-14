@@ -3400,8 +3400,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	)
 	providerCtx = managedexecution.WithAdmission(providerCtx, winner.container.admission)
 	capabilitySurface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: "task",
-		Provider: "openai", Transport: "api", ProviderContract: "run-fork-race-test",
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: profile.RuntimeMode,
+		Provider: profile.Provider, Transport: profile.Transport, ProviderContract: "run-fork-race-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
 			ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
@@ -3414,7 +3414,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("build winning %s capability surface: %v", winner.surface, err)
 	}
 	providerCtx = managedcapabilities.WithContext(providerCtx, capabilitySurface)
-	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.SourceArtifactFact)
+	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.SourceArtifactFact, targetConfig.Model, targetConfig.ResolvedModel)
 	providerCtx = runtimecorrelation.WithSourceArtifactFact(providerCtx, baseRequest.LoadedSource.SourceArtifactFact)
 	providerCtx = runtimecorrelation.WithInboundEvent(providerCtx, causalEvent)
 	causalEvent, err = eventfixture.BindPayload(causalEvent)
@@ -3470,31 +3470,42 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatal(err)
 	}
 	providerCtx = deliverylifecycle.WithClaim(providerCtx, claimed.Claim)
-	handle, err := runtimeeffects.BeginManagedCompletion(providerCtx, "openai_compatible", []byte("request"), frame, nil)
+	handle, err := runtimeeffects.BeginManagedCompletion(providerCtx, "anthropic_api", []byte("request"), frame, nil)
 	if err != nil {
 		t.Fatalf("winning %s authorize provider completion: %v", winner.surface, err)
+	}
+	request := handle.Attempt().Authority.CompletionRequest
+	if request != (runtimeeffects.CompletionRequest{
+		ModelAlias: targetConfig.Model, RequestedModel: targetConfig.ResolvedModel,
+		BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport,
+	}) {
+		t.Fatalf("winning %s completion request contradicts admitted actor: %+v", winner.surface, request)
 	}
 	if err := handle.MarkLaunched(providerCtx); err != nil {
 		t.Fatalf("winning %s launch provider completion: %v", winner.surface, err)
 	}
 	var providerLaunches atomic.Int32
 	providerLaunches.Add(1)
-	if err := handle.MarkResponseObserved(providerCtx, map[string]any{"surface": winner.surface}); err != nil {
+	const observedModel = "reported-authority-race"
+	if err := handle.MarkResponseObserved(providerCtx, map[string]any{"surface": winner.surface, "model": observedModel}); err != nil {
 		t.Fatalf("winning %s observe provider response: %v", winner.surface, err)
 	}
 	inputTokens, outputTokens := int64(1), int64(1)
+	usage := runtimeeffects.CompletionUsage{
+		ResolvedModel: observedModel, Exactness: runtimeeffects.CompletionUsageExact,
+		InputTokens: &inputTokens, OutputTokens: &outputTokens,
+	}
+	usage.Evidence = runtimeeffects.CompletionEvidence{
+		Request: request, CostProvenance: usage.CostProvenance(),
+		Models: []runtimeeffects.CompletionModelObservation{{Model: observedModel, Source: runtimeeffects.CompletionModelResponse}},
+	}
 	capabilitySurfaceJSON, err := json.Marshal(capabilitySurface)
 	if err != nil {
 		t.Fatalf("marshal winning %s capability surface: %v", winner.surface, err)
 	}
 	if _, err := handle.SettleCompletion(providerCtx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"surface": winner.surface}},
-		Usage: runtimeeffects.CompletionUsage{
-			ResolvedModel: "test-model",
-			Exactness:     runtimeeffects.CompletionUsageExact,
-			InputTokens:   &inputTokens,
-			OutputTokens:  &outputTokens,
-		},
+		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: authority.Target.ID, RunID: forkRunID, AgentID: authority.Target.AgentID,
 			Identity:  targetIdentity,
@@ -3505,8 +3516,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: authority.Target.FlowInstance, AgentID: authority.Target.AgentID,
 			AgentIdentity: targetIdentity,
-			Model:         "test-model", ModelAlias: "regular", BackendProfile: "test",
-			Provider: "test", Transport: "http", ResolvedModel: "test-model",
+			Model:         request.RequestedModel, ModelAlias: request.ModelAlias, BackendProfile: request.BackendProfile,
+			Provider: request.Provider, Transport: request.Transport, ResolvedModel: usage.ResolvedModel,
 			InvocationType: "test",
 		},
 		Now: time.Now().UTC(),
@@ -3538,7 +3549,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	}
 }
 
-func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, source runtimecorrelation.SourceArtifactFact) (agentframe.Frame, events.Event) {
+func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, source runtimecorrelation.SourceArtifactFact, modelAlias, requestedModel string) (agentframe.Frame, events.Event) {
 	t.Helper()
 	bundleHash := source.BundleHash()
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.selected-agent.intent", "Exercise the selected-fork authority race.")
@@ -3561,7 +3572,7 @@ func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Autho
 	frame, err := agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: authority.Target.AgentIdentity, Role: "selected-agent", FlowID: "selected-authority-race",
 		Intent: intent, ProviderPrompt: prompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
-		ModelAlias: "regular", Model: "test-model",
+		ModelAlias: modelAlias, Model: requestedModel,
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
 		BundleHash: bundleHash, Surface: surface,
 	})

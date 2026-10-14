@@ -154,15 +154,17 @@ func TestAgentDetailHumanOutputPreservesCanonicalLastTurnFailure(t *testing.T) {
 			Status:  "failed",
 		},
 		LastTurnRef: &agentTurnRef{
-			TurnID:      "turn-1",
-			CompletedAt: "2026-05-18T03:05:00Z",
-			ParseOK:     &parseOK,
-			Failure:     testRuntimeFailure("agent_turn_failed"),
+			TurnID:             "turn-1",
+			CompletedAt:        "2026-05-18T03:05:00Z",
+			ParseOK:            &parseOK,
+			Failure:            testRuntimeFailure("agent_turn_failed"),
+			CompletionEvidence: completionEvidenceFixtureForCLI(),
 		},
 	})
 	for _, want := range []string{
 		"Agent agent-1  failed",
-		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed false, failure platform.connector_failure/agent_turn_failed",
+		"last turn",
+		"turn-1, completed 2026-05-18T03:05:00Z, parsed false, requested request-A (regular); reported unavailable; cost unavailable, failure platform.connector_failure/agent_turn_failed",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
