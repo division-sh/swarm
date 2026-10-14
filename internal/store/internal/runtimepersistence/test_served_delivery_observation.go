@@ -149,6 +149,11 @@ func CountTemplateSubscribedReplayScopeForTest(ctx context.Context, selected any
 		return pipelinepersistence.CountTemplateSubscribedReplayScopeTx(ctx, tx, event)
 	})
 }
+func CountTemplateEventReplayScopesForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplateEventReplayScopesTx(ctx, tx, event)
+	})
+}
 func CountTemplateInstancesForTest(ctx context.Context, selected any, template string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return pipelinepersistence.CountTemplateInstancesTx(ctx, tx, template)
@@ -175,6 +180,11 @@ func CountTemplateActiveAgentRoutesForTest(ctx context.Context, selected any, ag
 func CountTemplatePlaceholderRoutesForTest(ctx context.Context, selected any, path string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return pipelinepersistence.CountTemplatePlaceholderRoutesTx(ctx, tx, path)
+	})
+}
+func CountTemplatePrefixRoutingRulesForTest(ctx context.Context, selected any, template string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountTemplatePrefixRoutingRulesTx(ctx, tx, template)
 	})
 }
 func CountPhysicalRoutingRulesForTest(ctx context.Context, selected any) (int, error) {

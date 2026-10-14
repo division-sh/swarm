@@ -62,6 +62,9 @@ func templateStorageReadCases(run, event string) []templateStorageReadCase {
 		{"scope", func(ctx context.Context, owner any) (any, error) {
 			return CountTemplateSubscribedReplayScopeForTest(ctx, owner, event)
 		}, 0, false, false},
+		{"all_event_scopes", func(ctx context.Context, owner any) (any, error) {
+			return CountTemplateEventReplayScopesForTest(ctx, owner, event)
+		}, 0, false, false},
 		{"instances", func(ctx context.Context, owner any) (any, error) {
 			return CountTemplateInstancesForTest(ctx, owner, "consumer")
 		}, 0, false, false},
@@ -76,6 +79,9 @@ func templateStorageReadCases(run, event string) []templateStorageReadCase {
 		}, 0, false, false},
 		{"placeholder_routes", func(ctx context.Context, owner any) (any, error) {
 			return CountTemplatePlaceholderRoutesForTest(ctx, owner, "operating/one")
+		}, 0, false, false},
+		{"template_prefix_routes", func(ctx context.Context, owner any) (any, error) {
+			return CountTemplatePrefixRoutingRulesForTest(ctx, owner, "consumer")
 		}, 0, false, false},
 		{"all_routes", func(ctx context.Context, owner any) (any, error) { return CountPhysicalRoutingRulesForTest(ctx, owner) }, 0, false, false},
 		{"accounts", func(ctx context.Context, owner any) (any, error) {

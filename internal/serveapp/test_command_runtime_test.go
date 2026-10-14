@@ -394,7 +394,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
 			eventID, runID := publicInputFailureIdentity(t, rpcErr)
-			requirePublicInputRollbackNoResidue(t, db, backend, eventID, runID)
+			requirePublicInputRollbackNoResidue(t, reader, backend, eventID, runID)
 			if got := servedEventPublishAPIIdempotencyCount(t, reader, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
 				t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
 			}
@@ -436,7 +436,7 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
 				}
 				eventID, runID := publicInputFailureIdentity(t, rpcErr)
-				requirePublicInputRollbackNoResidue(t, db, backend, eventID, runID)
+				requirePublicInputRollbackNoResidue(t, reader, backend, eventID, runID)
 				if got := servedEventPublishAPIIdempotencyCount(t, reader, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
 					t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
 				}
@@ -504,20 +504,41 @@ func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (strin
 	return eventID, runID
 }
 
-func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, eventID, runID string) {
+func requirePublicInputRollbackNoResidue(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend, eventID, runID string) {
 	t.Helper()
 	queries := []struct {
 		label string
-		sql   string
-		args  []any
-	}{{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}}, {label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`}, {label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}}, {label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`}, {label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}}, {label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}}, {label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}}}
+		read  func(context.Context) (int, error)
+	}{
+		{"run", func(ctx context.Context) (int, error) { return storetest.CountPhysicalRunIdentity(ctx, reader, runID) }},
+		{"flow instance", func(ctx context.Context) (int, error) {
+			return storetest.CountTemplateInstances(ctx, reader, "telegram-chat")
+		}},
+		{"entity", func(ctx context.Context) (int, error) { return storetest.CountWorkflowRunFieldRows(ctx, reader, runID) }},
+		{"route", func(ctx context.Context) (int, error) {
+			return storetest.CountTemplatePrefixRoutingRules(ctx, reader, "telegram-chat")
+		}},
+		{"event", func(ctx context.Context) (int, error) {
+			return storetest.CountTemplateEventIdentity(ctx, reader, eventID)
+		}},
+		{"delivery", func(ctx context.Context) (int, error) {
+			return storetest.CountTemplateEventDeliveries(ctx, reader, eventID)
+		}},
+		{"replay scope", func(ctx context.Context) (int, error) {
+			return storetest.CountTemplateEventReplayScopes(ctx, reader, eventID)
+		}},
+	}
 	for _, query := range queries {
 		var count int
-		statement := query.sql
-		if backend == servedparity.BackendExplicitPostgres && len(query.args) > 0 {
-			statement = strings.Replace(statement, "?", "$1::uuid", 1)
+		if reader == nil {
+			t.Fatalf("%s count %s rollback rows: missing original selected reader", backend, query.label)
 		}
-		if err := db.QueryRowContext(context.Background(), statement, query.args...).Scan(&count); err != nil {
+		err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			count, err = query.read(ctx)
+			return err
+		})
+		if err != nil {
 			t.Fatalf("%s count %s rollback rows: %v", backend, query.label, err)
 		}
 		if count != 0 {

@@ -58,6 +58,12 @@ func CountTemplateSubscribedReplayScopeTx(ctx context.Context, tx *sql.Tx, event
 	return count, err
 }
 
+func CountTemplateEventReplayScopesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1`, event).Scan(&count)
+	return count, err
+}
+
 func CountTemplateInstancesTx(ctx context.Context, tx *sql.Tx, template string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE flow_template=$1`, template).Scan(&count)
@@ -88,6 +94,12 @@ func CountTemplateActiveAgentRoutesTx(ctx context.Context, tx *sql.Tx, agent, pa
 func CountTemplatePlaceholderRoutesTx(ctx context.Context, tx *sql.Tx, path string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM routing_rules WHERE flow_instance=$1 AND subscriber_id='ceo-{product_id}'`, path).Scan(&count)
+	return count, err
+}
+
+func CountTemplatePrefixRoutingRulesTx(ctx context.Context, tx *sql.Tx, template string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE $1`, template+"/%").Scan(&count)
 	return count, err
 }
 

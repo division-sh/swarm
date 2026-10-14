@@ -57,6 +57,9 @@ func CountTemplateNodeReceipt(ctx context.Context, selected any, event, node str
 func CountTemplateSubscribedReplayScope(ctx context.Context, selected any, event string) (int, error) {
 	return private.CountTemplateSubscribedReplayScopeForTest(ctx, selected, event)
 }
+func CountTemplateEventReplayScopes(ctx context.Context, selected any, event string) (int, error) {
+	return private.CountTemplateEventReplayScopesForTest(ctx, selected, event)
+}
 func CountTemplateInstances(ctx context.Context, selected any, template string) (int, error) {
 	return private.CountTemplateInstancesForTest(ctx, selected, template)
 }
@@ -71,6 +74,9 @@ func CountTemplateActiveAgentRoutes(ctx context.Context, selected any, agent, pa
 }
 func CountTemplatePlaceholderRoutes(ctx context.Context, selected any, path string) (int, error) {
 	return private.CountTemplatePlaceholderRoutesForTest(ctx, selected, path)
+}
+func CountTemplatePrefixRoutingRules(ctx context.Context, selected any, template string) (int, error) {
+	return private.CountTemplatePrefixRoutingRulesForTest(ctx, selected, template)
 }
 func CountPhysicalRoutingRules(ctx context.Context, selected any) (int, error) {
 	return private.CountPhysicalRoutingRulesForTest(ctx, selected)
