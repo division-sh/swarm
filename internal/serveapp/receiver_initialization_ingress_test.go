@@ -30,6 +30,7 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 			defer unblock()
 			hold := &exactOriginDiagnosticHold{eventType: "inbound.telegram.text_message", entered: make(chan string, 1), release: release}
 			opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyProviderReceiverInitialization(t))
+			completion := installReceiverCompletionBoundary(t)
 			var source semanticview.Source
 			opts.TestRuntimeReadyHook = func(runtime *runtimepkg.Runtime) { source = runtime.Options.WorkflowModule.SemanticSource() }
 			process, rt := start()
@@ -55,7 +56,7 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 			}
 			rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
 				t.Helper()
-				requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock)
+				requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock, completion, rt.BundleHash)
 				if err := waitExactOriginPublications(t.Context(), probe, seed.EventID); err != nil {
 					t.Fatal(err)
 				}
