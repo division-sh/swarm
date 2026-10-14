@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/platform"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
@@ -94,14 +93,11 @@ func newWorkspaceBuildCommand(ctx context.Context, RepoRoot string) *cobra.Comma
 }
 
 func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspaceBuildOptions) error {
-	var cfg *config.Config
-	if configPath := strings.TrimSpace(opts.configPath); configPath != "" {
-		cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: configPath})
-		if err != nil {
-			return fmt.Errorf("workspace image build failed: load config: %w", err)
-		}
-		cfg = cfgResult.Config
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.configPath})
+	if err != nil {
+		return fmt.Errorf("workspace image build failed: load config: %w", err)
 	}
+	cfg := cfgResult.Config
 	image := strings.TrimSpace(opts.image)
 	if image == "" {
 		var err error
