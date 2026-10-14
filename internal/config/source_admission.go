@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -94,6 +95,16 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 			child := declared[field.Name]
 			if _, admitted := options[field.Name]; !admitted {
 				return runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
+			}
+			if shape == reflect.TypeFor[LLMProviderLimitPolicy]() {
+				scalar, err := field.Value.Scalar()
+				if err != nil || scalar.Tag != "!!int" {
+					return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
+				}
+				var count int
+				if err := field.Value.Project(&count); err != nil || count <= 0 {
+					return fmt.Errorf("%s.max_concurrency must be a positive integer", owner)
+				}
 			}
 			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {
 				return err

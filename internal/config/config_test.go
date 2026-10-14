@@ -458,19 +458,10 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid profile and model limits",
+			name: "valid profile integer",
 			limits: map[string]LLMProviderLimitPolicy{
 				"anthropic": {
-					RateLimit:             "10/s",
-					RateLimitMaxWait:      "1s",
-					MaxConcurrency:        2,
-					MaxConcurrencyMaxWait: "0s",
-					Models: map[string]LLMProviderLimitPolicy{
-						"regular": {
-							RateLimit:        "20/m",
-							RateLimitMaxWait: "5s",
-						},
-					},
+					MaxConcurrency: 2,
 				},
 			},
 		},
@@ -478,36 +469,36 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 			name: "default no limit",
 		},
 		{
-			name: "missing rate wait",
+			name: "retired rate rejected",
 			limits: map[string]LLMProviderLimitPolicy{
 				"anthropic": {RateLimit: "1/s"},
 			},
-			wantErr: "rate_limit requires rate_limit_max_wait",
+			wantErr: `field "rate_limit" is not supported`,
 		},
 		{
-			name: "missing concurrency wait",
+			name: "retired concurrency wait rejected",
 			limits: map[string]LLMProviderLimitPolicy{
-				"anthropic": {MaxConcurrency: 1},
+				"anthropic": {MaxConcurrency: 1, MaxConcurrencyMaxWait: "0s"},
 			},
-			wantErr: "max_concurrency requires max_concurrency_max_wait",
+			wantErr: `field "max_concurrency_max_wait" is not supported`,
 		},
 		{
 			name: "active mock profile accepted",
 			limits: map[string]LLMProviderLimitPolicy{
-				"mock": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+				"mock": {MaxConcurrency: 1},
 			},
 		},
 		{
 			name: "reserved local profile rejected",
 			limits: map[string]LLMProviderLimitPolicy{
-				"local": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+				"local": {MaxConcurrency: 1},
 			},
 			wantErr: "reserved",
 		},
 		{
 			name: "profile key whitespace rejected",
 			limits: map[string]LLMProviderLimitPolicy{
-				"anthropic ": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+				"anthropic ": {MaxConcurrency: 1},
 			},
 			wantErr: "profile key must not contain leading or trailing whitespace",
 		},
@@ -520,7 +511,7 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "model key must not contain leading or trailing whitespace",
+			wantErr: `field "models" is not supported`,
 		},
 		{
 			name: "model nested models rejected",
@@ -531,7 +522,17 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "nested model limits are not supported",
+			wantErr: `field "models" is not supported`,
+		},
+		{
+			name:    "negative concurrency rejected",
+			limits:  map[string]LLMProviderLimitPolicy{"anthropic": {MaxConcurrency: -1}},
+			wantErr: "max_concurrency must be a positive integer",
+		},
+		{
+			name:    "empty override map rejected",
+			limits:  map[string]LLMProviderLimitPolicy{"anthropic": {Models: map[string]LLMProviderLimitPolicy{}}},
+			wantErr: `field "models" is not supported`,
 		},
 	}
 	for _, tc := range tests {
