@@ -1664,8 +1664,8 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]: else" {
-		t.Fatalf("display = %q, want rules[0]: else", got)
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]" {
+		t.Fatalf("display = %q, want rules[0]", got)
 	}
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("selected rules fact = %#v", result.HandlerRuleSelection)
@@ -1717,7 +1717,7 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
 	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
-		t.Fatalf("RuleID = %q, want empty when rules do not match", got)
+		t.Fatalf("selection display = %q, want empty when rules do not match", got)
 	}
 	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch || requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("no-match rules fact = %#v", result.HandlerRuleSelection)
@@ -1730,7 +1730,6 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.T) {
 	handler, err := loadNodeHandlerFixture(`rules:
   - when: evaluator.failure
-  - else: true
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -1778,14 +1777,12 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler runtimecontracts.SystemNodeEventHandler
 			predicate := "condition"
-			fallback := ""
 			if tc.field == "rules" {
 				predicate = "when"
-				fallback = "  - else: true\n"
 			}
 			raw := fmt.Sprintf(`%s:
   - %s: unsupported.condition
-`, tc.field, predicate) + fallback
+`, tc.field, predicate)
 			var err error
 			handler, err = loadNodeHandlerFixture(raw)
 			if err != nil {
@@ -4491,8 +4488,7 @@ rules:
       selector: payload.mode
       equals: deep
     advances_to: deep_scan
-  - default: true
-    advances_to: fallback
+  - advances_to: fallback
 `)
 	if err != nil {
 		t.Fatalf("source admission: %v", err)
@@ -4701,11 +4697,11 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			display: "rules[1]: when payload.score >= 40",
 		},
 		{
-			name:    "else_low",
+			name:    "fallback_low",
 			score:   12,
 			bools:   map[string]bool{"payload.score >= 80": false, "payload.score >= 40": false},
 			bucket:  "low",
-			display: "rules[2]: else",
+			display: "rules[2]",
 		},
 	}
 	for _, tc := range cases {
