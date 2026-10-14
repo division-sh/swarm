@@ -111,6 +111,16 @@ Cumulative proposed accepted total since04:02Z:1492/1249; this is pending review
 acceptance, not a preemptive ledger closure. No policy/signature-pair exception,
 classification change, transferred credit or ceiling increase.
 
+The extra12 findings/9 raw above upfront167/129 are exactly the omitted getter,
+artifact-count and carrier occurrences in the ALREADY ENUMERATED
+Test2376RootManifestRejectsBeforePublicationBothStores:3 QueryRow +3 Scan
++1 selectedRuntimeStoreForTest +2 DatabaseForTest calls, one local DB type and
+two selected-construction tuples. The root was already included in the approved
+29-declaration capture and eight-file boundary, including its post-stop read;
+no unrelated declaration or file was added to reach a number. Comparison uses
+the saved standing-control-upfront-retained-identities.tsv against the exact
+signed366/current retained-ledger identity maps, not rounded estimates.
+
 Boundary receipt PASS4.813s includes event admitted-persistence, closed delivery
 SQL owners and run lifecycle guards. Vet -composites=false and pinned U1000
 pass for the changed native/domain/tool subtree. This is not a claim that all
