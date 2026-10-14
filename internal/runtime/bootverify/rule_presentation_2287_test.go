@@ -15,7 +15,7 @@ func TestExecutableReaderPresentationKeepsPositionalSourceSlots(t *testing.T) {
 			phase                                pipeline.WorkflowEntityFieldLifecyclePhase
 		}{
 			{
-				name: "rules", raw: "rules:\n  - when: false\n  - case: {selector: payload.mode, equals: 'gold'}\n  - else: true\n",
+				name: "rules", raw: "rules:\n  - when: false\n  - case: {selector: payload.mode, equals: 'gold'}\n  - emit: fallback\n",
 				expression: `payload.mode == "gold"`, display: "rules[1]: case {selector: payload.mode, equals: 'gold'}.condition", slot: "rules[1].when",
 				context: pipeline.WorkflowConditionContextRule, phase: pipeline.WorkflowEntityFieldLifecycleRule,
 			},
