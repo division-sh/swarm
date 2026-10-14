@@ -165,3 +165,26 @@ omission controls, native/public roots and final preflight remain outstanding.
 
 C's new disjoint D07 replay reservation 6163489309 takes priority. This checkpoint
 is parked; it is not an implementation-complete, reviewer-ready or closure claim.
+
+### Numeric owner guard correction
+
+An exploratory direct engine/workflowexpr aggregate was interrupted and earns no
+native qualification credit: engine includes real database consumers and must use
+managed admission. Its workflowexpr portion exposed an extraction-only RED in
+TestExecutionAdapterOwners: that unchanged guard requires NormalizeRuntimeNumber
+in normalizeValueForType itself. Keep that canonical call in the dispatcher and
+remove the redundant numeric helper; no guard/registry or numeric law changes.
+The owner and hostile guard tests now pass under race (20.943s); the complete
+49-root entityruntime suite passes race x3 (1.187s), zero failures/skips. The
+pre-correction aggregate and interrupted engine evidence remain unqualified.
+
+The original signed checkpoint passed the independent Git-snapshot complexity
+ratchet and all 12 separately compiled omission controls refused as intended;
+the disposable source was restored clean. Its clean preflight passed all 25
+phases and vet in 368.610s, not exact-head credit for this subsequent correction.
+Updated production size is 938 gross, net +110. Net eligibility is explicitly
+pending reviewer-g question 6164187973, not silently waived. Final native/public
+proof, ratchet/preflight refresh and hosted qualification remain outstanding.
+
+C's D09 reservation 6164159759 now takes priority; no production PR push occurs
+from this parked checkpoint.
