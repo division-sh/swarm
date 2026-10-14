@@ -44,7 +44,8 @@ func workflowActivityNativeSourceFixture(t *testing.T, backend string, source se
 
 func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
-	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.(sourceartifactfixture.Writer), artifact)
+	// Keep the first artifact write inside RequireRun's accounting boundary.
+	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
