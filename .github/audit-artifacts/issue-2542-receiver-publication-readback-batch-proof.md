@@ -84,14 +84,40 @@ The fingerprint-only control confirms the collector remains
 b5bdd1d92df22693c570dab217a46c8a184f37085f496653d59b732c12399a4d.
 The census independently consumes the older selected-read-role endpoint and
 needs the same finite current-to-signed inverse as the tool-history consumer.
-Exact request6173711592 proposes source-evidence composition only: no classifier,
-fingerprint, identity, multiplicity, retirement list or ceiling change, and zero
-credit for the source bridge itself. No red is waived or called a ratchet pass.
+Ruling6173853859 authorizes the complete32-pin current-to-signed composition,
+including all eight older selected-role intersections. The supplied-current and
+actual-sibling paths use the same exact inverse once. Hostile fixture modules
+copy the actual current bodies, never obsolete intermediate bodies. The new
+source controls, selected-role hostile controls, exact served-debug model,
+retained-predecessor ceiling and unchanged fingerprint pass together in
+readback-final-composed-source-controls.jsonl (package424.573s). This gives no
+classifier, identity, multiplicity, retirement-list or ceiling authority and no
+credit for the bridge itself.
+
+The second real downward census is still RED215.286s; native fixture controls
+remain GREEN. A temporary read-only discriminator (removed after diagnosis)
+shows no actual additions: actual physical debt is5622/3565, a182/160 decrease.
+The complete blocker is five existing served-debug signature pairs with eleven
+occurrences calling semanticNumericOutput. Actual contains neither raw side;
+head still retains the newer signatures, which fail head-to-trusted comparison.
+Ruling6174425427 authorizes a separate exact five-pair retirement comparison,
+preserving the original49-pair/71-occurrence ledger and34-pair/44-occurrence
+retirement inventory byte-for-byte. The added comparison matches complete
+identities and multiplicities, requires actual-census proof, exact donors and
+fresh authentication of all32 native endpoints, and refuses resurrection,
+altered identities/owners/carriers, fabricated proofs or deletion funding a new
+escape. Its own focused controls and71-occurrence conservation pass. The
+combined downward/read-only ratchet remains pending; no earlier failed command
+is represented as a real ratchet pass.
 
 The accepted predecessor remains751 findings /635 raw removals. Its physical
 baseline5804/3725 includes a held78/62 mock migration; qualified remaining is
 5882/3787. Those78/62 remain held at this checkpoint too. Final new numbers
 require the real downward census and a per-identity qualified/held comparison.
+The separate numeric-fork hold is exactly9 findings /8 raw occurrences: six
+direct query/scan operations, the helper's raw carrier and two caller operations.
+Thus the read-only projection would qualify173/152 independently green, not182/160
+and not the175 target. This is still a projection, not ratchet/acceptance credit.
 
 ## Executed Manifestations
 
@@ -148,8 +174,13 @@ isolated reader wrappers; the current batch retires only its finite outputs.
 
 The #2617 recorded source inventory and611 deferred constructions are untouched.
 Rebase remains deferred until #2617 merges. No push, PR, server2 run, local tier
-or hosted qualification is claimed. Native unused and canonical complexity are
-recorded separately when definitively complete. Limited vet uses composites=false;
+or hosted qualification is claimed. Native unused passes for the changed packages;
+the two-package source/driver repair delta also passes U1000 in default, race and
+issue2413 views. This is not cross-platform union qualification. Canonical
+complexity at signedb1d26317c2 against19 passes with no threshold growth:
+cognitive>=30 remains557,>=50 remains196; cyclomatic>=30 remains259,>=50 remains59.
+The first canonical measurement was RED before flag validation was extracted;
+that receipt is retained, not relabeled. Limited vet uses composites=false;
 existing unkeyed-literal warnings are not represented as a default vet pass.
 Preflight is unavailable on this frozen base; the instructed rebased-tree
 preflight is required before any eventual push. No runtime/spec semantics change

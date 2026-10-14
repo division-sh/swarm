@@ -61,6 +61,10 @@ func debtServedObservationRetirementPairs() [][2]authorityDebtSite {
 }
 
 func debtServedObservationRetirementComparisons(actual, head, base, source map[string]authorityDebtSite, proofs ...debtDeliveryRetirementProof) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	head, base, source, failures := debtReadbackRetirementComparisons(actual, head, base, source, proofs...)
+	if len(failures) != 0 {
+		return head, base, source, failures
+	}
 	pairs := debtServedObservationRetirementPairs()
 	needed := false
 	for _, pair := range pairs {
