@@ -122,16 +122,11 @@ func (o *expiredEvaluationOwner) ClaimFanOutIntent(ctx context.Context, req pipe
 	return intent, claim, found, err
 }
 
-func (o *expiredEvaluationOwner) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
-	input, err := o.FanOutObligationOwner.LoadFanOutEvaluation(ctx, claim)
-	if err == nil {
+func (o *expiredEvaluationOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, func(input pipeline.FanOutEvaluationInput) error {
 		o.loadedAt = time.Now()
-	}
-	return input, err
-}
-
-func (o *expiredEvaluationOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	group, err := o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+		return validate(input)
+	})
 	if err == nil && group != nil {
 		o.groupAt = time.Now()
 	}
@@ -143,10 +138,10 @@ func (o *expiredEvaluationOwner) BeginFanOutPublicationGroup(ctx context.Context
 		select {
 		case <-o.executor.resume:
 		case <-ctx.Done():
-			return group, ctx.Err()
+			return input, group, ctx.Err()
 		}
 	}
-	return group, err
+	return input, group, err
 }
 
 func (o *expiredEvaluationOwner) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {

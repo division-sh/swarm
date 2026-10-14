@@ -86,6 +86,10 @@ func (startupRecoveryWorkflowOwner) LoadFanOutEvaluation(context.Context, runtim
 	return runtimepipeline.FanOutEvaluationInput{}, errors.New("startup recovery fixture has no fan-out work")
 }
 
+func (startupRecoveryWorkflowOwner) BeginFanOutEvaluation(context.Context, runtimefanout.Claim, func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
+	return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: errors.New("startup recovery fixture has no fan-out work")}
+}
+
 func (startupRecoveryWorkflowOwner) CommitFanOutChunk(context.Context, runtimepipeline.FanOutChunkCommand) (runtimepipeline.CommittedFanOutChunk, error) {
 	return runtimepipeline.CommittedFanOutChunk{}, errors.New("startup recovery fixture has no fan-out work")
 }

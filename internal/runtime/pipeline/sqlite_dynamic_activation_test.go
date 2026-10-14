@@ -428,6 +428,18 @@ func (o *singleTurnFanOutOwner) BeginFanOutPublicationGroup(_ context.Context, c
 	return o.group, nil
 }
 
+func (o *singleTurnFanOutOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
+	input, err := o.LoadFanOutEvaluation(ctx, claim)
+	if err != nil {
+		return input, nil, &FanOutEvaluationLoadError{Cause: err}
+	}
+	if err := validate(input); err != nil {
+		return input, nil, &FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+	}
+	group, err := o.BeginFanOutPublicationGroup(ctx, claim)
+	return input, group, err
+}
+
 func (b *recordingPipelineBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error) {
 	if len(requests) > fanoutobligation.InitialChunkSize {
 		return nil, fmt.Errorf("recording fan-out batch exceeds one bounded turn")
