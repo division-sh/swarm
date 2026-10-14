@@ -17,12 +17,12 @@ type serveSessionLogoutDispatcher struct {
 	posture  executionposture.Posture
 }
 
-func (d *serveSessionLogoutDispatcher) PrepareSessionLogout(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionLogoutTarget, error) {
+func (d *serveSessionLogoutDispatcher) PrepareSessionLogout(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionLogoutPreparation, error) {
 	if d == nil || d.sessions == nil || d.effects == nil || !d.posture.Valid() {
-		return channelonboarding.SessionLogoutTarget{}, fmt.Errorf("session logout requires its installed owners")
+		return channelonboarding.SessionLogoutPreparation{}, fmt.Errorf("session logout requires its installed owners")
 	}
 	if err := d.posture.Admit(executionmode.Live, "explicit session logout"); err != nil {
-		return channelonboarding.SessionLogoutTarget{}, err
+		return channelonboarding.SessionLogoutPreparation{}, err
 	}
 	return d.sessions.PrepareSessionLogout(ctx, op)
 }

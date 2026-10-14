@@ -6,37 +6,58 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
-// SessionLogoutTarget is frozen responsibility evidence, not an SDK execution
-// permit. Only the retained private connection can admit its occurrence.
-type SessionLogoutTarget struct {
+// Preparation identifies the original SDK occurrence but cannot assert process
+// authority; the selected reservation owner freezes that evidence separately.
+type SessionLogoutPreparation struct {
 	OperationID       string                                  `json:"operation_id"`
 	OperationRevision int64                                   `json:"operation_revision"`
 	OccurrenceID      string                                  `json:"occurrence_id"`
 	TargetSelector    string                                  `json:"target_selector"`
 	Account           operatorchannel.SessionAccountAdmission `json:"account"`
 	Coordinate        ChannelRuntimeContextCoordinate         `json:"coordinate"`
+	ProcessBinding    processbinding.Binding                  `json:"process_binding"`
 }
 
-func (t SessionLogoutTarget) Validate() error {
+func (t SessionLogoutPreparation) Validate() error {
 	if uuid.Validate(t.OperationID) != nil || uuid.Validate(t.OccurrenceID) != nil || t.OperationRevision < 1 || strings.TrimSpace(t.TargetSelector) == "" ||
-		t.Account.Provider != "whatsapp" || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil {
+		t.Account.Provider != "whatsapp" || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
+		t.ProcessBinding.Validate() != nil || t.ProcessBinding.BundleHash != t.Coordinate.BundleHash ||
+		t.ProcessBinding.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID {
 		return fmt.Errorf("%w: logout requires exact paired session, operation revision, source and SDK occurrence", ErrInvalidRequest)
 	}
 	return nil
 }
 
-func (t SessionLogoutTarget) MatchesOperation(op Operation) bool {
+func (t SessionLogoutPreparation) MatchesOperation(op Operation) bool {
 	return t.Validate() == nil && op.Posture == ActivationSessionConnection &&
 		op.Provider == t.Account.Provider && op.OperationID == t.OperationID && op.Revision == t.OperationRevision &&
 		op.SessionConnectionID == t.Account.ConnectionID && op.SessionAccount == t.Account && op.Coordinate == t.Coordinate && op.TargetSelector == t.TargetSelector
 }
 
+type SessionLogoutTarget struct {
+	SessionLogoutPreparation
+	ProcessStamp processbinding.LeaseStamp `json:"process_stamp"`
+}
+
+func (t SessionLogoutTarget) Validate() error {
+	if err := t.SessionLogoutPreparation.Validate(); err != nil {
+		return err
+	}
+	if t.ProcessStamp.Validate() != nil || t.ProcessStamp.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID ||
+		t.ProcessStamp.LeaseID != t.ProcessBinding.ProcessAuthorityID || t.ProcessStamp.OwnerID != t.ProcessBinding.ProcessOwnerID ||
+		t.ProcessStamp.BootID != t.ProcessBinding.ProcessBootID {
+		return fmt.Errorf("%w: logout requires exact original process attribution", ErrInvalidRequest)
+	}
+	return nil
+}
+
 type SessionLogoutLifecycle interface {
-	PrepareSessionLogout(context.Context, Operation) (SessionLogoutTarget, error)
+	PrepareSessionLogout(context.Context, Operation) (SessionLogoutPreparation, error)
 	DispatchSessionLogout(context.Context, TeardownOperation) error
 }
 
@@ -163,36 +184,36 @@ func (s *DestructiveService) Logout(ctx context.Context, operationID string, exp
 	return s.driveSessionLogout(ctx, op)
 }
 
-func (s *DestructiveService) prepareSessionLogout(ctx context.Context, principalID, operationID string, expectedRevision int64) (Operation, SessionLogoutTarget, error) {
+func (s *DestructiveService) prepareSessionLogout(ctx context.Context, principalID, operationID string, expectedRevision int64) (Operation, SessionLogoutPreparation, error) {
 	operations, err := s.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
-		return Operation{}, SessionLogoutTarget{}, err
+		return Operation{}, SessionLogoutPreparation{}, err
 	}
 	var retained *Operation
 	for _, op := range operations {
 		if op.OperationID == operationID {
 			if retained != nil {
-				return Operation{}, SessionLogoutTarget{}, ErrConflict
+				return Operation{}, SessionLogoutPreparation{}, ErrConflict
 			}
 			retained = &op
 		}
 	}
 	if retained == nil {
-		return Operation{}, SessionLogoutTarget{}, ErrNotFound
+		return Operation{}, SessionLogoutPreparation{}, ErrNotFound
 	}
 	if retained.PrincipalID != principalID || retained.Phase == PhaseFailed || retained.Phase == PhaseRetired ||
 		retained.Posture != ActivationSessionConnection || retained.SessionAccount.Validate() != nil || s.logout == nil {
-		return Operation{}, SessionLogoutTarget{}, ErrConflict
+		return Operation{}, SessionLogoutPreparation{}, ErrConflict
 	}
 	if retained.Revision != expectedRevision {
-		return Operation{}, SessionLogoutTarget{}, ErrRevisionConflict
+		return Operation{}, SessionLogoutPreparation{}, ErrRevisionConflict
 	}
 	target, err := s.logout.PrepareSessionLogout(ctx, *retained)
 	if err != nil {
-		return Operation{}, SessionLogoutTarget{}, err
+		return Operation{}, SessionLogoutPreparation{}, err
 	}
 	if !target.MatchesOperation(*retained) {
-		return Operation{}, SessionLogoutTarget{}, ErrConflict
+		return Operation{}, SessionLogoutPreparation{}, ErrConflict
 	}
 	return *retained, target, nil
 }

@@ -84,6 +84,66 @@
     "body_sha256": "e8544919aa82a84497ea727e1599dea8d9d002f0f76c09bcf2d78d696b5b9871"
   },
   {
+    "owner": "internal/channelonboarding/logout.go::*DestructiveService.Logout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "87245bb52f467577e9a4505f34785a0eee7851a4dbc676466462dcb88e57325b"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::*DestructiveService.driveSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "9a8cf284bcfe8788edd95b2fdfea36de59a2499f38dec9cfd4be6dec1f7e605b"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::*DestructiveService.prepareSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "117706703a5f155bc74b4e8fe51e5eeb8d9c1a7551a4874c0cd5823d0d0eb3f5"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::*Service.sessionLogoutReadback",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "b10795e6c3f97dbecf88c43a5aa9d1f05301195de0067bb215ab2a3ceb3cdc51"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::NewSessionLogoutReadback",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "fe29f30156040c83fe4b6bfe6c8f4e43b7bd923824364f91434b01874ea6305a"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::RetainedSessionLogoutPending",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "6e8247ab0e260bad863645909a7b22eb3c3c0bc398126bac62906ae083a40199"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::SessionLogoutPreparation.MatchesOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "9ba6b86e86576b9c294acddbdd71176ff3bbdad54784fe3ca81519cfed674d6c"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::SessionLogoutPreparation.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "e93c147889d36ba7dcfbab43149ae9ef3da4c36c9ab15784ed64aa7c97884872"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::SessionLogoutReadback.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "7bc469ea67ce2788e3764d55f46cd72fcf1f6b4122d48ab32a2845c534eb8476"
+  },
+  {
+    "owner": "internal/channelonboarding/logout.go::SessionLogoutTarget.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "2ab990c8bb289d5e684cbc6434fbc4995008dfd2b20f4646daec519e795d2c65"
+  },
+  {
     "owner": "internal/channelonboarding/publication.go::*ChannelActivationGeneration.UnmarshalJSON",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-publication,P08,P10,P21",
@@ -3656,163 +3716,169 @@
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::observeServeChannelSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
     "body_sha256": "0237f01ae8a93b182a5ccd243ca7782bdf18963d1c5344e1ea8bf16eacfee9cf"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::selectServeChannelWrite",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
     "body_sha256": "7d6b454f7ef49a584c5ae66e0851ae36d9f28d3ea4b0a28145d25ad3c58eba17"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionBootstrapRuntimeSelector",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
-    "body_sha256": "809e98603cd3a17b74c91746c5f0cf7dafacab359b8c86447f08b730a7c85f5b"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
+    "body_sha256": "f4f2039cf0560422a1e4320f6982d73fb3c2f277a17bb014b19cd98baee3c7a7"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionIncomingSelection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
     "body_sha256": "e694fb34b1e291429a663bb049618dace98c504434de1b8aa751f40afbacbf8a"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionProcessBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
+    "body_sha256": "d9d9dd9ff14a930943c7e74d420934dad66bcb9c8211bbb4bc0f9e89a2dd429a"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::unavailableServeSessionBootstrap",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
     "body_sha256": "4d6a1f975f6edfd33fc0c73392169ac7f2f3c5f444723e16d3b05ef345382d10"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::validateServeSessionCandidate",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp",
     "body_sha256": "cb7a38ee9dd5598af74170c4f1a4990abe93a20051e77dd24638511c94214d83"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.AdmitSessionAccount",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "4cd35118196104b70ae65ce4081857232cbdc6252ca643a24496f38313b05b87"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.BootstrapSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "f248cae1ba5374b57db8be638ab9aff0519b2bcccd183e318ce64d75ac199066"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ChannelExecution",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "f9d762b3c3a5299e1a9b99d1a63867e058c4ddcf6dc691d13647500a0cd9b759"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CheckpointSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "689ee0b607eb4627429ebb842f2f853651fa0adf52c19b79a4414d7c57d86d3c"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CurrentValueMatchesSeal",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "90baafa665e87ee063bac6db1547d5aa6cf2079b13d3c9cedac9392e349060ae"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ObserveSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "409de740d712f4bd35b73084ccdb1cefff2c1aa8b297ad3a68964694256b5510"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.QualifySessionPlan",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "fad43ada3d8f69cc2c311c12b0e214ac10969cf1b22d38afc6baf943013b40f5"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ReadSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "59665e46245a2efc604804648dd18b51bb7610e7aefe098046928a1aa75a0cbb"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "0e6769429d2da1bac647b45726a5e49d777c19788ce7d4babe58a7cde84712ed"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RetireInactiveSessions",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "a4dc8fa7dc4603d316a24ae5bf1ac745c32b2cb110d4de73c7d441fa9d76ce16"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
+    "body_sha256": "aa04ae8ee294be847293c78bf024a1237c3b529f67e2104b081bbe5a54b4d004"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "1f9a7ae14a7deeb23792db0f1fd7ef29b97d3192008d07f6d2c420d6eb5e34a2"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.currentConnection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "e8b4cda72ac559543c0e06c2ea0d5481a866b46d5cd1828d4dfcb28080837af0"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.observeSessionRetirement",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "f9ee9a461a6e68a36f25f00f5dcd9b8488f97f23a80598360d4be402bbe69704"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "a4146d55d1f18722266b87a1669a604e7feab7660ac641fff7c9a05084401fb4"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
+    "body_sha256": "bd1a6630a70fad32d32359d85f9458f5e4595ca4146a69aca3427aa5f2d1ec82"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "3b0ceea6e37dcd3d6831d1f0ecf0f615b62cc5c07fc7951b1123eb448bb9be30"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateRetainedSessionOperation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "f0d434f0bfe1638a0968db036e076a4937b852e93779a9f63a6e3cc9486fac74"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrapAttempt.current",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "ad4bf466f03e8784fddefad53b30f870ea8374a9f217dc5fc3d3e97bfbd5b89e"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::init",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "096dad8a6acfa957329319332b5b5e56392bdc332d84baf91d2122441a3b2568"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::newNativeServeSessionBootstrap",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "975afdb597f160ed4862b396adfc3814bb8bc7d1cfffceeaa872133b39bfd90a"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp",
     "body_sha256": "d2be2406c8339682413ddbd08c3a2d3673740c184c59f9f5778d4094f253de1c"
   },
   {
@@ -3908,7 +3974,7 @@
   {
     "owner": "internal/serveapp/main.go::Run",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "d1825b3df31983f69d71d1f5b0daf7f63c099381ea6b81e32634640642124259"
   },
   {
@@ -3926,8 +3992,8 @@
   {
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8c462f5b3386160df2a9fb561e362c4ea1fc2ae17d0b15ffde643ba333aaed17"
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
+    "body_sha256": "558ce468c530627d4951f54c2d42bc26328fccd527cbbe1782006aa2c50eb44c"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -4274,7 +4340,7 @@
   {
     "owner": "internal/serveapp/main.go::startServeOwnershipWatch",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "d5c44e2684b44106d92a4401eb21461380c0cdd306acf1b74271f179f359feda"
   },
   {
@@ -4383,7 +4449,7 @@
     "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.commitReady",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-boot,P08,P10,P21",
-    "body_sha256": "1ab926d96767a54f0cdec2f8dc6fc7ec9f84d1adf78d01d3f718451d4affc03e"
+    "body_sha256": "d16f28f111b94ba46964ed37b9d32672a52fbe3103e4a8e95d31feaa2f00d544"
   },
   {
     "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.fail",
@@ -4468,12 +4534,6 @@
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-boot,P08,P10,P21",
     "body_sha256": "13a49475dd0cce709aecbf7bf1e85b99cba893ea64cdfb19b48d5b5c5763d3b7"
-  },
-  {
-    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordRecoveredPreviousSession",
-    "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,P08,P10,P21",
-    "body_sha256": "d8e3dbcfc87feaf315261d3412358ce7a349e66d76bc13c2aee1aa53858cd2e7"
   },
   {
     "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordStore",
@@ -4566,12 +4626,6 @@
     "body_sha256": "8b1ef75d1d3ae6c6ae179476fc92a7a7d227863bc8134c46cd38ee1c3c9c0fd9"
   },
   {
-    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeRecoveredSessionLocked",
-    "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,P08,P10,P21",
-    "body_sha256": "7f95569046811fdf073e706927b4488d64fe990a6ff666db9dd88b18d88bfec4"
-  },
-  {
     "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeResolvedFactLocked",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-boot,P08,P10,P21",
@@ -4650,27 +4704,153 @@
     "body_sha256": "c89c933e881329091c0faf959e3bd6b9d834da22eebd75b8be0a5835817b7318"
   },
   {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.DispatchSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "0f593287117cdf6eaeec835c5d4aeaafbbe2a1202ee4a493001c02c29623104c"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.PrepareSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "bf5da1e0e2f9648acff0a31d8566ddb8a0ecb4d6433ffb8f83db17d82d830312"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.admitSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "ef871e9f8515ae5122740f7f298b28b24be470ccf49e2eb8a0a66ecb591e6092"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.beginLogoutSettlement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "83dbad2523e2e9d8fe81291c66ba2886f3920173f9ac3c0fbbf3181c42ba1725"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.requireCurrentLogoutDispatch",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "02f6c2aaa00136d998cfccfdaa3a9bd9813ea1aa7e11f11a19a9b3407b63c8b0"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.requireOriginalLogoutOccurrence",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "af1ae8b050737e4b5a80ab74ff2324b643b056a85afe62678dee747d4373bbb5"
+  },
+  {
+    "owner": "internal/sessionprovider/runtime_logout_unix.go::executeSessionLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
+    "body_sha256": "8f73f77ccc775237d536899214d3ccb95c3c4610a4d16565cc640f749a933570"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::admitLogoutTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "0954cfbe64018006808ed0a2dc796c4a9c16307ac37db6f8d5b89931323a4756"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::decodeLogoutTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "292de637d11f3fa70d491760474fb5f91813ba06506a0414e268ec7111d311d4"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::exactTeardownReplayTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "90fda10f57e9efd847cea0e4dc0e96bf55252ae02b4fcfd4064fef7ff914451b"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::fenceLogoutConnectionTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "a9e31b8a2fe7f02d3b60bae06fa0f5d45f7be111fb3fdab1dbe659c8409db36e"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::prepareTeardownReservationTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "490db79a2bd02fed6e20a25a876556c5c5c1f8ae9c81f784a47d3f6b30af6997"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::requireNoConflictingLogoutTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "5b4ff54efe22a5933e98ef40f3add280b4a66adc92b933bb8382589c9ad955d8"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::teardownRequestMatches",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "6cbfee5c7251404c8671d5a6906cea4a1634879021c89d84b95fd8bafba2e3d5"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout.go::teardownScopeIncludesOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "0f634fe85594368c684003993a990f1aa38a5ef77aa8876ded7342dec087f86b"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::LogoutEffectAuthorityCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "83f50a42120364c28c0d2c21660d4cf0b1cd37495cd0b0db675769cb8b76fff6"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::SettleLogoutEffectTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "558a985d9f1269f81957665faf133678ca3aa7fc500e529c1fd2fd63ae2f83af"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::logoutDialect",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "8d2bf7ae30edf0c25b64fb43c7065779c24814978e57a74330e7dc0f530a1afd"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::logoutEffectMatches",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "e1c3d590b389e9e51b219e805195348be330e6a56a52bf1d8f26aa76c33c5213"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::logoutEffectResult",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "8823ebb987ceed6c57c884de9beeed245b31c178c144a8b378fc0c6a1f0384c8"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::settleLogoutResultTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "433356fbf4e82e2a578fe0ea3fefce7ee2ed95dfde127c8afaa98eb8ab0ae406"
+  },
+  {
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::*PostgresOwner.RecoverUnlaunchedChannelLogout",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race,2577-logout-successor",
     "body_sha256": "d04cb353c58b77780bff25eb7b8b84d59d2103a33d4b7b2f6c7c1346608c5da6"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::*SQLiteOwner.RecoverUnlaunchedChannelLogout",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race,2577-logout-successor",
     "body_sha256": "a6e886bfada58ec40b682cb659cb82724fc5f58c9b25b9a1a81144d9dd2dbe7a"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::logoutOriginalWithdrawnWithoutAuthorizationTx",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
-    "body_sha256": "d47cf03dd125e084730b0223638d9bf420a5eb6f437ad60f599ea4bb56d3a10c"
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race,2577-logout-successor",
+    "body_sha256": "aa67c024d0afe3763718f75108f1050a6d51bba247c4f2037942ed805a8c6420"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::recoverUnlaunchedLogout",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race,2577-logout-successor",
     "body_sha256": "ca930542a69e571ac34741fbdab410d408d523dd7062b3f8dfac5d206a2276b6"
   },
   {
@@ -5154,6 +5334,18 @@
     "body_sha256": "497984defb2336512582efc79bb9fa9df2b09771142d3d7dcc574cdb41e549cb"
   },
   {
+    "owner": "internal/store/internal/startupownership/logout_binding.go::FreezeLogoutProcessTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "6a807573cd270ca456dfc6a56543da97ac4bd2d258ee6a806bfbc54698d4fea5"
+  },
+  {
+    "owner": "internal/store/internal/startupownership/logout_binding.go::admitLogoutGrantTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "5611452c0c9fe174d47cfdb3adbc314b67da7f20293016cc20a120d1912909e1"
+  },
+  {
     "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupPostgresOwner.ProbePossession",
     "audit_rows": "A20,A28",
     "proof_families": "P19,P22,P24",
@@ -5174,8 +5366,8 @@
   {
     "owner": "internal/store/internal/startupownership/withdrawn_runtime.go::RuntimeAuthorityWithdrawnTx",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-original-withdrawal",
-    "body_sha256": "aba5be250c4e70b9a921fac1b0327d39f45b1ce5716f044ed50454bfee7bcfb7"
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-original-withdrawal,2577-logout-successor",
+    "body_sha256": "69350606842fffe1021260a095bbe2431dcd4e1146f73860c227c6f69db45fd8"
   },
   {
     "owner": "internal/store/selected/admission.go::*AbsentSQLiteStore.Error",
