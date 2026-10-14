@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1806,7 +1807,7 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, selected, runID := newEntityToolConformanceHarness(t)
+	ctx, exec, selected, runID := newEntityToolConformanceHarness(t, ".")
 
 	requireMutationSurface(t, selected)
 
@@ -1838,6 +1839,37 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
 	}
+	before, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read root before generated-tool refusal: %v", err)
+	}
+	_, err = exec.Execute(ctx, "save_accounts_status", map[string]any{
+		"value": "rechecked",
+	})
+	var refusal *runtimefailures.Error
+	if !errors.As(err, &refusal) || refusal.Failure.Class != runtimefailures.ClassInternalFailure ||
+		refusal.Failure.Detail.Code != "current_entity_context_missing" || refusal.Failure.Operation != "role_scoped_entity_tool.current_entity" {
+		t.Fatalf("generated root write must refuse its ineligible current subject: %v", err)
+	}
+	after, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
+	if err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("generated root refusal changed fields or mutation evidence: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(root refusal): %v", err)
+	}
+
+	// Generated tools require a real non-root current subject, not the run's entity.
+	ctx, exec, selected, runID = newEntityToolConformanceHarness(t, "accounts")
+	current, ok := runtimebus.InboundEventFromContext(ctx)
+	if !ok || current.EntityID() == "" || current.EntityID() == runID {
+		t.Fatal("generated tool fixture requires its constructed non-root current subject")
+	}
+	entityID = current.EntityID()
+	beforeChild, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read non-root subject before generated write: %v", err)
+	}
 	if _, err := exec.Execute(ctx, "save_accounts_status", map[string]any{
 		"value": "rechecked",
 	}); err != nil {
@@ -1846,6 +1878,14 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 
 	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
+	}
+	afterChild, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read non-root subject after generated write: %v", err)
+	}
+	fields, err := decodeJSONMapErr(afterChild.Fields)
+	if err != nil || fields["status"] != "rechecked" || len(afterChild.Mutations) <= len(beforeChild.Mutations) {
+		t.Fatalf("generated non-root save omitted its authored field or history: fields=%+v before=%+v after=%+v err=%v", fields, beforeChild, afterChild, err)
 	}
 }
 
@@ -2090,14 +2130,23 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
+func newEntityToolConformanceHarness(t *testing.T, flowID string) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
 	t.Helper()
+	if flowID != "." && flowID != "accounts" {
+		t.Fatalf("unsupported tool conformance fixture flow %q", flowID)
+	}
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+	if flowID == "accounts" {
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/schema.yaml", "name: accounts\nstages:\n  queued: {}\n  done: {final: true}\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/events.yaml", "accounts.updated:\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("load entity tool source: %v", err)
@@ -2112,9 +2161,21 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	construction := newFanInBarrierRuntimeForSource(t, pg, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
 	at := time.Now().UTC()
-	plan, err := construction.manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: at,
-	})
+	root := runtimeflowidentity.Stored(source, ".", runID, runID, runID, "")
+	target := root
+	var inbound events.Event
+	request := runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: at}
+	if flowID != "." {
+		target, err = runtimeflowidentity.KeylessChild(source, root, flowID)
+		if err != nil {
+			t.Fatalf("derive declared tool subject: %v", err)
+		}
+		inbound = eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, target.EntityID), target.InstancePath),
+			eventtest.StaticFlowRoutingSource(flowID, target.InstancePath, target.EntityID), at)
+		request.TriggerEvent = inbound
+	}
+	plan, err := construction.manager.PrepareFlowInstanceActivation(constructionCtx, request)
 	if err != nil {
 		t.Fatalf("prepare tool mutation target: %v", err)
 	}
@@ -2125,7 +2186,27 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	if err := construction.manager.FinalizeCommittedFlowInstanceActivation(constructionCtx, committed); err != nil {
 		t.Fatalf("construct tool mutation target: %v", err)
 	}
-	declaration, ok := runtimesemanticview.ResolveAgentDeclaration(source, runtimeactors.AgentConfig{ID: "tester", FlowID: "."})
+	if flowID != "." {
+		matches := 0
+		for _, child := range plan.ConstructionPlans() {
+			if child.Identity.TemplateID != flowID {
+				continue
+			}
+			if child.Identity != target || child.CreatingInput.EventID != inbound.ID() {
+				t.Fatal("tool subject lost its native identity or actual creating event")
+			}
+			matches++
+		}
+		if matches != 1 {
+			t.Fatalf("constructed non-root tool subjects = %d, want exactly one", matches)
+		}
+	}
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: target.Route()}
+	stored, found, err := construction.pipeline.Load(constructionCtx, owner)
+	if err != nil || !found || stored.EntityID != target.EntityID || stored.ParentEntityID != target.ParentEntityID || stored.CurrentState != "queued" {
+		t.Fatalf("read exact constructed tool subject: stored=%+v found=%v err=%v", stored, found, err)
+	}
+	declaration, ok := runtimesemanticview.ResolveAgentDeclaration(source, runtimeactors.AgentConfig{ID: "tester", FlowID: flowID})
 	if !ok {
 		t.Fatal("tool mutation fixture requires its exact tester declaration")
 	}
@@ -2137,9 +2218,17 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame, err := construction.manager.ResolveAgentFrameConfig(runID, name.AgentID, "", true)
+	instancePath := ""
+	if flowID != "." {
+		instancePath = target.InstancePath
+	}
+	frame, err := construction.manager.ResolveAgentFrameConfig(runID, name.AgentID, instancePath, flowID == ".")
 	if err != nil {
 		t.Fatalf("resolve constructed tool mutation actor: %v", err)
+	}
+	actorRoute, err := target.Route().AgentIdentityRoute()
+	if err != nil || frame.Config.Identity.RunID != runID || frame.Config.Identity.Route != actorRoute {
+		t.Fatalf("tool actor does not retain its actual constructed flow: %+v", frame.Config.Identity)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
@@ -2149,8 +2238,10 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 		AllowInternalLegacyEntityTools: true,
 	})
 	ctx = runtimetools.WithActor(runtimecorrelation.WithRunID(ctx, runID), frame.Config)
-	inbound := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, runID), time.Now().UTC())
+	if flowID == "." {
+		inbound = eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
+			events.EnvelopeForEntityID(events.EventEnvelope{}, runID), time.Now().UTC())
+	}
 	storetest.CommitSemanticEvent(t, ctx, pg, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	return ctx, exec, pg, runID
