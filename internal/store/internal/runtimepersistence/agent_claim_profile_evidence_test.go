@@ -329,6 +329,53 @@ func TestAgentFirstClaimProfileCorruptionRefusesReclaimBothStores(t *testing.T) 
 	}
 }
 
+func TestAgentFirstClaimProfileEligibleRetryPreservesOrRefusesCaptureBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, variant := range []AgentClaimProfileFault{"healthy", AgentClaimProfileMissing, AgentClaimProfileCorrupt, AgentClaimProfileForeign} {
+			t.Run(backend+"/"+string(variant), func(t *testing.T) {
+				f := newAgentClaimProfileFixture(t, backend)
+				event, first, original := f.claim(t)
+				foreign := deliverylifecycle.Claim{}
+				if variant == AgentClaimProfileForeign {
+					_, other, _ := f.claim(t)
+					foreign = other.Claim
+				}
+				if variant != "healthy" {
+					if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, first.Claim, original, variant, foreign); err != nil {
+						t.Fatal(err)
+					}
+				}
+				retrying, err := f.store.SettleFailure(f.ctx, first.Claim, deliverylifecycle.Settlement{
+					Disposition: deliverylifecycle.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Nanosecond,
+					RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
+				})
+				if err != nil || retrying.Status != deliverylifecycle.StatusFailed || retrying.RetryCount != 1 || retrying.NextEligibleAt.IsZero() {
+					t.Fatalf("native retry settlement did not retain the exact first attempt: %+v err=%v", retrying, err)
+				}
+				before := profileFixtureSnapshot(t, f)
+				result, err := f.store.ClaimDelivery(f.ctx, f.authority, event, f.route)
+				next, acquired := result.Acquired()
+				if variant == "healthy" {
+					if err != nil || !acquired || next.Claim.Version() != 2 || next.Snapshot.RetryCount != 1 {
+						t.Fatalf("eligible retry did not acquire its exact successor: %+v err=%v", result, err)
+					}
+					captured, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, next.Snapshot)
+					if err != nil || captured != original {
+						t.Fatalf("eligible retry replaced immutable first capture: %+v err=%v", captured, err)
+					}
+					return
+				}
+				if acquired || err == nil || !strings.Contains(err.Error(), "first-claim agent profile") {
+					t.Fatalf("invalid capture reached eligible retry or the wrong gate: result=%+v err=%v", result, err)
+				}
+				if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
+					t.Fatal("refused corrupt-capture retry changed complete storage")
+				}
+			})
+		}
+	}
+}
+
 func assertOnlyAgentProfileCellChanged(t *testing.T, before, after map[string]SelectedForkStorageTableSnapshot, deliveryID string) {
 	t.Helper()
 	beforeBytes, err := json.Marshal(before)
