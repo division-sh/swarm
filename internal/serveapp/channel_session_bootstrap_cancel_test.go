@@ -18,18 +18,15 @@ import (
 type blockedBootstrapReservationRead struct {
 	channelonboarding.Store
 	entered, release chan struct{}
-	once             sync.Once
 	armed            atomic.Bool
 }
 
 func (s *blockedBootstrapReservationRead) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
-	if s.armed.Load() {
-		s.once.Do(func() {
-			close(s.entered)
-			// Model noninterruptible storage work while the retained owner still owns
-			// construction. Canceling a caller must not erase or join this work inline.
-			<-s.release
-		})
+	if owned, _ := ctx.Value(sessionConstructionCutKey{}).(bool); owned && s.armed.CompareAndSwap(true, false) {
+		close(s.entered)
+		// Only construction holds the storage barrier; an independent selected
+		// request must still validate its current responsibility and cancellation.
+		<-s.release
 	}
 	return s.Store.GetChannelOnboarding(ctx, id)
 }
@@ -52,7 +49,7 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 						return nil, nil, processbinding.Binding{}, nil, errors.Join(err, release())
 					}
 					blocked.armed.Store(true)
-					return owned, incoming, binding, func() error { return errors.Join(release(), use.Done()) }, nil
+					return context.WithValue(owned, sessionConstructionCutKey{}, true), incoming, binding, func() error { return errors.Join(release(), use.Done()) }, nil
 				}
 				var releaseOnce sync.Once
 				release := func() { releaseOnce.Do(func() { close(blocked.release) }) }
@@ -61,9 +58,13 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				caller, cancel := context.WithCancel(f.ctx)
 				defer cancel()
 				finished := make(chan error, 1)
-				start := f.adapter.BootstrapSession
+				start := func(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
+					return awaitServeSessionBootstrapFixture(ctx, f.adapter, op, candidate, false)
+				}
 				if mode == "resume" {
-					start = f.adapter.ResumeSession
+					start = func(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
+						return awaitServeSessionBootstrapFixture(ctx, f.adapter, op, candidate, true)
+					}
 				}
 				go func() { finished <- start(caller, f.op, f.candidate) }()
 				select {
@@ -88,7 +89,7 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 					t.Error("unresolved construction lost its counted runtime ownership")
 				}
 				reuse, stop := context.WithTimeout(f.ctx, 50*time.Millisecond)
-				if err := f.adapter.BootstrapSession(reuse, f.op, f.candidate); !errors.Is(err, context.DeadlineExceeded) || f.selections.Load() != 1 {
+				if err := awaitServeSessionBootstrapFixture(reuse, f.adapter, f.op, f.candidate, false); !errors.Is(err, context.DeadlineExceeded) || f.selections.Load() != 1 {
 					t.Error("pending original construction was replaced or reported success", err, f.selections.Load())
 				}
 				stop()
@@ -111,7 +112,7 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
 					t.Fatal("construction released caller but retained unresolved transient work", err)
 				}
-				if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil || f.selections.Load() != 1 {
+				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil || f.selections.Load() != 1 {
 					t.Fatal("canceled construction became success or an automatic replacement", err, f.selections.Load())
 				}
 			})
@@ -147,7 +148,7 @@ func TestServeBootstrapSelectionFailureReleasesOriginalUseBothStores(t *testing.
 					cancel()
 					return f.owned, nil, processbinding.Binding{}, release, nil
 				}
-				err := f.adapter.BootstrapSession(caller, f.op, f.candidate)
+				err := awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false)
 				if !errors.Is(err, releaseFailure) || mode == "selection_error" && !errors.Is(err, selectionFailure) ||
 					mode == "invalid_owner" && !errors.Is(err, channelonboarding.ErrInvalidRequest) || mode == "canceled" && !errors.Is(err, context.Canceled) {
 					t.Fatal("original selection/release evidence lost", err)
@@ -155,7 +156,7 @@ func TestServeBootstrapSelectionFailureReleasesOriginalUseBothStores(t *testing.
 				if releases.Load() != 1 || f.owner.ActiveCount() != 0 || f.adapter.connection(f.op.OperationID) != nil {
 					t.Fatal("failed selection retained work or constructed an SDK", releases.Load(), f.owner.ActiveCount())
 				}
-				if cached := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); !errors.Is(cached, releaseFailure) || releases.Load() != 1 || f.selections.Load() != 1 {
+				if cached := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); !errors.Is(cached, releaseFailure) || releases.Load() != 1 || f.selections.Load() != 1 {
 					t.Fatal("cache lost original error or repeated selection/release", cached)
 				}
 			})
@@ -171,7 +172,7 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			finished := make(chan error, 1)
-			go func() { finished <- f.adapter.BootstrapSession(caller, f.op, f.candidate) }()
+			go func() { finished <- awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false) }()
 			select {
 			case <-entered:
 			case err := <-finished:
@@ -223,7 +224,7 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 			if f.owner.ActiveCount() != 0 {
 				t.Fatal("completed SDK join retained counted work")
 			}
-			if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil || f.selections.Load() != 1 {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil || f.selections.Load() != 1 {
 				t.Fatal("canceled original attempt became success or automatic reconnect", err)
 			}
 		})
