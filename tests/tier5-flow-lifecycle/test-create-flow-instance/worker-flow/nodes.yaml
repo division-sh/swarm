@@ -9,11 +9,9 @@ worker-node:
       rules:
         - when: _entity.current_state == 'awaiting_spawned'
           advances_to: complete
-        - else: true
-          advances_to: awaiting_observed
+        - advances_to: awaiting_observed
     worker.observed:
       rules:
         - when: _entity.current_state == 'awaiting_observed'
           advances_to: complete
-        - else: true
-          advances_to: awaiting_spawned
+        - advances_to: awaiting_spawned

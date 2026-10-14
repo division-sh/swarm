@@ -19,8 +19,8 @@ func (r HandlerRuleEntry) DisplayLabel(context string, index int) string {
 	if predicate == "" {
 		condition := strings.TrimSpace(r.Condition)
 		switch {
-		case r.PolicyRow.Kind == PolicySheetRowKindDefault || strings.EqualFold(condition, "else"):
-			predicate = "else"
+		case r.PolicyRow.Kind == PolicySheetRowKindDefault:
+			predicate = string(r.PolicyRow.Kind)
 		case r.PolicyRow.Kind == PolicySheetRowKindCase || r.PolicyRow.Kind == PolicySheetRowKindRange:
 			// Direct typed fixtures have no authored predicate text. Keep their
 			// admitted kind; do not reverse their lowered execution expression.

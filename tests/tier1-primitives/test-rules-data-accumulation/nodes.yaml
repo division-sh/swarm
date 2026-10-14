@@ -9,7 +9,6 @@ test-node:
           data_accumulation:
             writes:
               - value
-        - else: true
   state_schema:
     fields:
       value: integer

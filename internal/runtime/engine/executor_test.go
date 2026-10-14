@@ -4985,6 +4985,10 @@ func emitFromExecutorSource() semanticview.Source {
 }
 
 func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
+	handler, err := loadNodeHandlerFixture("rules:\n  - when: payload.score > 5\n    emit: rule.emitted\non_success:\n  emit: handler.succeeded\n")
+	if err != nil {
+		t.Fatal(err)
+	}
 	publications := &recordingPublicationCommitter{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
@@ -5003,14 +5007,8 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
-			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "payload.score > 5",
-				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
-			}},
-		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler:    handler,
+		State:      testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
