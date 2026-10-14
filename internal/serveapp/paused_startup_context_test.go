@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -48,27 +50,42 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				selected = openSelectedPostgresOwner(t, dsn, db, cfg)
 			}
 			t.Cleanup(func() { closeUnactivatedSelectedStore(t, selected) })
-			module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), writeServedTestSetupFixture(t), filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
-			if err != nil {
-				t.Fatal(err)
+			var modules []runtimepipeline.WorkflowModule
+			var artifacts []*sourceartifact.AdmittedSourceArtifact
+			var facts []runtimecorrelation.SourceArtifactFact
+			for _, label := range []string{"a", "b"} {
+				root := writeServedTestSetupFixture(t)
+				path := filepath.Join(root, "schema.yaml")
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(body, []byte("\n# paused-context-"+label+"\n")...), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := initializeStateStores(context.Background(), selected.Schema(), bundle); err != nil {
+					t.Fatal(err)
+				}
+				modules = append(modules, module)
+				artifacts = append(artifacts, bundle.SourceArtifact)
+				facts = append(facts, sourceartifactfixture.FactFor(bundle.SourceArtifact))
 			}
-			if _, err := initializeStateStores(context.Background(), selected.Schema(), bundle); err != nil {
-				t.Fatal(err)
+			if facts[0].BundleHash() == facts[1].BundleHash() {
+				t.Fatal("mixed startup requires two distinct compiled source artifacts")
 			}
-			artifacts := []*sourceartifact.AdmittedSourceArtifact{
-				sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# paused-context-a\n")),
-				sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# paused-context-b\n")),
-			}
-			facts := []runtimecorrelation.SourceArtifactFact{sourceartifactfixture.FactFor(artifacts[0]), sourceartifactfixture.FactFor(artifacts[1])}
 			process := worklifetime.NewProcess()
 			runtimeInstanceID := uuid.NewString()
 			deps := selected.RuntimeDeps()
 			var runtimes []*runtimepkg.Runtime
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
-			for _, fact := range facts {
+			for index, fact := range facts {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, selected, cfg, runtimepkg.RuntimeOptions{
-					SelfCheck: false, WorkflowModule: module, LLMRuntime: servedNoopLLMRuntime{},
+					SelfCheck: false, WorkflowModule: modules[index], LLMRuntime: servedNoopLLMRuntime{},
 					ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process,
 					SourceArtifactFact: fact, RuntimeInstanceID: runtimeInstanceID,
 				}))
@@ -77,7 +94,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				}
 				runtimes = append(runtimes, rt)
 				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
-				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), coordinate)
+				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(modules[index].SemanticSource(), coordinate)
 				if err != nil {
 					t.Fatal(err)
 				}
