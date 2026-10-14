@@ -121,6 +121,14 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if req.Preparation.SourceRunID != plan.SourceRunID || req.Preparation.ForkPoint != plan.ForkPoint ||
 			req.Preparation.ForkEventID != plan.ForkPoint.EventID ||
 			req.Preparation.Coordinates.BundleHash != req.SourceArtifactFact.BundleHash() || fingerprint != req.Preparation.Coordinates.AdmittedPlanFingerprint {
+			fmt.Printf("DISPOSABLE fork point cut: kind_equal=%t input_equal=%t event_id_equal=%t event_name_equal=%t source_event_equal=%t producer_equal=%t producer_type_equal=%t routing_equal=%t timestamp_representation_equal=%t timestamp_instant_equal=%t revision_equal=%t prepared_kind=%s transaction_kind=%s prepared_revision=%d transaction_revision=%d fixed_operation_point=%t\n",
+				req.Preparation.ForkPoint.Kind == plan.ForkPoint.Kind, req.Preparation.ForkPoint.Input == plan.ForkPoint.Input,
+				req.Preparation.ForkPoint.EventID == plan.ForkPoint.EventID, req.Preparation.ForkPoint.EventName == plan.ForkPoint.EventName,
+				req.Preparation.ForkPoint.SourceEventID == plan.ForkPoint.SourceEventID, req.Preparation.ForkPoint.ProducedBy == plan.ForkPoint.ProducedBy,
+				req.Preparation.ForkPoint.ProducedByType == plan.ForkPoint.ProducedByType, req.Preparation.ForkPoint.RoutingSource == plan.ForkPoint.RoutingSource,
+				req.Preparation.ForkPoint.Timestamp == plan.ForkPoint.Timestamp, req.Preparation.ForkPoint.Timestamp.Equal(plan.ForkPoint.Timestamp),
+				req.Preparation.ForkPoint.Revision == plan.ForkPoint.Revision, req.Preparation.ForkPoint.Kind, plan.ForkPoint.Kind,
+				req.Preparation.ForkPoint.Revision, plan.ForkPoint.Revision, req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil)
 			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan [source_run_equal=%t fork_point_equal=%t timestamp_representation_equal=%t timestamp_instant_equal=%t fork_event_equal=%t bundle_equal=%t plan_fingerprint_equal=%t]",
 				req.Preparation.SourceRunID == plan.SourceRunID,
 				req.Preparation.ForkPoint == plan.ForkPoint,
