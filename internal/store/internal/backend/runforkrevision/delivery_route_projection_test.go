@@ -59,3 +59,20 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 		t.Error("historical projection must not copy a live worker claim token")
 	}
 }
+
+func TestHistoricalDeliveryProjectionExcludesLeaseExpiry(t *testing.T) {
+	spec, ok := canonicalProjectionSpec(FamilyEventDeliveries)
+	if !ok {
+		t.Fatal("missing delivery projection")
+	}
+	if strings.Contains(spec.query, "lease_expires_at") {
+		t.Error("historical delivery projection reads the live lease expiry")
+	}
+	values := make(map[string]any, len(spec.columns))
+	for _, column := range spec.columns {
+		values[column.name] = nil
+	}
+	if _, exists := spec.build(values)["claim_expires_at"]; exists {
+		t.Error("historical delivery fact contains operational lease expiry")
+	}
+}
