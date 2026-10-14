@@ -12,9 +12,13 @@ workflows.
   artifact.
 - Use [SECURITY.md](SECURITY.md) for suspected vulnerabilities. Do not report
   security issues in public GitHub issues.
-- Use [swarm.example.yaml](swarm.example.yaml) as the non-secret `swarm.yaml`
-  setup reference. Use `swarm secrets` for contract credentials. Repo
-  `.env` files are non-authoritative and are not loaded by Swarm commands.
+- Use [swarm.example.yaml](swarm.example.yaml) as the non-secret setup reference.
+  Swarm reads one file: `.swarm/swarm.yaml` in the current directory, or built-in
+  defaults if absent. `--config <file>` replaces that selection completely;
+  `SWARM_CONFIG` selects the same file when `--config` is absent. Root
+  `swarm.yaml` and user-global config files are not discovered. Use `swarm secrets`
+  for contract credentials. Repo `.env` files are non-authoritative and are not
+  loaded by Swarm commands.
 
 ## Local Checks
 
