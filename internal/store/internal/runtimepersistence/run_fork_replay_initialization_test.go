@@ -75,7 +75,14 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
 				t.Fatal(err)
 			}
-			constructHistoricalSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(bundle, ".", runID, "", runID))
+			construction := constructHistoricalSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(bundle, ".", runID, "", runID))
+			constructed := map[string]pipeline.FlowInstanceActivationPlan{}
+			for _, item := range construction.ConstructionPlans() {
+				constructed[item.Identity.TemplateID] = item
+			}
+			if len(constructed) != 3 {
+				t.Fatalf("want exact root and two receiver constructions, got %d", len(constructed))
+			}
 			trigger := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "work.ready", eventtest.Producer(events.EventProducerNode, mustPersistenceRootNode("source").Key()), "", []byte(`{}`), 0, events.LineageFromEvent(parent), events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 			plans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: trigger}})
 			if err != nil || len(plans) != 1 {
@@ -99,12 +106,32 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			}
 			trigger = command.Commit.Event.Event()
 			t.Logf("source aggregate flow=%q producer=%+v", trigger.FlowInstance(), trigger.RoutingSource().Route())
+			var receiver events.RouteIdentity
 			for _, route := range command.Commit.DeliveryRoutes {
-				if !route.Target.ExistingEntity() || !route.Initialization.Empty() {
-					t.Fatal("handler delivery must consume already-constructed receivers")
+				captured, found := constructed[route.Target.Route().FlowID]
+				if !found || captured.Identity.TemplateID == "." {
+					t.Fatalf("delivery lacks its exact captured receiver construction: %+v", route)
 				}
+				header := events.RouteIdentity{FlowID: captured.Identity.TemplateID, FlowInstance: captured.Identity.InstancePath, EntityID: captured.Identity.EntityID}
 				if route.Recipient.IsAgent() {
+					actor := header
+					actor.EntityID = ""
+					agentRoute, err := captured.Identity.Route().AgentIdentityRoute()
+					if err != nil {
+						t.Fatal(err)
+					}
+					dependency, err := events.AdmitStoredFlowReceiverInitialization(runID, captured.CreatingInput.EventID, events.MustExistingEntityTarget(header), agentRoute)
+					if err != nil || route.AgentIdentity.RunID != runID || route.AgentIdentity.Route != agentRoute ||
+						!events.SameDeliveryTargetOwnership(route.Target, events.MustEntitylessReceiverTarget(actor)) || !route.Initialization.Equal(dependency) {
+						t.Fatalf("agent must retain empty ownership and exact original construction: route=%+v dependency=%+v err=%v", route, dependency, err)
+					}
 					continue
+				}
+				if !events.SameDeliveryTargetOwnership(route.Target, events.MustExistingEntityTarget(header)) || !route.Initialization.Empty() {
+					t.Fatal("handler delivery must consume its exact already-constructed receiver")
+				}
+				if receiver.Empty() {
+					receiver = header
 				}
 				delivery, err := events.NewDeliveryEvent(trigger, route)
 				if err != nil {
@@ -120,6 +147,9 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					disposition, _ := outcome.Disposition()
 					t.Fatalf("execute initializer: reason=%s failure=%+v err=%v", disposition.ReasonCode(), disposition.Failure(), err)
 				}
+			}
+			if receiver.Empty() {
+				t.Fatal("missing constructed initializer receiver for replay corruption controls")
 			}
 			captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, backend.name == "postgres")
 			point := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.checkpoint", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
@@ -172,7 +202,6 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			}}
 			request := runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true, HistoricalReplayExecutionAdmitter: admitter, OriginalLoopCarriage: original}
 			// A valid source snapshot is not proof that child reconstruction is intact.
-			receiver := command.Commit.DeliveryRoutes[0].Target.Route()
 			if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2 AND entity_id=$3`, "foreign", child.ForkRunID, receiver.EntityID); err != nil {
 				t.Fatal(err)
 			}
@@ -286,8 +315,20 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 					want := sourceDelivery.Route
 					want.AgentIdentity.RunID = child.ForkRunID
-					want.Target = events.MustExistingEntityTarget(want.Target.Route())
-					want.Initialization = events.ReceiverInitialization{}
+					header := sourceDelivery.Route.Initialization.ConstructionTarget().Route()
+					projected, err := runfork.ProjectEntityOwnership(runID, child.ForkRunID, header.EntityID, header.FlowInstance)
+					if err != nil {
+						t.Fatal(err)
+					}
+					header.EntityID, header.FlowInstance = projected.Fork.EntityID, projected.Fork.FlowInstance
+					actor := header
+					actor.EntityID = ""
+					want.Target = events.MustEntitylessReceiverTarget(actor)
+					want.Initialization, err = events.AdmitHistoricalFlowReceiverInitialization(child.ForkRunID, events.MustExistingEntityTarget(header), want.AgentIdentity.Route,
+						events.HistoricalReceiverConstruction{SourceRunID: runID, SourceRevision: child.ForkPoint.Revision, SourceReceiver: sourceDelivery.Route.AgentIdentity.Route})
+					if err != nil {
+						t.Fatal(err)
+					}
 					if !reflect.DeepEqual(want, delivery.Route) {
 						t.Fatalf("child route differs from exact initialized owner:\nwant=%+v\ngot=%+v", want, delivery.Route)
 					}
