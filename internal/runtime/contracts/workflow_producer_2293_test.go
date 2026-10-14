@@ -61,22 +61,24 @@ func TestEffectiveSystemNodeProducesOwnsCompleteDerivedSet(t *testing.T) {
 			Emit:  EmitSpec{Event: "work.completed"},
 		},
 		"audit.requested": {Emit: EmitSpec{Event: "work.completed"}},
-		"read.requested": {Activity: ActivitySpec{
-			ID: "read", Tool: "proof.read",
+		"dispatch.requested": {Activity: ActivitySpec{
+			ID: "dispatch", Tool: "proof.write",
 			Approval: &ActivityApprovalSpec{Decision: "review"},
 		}},
+		"dispatch.revision_requested": {},
+		"dispatch.rejected":           {},
 	}}
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{"worker": node},
-		Tools: map[string]ToolSchemaEntry{"proof.read": MustToolSchemaEntry(
-			WithToolHandler(ToolHandlerHTTP), WithToolEffect(ActivityEffectClassReadOnly),
+		Tools: map[string]ToolSchemaEntry{"proof.write": MustToolSchemaEntry(
+			WithToolHandler(ToolHandlerHTTP), WithToolEffect(ActivityEffectClassNonIdempotentWrite),
 			WithToolSchemas(MustToolInputSchema(ToolSchemaObject), MustToolInputSchema(ToolSchemaObject)),
-			WithToolHTTP(HTTPToolSpec{Method: "GET", URL: "https://example.test"}),
+			WithToolHTTP(HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
 		)},
 	}
 	compileRootContractTestFixture(bundle)
 	owner := identitytest.RootNode(t, "worker")
-	want := []string{"read.failed", "read.rejected", "read.revision_requested", "read.succeeded", "work.completed", "work.escalated"}
+	want := []string{"dispatch.failed", "dispatch.rejected", "dispatch.revision_requested", "dispatch.succeeded", "work.completed", "work.escalated"}
 	if got := EffectiveSystemNodeProduces(bundle, owner, node); !reflect.DeepEqual(got, want) {
 		t.Fatalf("canonical node producer set = %v, want %v", got, want)
 	}
