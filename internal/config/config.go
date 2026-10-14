@@ -270,11 +270,11 @@ func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 	}
 	var cfg Config
 	cfg.Runtime.RecoveryOnStartup = true
-	var source yaml.Node
-	if err := yaml.Unmarshal(b, &source); err != nil {
+	source, err := yamlsource.Load(b)
+	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if err := DecodeSource(yamlsource.ValueFromNode(&source), &cfg); err != nil {
+	if err := DecodeSource(source.Document(path).Root(), &cfg); err != nil {
 		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 			located := *diagnostic
 			located.Location.File = path

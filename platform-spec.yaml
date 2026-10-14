@@ -5705,6 +5705,12 @@ engine:
         newly resolved routes use the same projection; declaration-local aliases and sibling instance paths
         cannot supply the missing handler fact. A wildcard is not a schema declaration: payload expressions consume
         the matched concrete local event schema in the exact receiver scope, preserving exact-handler precedence.'
+      unanchored_agent_controls: >
+        Agent subscription admission MUST refuse an exact value or root wildcard whose resolved route pattern admits
+        platform.boot, platform.runtime_log, or event.replayed: those control publications have no activity-order anchor.
+        This finite agent-only admission rule does not change node/system consumers, anchored platform events, or private
+        flow-local patterns that do not admit those canonical control publications. It does not create an occurrence kind
+        or turn the broader recording of internal events into S6 scope.
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
@@ -22935,6 +22941,15 @@ environment_source_authority:
     - '#1731 repo-wide SWARM env accepted-set guard, typed delegation schema, doctor env reporting, generated-boundary env closure, and unknown-env guard'
     - '#1600 parent residual env-source-authority closeout'
 configuration_source_authority:
+  direct_config_loader:
+    owner: internal/config.LoadWithOptions
+    source_owner: yamlsource.Load/Document.Root
+    rule: >
+      The direct file loader admits exactly one nonempty YAML document through the canonical source parser before typed
+      configuration projection and backend overrides. Empty/comment-only and multi-document files MUST fail closed,
+      including when an override is supplied; a later document cannot be silently ignored. Valid single-document values,
+      defaults, source diagnostics and legal backend overrides retain their existing meaning. This direct-loader rule
+      does not change the separately owned CLI layered discovery or optional absent-layer representation.
   unified_swarm_config:
     promoted_by: '#1804'
     parent_trackers:

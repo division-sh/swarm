@@ -700,6 +700,7 @@ seam_families:
       - internal/runtime/semanticview/agent_subscription_admission.go
       - internal/runtime/semanticview/agent_subscription_admission_test.go
       - internal/runtime/semanticview/s6_agent_order_origin_diagnostic_test.go
+      - internal/runtime/semanticview/s6_control_subscription_test.go
       - internal/runtime/semanticview/source_artifact.go
       - internal/runtime/semanticview/endpoint_census.go
       - internal/runtime/semanticview/endpoint_census_test.go
@@ -754,6 +755,9 @@ seam_families:
       The S6 source-join diagnostics consume this admission and the existing
       publication metadata resolver read-only. They install no subscription or
       runtime route and do not prove a native order or recovered provider join.
+      S6 control-subscription proofs consume this same admission owner for the
+      finite unanchored platform names and preserve node/system, anchored and
+      private-pattern controls; they install no runtime route or native journal.
   - id: unadmitted_live_agent_pattern_routes
     layer: invalid_old_authority
     classification: invalid_old_authority_path
