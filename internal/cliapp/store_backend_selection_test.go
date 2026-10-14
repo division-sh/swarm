@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -20,7 +19,11 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		repo := t.TempDir()
 		swarmDir := t.TempDir()
 		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{"swarm_dir": swarmDir}))
-		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -34,9 +37,14 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 
 	t.Run("runtime config selects backend", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
-		got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{
-			Store: config.StoreConfig{Backend: storebackend.BackendSQLite.String()},
-		})
+		repo := t.TempDir()
+		path := filepath.Join(repo, "operator.yaml")
+		writeRuntimeConfigText(t, path, "store:\n  backend: sqlite\n")
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -47,7 +55,12 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 
 	t.Run("absent backend uses rollout default", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
-		got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		repo := t.TempDir()
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -59,12 +72,13 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 	t.Run("runtime config selects sqlite path", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{
-			Store: config.StoreConfig{
-				Backend: storebackend.BackendSQLite.String(),
-				SQLite:  config.StoreSQLiteConfig{Path: "config/dev.db"},
-			},
-		})
+		path := filepath.Join(repo, "operator.yaml")
+		writeRuntimeConfigText(t, path, "store:\n  backend: sqlite\n  sqlite:\n    path: config/dev.db\n")
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -76,7 +90,11 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 	t.Run("absent sqlite path uses default", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -88,12 +106,13 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 	t.Run("flag beats config", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
-		got, err := ResolveRuntimeStoreSelection(repo, storebackend.BackendSQLite.String(), true, &config.Config{
-			Store: config.StoreConfig{
-				Backend: storebackend.BackendPostgres.String(),
-				SQLite:  config.StoreSQLiteConfig{Path: "config/dev.db"},
-			},
-		})
+		path := filepath.Join(repo, "operator.yaml")
+		writeRuntimeConfigText(t, path, "store:\n  backend: postgres\n  sqlite:\n    path: config/dev.db\n")
+		loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveRuntimeStoreSelection(repo, storebackend.BackendSQLite.String(), true, loaded)
 		if err != nil {
 			t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 		}
@@ -110,7 +129,14 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				unsetStoreSelectorEnv(t)
 				t.Setenv(key, "unsupported-source")
-				_, err := ResolveRuntimeStoreSelection(t.TempDir(), "sqlite", flagSet, &config.Config{Store: config.StoreConfig{Backend: "sqlite"}})
+				repo := t.TempDir()
+				path := filepath.Join(repo, "operator.yaml")
+				writeRuntimeConfigText(t, path, "store:\n  backend: sqlite\n")
+				loaded, loadErr := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: path})
+				if loadErr == nil || !strings.Contains(loadErr.Error(), "env/unknown_stale @ "+key) {
+					t.Fatalf("unsupported env admitted before selection: %v", loadErr)
+				}
+				_, err := ResolveRuntimeStoreSelection(repo, "sqlite", flagSet, loaded)
 				if err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ "+key) {
 					t.Fatalf("unsupported env with flag set=%v: %v", flagSet, err)
 				}
@@ -139,13 +165,22 @@ func TestDatabaseEnvDetailsDoNotImplyPostgresSelection(t *testing.T) {
 	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 5432 || cfg.Database.Name != "swarm" || cfg.Database.User != "postgres" || cfg.Database.SSLMode != "disable" || cfg.Database.PoolSize != 5 {
 		t.Fatalf("database env fallback affected built-in default config: %#v", cfg.Database)
 	}
-	if _, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, cfg); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_DB_HOST") {
+	repo := t.TempDir()
+	loaded, loadErr := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+	if loadErr == nil || !strings.Contains(loadErr.Error(), "env/unknown_stale @ SWARM_DB_HOST") {
+		t.Fatalf("unsupported database sources admitted before selection: %v", loadErr)
+	}
+	if _, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_DB_HOST") {
 		t.Fatalf("unsupported database sources: %v", err)
 	}
 	for _, key := range []string{"SWARM_DB_HOST", "SWARM_DB_PORT", "SWARM_DB_NAME", "SWARM_DB_USER", "SWARM_DB_SSLMODE", "SWARM_DB_POOL_SIZE"} {
 		t.Setenv(key, "")
 	}
-	got, err := ResolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, cfg)
+	loaded, err = LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, loaded)
 	if err != nil {
 		t.Fatalf("ResolveRuntimeStoreSelection: %v", err)
 	}

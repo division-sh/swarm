@@ -217,16 +217,22 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
-func ResolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bool, cfg *config.Config) (storebackend.Selection, error) {
+func ResolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bool, admitted RuntimeConfigLoadResult) (storebackend.Selection, error) {
+	if blockers := unifiedConfigBlockers(admitted.Diagnostics); len(blockers) > 0 {
+		return storebackend.Selection{}, unifiedConfigError{Diagnostics: blockers}
+	}
+	if admitted.Config == nil || !admitted.validated {
+		return storebackend.Selection{}, fmt.Errorf("admitted runtime config is required")
+	}
 	root, err := NewInvocationRoot(repo)
 	if err != nil {
 		return storebackend.Selection{}, err
 	}
-	swarmDir, err := resolveCLISwarmDirAt(root, cliSwarmDirOptions{})
+	swarmDir, err := resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{}, admitted.cli)
 	if err != nil {
 		return storebackend.Selection{}, err
 	}
 	defaultPath := filepath.Join(swarmDir.Path, "stores", "default", "dev.db")
 	defaultSource := storebackend.SourceSwarmDirDefault
-	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, cfg, defaultPath, defaultSource)
+	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, admitted.Config, defaultPath, defaultSource)
 }
