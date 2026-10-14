@@ -32,6 +32,8 @@ pins:
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "case: {}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "requested:\n  selector: "+tc.fieldType+"\ncompleted:\n  choice: text\n")
+			// The lookup has one value, chosen, and fails on a missing key; its
+			// successful branch is therefore the effectful structural default.
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `router:
   execution_type: system_node
   subscribes_to: [requested]
@@ -44,8 +46,7 @@ pins:
             entries: [{key: `+tc.key+`, value: chosen}]
             into: computed.choice
             default: fail
-        - when: computed.choice == "chosen"
-          advances_to: done
+        - advances_to: done
           emit:
             event: completed
             fields:
