@@ -29,16 +29,19 @@ type unifiedConfigLoadOptions struct {
 }
 
 type unifiedConfigLoadResult struct {
-	Config      *config.Config
-	CLI         cliCommandConfig
-	Source      string
-	Path        string
-	Diagnostics []unifiedConfigDiagnostic
+	Config        *config.Config
+	CLI           cliCommandConfig
+	Source        string
+	Path          string
+	Diagnostics   []unifiedConfigDiagnostic
+	sourcePresent *bool
+	validated     bool
 }
 
 type unifiedConfigSource struct {
-	Name string
-	Path string
+	Name    string
+	Path    string
+	Present *bool
 }
 
 type unifiedConfigDiagnosticKind string
@@ -117,21 +120,10 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 			diagnostics = append(diagnostics, unifiedConfigProjectionDiagnostic(err, source.Path))
 		}
 	}
-	delegated := map[string]string{}
-	if len(unifiedConfigBlockers(diagnostics)) == 0 {
-		delegated = unifiedConfigDelegation(&document)
-	}
-	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: source.Path, Message: err.Error()})
-	}
 	backendOverride := strings.TrimSpace(opts.BackendOverride)
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
 		if _, err := llmselection.ResolvePersistedBackend(cfg.LLM.Backend); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticValidationFailed,
-				Message:     err.Error(),
-				Remediation: "set llm.backend to a supported backend profile before applying command-line overrides",
-			})
+			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "set llm.backend to a supported backend profile before applying command-line overrides"))
 		}
 	}
 	if backendOverride != "" {
@@ -139,27 +131,31 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	}
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
 		if err := cfg.Validate(); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticValidationFailed,
-				Message:     err.Error(),
-				Remediation: "fix the referenced swarm.yaml key or command flag",
-			})
+			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "fix the referenced swarm.yaml key or command flag"))
 		}
 	}
 	cli, err := decodeUnifiedCLIConfig(&document)
 	if err != nil {
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-			Kind:        unifiedConfigDiagnosticParseFailed,
-			Message:     fmt.Sprintf("decode swarm.yaml CLI config: %v", err),
-			Remediation: "fix connection, serve, or paths value types in swarm.yaml",
-		})
+		diagnostics = append(diagnostics, unifiedConfigProjectionDiagnostic(err, source.Path))
+	}
+	validated := len(unifiedConfigBlockers(diagnostics)) == 0
+	delegated := map[string]string{}
+	if validated {
+		delegated = unifiedConfigDelegation(cfg)
+	} else {
+		diagnostics = unifiedConfigBlockers(diagnostics)
+	}
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
+		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: source.Path, Message: err.Error()})
 	}
 	result := unifiedConfigLoadResult{
-		Config:      cfg,
-		CLI:         cli,
-		Source:      source.Name,
-		Path:        source.Path,
-		Diagnostics: diagnostics,
+		Config:        cfg,
+		CLI:           cli,
+		Source:        source.Name,
+		Path:          source.Path,
+		Diagnostics:   diagnostics,
+		sourcePresent: source.Present,
+		validated:     validated,
 	}
 	if blockers := unifiedConfigBlockers(diagnostics); len(blockers) > 0 {
 		return result, unifiedConfigError{Diagnostics: blockers}
@@ -167,11 +163,29 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	return result, nil
 }
 
+func unifiedConfigValidationDiagnostic(err error, path string, document *yaml.Node, remediation string) unifiedConfigDiagnostic {
+	diagnostic := unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: path, Message: err.Error(), Remediation: remediation}
+	if path != "" {
+		// Runtime validation has no key coordinate; locate the selected document,
+		// rather than inferring a field from the validator's human-readable error.
+		diagnostic.Line, diagnostic.Column = 1, 1
+		if root := yamlDocumentRoot(document); root != nil {
+			diagnostic.Line, diagnostic.Column = max(1, root.Line), max(1, root.Column)
+		}
+		diagnostic.Message = fmt.Sprintf("%s:%d:%d: %v", path, diagnostic.Line, diagnostic.Column, err)
+	}
+	return diagnostic
+}
+
 func unifiedConfigProjectionDiagnostic(err error, path string) unifiedConfigDiagnostic {
 	diagnostic := unifiedConfigDiagnostic{
 		Kind: unifiedConfigDiagnosticParseFailed, Path: path,
 		Message:     fmt.Sprintf("decode swarm.yaml config %s: %v", path, err),
 		Remediation: "fix value types in swarm.yaml",
+	}
+	if path != "" {
+		diagnostic.Line, diagnostic.Column = 1, 1
+		diagnostic.Message = fmt.Sprintf("%s:1:1: decode swarm.yaml config: %v", path, err)
 	}
 	if typed, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 		located := *typed
@@ -247,18 +261,29 @@ func selectUnifiedConfigSource(RepoRoot, explicitPath string) (unifiedConfigSour
 		path = strings.TrimSpace(os.Getenv("SWARM_CONFIG"))
 	}
 	if path != "" {
-		return unifiedConfigSource{Name: unifiedConfigSourceExplicit, Path: ResolvePath(RepoRoot, path)}, nil
+		return inspectUnifiedConfigSource(unifiedConfigSource{Name: unifiedConfigSourceExplicit, Path: ResolvePath(RepoRoot, path)})
 	}
 	path = filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
-	if _, err := os.Lstat(path); os.IsNotExist(err) {
-		return unifiedConfigSource{Name: unifiedConfigSourceDefaults}, []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticLoaded, Message: "using built-in defaults"}}
+	return inspectUnifiedConfigSource(unifiedConfigSource{Name: unifiedConfigSourceDeployment, Path: path})
+}
+
+func inspectUnifiedConfigSource(source unifiedConfigSource) (unifiedConfigSource, []unifiedConfigDiagnostic) {
+	present := false
+	source.Present = &present
+	if _, err := os.Lstat(source.Path); os.IsNotExist(err) {
+		if source.Name == unifiedConfigSourceDeployment {
+			return unifiedConfigSource{Name: unifiedConfigSourceDefaults, Present: &present}, []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticLoaded, Message: "using built-in defaults"}}
+		}
+		return source, nil
 	} else if err != nil {
-		return unifiedConfigSource{Name: unifiedConfigSourceDeployment, Path: path}, []unifiedConfigDiagnostic{{
-			Kind: unifiedConfigDiagnosticReadFailed, Path: path,
-			Message: fmt.Sprintf("inspect deployment config %s: %v", path, err),
+		source.Present = nil
+		return source, []unifiedConfigDiagnostic{{
+			Kind: unifiedConfigDiagnosticReadFailed, Path: source.Path,
+			Message: fmt.Sprintf("inspect selected config %s: %v", source.Path, err),
 		}}
 	}
-	return unifiedConfigSource{Name: unifiedConfigSourceDeployment, Path: path}, nil
+	present = true
+	return source, nil
 }
 
 func unifiedConfigReadRemediation(source unifiedConfigSource) string {
@@ -543,7 +568,6 @@ func unknownUnifiedConfigDiagnostic(path, file string, location yamlsource.Locat
 func addUnifiedConfigDiagnosticsToReport(report *LocalPreflightReport, diagnostics []unifiedConfigDiagnostic) {
 	for _, d := range diagnostics {
 		if d.Kind == unifiedConfigDiagnosticLoaded {
-			report.addWithOwner(localPreflightConfigPrerequisite, "config_loaded", LocalPreflightSeverityInfo, LocalPreflightStatusOK, d.Message, "", unifiedConfigOwner)
 			continue
 		}
 		report.addWithOwner(localPreflightConfigPrerequisite, "config_"+string(d.Kind), LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, d.Message, d.Remediation, unifiedConfigOwner)
@@ -558,6 +582,8 @@ func unifiedConfigDiagnosticsFromError(err error) []unifiedConfigDiagnostic {
 	return nil
 }
 
+// The early env guard admits reference declarations, not the deployment.
+// Doctor consumes the completed selected-config admission instead.
 func unifiedConfigDelegatedSwarmEnvSources(RepoRoot, explicitPath string) map[string]string {
 	RepoRoot, err := requireInvocationRootPath(RepoRoot)
 	if err != nil {
@@ -571,31 +597,18 @@ func unifiedConfigDelegatedSwarmEnvSources(RepoRoot, explicitPath string) map[st
 	if len(unifiedConfigBlockers(diagnostics)) != 0 {
 		return map[string]string{}
 	}
-	if err := config.DecodeSource(yamlsource.ValueFromNode(&document), &config.Config{}); err != nil {
+	var cfg config.Config
+	if err := config.DecodeSource(yamlsource.ValueFromNode(&document), &cfg); err != nil {
 		return map[string]string{}
 	}
-	return unifiedConfigDelegation(&document)
+	return unifiedConfigDelegation(&cfg)
 }
 
-func unifiedConfigDelegation(merged *yaml.Node) map[string]string {
+func unifiedConfigDelegation(cfg *config.Config) map[string]string {
 	out := map[string]string{}
-	name := strings.TrimSpace(yamlScalarPath(merged, "database", "password_env"))
+	name := strings.TrimSpace(cfg.Database.PasswordEnv)
 	if strings.HasPrefix(name, "SWARM_") {
 		out[name] = "database.password_env"
 	}
 	return out
-}
-
-func yamlScalarPath(node *yaml.Node, path ...string) string {
-	cur := node
-	for _, key := range path {
-		cur = yamlMappingValue(cur, key)
-		if cur == nil {
-			return ""
-		}
-	}
-	if cur.Kind != yaml.ScalarNode {
-		return ""
-	}
-	return cur.Value
 }
