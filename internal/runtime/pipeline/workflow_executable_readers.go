@@ -97,8 +97,6 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 }
 
 var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableReaderCollector{
-	"ID":          noHandlerRuleExecutableReaders,
-	"Description": noHandlerRuleExecutableReaders,
 	"Condition": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		before := len(*out)
 		appendConditionExecutableReader(out, prefix+".condition", rule.Condition, WorkflowEntityFieldLifecycleRule, WorkflowConditionContextRule)

@@ -242,7 +242,7 @@ router:
     request:
       on_success: {emit: audit}
       rules:
-        - {else: true, emit: routed}
+        - {emit: routed}
 template:
   execution_type: system_node
   event_handlers:
@@ -251,8 +251,7 @@ template:
       rules:
         - when: payload.score > 0
           emit: {fields: {bucket: "high"}}
-        - else: true
-          emit: {fields: {bucket: "low"}}
+        - emit: {fields: {bucket: "low"}}
 dispatcher:
   execution_type: system_node
   event_handlers:
@@ -267,8 +266,7 @@ rule-dispatcher:
   event_handlers:
     request:
       rules:
-        - else: true
-          fan_out:
+        - fan_out:
             items_from: payload.items
             as: element
             identity: element
@@ -410,8 +408,9 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 	}
 	end += start
 	activity := strings.TrimSuffix(nodes[start:end], "\n")
-	activity = "    " + strings.ReplaceAll(activity, "\n", "\n    ") + "\n"
-	nodes = nodes[:start] + "      rules:\n        - else: true\n" + activity + nodes[end:]
+	activity = "        - " + strings.TrimPrefix(activity, "      ")
+	activity = strings.ReplaceAll(activity, "\n", "\n    ") + "\n"
+	nodes = nodes[:start] + "      rules:\n" + activity + nodes[end:]
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	return root
 }
