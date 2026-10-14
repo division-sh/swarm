@@ -13,8 +13,6 @@ var ruleFieldOptions = map[string]struct{}{
 	"lookup":            {},
 	"validate":          {},
 	"compute_module":    {},
-	"else":              {},
-	"default":           {},
 	"advances_to":       {},
 	"terminate":         {},
 	"emit":              {},

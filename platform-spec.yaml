@@ -4092,7 +4092,7 @@ handler_specification:
       Handler rules and ordinary completion rows share one presentation projection of context, position and admitted
       authored predicate text. Admission captures full predicate spelling once, including multiline, alias and merge
       sources; validators, authoring views and execution diagnostics consume it without reconstructing lowered CEL.
-      Else/default displays else, and predicate-less/value-only rows retain position and admitted kind without invented
+      A trailing predicate-less default displays its derived kind, and value-only/completion rows retain position and admitted kind without invented
       else semantics. Presentation is neither declaration identity nor activity naming authority.
       Handler rules and ordinary completion rows cannot author id or description; both fields fail
       current-vocabulary admission on presence. Positional identities are retained separately from display text.
@@ -4474,9 +4474,9 @@ handler_specification:
           rules.when, ordinary on_complete.condition, guard.check/checks[].check, query.filter, filter.condition
           and count.condition expect boolean expressions. Quoted source is a verification error naming the source,
           semantic slot, and fix: remove YAML quotes. Optional omission preserves the existing absence behavior.
-          The trimmed, case-insensitive else marker is invalid in every authored predicate slot.
-          An unconditional completion omits condition. Explicit rules
-          else: true/default: true retain their separate typed default identity. Native boolean predicates do
+          Predicate source receives ordinary CEL validation without a special else sentinel or interpreter.
+          An unconditional completion omits condition. The last predicate-less selection row derives PolicyRow kind default.
+          Native boolean predicates do
           not create new definite-assignment exhaustiveness evidence.
         diagnostics: >-
           Expression errors identify the source and semantic slot category. An undeclared plain reference retains
@@ -4501,8 +4501,8 @@ handler_specification:
         ordering: When a rule matches and has emit, the rule emit is materialized first and on_success.emit second. Both events
           are emitted after rule selection, state/gate/data/projection side effects, and emit.fields evaluation for their own
           active emit site, before the handler transaction commits.
-        no_match: If no rule matches and no else branch exists, the handler still succeeds when no validation or runtime failure
-          occurs. on_success.emit fires, and no rule emit fires.
+        no_match: If no rule matches and no default branch exists, the handler still succeeds when no validation or runtime failure
+          occurs and records the typed no_match selection. on_success.emit fires, and no rule emit fires. A default row is not mandatory.
         distinct_event_requirement: If on_success.emit and the selected rules emit resolve to the same event identity, runtime
           fails closed. Same-event template specialization is outside this surface.
         atomicity: Any payload, route, validation, persistence-prerequisite, outbox, or delivery-plan creation failure for either
@@ -4519,8 +4519,7 @@ handler_specification:
           accumulated.*, fan_out.*, and item.* are unavailable. entity.* reads use the pre-rule entity state;
           computed.* reads are turn-scoped values written earlier in the handler compute phase. `when` lowers to
           the internal Condition carrier with PolicyRow kind when, and uses ordinary selected-branch fields.
-          It cannot be combined with case, range, else, or default. The trimmed, case-insensitive `else`
-          sentinel is not a predicate and is rejected here; author `else: true` for a default row.
+          It cannot be combined with case or range. Predicate source receives ordinary CEL validation.
         case: >-
           object — first-class policy-sheet selection row for scalar or tuple dispatch. Shape is
           `{selector: <path>, equals: <scalar>}` or `{selectors: [<path>, ...], equals: [<scalar>, ...]}`. Selectors
@@ -4555,8 +4554,6 @@ handler_specification:
           the compute-owned internal compute_module operation, validates the module output object against the declared output
           schema, binds the object under computed.*, and runs before selection rows consume the result. It cannot emit,
           advance state, execute action/activity, fan_out, data_accumulation, perform I/O, access files, or public compute.
-        else: boolean true — explicit default row. Lowers to the ordinary else selected branch.
-        default: boolean true — alias for else, used when the authoring intent is an explicit policy-sheet default row.
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
           rules emit template specialization.
         advances_to: string — optional state change
@@ -4564,29 +4561,34 @@ handler_specification:
         data_accumulation: object — optional data write (same format as handler-level)
         activity: object — selected rule activity using the shared activity contract; a non-empty explicit activity.id is required, independently of predicate text and row position.
       admission_rule: >-
-        Selection rules admit when for a predicate and else/default for a default row. Unknown fields fail
+        Selection rules admit when/case/range for a predicate and derive the default branch from the last
+        selection row without a predicate. A predicate-less selection row anywhere except last fails as
+        unreachable. A predicate-less row without effects fails as empty; predicate-only observer rows remain legal.
+        else and default are unknown row fields on presence; lookup.default: fail is a distinct value-row field.
+        Unknown fields fail
         current-vocabulary admission on authored presence, including null, empty, alias and merge forms.
         Keyed maps and singleton mappings fail before row admission. id and description are unknown row fields.
         Admission never derives activity identity from a row label or row index. Display text comes from the one
         admitted predicate/context/position projection, never from authored names or re-parsed lowered CEL.
         Ordinary on_complete.condition remains its distinct ordered completion-rule predicate; join outcomes
         and timeouts reject both condition and when and retain their singular outcome mappings.
-        This slice does not retire default: true, predicate-less rows, or require a no-op else row.
+        A plain when block needs no default; a block that matches nothing succeeds and records no_match.
       shape_diagnostic: >-
         DIALECT-RULES-ORDER names the source and rules slot and teaches an ordered list evaluated top to bottom:
-        rules: [{when: payload.kind == 'a', emit: routed.a}, {else: true}].
+        rules: [{when: payload.kind == 'a', emit: routed.a}, {emit: routed.other}].
         A mapping keyed by rule name, a single row without the list marker, or an authored row id is not accepted;
         rows are identified by position. Unknown row fields use the current declared vocabulary.
       policy_sheet_selection_rows:
-        scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
+        scope: Selection rows are `when`, `case`, `range`, and the trailing predicate-less default row. Lookup value rows are specified
           under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
           derivation and temporal/join/loop/collection/schedule rows are separate future gates.
         stable_identity: Typed policy-sheet rows use canonical DeclarationIdentity. Moving a row is delete plus add; display text is derived from its admitted predicate and position, never an authored id.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
           Runtime must not contain a second switch/table/range interpreter.
-        default_requirement: A rules block containing typed policy-sheet selection rows must include an authored
-          else/default selected branch whose admitted PolicyRow kind is default; Condition text alone is not
-          fallback evidence, unless a later spec-promoted row type supplies a stronger exhaustiveness proof.
+        default_requirement: A rules block containing policy-sheet case/range selection or value rows alongside
+          selection rows must end with a predicate-less default row whose admitted PolicyRow kind is default.
+          Plain when-only blocks require no default. Condition text alone is not fallback evidence, unless a
+          later spec-promoted row type supplies a stronger exhaustiveness proof.
         forbidden_authoring_surfaces:
           - "`handler.branch` — retired; fail closed"
           - "`handler.switch`, `handler.lookup`, `handler.threshold` — not standalone handler fields"
@@ -10228,6 +10230,8 @@ engine:
       severity: error
       scope: per-node
       trigger: A handler uses on_complete or rules as a map instead of an ordered list, or a row authors id or description.
+        DIALECT-RULES-DEFAULT rejects else/default row fields on presence, a non-last predicate-less selection
+        row whose successors are unreachable, or an empty default row; its diagnostic names the owning source and position.
         Or a handler uses both on_complete and rules on the same handler. Or
         uses both accumulate and handler-level on_complete. Handler create_entity is independently retired on presence.
       when: boot-only
