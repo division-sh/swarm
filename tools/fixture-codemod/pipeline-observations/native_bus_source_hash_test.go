@@ -28,7 +28,7 @@ func TestNativeBusSourceHashPreservesEveryPublicationAndIdentityAssertion(t *tes
 		if before != row.After {
 			t.Fatal("source admission, exact hash, direct target, lifecycle seed or publish assertion changed")
 		}
-		if selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("source fixture diverged from finite migration")
 		}
 		owner := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_selected_fork_storage.go", "ReadSelectedForkRunBundleHashForTest")

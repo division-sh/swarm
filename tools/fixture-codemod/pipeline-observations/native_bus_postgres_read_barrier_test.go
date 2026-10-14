@@ -68,8 +68,27 @@ func TestNativeBusPostgresReadBarrierPreservesEveryOriginAndRetirementCut(t *tes
 		default:
 			t.Fatal("unknown origin-read consumer")
 		}
-		if before != row.After || selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if before != row.After {
 			t.Fatalf("%s: origin-read cut diverged from finite migration", row.Function)
+		}
+		expected := row.After
+		if row.Successor != "" {
+			from := `newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin()`
+			to := from + `, nil`
+			if (row.Function != "TestOriginSQLLockObserverPostgres" && row.Function != "TestContinuationOriginReadPostgresCancellationCausality") || strings.Count(row.After, from) != 1 {
+				t.Fatal("unknown origin-read fixture successor")
+			}
+			migrated, err := canonicalFunction(strings.Replace(row.After, from, to, 1))
+			current, currentErr := canonicalFunction(row.Successor)
+			if err != nil || currentErr != nil || !reflect.DeepEqual(migrated, current) {
+				t.Fatal("origin-read successor changed more than the explicit fixture source input")
+			}
+			expected = row.Successor
+		}
+		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+		wanted, wantedErr := canonicalFunction(expected)
+		if err != nil || wantedErr != nil || !reflect.DeepEqual(actual, wanted) {
+			t.Fatalf("%s: current origin-read fixture diverged from its exact successor", row.Function)
 		}
 	}
 	if matched != 5 {

@@ -73,7 +73,7 @@ func TestNativeCatalogApplicationSnapshotRetainsJoinedDoubleRefusalAndFutureArti
 	source := string(data[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
 	for _, part := range []string{
 		"h.rt.Shutdown()", "before := snapshotCatalogApplication(t, h)", "attempt < 2",
-		"storetest.RequireRunForkReplayResumeBlocker(t, err, runfork.RunForkBlockerFlowRouteHistoryUnproven, runfork.RunForkReplayResumeFactRouteHistory)",
+		"storetest.RequireRunForkReplayResumeBlocker(t, err, runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven, runfork.RunForkHistoricalReplayFactRoutes)",
 		"selected-contract route resolution requires complete static and dynamic topology proof",
 		"result.Materialization.ForkRunID != \"\"", "result.Activation.Activated", "result.ExecutedEventCount != 0",
 		"len(result.ForkEvents) != 0", "result.ForkLocalRuntimeContainer != nil",
