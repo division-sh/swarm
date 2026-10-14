@@ -84,7 +84,6 @@ result.rejected:
           emit:
             event: result.rejected
             fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
-        - else: true
 `+local)
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
