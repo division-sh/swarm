@@ -45,6 +45,10 @@ func debtSelectedReadRoleLiveSources(root string) ([]debtRunIdentitySourceBody, 
 	if err != nil {
 		return nil, err
 	}
+	readback, err := debtReadbackLiveSources(root)
+	if err != nil {
+		return nil, err
+	}
 	files := map[string]map[string]string{}
 	for _, pin := range pins {
 		if files[pin.File] == nil {
@@ -53,7 +57,8 @@ func debtSelectedReadRoleLiveSources(root string) ([]debtRunIdentitySourceBody, 
 				return nil, err
 			}
 		}
-		if files[pin.File][pin.Function] != pin.After {
+		current, err := debtReadbackSourceInverse(readback, pin.File, pin.Function, files[pin.File][pin.Function])
+		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("selected read-role actual source changed: %s", pin.Function)
 		}
 	}
@@ -62,6 +67,10 @@ func debtSelectedReadRoleLiveSources(root string) ([]debtRunIdentitySourceBody, 
 
 // Source-evidence ingress only: no occurrence identity or classifier changes.
 func debtSelectedReadRoleSourcePrevious(root, file, function, current string) (string, error) {
+	current, err := debtReadbackSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	pins, err := debtSelectedReadRolePins(root)
 	if err != nil {
 		return "", err
@@ -95,6 +104,7 @@ func debtSelectedReadRoleCopySources(t *testing.T, root, copy string) {
 	for _, pin := range pins {
 		debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
 	}
+	debtReadbackCopySources(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtSelectedReadRoleSourceRefusesHistoricalForeignAndStaleEvidence(t *testing.T) {
@@ -104,7 +114,11 @@ func TestPersistenceAuthorityDebtSelectedReadRoleSourceRefusesHistoricalForeignA
 		t.Fatal(err)
 	}
 	for _, pin := range pins {
-		before, err := debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, pin.After)
+		actual, err := debtServedSetupDeclarations(filepath.Join(root, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, err := debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, actual[pin.Function])
 		if err != nil || before != pin.Before {
 			t.Fatalf("exact source inverse refused %s: %v", pin.Function, err)
 		}

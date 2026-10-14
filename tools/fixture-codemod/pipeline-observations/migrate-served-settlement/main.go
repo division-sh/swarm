@@ -44,9 +44,7 @@ func main() {
 		panic("usage: migrate-served-settlement [-lookup|-scalar|-roles] [-write]")
 	}
 	if *readback || *captureReadback {
-		if *lookup || *scalar || *roles || *readRoles || *processRead || *captureProcessRead || (*readback && *captureReadback) {
-			panic("readback repair cannot replay another migration stage")
-		}
+		validateReadbackSelection(*readback, *captureReadback, *lookup, *scalar, *roles, *readRoles, *processRead, *captureProcessRead)
 		migrateReadback(*write, *captureReadback)
 		return
 	}
@@ -101,6 +99,17 @@ func main() {
 			must(os.WriteFile(path, raw, 0644))
 		}
 		must(os.WriteFile(manifestPath, raw, 0644))
+	}
+}
+
+func validateReadbackSelection(replay, capture bool, others ...bool) {
+	if replay && capture {
+		panic("readback capture and replay are mutually exclusive")
+	}
+	for _, selected := range others {
+		if selected {
+			panic("readback repair cannot replay another migration stage")
+		}
 	}
 }
 

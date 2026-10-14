@@ -97,3 +97,15 @@ func TestReadbackDiscardedCapabilityCannotHideEvaluationOrForeignCarrier(t *test
 		})
 	}
 }
+
+func TestReadbackDispatchRefusesMixedMigrationModes(t *testing.T) {
+	validateReadbackSelection(true, false, false, false, false, false, false, false)
+	validateReadbackSelection(false, true, false, false, false, false, false, false)
+	requireReadRolePanic(t, func() { validateReadbackSelection(true, true) })
+	for index := range 6 {
+		others := make([]bool, 6)
+		others[index] = true
+		requireReadRolePanic(t, func() { validateReadbackSelection(true, false, others...) })
+		requireReadRolePanic(t, func() { validateReadbackSelection(false, true, others...) })
+	}
+}
