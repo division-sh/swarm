@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -245,8 +246,28 @@ func run(paths []string, write bool) error {
 
 func main() {
 	write := flag.Bool("write", false, "apply the selected node shape rewrite")
+	activities := flag.Bool("capture-activities", false, "read old effective activity identities from explicitly selected source bundle roots")
 	flag.Parse()
-	if err := run(flag.Args(), *write); err != nil {
+	err := func() error {
+		if !*activities {
+			return run(flag.Args(), *write)
+		}
+		if *write {
+			return fmt.Errorf("activity identity capture is read-only")
+		}
+		repo, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		pins, err := captureActivityIdentities(repo, flag.Args())
+		if err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(pins)
+	}()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, strings.TrimSpace(err.Error()))
 		os.Exit(1)
 	}

@@ -7,6 +7,7 @@ public migration command. Select complete `nodes.yaml` files explicitly:
 ```sh
 go run ./scripts/rewrite-node-shape-2293 path/to/nodes.yaml
 go run ./scripts/rewrite-node-shape-2293 -write path/to/nodes.yaml
+go run ./scripts/rewrite-node-shape-2293 -capture-activities path/to/source-bundle
 ```
 
 Dry run is the default. The complete selection is checked before any write.
@@ -17,6 +18,14 @@ there is no off-owner YAML decoder, mutable syntax carrier or map re-emission.
 This retains quoted/block scalar bytes, handler bodies, nested data, timers, and
 the state fields owned by slice 3.
 Already rewritten input returns its original bytes unchanged.
+
+Before changing guard/rule positions or requiring explicit activity IDs, capture
+the old effective names through the admitted bundle's existing activity/result
+owners. Read-only capture includes the source artifact hash and admitted source
+coordinates; it neither reimplements the default-ID algorithm nor skips failed
+bundle admission. The four result-name fields record identity, not a claim that
+all four event kinds exist without activity approval. Generated sources and
+negative fixtures still need explicit ledger coverage before output is applied.
 
 Node aliases and merge references retain their original anchor ownership.
 Inline/quoted node-field edits, handler-container anchors/aliases, nonmapping containers, cyclic or duplicate
