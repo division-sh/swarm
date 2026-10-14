@@ -183,25 +183,26 @@ const (
 // typed delivery intents that should be persisted and the live dispatch
 // recipients that remain only projections/consumers of that authority.
 type RoutePlan struct {
-	ordinarySource       ordinaryPublicationSource
-	Event                events.Event
-	ConnectEvaluation    events.ConnectEvaluationLedger
-	AuthorityState       RoutePlanAuthorityState
-	AuthorityOwner       routePlanSource
-	LiveRecipients       []RoutePlanLiveRecipient
-	DeliveryIntents      []RoutePlanDeliveryIntent
-	RoutedRecipients     []Subscriber
-	SubscribedRecipients []string
-	ExtraDetail          map[string]any
-	TargetFailure        runtimepinrouting.TargetFailure
-	ContradictionReason  string
-	BlockedByCycle       bool
-	CycleEscalation      *events.Event
-	ReplyContextConsumed bool
-	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
-	ReplyCreations       []runtimereplycontext.Record
-	ReplyClaims          []runtimereplycontext.ClaimCommand
-	JoinAdmissionFences  []runtimepipeline.WorkflowJoinAdmissionFence
+	ordinarySource           ordinaryPublicationSource
+	Event                    events.Event
+	ConnectEvaluation        events.ConnectEvaluationLedger
+	AuthorityState           RoutePlanAuthorityState
+	AuthorityOwner           routePlanSource
+	LiveRecipients           []RoutePlanLiveRecipient
+	DeliveryIntents          []RoutePlanDeliveryIntent
+	RoutedRecipients         []Subscriber
+	SubscribedRecipients     []string
+	ExtraDetail              map[string]any
+	TargetFailure            runtimepinrouting.TargetFailure
+	ContradictionReason      string
+	BlockedByCycle           bool
+	CycleEscalation          *events.Event
+	ReplyContextConsumed     bool
+	ActivationPlans          []runtimepipeline.FlowInstanceActivationPlan
+	ReplyCreations           []runtimereplycontext.Record
+	ReplyClaims              []runtimereplycontext.ClaimCommand
+	JoinAdmissionFences      []runtimepipeline.WorkflowJoinAdmissionFence
+	unavailableReceiverError error
 }
 
 type RoutePlanLiveRecipient struct {

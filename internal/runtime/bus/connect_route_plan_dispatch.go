@@ -56,17 +56,18 @@ type connectRoutePlanResolver struct {
 }
 
 type connectRoutePlanDispatch struct {
-	Matched              bool
-	Failure              runtimepinrouting.TargetFailure
-	Evaluation           events.ConnectEvaluationLedger
-	LiveRecipients       []RoutePlanLiveRecipient
-	DeliveryIntents      []RoutePlanDeliveryIntent
-	RoutedRecipients     []Subscriber
-	ExtraDetail          map[string]any
-	ReplyContextConsumed bool
-	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
-	ReplyCreations       []runtimereplycontext.Record
-	ReplyClaims          []runtimereplycontext.ClaimCommand
+	Matched                  bool
+	Failure                  runtimepinrouting.TargetFailure
+	Evaluation               events.ConnectEvaluationLedger
+	LiveRecipients           []RoutePlanLiveRecipient
+	DeliveryIntents          []RoutePlanDeliveryIntent
+	RoutedRecipients         []Subscriber
+	ExtraDetail              map[string]any
+	ReplyContextConsumed     bool
+	ActivationPlans          []runtimepipeline.FlowInstanceActivationPlan
+	ReplyCreations           []runtimereplycontext.Record
+	ReplyClaims              []runtimereplycontext.ClaimCommand
+	unavailableReceiverError error
 }
 
 func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
@@ -205,7 +206,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	var receiverPinAdmission runtimepinrouting.ConnectReceiverPinAdmission
 	createdRoutes := make(map[runtimeflowidentity.Route]struct{}, len(matched))
 	replyContextConsumed := false
-	for _, plan := range matched {
+	for index, plan := range matched {
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
 			routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values, replyRecord)
 			if err != nil {
@@ -273,6 +274,14 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
 			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values) {
 				out.ExtraDetail[key] = value
+			}
+			if decision.unavailableReceiverError != nil {
+				// A semantic refusal cannot hide a later independent read failure.
+				if _, err := r.planMatched(ctx, evt, matched[index+1:], values, replyRecord); err != nil {
+					return connectRoutePlanDispatch{}, errors.Join(decision.unavailableReceiverError, err)
+				}
+				out.unavailableReceiverError = decision.unavailableReceiverError
+				out.ActivationPlans, out.ReplyCreations, out.ReplyClaims = nil, nil, nil
 			}
 			return out, nil
 		}

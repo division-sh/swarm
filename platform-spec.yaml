@@ -5880,7 +5880,7 @@ engine:
         retired_emit_routing: emit.target or emit.broadcast is present in any shape and strict loading fails.
       publish_time_dead_letter:
         target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
-        target_unreachable_terminated: The authorized target referred to an instance that no longer exists.
+        target_unreachable_terminated: Positive exact construction evidence proves an occupied terminal or terminated receiver, not an absent instance. Ordinary new publication returns the original isolated typed refusal without business mutation; the exact compiled keyless-target diagnostic and sealed fan-out member settlement retain their existing admission owners. Independent errors, cancellation and corruption cannot borrow either disposition.
         target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
         platform.reply_already_terminal: A distinct reply event attempted to consume a context already terminally claimed by
           another reply. Diagnostics name reply_context_id, request event, accepted reply event, and rejected reply event.

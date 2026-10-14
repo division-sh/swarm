@@ -205,6 +205,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		}
 		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted, prospective: prospective}
 		if member != nil {
+			publication.fanOutMember = member
 			publication.outputConsumers = member.outputConsumers
 			publication.instances = member.instances
 			claim := member.claim

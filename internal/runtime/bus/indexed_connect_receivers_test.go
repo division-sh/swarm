@@ -362,6 +362,12 @@ func TestKeylessConnectDistinguishesSelectedUnavailableReceiverFromReadFailure(t
 	if got := connectRoutePlanTargetFailure(materialized.Failure); got != pinrouting.FailureTargetUnreachableTerminated {
 		t.Fatalf("keyless lifecycle refusal lost its canonical target failure: %v", got)
 	}
+	var unavailable *pipeline.TerminatedReceiverError
+	owner, occupied := selection.UnavailableReceiver()
+	if !errors.As(selection.unavailableReceiverError, &unavailable) || unavailable.FlowID != "consumer" || !occupied ||
+		owner.RunID != event.RunID() || owner.Route != child.Route() || selection.SourceEventID != event.ID() {
+		t.Fatalf("keyless planning lost its original exact semantic refusal: owner=%+v err=%v", owner, selection.unavailableReceiverError)
+	}
 	terminal := &pipeline.TerminatedReceiverError{FlowID: "consumer"}
 	corrupt := &pipeline.FlowInstanceConstructionCorruption{RunID: event.RunID(), FlowID: "consumer", Cause: terminal}
 	for _, failure := range []error{terminal, corrupt, context.Canceled, errors.Join(terminal, errors.New("independent read failure"))} {
@@ -370,6 +376,53 @@ func TestKeylessConnectDistinguishesSelectedUnavailableReceiverFromReadFailure(t
 		materialized, selection, err := resolver.materializeKeylessConnect(ctx, event, plans[0])
 		if !errors.Is(err, failure) || !materialized.Failure.Empty() || !selection.Empty() {
 			t.Fatalf("keyless reader failure became semantic unavailability: %+v %+v err=%v want=%v", materialized, selection, err, failure)
+		}
+	}
+}
+
+type unavailableThenFailingConnectReader struct {
+	constructionIndexTestReader
+	selectionReads int
+	failure        error
+}
+
+func (r *unavailableThenFailingConnectReader) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	if request.DeclaredSelection() && request.FlowID() == "consumer" {
+		r.selectionReads++
+		if r.selectionReads == 2 {
+			return pipeline.FlowInstanceObservation{}, false, r.failure
+		}
+	}
+	return r.constructionIndexTestReader.LookupFlowInstance(ctx, request)
+}
+
+func TestUnavailableConnectionDoesNotHideLaterReadFailure(t *testing.T) {
+	source := connectReceiverPinCollisionSource(t, "static", false, "node", false)
+	plans, issues := compiledConnectPlans(source)
+	if len(plans) != 2 || len(issues) != 0 {
+		t.Fatalf("counterexample requires two lawful connections: plans=%d issues=%+v", len(plans), issues)
+	}
+	producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
+	event := connectRoutePlanStaticProducerEvent(eventtest.UUID("terminal-before-read-error"), "producer/work.ready", "test", "", []byte(`{}`), 0,
+		busInternalTestRunID, "", events.EventEnvelope{Source: events.RouteIdentity{
+			FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID,
+		}}, time.Now().UTC())
+	root := ConstructedFlowInstanceIdentityFixture(source, ".", "", event.RunID())
+	child := ConstructedFlowInstanceIdentityFixture(source, "consumer", "", event.RunID())
+	for _, failure := range []error{errors.New("independent later receiver read"), context.Canceled, errors.Join(context.Canceled, errors.New("independent joined reader error"))} {
+		reader := &unavailableThenFailingConnectReader{failure: failure, constructionIndexTestReader: constructionIndexTestReader{
+			observations: []pipeline.FlowInstanceObservation{
+				constructionIndexObservation(t, source, event.RunID(), root, ""),
+				constructionIndexObservation(t, source, event.RunID(), producer, ""),
+				TerminatedFlowInstanceObservationFixture(t, source, event.RunID(), child),
+			},
+		}}
+		resolver := newConnectRoutePlanResolver(source, derivedRouteTableFixture(t, source), nil, reader, nil)
+		result, err := resolver.Plan(constructionIndexContext(t, source), event)
+		var terminal *pipeline.TerminatedReceiverError
+		if !errors.Is(err, failure) || !errors.As(err, &terminal) || terminal.FlowID != "consumer" || reader.selectionReads != 2 ||
+			len(result.DeliveryIntents) != 0 || len(result.ActivationPlans) != 0 || len(result.ReplyCreations) != 0 || len(result.ReplyClaims) != 0 {
+			t.Fatalf("earlier terminal selection hid later read error: reads=%d result=%+v err=%v", reader.selectionReads, result, err)
 		}
 	}
 }
