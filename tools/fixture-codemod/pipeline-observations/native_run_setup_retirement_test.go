@@ -33,7 +33,7 @@ func runSetupTransitions(t *testing.T) []runSetupTransition {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 149 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "b12bb6d4cffc0c685be0a6f53f12a0077d4880ad541c4693818d2c03d466d168" {
+	if err != nil || len(rows) != 149 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "8425ffe9aa580a48e765a5da1b12ce8c8ca14ab282b6c5cc1dddf1eb29cb3c2a" {
 		t.Fatalf("finite run-setup transformation changed: %d/%v", len(rows), err)
 	}
 	return rows

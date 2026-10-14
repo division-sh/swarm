@@ -58,7 +58,7 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
 	digest, err := mechanicalReceiptDigest(rows)
-	if err != nil || digest != "2d074e3214eb7a6e7aecac3a4f9cd37fab0f98f2891a3340f678e27af8f5099e" {
+	if err != nil || digest != "f0a51a7fba0d0f7953da611d378e809c54705ab4f98b40461f9bc7e27e19367e" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 }
@@ -115,7 +115,7 @@ func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) 
 func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) {
 	for _, pin := range []struct{ file, function, digest string }{
 		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "openWorkflowHandlerNativeFixture", "fa6ca50cc31122fef484b3dcb892798c18adb44ad1b86413bc3906969de22847"},
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "79a15fe68e7ead7db5bf58ab26f04c0495429ce7a254bf9924ee59f2a3ceef86"},
+		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "2479ed29142e93c40fc306cb993d11586bbecd8945526efb40b0ee2796237d62"},
 		{"internal/runtime/pipeline/delivery_native_owner_external_test.go", "workflowHandlerNativeCoordinator", "21ef5b19dd26e1d1bb42825279b4b1cad5788f1ed6b96efc445fb2fdbcf256cd"},
 	} {
 		t.Run(pin.function, func(t *testing.T) {
