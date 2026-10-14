@@ -246,16 +246,10 @@ func requireServedNativeProcessPairingClaim(t *testing.T, endpoint string, peer 
 	}()
 	id := result.Operation.OperationID
 	deadline := time.Now().Add(5 * time.Second)
-	for result.Pairing == nil || result.Pairing.Code == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("SDK process has no authorized pairing disclosure", result)
-		}
-		time.Sleep(10 * time.Millisecond)
-		requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-	}
+	result = requireServedNativePairingProgress(t, endpoint, result, deadline)
 	peer.pair(result.Pairing.Code)
 	peer.awaitPostLogin()
-	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
+	requireTimedServedNativeOnboardingRetry(t, endpoint, id, "pairing_checkpoint", &result)
 	if result.IdentityOperation == nil || result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 		t.Fatal("pairing was substituted for principal claim", result)
 	}
@@ -266,7 +260,7 @@ func requireServedNativeProcessPairingClaim(t *testing.T, endpoint string, peer 
 			t.Fatal("genuine SDK claim did not reach public confirmation", result)
 		}
 		time.Sleep(10 * time.Millisecond)
-		requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
+		requireTimedServedNativeOnboardingRetry(t, endpoint, id, "claim_checkpoint", &result)
 	}
 	var confirmed struct {
 		Binding operatorchannel.Binding `json:"binding"`
@@ -276,7 +270,7 @@ func requireServedNativeProcessPairingClaim(t *testing.T, endpoint string, peer 
 	if confirmed.Binding.ExternalAccountRef != from.String() || confirmed.Binding.Status != operatorchannel.BindingCurrent {
 		t.Fatal("confirmation did not bind the exact genuine claimant", confirmed)
 	}
-	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
+	requireTimedServedNativeOnboardingRetry(t, endpoint, id, "activation_confirmation", &result)
 	if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready {
 		t.Fatal("SDK process did not establish enabled authority", result)
 	}

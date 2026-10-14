@@ -107,13 +107,7 @@ func requireServedUnboundConnectAcrossRestart(t *testing.T, endpoint string, pee
 	id := result.Operation.OperationID
 	waitPairing := func() {
 		deadline := time.Now().Add(5 * time.Second)
-		for result.Pairing == nil || result.Pairing.Code == "" {
-			if time.Now().After(deadline) {
-				t.Fatal("explicit unbound connect bypassed or lost fresh pairing", result)
-			}
-			time.Sleep(10 * time.Millisecond)
-			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-		}
+		result = requireServedNativePairingProgress(t, endpoint, result, deadline)
 	}
 	waitPairing()
 	if !saveProof {
