@@ -32,6 +32,17 @@ var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
 
 // Finite endpoints authorized by reviewer-b6145065880/6145833450/6146134392/6150892514.
 func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
+	composition, found, err := sharedCoordinatorComposition2617(row)
+	if err != nil {
+		return err
+	}
+	if found {
+		return validateSharedCoordinatorComposition2617(row, actual, pin, composition)
+	}
+	return reverseR52OriginalDirectiveSuccessor(row, actual, pin)
+}
+
+func reverseR52OriginalDirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
 	wantFile := "internal/apiv1/operator_agent_control_test.go"
 	if pin.family == "native-shared-coordinator-authority" {
 		wantFile = "internal/runtime/template_instance_delivery_test.go"

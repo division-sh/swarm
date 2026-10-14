@@ -46,7 +46,11 @@ func TestNativeBusDispatchSeedPreservesOriginClockAndEveryContinuationAssertion(
 			t.Fatal("run origin, source, clock, continuation ordering or assertions changed")
 		}
 		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		expected, expectedErr := canonicalFunction(current.After)
+		currentSource := current.After
+		if current.Successor != "" {
+			currentSource = current.Successor
+		}
+		expected, expectedErr := canonicalFunction(currentSource)
 		if actualErr != nil || expectedErr != nil || actual != expected {
 			t.Fatalf("%s: complete-event seed diverged from finite migration", row.Function)
 		}
