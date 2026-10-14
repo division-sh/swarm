@@ -56,6 +56,44 @@ func TestOrderedRuleModelSuccessorsPreserveEveryExecutionStatement(t *testing.T)
 			if removed != count {
 				t.Fatalf("removed row-name fields=%d, want exactly%d", removed, count)
 			}
+			if row.Function == "TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent" {
+				// #2287/6169683113: the existing final row is now the structural default.
+				defaults := 0
+				ast.Inspect(file, func(node ast.Node) bool {
+					literal, ok := node.(*ast.CompositeLit)
+					if !ok {
+						return true
+					}
+					array, ok := literal.Type.(*ast.ArrayType)
+					if !ok || !isRuleModelType(array.Elt) || len(literal.Elts) != 3 {
+						return true
+					}
+					last, ok := literal.Elts[2].(*ast.CompositeLit)
+					if !ok {
+						t.Fatal("reviewed template lost its final rule row")
+					}
+					for _, field := range last.Elts {
+						kv, ok := field.(*ast.KeyValueExpr)
+						if !ok {
+							continue
+						}
+						key, ok := kv.Key.(*ast.Ident)
+						if !ok || key.Name != "Condition" {
+							continue
+						}
+						value, ok := kv.Value.(*ast.BasicLit)
+						if !ok || value.Kind != token.STRING || value.Value != `"else"` {
+							t.Fatal("reviewed final template predicate is not the retired sentinel")
+						}
+						value.Value = `""`
+						defaults++
+					}
+					return true
+				})
+				if defaults != 1 {
+					t.Fatalf("structural default edits=%d, want exactly1", defaults)
+				}
+			}
 			var expected bytes.Buffer
 			if err := format.Node(&expected, token.NewFileSet(), file.Decls[0]); err != nil {
 				t.Fatal(err)
