@@ -26,10 +26,13 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -220,6 +223,7 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 				if err != nil {
 					t.Fatal(err)
 				}
+				constructInboundPublicationProofTree(t, ctx, store, bundle, standing.RunID)
 				sequence, err := f.workflow.PublishStandingService(ctx, standing.ServiceID, standing.RunID, standing.Generation)
 				if err != nil {
 					t.Fatal(err)
@@ -265,7 +269,8 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	flowPath := "publication-proof/ingress"
-	artifact := inboundPublicationProofBundle(t, flowPath).SourceArtifact
+	bundle := inboundPublicationProofBundle(t, flowPath)
+	artifact := bundle.SourceArtifact
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath,
@@ -285,6 +290,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	if err != nil {
 		t.Fatalf("ReconcileStandingService: %v", err)
 	}
+	constructInboundPublicationProofTree(t, ctx, store, bundle, standing.RunID)
 	sequence, err := workflowStore.PublishStandingService(ctx, serviceID, standing.RunID, standing.Generation)
 	if err != nil {
 		t.Fatalf("PublishStandingService: %v", err)
@@ -374,6 +380,48 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		t.Fatalf("suspended standing inbound error = %v, want typed suspended disposition", err)
 	}
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, blocked.ProviderEventID, 0)
+}
+
+// The inbound component owns a standing run, but does not install runtime
+// topology. Construct its exact keyless tree through the native owner first.
+func constructInboundPublicationProofTree(t *testing.T, ctx context.Context, store inboundPublicationProofStore, bundle *runtimecontracts.WorkflowContractBundle, runID string) {
+	t.Helper()
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found || fact.BundleHash() != bundle.SourceArtifact.BundleHash() {
+		t.Fatal("inbound constructor requires its exact admitted source")
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	source := semanticview.Wrap(bundle)
+	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
+	options.SourceArtifactFact = fact
+	options.Module = sqliteFlowActivationWorkflowModule{source: source, guards: runtimepipeline.NewContractGuardRegistry(source)}
+	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
+	if workflow == nil {
+		t.Fatal("construct inbound source-bound lifecycle owner")
+	}
+	identity, err := runtimeflowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact,
+		WorkflowInstances: workflow, ExecutionPosture: executionposture.Live,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: identity, OccurredAt: time.Now().UTC().Truncate(time.Microsecond),
+	})
+	if err != nil {
+		t.Fatalf("prepare inbound standing root tree: %v", err)
+	}
+	owner, ok := store.(runtimebus.FlowInstanceActivationCommitOwner)
+	if !ok {
+		t.Fatalf("inbound store %T lacks native construction owner", store)
+	}
+	committed, err := owner.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{Plan: plan})
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct inbound standing root tree: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+	}
 }
 
 func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
