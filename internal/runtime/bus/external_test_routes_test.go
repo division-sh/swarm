@@ -13,7 +13,3 @@ func testRunScopedFlowRouteForRun(runID string, route runtimeflowidentity.Route)
 	}
 	return identity
 }
-
-func testUncheckedRunScopedFlowRoute(route runtimeflowidentity.Route) runtimeflowidentity.RunScopedFlowInstance {
-	return runtimeflowidentity.RunScopedFlowInstance{RunID: eventBusTestRunID, Route: route}
-}

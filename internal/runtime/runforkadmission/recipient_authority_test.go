@@ -356,6 +356,7 @@ func recipientAuthoritySource(t *testing.T, receivers []recipientAuthorityReceiv
 	children := []string{}
 	for i := range root.Children {
 		flow := &root.Children[i]
+		flow.Parent = &root
 		children = append(children, flow.Path)
 		bundle.FlowTree.ByPath[flow.Path], bundle.FlowTree.ByID[flow.Path] = flow, flow
 		bundle.FlowSchemas[flow.Path] = flow.Schema

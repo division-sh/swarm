@@ -223,14 +223,18 @@ func VerifyAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStoresForTest(
 	fixture := open(t, source)
 	ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
 	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source}})
-	path := "orders/" + uuid.NewString()
-	route := testWorkflowInstanceRoute(path)
-	entityID := FlowInstanceEntityID(path)
 	now := time.Now().UTC()
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", EnteredStageAt: now, EntityType: "test_entity"})
+	root := constructedScenarioInstanceForTest(t, source, ctx, semanticview.RootExecutionFlowID(source))
+	if err := fixture.Construct(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	instance := constructedScenarioInstanceForTest(t, source, ctx, "orders")
+	instance.CurrentState, instance.EnteredStageAt = "active", now
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)
 	}
+	path, entityID := instance.StorageRef, instance.EntityID
+	route := testWorkflowInstanceRoute(path)
 	accepted := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "orders/lifecycle.transitioned", "operator", "", []byte(`{}`), 0, runtimecorrelation.RunIDFromContext(ctx), handlerTestWorkflowEnvelope("orders", path, entityID), testWorkflowRoutingSource("orders", path, entityID), now, executionmode.Live)
 	gateAccepted := eventtest.RuntimeControl(uuid.NewString(), workflowGateDecisionEventType, "platform", "", []byte(`{}`), 0,
 		runtimecorrelation.RunIDFromContext(ctx), "", handlerTestWorkflowEnvelope("orders", path, entityID), now)

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -28,6 +29,10 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					flow, path, mode = "review", "review/one", "template"
 				} else if shape == "fieldless" {
 					entityType = ""
+				}
+				instanceKey := ""
+				if shape == "keyed" {
+					instanceKey = "one"
 				}
 				entityID := flowidentity.EntityID(path)
 				entry := a2ForkEntry(t, sourceRun, entityID, path, "active", "historical")
@@ -66,7 +71,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					Accumulator: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
 					MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, StageDefined: true,
+						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, InstanceKey: instanceKey, StageDefined: true,
 					},
 				}
 				before, err := json.Marshal(history.Accumulator)
@@ -85,7 +90,15 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					EntityType: entityType, WorkflowName: flow, WorkflowVersion: "fixture", Mode: mode,
 					Route: projection.Fork.FlowInstance, History: history,
 				}
-				header, headerErr := selectedContractHistoricalHeader(state, []byte(`{}`), targetHash, at)
+				config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(state.Route), state.Route), state.WorkflowVersion)
+				if err != nil {
+					t.Fatal(err)
+				}
+				encoded, err := json.Marshal(config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				header, headerErr := selectedContractHistoricalHeader(state, encoded, targetHash, at)
 				fields, fieldErr := projectRunForkHistoricalFields(sourceRun, childRun, projection.Fork.EntityID, targetHash, history, runForkEntityMetadata{
 					FlowInstance: projection.Fork.FlowInstance, EntityType: entityType,
 				}, at)

@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -83,8 +82,7 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 			ctx, _, _ := seedReplyToolContext(t, selected)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "human-task-ack-turn")
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:ask_human")
-			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
-			actor, loader := humanTaskConstructedRequester(t, ctx, selected, source, actor)
+			ctx, actor, loader := humanTaskConstructedRequester(t, ctx, selected, source, actor)
 			ctx = runtimetools.WithActor(ctx, actor)
 			fault := errors.Join(errors.New("post-commit cleanup failed"), errors.New("SQL password=private-token"))
 			wrapped := &postCommitFaultHumanTaskStore{HumanTaskAcknowledgedCreationStore: selected, fault: fault}

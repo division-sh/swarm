@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -43,7 +44,7 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -51,7 +52,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 		t.Fatalf("new cold authority: %v", err)
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
-	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
+	rt, err := NewRuntime(ctx, completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
 		Config:       cfg,
 		ManagerStore: selected,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
@@ -76,7 +77,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("InstallStartupGrant: %v", err)
 	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
+	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {
@@ -109,4 +110,14 @@ func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 		t.Fatalf("load bundle: %v", err)
 	}
 	return semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}
+}
+
+func runtimeOwnershipFixtureContext(t *testing.T, module semanticOnlyWorkflowRuntime) (context.Context, runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("runtime ownership fixture requires its admitted source artifact")
+	}
+	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
+	return testAuthorActivityContextForBundle(context.Background(), fact.BundleHash()), fact
 }

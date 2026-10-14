@@ -83,6 +83,10 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Slug":                           {1, "fixed-revision presentation metadata, not event payload"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Name":                           {1, "fixed-revision presentation metadata, not event payload"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.FlowConfig":                     {1, "defensive copy of the exact config envelope captured with entity metadata at the selected revision; no live read or route-derived business key"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InitialMaterialization":         {1, "defensive copy of the immutable native constructor receipt from the fixed-revision metadata owner"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.HistoricalConstruction":         {1, "retain the captured historical-construction classification from fixed-revision evidence, never infer it from native absence"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.ParentInstance":                 {1, "retain the exact captured parent coordinate from the fixed-revision metadata owner"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InstanceKey":                    {1, "retain the exact captured constructor key from the fixed-revision metadata owner"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.StageDefined":                   {1, "copy exact constructed stage-topology evidence from the fixed revision"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.FlowTemplate":                   {1, "copy validated constructor declaration, never infer from the event receiver"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Mode":                           {1, "copy closed constructed mode from the paired fixed-revision header"},
@@ -339,6 +343,12 @@ type runForkRevisionEvent struct { EntityID, FlowInstance string }
 func loadRunForkMaterializedEntitySnapshotMetadata(q runForkRevisionEvent) f.RunForkMaterializedEntitySnapshotMetadata {
  var renamed = q.FlowInstance
  return f.RunForkMaterializedEntitySnapshotMetadata{FlowInstance: renamed}
+}
+`, []string{"loadRunForkMaterializedEntitySnapshotMetadata/event_receiver_projection_to_owner"}},
+		{"captured_construction_fields_cannot_be_reconstructed", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
+import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
+func loadRunForkMaterializedEntitySnapshotMetadata(q e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
+ return f.RunForkMaterializedEntitySnapshotMetadata{ParentInstance: q.FlowInstance(), InstanceKey: q.EntityID(), InitialMaterialization: []byte(q.EntityID()), HistoricalConstruction: &f.RunForkCapturedHistoricalConstruction{SourceRunID: q.EntityID()}}
 }
 `, []string{"loadRunForkMaterializedEntitySnapshotMetadata/event_receiver_projection_to_owner"}},
 		{"nested_route_and_defined_type", "runtime/runforkexecution", "workflow_state_projection.go", `package runforkexecution

@@ -26,7 +26,7 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 			}
 			repo := pipelineEngineStateRepo{coordinator: pc}
 			entityID := runtimeRunID(ctx)
-			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, EntityID: entityID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "pending",
 				Fields: map[string]any{"count": 0, "marker": 0}, EntityType: "test_entity",

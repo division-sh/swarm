@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -30,14 +31,15 @@ import (
 )
 
 type receiverConfigActivationFixture struct {
-	ctx       context.Context
-	db        *sql.DB
-	store     agentFixtureFlowStore
-	manager   *manager.AgentManager
-	workflows *pipeline.PipelineCoordinator
-	bus       *sqliteFlowActivationBus
-	bundle    *contracts.WorkflowContractBundle
-	grant     startupownership.LiveGenerationGrant
+	ctx             context.Context
+	db              *sql.DB
+	store           agentFixtureFlowStore
+	manager         *manager.AgentManager
+	workflows       *pipeline.PipelineCoordinator
+	bus             *sqliteFlowActivationBus
+	bundle          *contracts.WorkflowContractBundle
+	grant           startupownership.LiveGenerationGrant
+	rootConstructed bool
 }
 
 func newReceiverConfigActivationFixture(t *testing.T, backend string) receiverConfigActivationFixture {
@@ -112,13 +114,11 @@ func newReceiverConfigActivationFixtureWithOwnership(t *testing.T, backend strin
 
 func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixtureFlowStore, withAgents bool, files map[string]string, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter, own func(*testing.T, *manager.AgentManager) *manager.AgentManager, configureLifecycle func(*pipeline.PipelineCoordinatorOptions), configure ...func(*manager.AgentManagerOptions)) receiverConfigActivationFixture {
 	t.Helper()
-	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	if withAgents {
-		actors := sqliteFlowActivationBundle(t)
-		bundle.FlowTree.ByID["review"].Agents = actors.FlowTree.ByID["review"].Agents
-		bundle.FlowTree.ByID["review"].AgentURIs = actors.FlowTree.ByID["review"].AgentURIs
-		bundle.URIRegistry = actors.URIRegistry
+		files = maps.Clone(files)
+		files["review/agents.yaml"] = "reviewer:\n  model: regular\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
 	}
+	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
@@ -149,8 +149,7 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleOutcome: selected,
-			AgentRoutes: bus, FlowActivation: committer,
-			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus}, ReceiverExecution: eventreceiver.NormalExecution(),
+			AgentRoutes: bus, FlowActivation: committer}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
 	for _, apply := range configure {
 		apply(&options)
@@ -217,6 +216,25 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 	return publisher
 }
 
+func (f *receiverConfigActivationFixture) constructKeylessRoot(t *testing.T) {
+	t.Helper()
+	runID := correlation.RunIDFromContext(f.ctx)
+	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")
+	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConstructionPlans()) != 1 || len(plan.Instance.Fields) != 0 {
+		t.Fatal("attachment fixture requires one entityless keyless root")
+	}
+	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct attachment parent: %+v %v", committed, err)
+	}
+	f.rootConstructed = true
+}
+
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {
 	req := sqliteFlowActivationRequest(f.bundle, "review", instanceID, "", "review/"+instanceID)
 	runID := correlation.RunIDFromContext(f.ctx)
@@ -262,6 +280,7 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					agentCount = 0
 				}
 				f := newReceiverConfigActivationFixtureWithAgents(t, backend, agentCount != 0)
+				f.constructKeylessRoot(t)
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 				defer cancel()
 				requests := []pipeline.FlowInstanceActivationRequest{f.request("business-key", "ti-receiver-one", "first"), f.request("business-key", "ti-receiver-one", "second")}
@@ -416,9 +435,13 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 func (f receiverConfigActivationFixture) requireCounts(t *testing.T, want int) {
 	t.Helper()
 	for _, table := range []string{"flow_instances", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness"} {
+		wantRows := want
+		if f.rootConstructed && table != "entity_state" {
+			wantRows++
+		}
 		var got int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&got); err != nil || got != want {
-			t.Fatalf("%s rows=%d want=%d: %v", table, got, want, err)
+		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&got); err != nil || got != wantRows {
+			t.Fatalf("%s rows=%d want=%d: %v", table, got, wantRows, err)
 		}
 	}
 }

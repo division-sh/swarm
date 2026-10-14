@@ -21,7 +21,7 @@ func TestCommittedAgentAttachmentRequiresExactAcceptedOwner(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			instances := &flowActivationTestInstanceStore{}
-			am := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances)
+			am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
 			am.lifecycle.phase, am.lifecycle.runCtx = runtimeLifecycleRunning, context.Background()
 			defer func() { am.lifecycle.phase, am.lifecycle.runCtx = runtimeLifecycleStopped, nil }()
 			bundle := testFlowBundle(t, "")

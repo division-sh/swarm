@@ -76,7 +76,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
 	assertCleanupTableResult(t, result, "decision_cards", 1, 1)
-	assertCleanupTableResult(t, result, "routing_rules", 1, 1)
 	assertCleanupTableResult(t, result, "agents", 1, 1)
 	assertCleanupTableResult(t, result, "flow_instances", 1, 1)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
@@ -121,7 +120,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"runtime_store_metadata",
 		"api_idempotency",
 		"runtime_ingress_state",
-		"routing_rules",
 		"mailbox",
 		"generated_entity_fixture",
 		"generated_node_state_fixture",
@@ -1547,18 +1545,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, 'flow/a', $2::uuid, 'reset_fixture', 'flow', 'static', TRUE, 'active', '{}', '{}', '{}', 1, now(), now(), now())`, runA, entityID); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance)
-		VALUES ('source.event', 'agent', 'agent-a', 'flow/a')
-	`); err != nil {
-		t.Fatalf("seed routing rule: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, is_materialized)
-		VALUES ($1::uuid, 'source.event', 'agent', 'agent-a', 'flow/a', TRUE)
-	`, runA); err != nil {
-		t.Fatalf("seed materialized routing rule: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO mailbox (entity_id, flow_instance, item_type, source_event_id, from_agent, summary)

@@ -26,6 +26,7 @@ import (
 type a2AccumulatorPersistenceProof struct {
 	selected    gateRecoveryStoreCase
 	ctx         context.Context
+	fact        correlation.SourceArtifactFact
 	runID       string
 	bus         *runtimebus.EventBus
 	module      proposedEffectProofModule
@@ -108,9 +109,8 @@ collector:
 `,
 	}))
 	runID := uuid.NewString()
-	insertGateRecoveryRun(t, selected.events, runID)
-	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+	ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
+	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ collector:
 	}}
 	observer := &a2AccumulatorPersistenceObserver{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner)}
 	selected.persistence = pipeline.NewWorkflowPersistence(observer)
-	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, runID: runID, bus: bus, module: module, persistence: observer}
+	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, fact: fact, runID: runID, bus: bus, module: module, persistence: observer}
 	proof.restart()
 	commitKeylessConstructorComponent(t, ctx, selected, proof.pc, source)
 	proof.execute(t, proof.publish(t, "seed", `{}`), "")
@@ -128,7 +128,7 @@ collector:
 }
 
 func (p *a2AccumulatorPersistenceProof) restart() {
-	p.pc = newGateRecoveryCoordinator(p.bus, p.selected, pipeline.PipelineCoordinatorOptions{Module: p.module})
+	p.pc = newGateRecoveryCoordinator(p.bus, p.selected, pipeline.PipelineCoordinatorOptions{Module: p.module, SourceArtifactFact: p.fact})
 }
 
 type a2AccumulatorPublication struct {

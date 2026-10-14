@@ -149,7 +149,10 @@ func TestSelectedInputValidationCannotWidenRecipientDisposition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscribers := routes.ResolveIndependentPubsubForRun(original.RunID(), string(original.Type()))
+	subscribers, err := routes.PubsubDeclarationDefinitions(".", []string{string(original.Type())})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(validation.FilterSubscribers(subscribers)) == 0 {
 		t.Fatal("fixture has no valid input recipients")
 	}

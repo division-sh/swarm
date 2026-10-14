@@ -89,8 +89,11 @@ func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver
 	t.Helper()
 	source := deliveryPlannerHandlerSource(policy.requireTargetOwners)
 	original := resolver.resolveRoutedSubscribers
-	resolver.resolveRoutedSubscribers = func(evt events.Event, keys []string) []Subscriber {
-		routed := original(evt, keys)
+	resolver.resolveRoutedSubscribers = func(ctx context.Context, evt events.Event, keys []string, publication ordinaryPublicationSource) ([]Subscriber, error) {
+		routed, err := original(ctx, evt, keys, publication)
+		if err != nil {
+			return nil, err
+		}
 		for index := range routed {
 			subscriber := &routed[index]
 			if !subscriber.Recipient.IsNode() || !subscriber.targetHandler.Empty() {
@@ -115,7 +118,7 @@ func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver
 				subscriber.LocalizedEvent = fixture.event
 			}
 		}
-		return routed
+		return routed, nil
 	}
 	policy.semanticSource = source
 	return newDeliveryPlanner(resolver, policy, connectPlanners...)
@@ -189,11 +192,11 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
 	resolver := deliveryRouteResolver{
-		resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+		resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 			return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "scan-orchestrator")), Path: "discovery",
 				MatchPattern: "producer/scan.requested",
 				routeSource:  subscriberRouteSourcePinAutoWire,
-			}}
+			}}, nil
 		},
 		resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 			return []deliveryRecipientCandidate{
@@ -214,7 +217,10 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 		},
 	}
 
-	result := resolver.Resolve(eventtest.RunCreatingRootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	result, err := resolver.Resolve(context.Background(), eventtest.RunCreatingRootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := len(result.RoutedRecipients), 1; got != want {
 		t.Fatalf("routed recipients = %d, want %d", got, want)
 	}
@@ -245,7 +251,9 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *testing.T) {
 	var resolvedKeys []string
 	resolver := deliveryRouteResolver{
-		resolveRoutedSubscribers: func(events.Event, []string) []Subscriber { return nil },
+		resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+			return nil, nil
+		},
 		resolveSubscribedRecipients: func(eventKey string) []deliveryRecipientCandidate {
 			resolvedKeys = append(resolvedKeys, eventKey)
 			if eventKey != "support/instance-a/inbound.github.push" {
@@ -273,7 +281,10 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 		time.Time{},
 	)
 
-	result := resolver.Resolve(evt)
+	result, err := resolver.Resolve(context.Background(), evt)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := resolvedKeys, []string{"support/instance-a/inbound.github.push"}; !slices.Equal(got, want) {
 		t.Fatalf("resolved subscription keys = %#v, want %#v", got, want)
 	}
@@ -293,7 +304,7 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
+	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-scope-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -315,7 +326,7 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), []deliveryRecipientCandidate{
+	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("internal-subscribers-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC()), []deliveryRecipientCandidate{
 		{ID: "workflow-runtime", PersistAsDelivery: false},
 		{ID: "node:scan-orchestrator", PersistAsDelivery: false},
 		{ID: "agent-a", PersistAsDelivery: true},
@@ -336,34 +347,41 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 	runID := eventtest.UUID("pending-static-run")
 	identity := agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "root")
 	target := events.RouteIdentity{
-		FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("pending-static-owner"),
+		FlowID: ".", FlowInstance: runID, EntityID: runID,
 	}.Normalized()
 	wrongRoute := identity
 	wrongRoute.Route = agentidentitytest.DeclaredForRun(t, runID, "reviewer", "root", ".", runID, runID).Route
 	for _, test := range []struct {
 		name       string
 		registered agentidentity.Identity
+		implicit   bool
 		entityless bool
+		foreign    bool
 		want       int
 	}{
-		{"missing_constructor_agent", agentidentity.Identity{}, false, 0},
-		{"exact_registered", identity, false, 1},
-		{"exact_entityless", identity, true, 1},
-		{"other_run", agentidentitytest.RootDeclaredForRun(t, eventtest.UUID("other-run"), "reviewer", "root"), false, 0},
-		{"other_declaration", agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "other-owner"), false, 0},
-		{"contradictory_root_route", wrongRoute, false, 0},
+		{name: "missing_constructor_agent"},
+		{name: "exact_registered", registered: identity, want: 1},
+		{name: "exact_entityless", registered: identity, implicit: true, want: 1},
+		{name: "incomplete_selector", registered: identity, entityless: true},
+		{name: "foreign_selector", registered: identity, foreign: true},
+		{name: "other_run", registered: agentidentitytest.RootDeclaredForRun(t, eventtest.UUID("other-run"), "reviewer", "root")},
+		{name: "other_declaration", registered: agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "other-owner")},
+		{name: "contradictory_root_route", registered: wrongRoute},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			selected := target
 			if test.entityless {
 				selected.EntityID = ""
 			}
+			if test.foreign {
+				selected.EntityID = eventtest.UUID("foreign-static-selector")
+			}
 			policy := deliveryRecipientPolicy{
-				semanticSource: deliveryPlannerHandlerSource(false),
+				semanticSource: connectRoutePlanRootProducerSingletonSource(t),
 				loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 					descriptors := make(map[agentidentity.Identity]ActiveAgentDescriptor)
 					if !test.registered.IsZero() {
-						descriptors[test.registered] = ActiveAgentDescriptor{Identity: test.registered, EntityID: selected.EntityID}
+						descriptors[test.registered] = ActiveAgentDescriptor{Identity: test.registered}
 					}
 					return descriptors, true, nil
 				},
@@ -372,8 +390,12 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				},
 				requireTargetOwners: true,
 			}
-			evt := eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, selected), time.Time{})
-			manifest, err := policy.Evaluate(context.Background(), evt, []deliveryRecipientCandidate{{
+			envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, selected)
+			if test.implicit {
+				envelope = events.EventEnvelope{}
+			}
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("constructed-static-publication"), "task.completed", "operator", "", nil, 0, runID, envelope, time.Now().UTC())
+			manifest, err := policy.Evaluate(admittedAgentConstructionContext(t, policy.semanticSource, runID), evt, []deliveryRecipientCandidate{{
 				ID: "reviewer", AgentIdentity: identity, PersistAsDelivery: true, AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
 			}})
 			if err != nil || len(manifest.DeliveryRoutes) != test.want {
@@ -389,8 +411,13 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				return
 			}
 			route := manifest.DeliveryRoutes[0]
-			if route.AgentIdentity != identity || route.Target.Route() != selected || route.Target.EntitylessReceiver() != test.entityless || route.Target.ExistingEntity() == test.entityless {
+			actor := target
+			actor.EntityID = ""
+			if route.AgentIdentity != identity || route.Target.Route() != actor || !route.Target.EntitylessReceiver() || route.Target.ExistingEntity() {
 				t.Fatalf("wrong exact constructed recipient: %+v", route)
+			}
+			if !route.Initialization.FlowLifecycle() || route.Initialization.ConstructionTarget().Route() != target {
+				t.Fatalf("selector did not preserve independent exact construction authority: %+v", route)
 			}
 			if err := routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy).ValidatePersistentDeliveries(); err != nil {
 				t.Fatalf("validate constructed static route plan: %v", err)
@@ -401,7 +428,7 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 
 func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 	source := connectRoutePlanRootProducerSingletonSource(t)
-	identity := agentidentitytest.Declared(t, "reviewer", "implicit-source", "review", "one", "review/one")
+	identity := agentidentitytest.Declared(t, "reviewer", "implicit-source", "consumer", "consumer", "consumer")
 	nodeEntity := eventtest.UUID("constructed-node-owner")
 	for _, test := range []struct {
 		name     string
@@ -413,19 +440,20 @@ func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 		{"entityless", identity, "", false, 1},
 		{"same_entity", identity, nodeEntity, false, 1},
 		{"foreign_entity", identity, eventtest.UUID("foreign-entity"), false, 0},
-		{"foreign_run", agentidentitytest.DeclaredForRun(t, eventtest.UUID("foreign-run"), "reviewer", "implicit-source", "review", "one", "review/one"), "", false, 0},
-		{"foreign_instance", agentidentitytest.Declared(t, "reviewer", "implicit-source", "review", "two", "review/two"), "", false, 0},
+		{"foreign_run", agentidentitytest.DeclaredForRun(t, eventtest.UUID("foreign-run"), "reviewer", "implicit-source", "consumer", "consumer", "consumer"), "", false, 0},
+		{"foreign_instance", agentidentitytest.Declared(t, "reviewer", "implicit-source", "consumer", "two", "consumer/two"), "", false, 0},
 		{"explicit_entity_cannot_be_erased", identity, "", true, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			agents := map[agentidentity.Identity]ActiveAgentDescriptor{test.identity: {Identity: test.identity, EntityID: test.entity}}
 			projection := selectedRunTargetOwnerProjection{agentsAvailable: true, agents: agents, required: true, source: source}
-			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: nodeEntity}}
+			projection.context = admittedAgentConstructionContext(t, source, identity.RunID)
+			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: nodeEntity}}
 			envelope := events.EventEnvelope{}
 			if test.explicit {
 				envelope = events.EnvelopeForTargetRoute(envelope, local.route)
 			}
-			evt := eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, identity.RunID, "", envelope, time.Time{})
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("implicit-local-publication"), "work.ready", "operator", "", nil, 0, identity.RunID, envelope, time.Now().UTC())
 			candidates := []deliveryRecipientCandidate{{ID: test.identity.AgentID(), AgentIdentity: test.identity, PersistAsDelivery: true}}
 			got, err := filterDeliveryRecipientCandidates(source, evt, candidates, agents, nil, projection, local)
 			if err != nil || len(got.DeliveryRoutes) != test.want {
@@ -593,7 +621,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 			},
 		},
 	)
-	target := events.RouteIdentity{EntityID: "requester-entity", FlowInstance: "review/instance-b"}
+	target := events.RouteIdentity{FlowID: "review", EntityID: "requester-entity", FlowInstance: "review/instance-b"}
 	evt := eventtest.RunCreatingRootIngress(
 		"",
 		"human_task.approved",
@@ -601,7 +629,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		"",
 		nil,
 		0,
-		"",
+		descriptorB.Identity.RunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
 		time.Time{},
@@ -623,7 +651,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		"",
 		nil,
 		0,
-		"",
+		descriptorB.Identity.RunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "requester-entity"),
 		time.Time{},
@@ -636,11 +664,16 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 
 func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescriptorReinterpretation(t *testing.T) {
 	descriptor := testActiveAgentDescriptor(t, "replay-agent", "", "")
+	var targetReads int
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{},
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return testActiveAgentDescriptors(descriptor), true, nil
+			},
+			loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+				targetReads++
+				return nil, false, errors.New("exact direct target was reinterpreted")
 			},
 		},
 	)
@@ -664,6 +697,9 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	if got := plan.DeliveryRoutes(); len(got) != 1 || !reflect.DeepEqual(got[0].Normalized(), route.Normalized()) {
 		t.Fatalf("exact delivery routes = %#v, want committed route %#v", got, route)
 	}
+	if targetReads != 0 {
+		t.Fatalf("exact direct planning consulted target election %d times", targetReads)
+	}
 
 	missing := testActiveAgentDescriptor(t, "replay-agent", "", "other/instance")
 	missingRoute := route
@@ -672,15 +708,22 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	if !errors.Is(err, ErrExactDirectRecipientUnavailable) {
 		t.Fatalf("PlanExactDirect missing exact identity error = %v, want %v", err, ErrExactDirectRecipientUnavailable)
 	}
+	storeFailure := errors.New("independent exact-agent availability failure")
+	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return nil, false, storeFailure
+	}
+	if _, err := planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{route}); !errors.Is(err, storeFailure) || targetReads != 0 {
+		t.Fatalf("exact agent failure lost: err=%v target reads=%d", err, targetReads)
+	}
 }
 
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	observerIdentity := agentidentitytest.RootRuntime(t, "observer", "delivery-planner-test")
-	runID := uuid.NewString()
+	runID := observerIdentity.RunID
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker")), Path: "."}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker")), Path: "."}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
@@ -746,8 +789,8 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 	rootTarget := events.RouteIdentity{FlowID: ".", FlowInstance: rootRunID, EntityID: "ent-1"}
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "parent-listener")), Path: "."}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "parent-listener")), Path: "."}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -795,8 +838,8 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 	parentRoute := events.RouteIdentity{FlowID: "parent", EntityID: "parent-entity", FlowInstance: "parent/inst-1"}
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "parent", "parent-collector")), Path: "parent/inst-1"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "parent", "parent-collector")), Path: "parent/inst-1"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -822,8 +865,8 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "other-flow", "unrelated-listener")), Path: "other-flow"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "other-flow", "unrelated-listener")), Path: "other-flow"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -859,11 +902,11 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-a", "child-a-listener")), Path: "child-a/inst-1"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-b", "child-b-listener")), Path: "child-b/inst-1"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -931,11 +974,11 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-002"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -985,8 +1028,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "operating", "lifecycle-orchestrator")), Path: "operating/inst-1"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "operating", "lifecycle-orchestrator")), Path: "operating/inst-1"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1205,8 +1248,8 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-node")), Path: ".", MatchPattern: "opco.spinup_requested"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-node")), Path: ".", MatchPattern: "opco.spinup_requested"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1249,8 +1292,8 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	const runID = "11111111-1111-4111-8111-111111111111"
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: ".", MatchPattern: "timer.check"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: ".", MatchPattern: "timer.check"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1310,11 +1353,11 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 func TestDeliveryPlanner_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child", "child-intake")), Path: "child",
 					MatchPattern: "child/child.start",
 					routeSource:  subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1339,11 +1382,11 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsClosed(
 func TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child", "child-intake")), Path: "child",
 					MatchPattern: "child/child.start",
 					routeSource:  subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "child-intake", PersistAsDelivery: false}}
@@ -1369,11 +1412,11 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: ".",
 					MatchPattern: "timer.check", routeSource: subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1474,7 +1517,7 @@ func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *t
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "project-observer")), Path: ".", MatchPattern: "child/child.start",
 						routeSource: subscriberRouteSourceSubscription,
@@ -1483,7 +1526,7 @@ func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *t
 						MatchPattern: "child/child.start",
 						routeSource:  subscriberRouteSourceSubscription,
 					},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1511,14 +1554,14 @@ func TestDeliveryPlanner_QualifiedRootInputDoesNotAuthorizePrivateConsumer(t *te
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient:      events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "intake")),
 					Path:           "worker",
 					MatchPattern:   "worker/task.assigned",
 					LocalizedEvent: "task.assigned",
 					routeSource:    subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1543,11 +1586,11 @@ func TestDeliveryPlanner_QualifiedRootInputDoesNotAuthorizePrivateConsumer(t *te
 func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "flow-a", "flow-a-node")), Path: "flow-a",
 					MatchPattern: "flow-b/order.completed",
 					routeSource:  subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1585,11 +1628,11 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeFailsClosed(t *testing
 func TestDeliveryPlanner_NoTargetWildcardCrossFlowRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "repo-scaffold", "repo-scaffold-node")), Path: "repo-scaffold",
 					MatchPattern: "component-scaffold/*/opco.repo_scaffold_requested",
 					routeSource:  subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1627,11 +1670,11 @@ func TestDeliveryPlanner_NoTargetWildcardCrossFlowRoutedNodeFailsClosed(t *testi
 func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child/grandchild", "grandchild-worker")), Path: "child/grandchild",
 					MatchPattern: "child/grandchild/micro.start",
 					routeSource:  subscriberRouteSourceSubscription,
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1695,11 +1738,11 @@ func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			planner := newDeliveryPlannerWithHandlers(t,
 				deliveryRouteResolver{
-					resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+					resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 						return []Subscriber{{
 							Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "operating", "lifecycle-orchestrator")),
 							Path:      owner.FlowInstance,
-						}}
+						}}, nil
 					},
 					resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 					resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1734,7 +1777,9 @@ func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber { return nil },
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return nil, nil
+			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "worker", PersistAsDelivery: true}}
 			},

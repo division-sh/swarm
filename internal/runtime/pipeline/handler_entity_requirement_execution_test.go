@@ -145,7 +145,7 @@ func executeExistingOwnerBehavior(
 	if seedMetadata == nil {
 		seedMetadata = map[string]any{}
 	}
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID:      runID,
 		StorageRef:      flowInstance,
 		EntityID:        entityID,

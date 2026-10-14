@@ -53,11 +53,6 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{
 					RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{seed},
 				}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
-				for _, construction := range plan.ConstructionPlans() {
-					command.Activations[0].RouteTopology = append(command.Activations[0].RouteTopology, runtimebus.FlowInstanceRouteRecordSet{
-						Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-					})
-				}
 				owner := selected.(runtimebus.ScenarioSetupCommitOwner)
 				unchanged := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 				for _, mismatch := range []string{"fields", "stage", "gates", "run"} {
@@ -153,7 +148,7 @@ func TestScenarioConstructionFieldlessStateBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{seed}},
-				Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan, RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: plan.Identity.Route()}}}}}}
+				Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
 			result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command)
 			if err != nil || !result.Acknowledged || len(result.Activations) != 1 || !result.Activations[0].Created {
 				t.Fatalf("fieldless scenario construction: %+v err=%v", result, err)

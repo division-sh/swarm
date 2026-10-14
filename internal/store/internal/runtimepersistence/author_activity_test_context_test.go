@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -27,6 +28,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -97,6 +99,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type storeTestDurableEventBusStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	sourceartifactfixture.Writer
 	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
@@ -104,14 +107,7 @@ type storeTestDurableEventBusStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -133,6 +129,14 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), store)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		sourceartifactfixture.Require(t, context.Background(), store)
+	}
+	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
+		repo := runtimepipeline.WorkflowRepoRoot()
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			return nil, err
+		}
+		opts.ContractBundle = semanticview.Wrap(bundle)
 	}
 	if opts.RuntimeInstanceID == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
@@ -162,10 +166,11 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	}
 	store.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	opts.Durable = runtimebus.DurableDependencies{
+		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
-		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
+
+		ActiveAgents: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
 	}
 	if feedback, ok := store.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {

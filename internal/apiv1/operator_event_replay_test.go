@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -36,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -272,16 +274,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				ctx := testAuthorActivityContext(context.Background())
 				f := tc.open(t, ctx)
 				runID := uuid.NewString()
-				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-					ContractBundle: completeOperatorReplaySource(t),
-				})
-				if err != nil {
-					t.Fatalf("NewEventBusWithOptions: %v", err)
-				}
 				const agentID = "complete-replay-agent"
 				agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
-				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
-				defer runtimebustest.Unsubscribe(bus, agentID)
 
 				parentID := uuid.NewString()
 				originalID := uuid.NewString()
@@ -302,11 +296,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				}, runStartTestSourceArtifactFact()); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
-				var auditCh <-chan *runtimebus.LocalDelivery
 				auditIdentity := runtimebustest.IdentityForRun(t, runID, "complete-replay-auditor", "audit-flow/instance")
 				if routeShape.fanOut {
-					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
-					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
 					if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
@@ -317,6 +308,20 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					}, runStartTestSourceArtifactFact()); err != nil {
 						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
 					}
+				}
+				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
+				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
+					ContractBundle: completeOperatorReplaySource(t), DeliveryAuthority: authority,
+				})
+				if err != nil {
+					t.Fatalf("NewEventBusWithOptions: %v", err)
+				}
+				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
+				defer runtimebustest.Unsubscribe(bus, agentID)
+				var auditCh <-chan *runtimebus.LocalDelivery
+				if routeShape.fanOut {
+					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
+					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
 				}
 				parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
 					parentID, events.EventType("filler.event"), eventtest.Producer(events.EventProducerPlatform, "replay-proof"), "parent-task",
@@ -334,10 +339,12 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 						Target: events.MustExistingEntityTarget(auditTarget),
 					})
 				}
+				original, _, err = runtimebus.ResolvePreparedPublishEventTargetProjection(original, originalRoutes)
+				if err != nil {
+					t.Fatal(err)
+				}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
-					originalRoutes,
-					runtimepipelineobligation.ScopeSubscribed)
+				storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), originalRoutes, authority, nil)
 				frameStore, ok := f.store.(storetest.ManagedAgentTurnFixtureStore)
 				if !ok {
 					t.Fatalf("%T does not support managed-turn replay proof", f.store)
@@ -491,16 +498,8 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
 			runID := uuid.NewString()
-			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
-			})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
 			const agentID = "route-sibling-replay-agent"
 			identity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
-			ch := subscribeOperatorReplayIdentity(t, bus, identity)
-			defer runtimebustest.UnsubscribeIdentity(bus, identity)
 
 			parentID := uuid.NewString()
 			originalID := uuid.NewString()
@@ -517,6 +516,15 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			}, runStartTestSourceArtifactFact()); err != nil {
 				t.Fatalf("UpsertAgent(%s): %v", identity, err)
 			}
+			authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
+			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
+				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")), DeliveryAuthority: authority,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			ch := subscribeOperatorReplayIdentity(t, bus, identity)
+			defer runtimebustest.UnsubscribeIdentity(bus, identity)
 			firstProjection, err := events.NewDeliveryPayloadProjection(map[string]string{"route_marker": "first"})
 			if err != nil {
 				t.Fatal(err)
@@ -527,11 +535,11 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			}
 			routes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
-					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()}),
+					Target:  events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance()}),
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
 				},
 				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
-					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()}),
+					Target:  events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance()}),
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
 				},
 			}
@@ -543,8 +551,12 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "",
 				json.RawMessage(`{"topic":"medicine"}`), 0, runID, parentID, events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt,
 			), "mock")
+			original, _, err = runtimebus.ResolvePreparedPublishEventTargetProjection(original, routes)
+			if err != nil {
+				t.Fatal(err)
+			}
 			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original, routes, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), routes, authority, nil)
 
 			firstClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[0])
 			if err != nil {
@@ -740,6 +752,51 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			}
 		})
 	}
+}
+
+func admitOperatorReplayReceiverGeneration(t *testing.T, ctx context.Context, selected completeOperatorReplayProofStore, runID string) runtimedelivery.ExecutionAuthority {
+	t.Helper()
+	fixture := selected.(storetest.AgentFixtureStore)
+	capability, err := agentfixture.ProcessCapability(t, ctx, fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("replay receiver source plan: found=%t err=%v", found, err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, fixture, plan, agenttopology.SourceCoordinate{BundleHash: runStartTestBundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, receiver := range plan.Agents {
+		identity, err := receiver.Identity.Live(runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, found, err := fixture.LoadAgentLifecycleState(ctx, identity)
+		if err != nil || !found || state.ProcessBinding != binding || state.Phase != runtimemanager.AgentLifecycleRunning {
+			t.Fatalf("replay receiver retained generation: state=%+v found=%t err=%v", state, found, err)
+		}
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(runStartTestSourceArtifactFact(), binding.GenerationGrantID, binding.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	return authority
 }
 
 func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorReplayProofStore, bus eventReplayPublisher, now time.Time) *Handler {
@@ -1454,7 +1511,9 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			pg := storetest.StartPostgresRuntimeStore(t)
-			bus, err := newScopedAPITestEventBus(t, pg, tc.opts)
+			opts := tc.opts
+			opts.ContractBundle = semanticview.Wrap(runStartTestBundle("scan.requested"))
+			bus, err := newScopedAPITestEventBus(t, pg, opts)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}

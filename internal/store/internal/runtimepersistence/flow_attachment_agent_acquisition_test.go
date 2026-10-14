@@ -20,16 +20,16 @@ import (
 
 type attachmentAgentAcquisitionRoutes struct {
 	*attachmentAgentRouteProbe
-	resource      string
-	after         bool
-	disposition   string
-	enabled       atomic.Bool
-	reached       atomic.Bool
-	published     atomic.Int32
-	flowPublished atomic.Int32
-	discarded     atomic.Int32
-	cancel        context.CancelFunc
-	fault         error
+	resource    string
+	after       bool
+	disposition string
+	enabled     atomic.Bool
+	reached     atomic.Bool
+	published   atomic.Int32
+	verified    atomic.Int32
+	discarded   atomic.Int32
+	cancel      context.CancelFunc
+	fault       error
 }
 
 func (r *attachmentAgentAcquisitionRoutes) PrepareAgentRoute(token effects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) bus.AgentRoutePreparation {
@@ -68,16 +68,20 @@ func (r *attachmentAgentAcquisitionRoutes) inject(resource string, after bool) e
 	}
 }
 
-func (r *attachmentAgentAcquisitionRoutes) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Context, req bus.FlowInstanceRouteMaterializationRequest, attempt pipeline.DynamicFlowRuntimeActivationAttempt) (bus.FlowRoutePublicationHandle, error) {
-	if err := r.inject("flow_route", false); err != nil {
-		return nil, err
+type attachmentActivationVerificationWorkflow struct {
+	*attachmentPhaseFaultWorkflow
+	owner *attachmentAgentAcquisitionRoutes
+}
+
+func (w *attachmentActivationVerificationWorkflow) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	if err := w.owner.inject("activation_verification", false); err != nil {
+		return err
 	}
-	publication, err := r.sqliteFlowActivationBus.PublishPersistedFlowInstanceRouteForAttempt(ctx, req, attempt)
-	if err != nil {
-		return publication, err
+	if err := w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
+		return err
 	}
-	r.flowPublished.Add(1)
-	return publication, r.inject("flow_route", true)
+	w.owner.verified.Add(1)
+	return w.owner.inject("activation_verification", true)
 }
 
 func (p *attachmentAgentAcquisitionPublication) Discard() error {
@@ -89,8 +93,8 @@ func TestFlowAttachmentAgentAcquisitionCutsBothStores(t *testing.T) {
 	runFlowAttachmentAcquisitionCuts(t, "agent_route")
 }
 
-func TestFlowAttachmentRouteAcquisitionCutsBothStores(t *testing.T) {
-	runFlowAttachmentAcquisitionCuts(t, "flow_route")
+func TestFlowAttachmentActivationVerificationCutsBothStores(t *testing.T) {
+	runFlowAttachmentAcquisitionCuts(t, "activation_verification")
 }
 
 func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
@@ -120,10 +124,13 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 					}, nil, func(options *manager.AgentManagerOptions) {
 						workflow.PipelineCoordinator = options.WorkflowInstances.(*pipeline.PipelineCoordinator)
 						options.WorkflowInstances = workflow
+						if resource == "activation_verification" {
+							options.WorkflowInstances = &attachmentActivationVerificationWorkflow{attachmentPhaseFaultWorkflow: workflow, owner: routes}
+						}
 						probe.sqliteFlowActivationBus = options.PersistenceRoles.AgentRoutes.(*sqliteFlowActivationBus)
 						options.PersistenceRoles.AgentRoutes = routes
-						options.PersistenceRoles.RouteRestorer = routes
 					})
+					f.constructKeylessRoot(t)
 					binding, err := f.grant.ProcessExecutionBinding()
 					if err != nil {
 						t.Fatal(err)
@@ -172,7 +179,7 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 					} else {
 						// A launched agent releases the caller before its retirement
 						// join. The owned worker still owes abandonment and error evidence.
-						retiring := resource == "flow_route" && err != nil && err.Error() == "dynamic flow runtime readiness retains predecessor retirement"
+						retiring := resource == "activation_verification" && err != nil && err.Error() == "dynamic flow runtime readiness retains predecessor retirement"
 						if err == nil || (!retiring && !strings.Contains(err.Error(), routes.fault.Error())) {
 							t.Fatalf("acquisition failure lost its declared disposition: %v", err)
 						}
@@ -193,7 +200,7 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 						row, found, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, owner.RunID, owner.Route)
 						wantPhase := pipeline.FlowAttachmentPlanned
 						wantDiscarded := int32(1)
-						if resource == "flow_route" {
+						if resource == "activation_verification" {
 							wantPhase, wantDiscarded = pipeline.FlowAttachmentAgentsRegistered, 0
 						}
 						if err != nil || !found || row.AttemptState != "aborted" || row.Phase != wantPhase || row.AttemptOrdinal != 1 || len(f.bus.routePaths()) != 0 || routes.discarded.Load() != wantDiscarded {
@@ -212,7 +219,7 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 							}
 						}
 						created, err := f.manager.EnsureFlowInstance(f.ctx, req)
-						retiring = resource == "flow_route" && err != nil && err.Error() == "dynamic flow runtime readiness retains predecessor retirement"
+						retiring = resource == "activation_verification" && err != nil && err.Error() == "dynamic flow runtime readiness retains predecessor retirement"
 						if created || (err != nil && !retiring) {
 							t.Fatalf("attachment retry repeated construction: created=%t err=%v", created, err)
 						}
@@ -227,18 +234,14 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 						t.Fatal("accepted work did not reach ready")
 					}
 					wantPublished := int32(1)
-					if (resource == "flow_route" || cut == "after_publish") && disposition != "caller_cancel" {
+					if (resource == "activation_verification" || cut == "after_publish") && disposition != "caller_cancel" {
 						wantPublished++
 					}
 					if routes.published.Load() != wantPublished {
 						t.Fatalf("unexpected publication count: got=%d want=%d", routes.published.Load(), wantPublished)
 					}
-					wantFlowPublished := int32(1)
-					if resource == "flow_route" && cut == "after_publish" && disposition != "caller_cancel" {
-						wantFlowPublished++
-					}
-					if routes.flowPublished.Load() != wantFlowPublished {
-						t.Fatalf("unexpected exact flow route acquisition count: got=%d want=%d", routes.flowPublished.Load(), wantFlowPublished)
+					if resource == "activation_verification" && routes.verified.Load() == 0 {
+						t.Fatal("ready attachment bypassed exact activation verification")
 					}
 					current, found, err := f.workflows.Load(f.ctx, owner)
 					if err != nil || !found || !reflect.DeepEqual(current, initial) {

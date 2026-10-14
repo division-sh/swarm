@@ -38,8 +38,8 @@ func receiverExecutionReadyTx(ctx context.Context, tx *sql.Tx, route events.Deli
 	if !found || current.Generation != state.Generation || current.Phase != state.Phase || current.RunMode != state.RunMode || current.ConfigRevision != state.ConfigRevision || current.ProcessBinding != state.ProcessBinding {
 		return false, nil
 	}
-	if entityID != "" && entityID != route.Target.Route().EntityID {
-		return false, fmt.Errorf("locked receiver lifecycle entity contradicts admitted materialization")
+	if err := validateReceiverActorEntity(entityID, route); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -52,11 +52,10 @@ func ReceiverExecutionReady(ctx context.Context, q rowQueryer, route events.Deli
 	if err != nil || !found {
 		return state, false, err
 	}
-	// A static declaration may intentionally have no entity-bearing descriptor.
-	// Its delivery's exact committed materializer owns the receiving entity; a
-	// descriptor which does carry an entity must agree, never redirect that plan.
-	if entityID != "" && entityID != route.Target.Route().EntityID {
-		return state, false, fmt.Errorf("receiver lifecycle entity contradicts admitted materialization")
+	// Empty is an exact actor entity value. Construction dependency belongs to
+	// the flow and cannot grant that entity to an independently entityless actor.
+	if err := validateReceiverActorEntity(entityID, route); err != nil {
+		return state, false, err
 	}
 	if state.Phase != manager.AgentLifecycleRunning {
 		return state, false, nil
@@ -92,6 +91,13 @@ func ReceiverExecutionReady(ctx context.Context, q rowQueryer, route events.Deli
 	default:
 		return state, false, fmt.Errorf("receiver has unsupported execution authority")
 	}
+}
+
+func validateReceiverActorEntity(entityID string, route events.DeliveryRoute) error {
+	if !route.Target.Empty() && entityID != route.Target.Route().EntityID {
+		return fmt.Errorf("receiver lifecycle entity contradicts admitted actor ownership")
+	}
+	return nil
 }
 
 // AuthorizeReceiverExecutionTx uses the same durable execution fence as lifecycle

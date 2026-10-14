@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -26,11 +28,11 @@ import (
 // This models a lost caller acknowledgement after a real creation commit,
 // not an ambiguous database COMMIT or a replacement transaction implementation.
 type receiverConfigLostCreationAcknowledgement struct {
-	pipeline.DynamicFlowRuntimeCreationOccurrencePublisher
+	*bus.EventBus
 }
 
 func (p receiverConfigLostCreationAcknowledgement) CommitDynamicFlowRuntimeCreationOccurrence(ctx context.Context, req pipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error {
-	if err := p.DynamicFlowRuntimeCreationOccurrencePublisher.CommitDynamicFlowRuntimeCreationOccurrence(ctx, req); err != nil {
+	if err := p.EventBus.CommitDynamicFlowRuntimeCreationOccurrence(ctx, req); err != nil {
 		return err
 	}
 	return errors.New("injected lost creation acknowledgement")
@@ -41,6 +43,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 		for _, boundary := range []string{"before_readiness", "creation_mark_rollback", "creation_commit_ack_lost", "numeric_substitution"} {
 			t.Run(backend+"/"+boundary, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithOptions(t, backend, true, true)
+				f.constructKeylessRoot(t)
 				source := semanticview.Wrap(f.bundle)
 				descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
 				if err != nil {
@@ -79,6 +82,53 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				}
 				f.requireCounts(t, 1)
 				f.requireCreationOccurrence(t, plan, 0)
+				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !found {
+					t.Fatal("restart requires its original source fact")
+				}
+				lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				index := f.store.(pipeline.FlowInstanceIndexReader)
+				original, found, err := index.LookupFlowInstance(f.ctx, lookup)
+				if err != nil || !found {
+					t.Fatalf("original native construction: found=%t err=%v", found, err)
+				}
+				originalHeader, err := original.WorkflowInstance()
+				if err != nil || originalHeader.CurrentState != "pending" || originalHeader.EnteredStageAt.IsZero() {
+					t.Fatalf("original construction lacks initial-entry evidence: %+v err=%v", originalHeader, err)
+				}
+				originalReceipt, found, err := original.NativeConstruction()
+				if err != nil || !found {
+					t.Fatalf("original immutable construction receipt: found=%t err=%v", found, err)
+				}
+				ledgerStore := exactFactStore{db: f.db, postgres: backend == "postgres"}
+				originalLedger := assertActualMutationLedger(t, f.ctx, ledgerStore, plan.Readiness.RunID, plan.Identity.EntityID)
+				if len(originalLedger) == 0 {
+					t.Fatal("original construction has no initial mutation evidence")
+				}
+				requireOriginalConstruction := func() {
+					t.Helper()
+					observed, found, err := index.LookupFlowInstance(f.ctx, lookup)
+					if err != nil || !found {
+						t.Fatalf("restart lost exact native construction: found=%t err=%v", found, err)
+					}
+					if err := observed.ValidateSelection(lookup); err != nil {
+						t.Fatal(err)
+					}
+					header, err := observed.WorkflowInstance()
+					if err != nil || !reflect.DeepEqual(header, originalHeader) {
+						t.Fatalf("restart changed initial construction/header: before=%+v after=%+v err=%v", originalHeader, header, err)
+					}
+					receipt, found, err := observed.NativeConstruction()
+					if err != nil || !found || !reflect.DeepEqual(receipt, originalReceipt) {
+						t.Fatalf("restart replaced immutable creating receipt: before=%+v after=%+v found=%t err=%v", originalReceipt, receipt, found, err)
+					}
+					if ledger := assertActualMutationLedger(t, f.ctx, ledgerStore, plan.Readiness.RunID, plan.Identity.EntityID); !reflect.DeepEqual(ledger, originalLedger) {
+						t.Fatal("restart repeated construction or initial-entry mutations")
+					}
+				}
 				if boundary == "numeric_substitution" {
 					binding, err := f.grant.ProcessExecutionBinding()
 					if err != nil {
@@ -115,6 +165,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					}
 					f.requireCreationOccurrence(t, plan, 0)
 					f.requireConfig(t, plan)
+					requireOriginalConstruction()
 					return
 				}
 				if err := f.manager.Shutdown(); err != nil {
@@ -138,6 +189,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					}
 					f.requireCreationOccurrence(t, plan, want)
 					f.requireConfig(t, plan)
+					requireOriginalConstruction()
 					if removeFault != nil {
 						removeFault()
 					}
@@ -154,24 +206,27 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					restarted.requireCounts(t, 1)
 					restarted.requireConfig(t, plan)
 					restarted.requireCreationOccurrence(t, plan, 1)
+					requireOriginalConstruction()
 				}
 				agents, err := f.store.LoadAgents(f.ctx)
 				if err != nil || len(agents) != 1 {
 					t.Fatalf("restarted agents=%d err=%v", len(agents), err)
 				}
 				requireNativeReceiverAgentCarrier(t, agents[0].Config)
-				for _, route := range restarted.bus.materializationRequests() {
-					for _, field := range []string{"label", "request_id", "nested", "enabled"} {
-						if _, exists := route.ActivationVariables[field]; exists {
-							t.Fatalf("restart retained business activation variable: %#v", route.ActivationVariables)
-						}
-					}
-					if route.ActivationVariables["instance_id"] != plan.Identity.InstanceID {
-						t.Fatalf("restart lost exact activation identity: %#v", route.ActivationVariables)
-					}
+				observed, found, err := index.LookupFlowInstance(f.ctx, lookup)
+				if err != nil || !found || observed.Identity() != plan.Identity || observed.InstanceKey() != plan.Instance.InstanceKey {
+					t.Fatalf("restart lost exact native construction: %+v found=%t err=%v", observed.Identity(), found, err)
 				}
-				if len(restarted.bus.routePaths()) != 1 {
-					t.Fatal("restart did not install exact instance route")
+				if err := observed.ValidateSelection(lookup); err != nil {
+					t.Fatal(err)
+				}
+				for _, expected := range plan.Readiness.Agents {
+					state, found, err := f.store.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(f.ctx, expected.Identity)
+					owned := state.Topology.Authority.Readiness
+					if err != nil || !found || state.Phase != manager.AgentLifecycleRegistered || owned == nil ||
+						owned.InstancePath != plan.Identity.InstancePath || owned.RunID != plan.Readiness.RunID || owned.AttemptID == "" {
+						t.Fatalf("restart lost exact bound agent: %+v readiness=%+v found=%t err=%v", state, owned, found, err)
+					}
 				}
 			})
 		}
@@ -192,20 +247,37 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 	}
 	f.bus = &sqliteFlowActivationBus{}
 	f.workflows = configureAgentFixtureFlowLifecycle(t, f.store, f.bus, f.bundle)
+	var routes manager.AgentRouteBus = f.bus
+	if publisher != nil {
+		var ok bool
+		routes, ok = publisher.(manager.AgentRouteBus)
+		if !ok {
+			t.Fatal("native creation publisher requires its actual agent-route owner")
+		}
+	}
 	options := manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, BaseContext: f.ctx, SourceArtifactFact: fact,
 		SemanticSource: semanticview.Wrap(f.bundle), WorkflowInstances: f.workflows, LLMBackend: "anthropic",
 		DeliveryStore: f.store, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
 			LifecycleState: f.store, LifecycleOutcome: f.store,
-			AgentRoutes: f.bus, FlowActivation: agentFixtureFlowActivationCommitter{store: f.store},
-			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: publisher,
+			AgentRoutes: routes, FlowActivation: agentFixtureFlowActivationCommitter{store: f.store},
+			CreationPublisher: publisher,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
 	if len(workflowOverride) != 0 {
 		options.WorkflowInstances = workflowOverride[0]
 	}
 	f.manager = ownStoreTestAgentManager(t, manager.NewAgentManagerWithOptions(f.bus, nil, options, f.store))
+	if publisher != nil {
+		finalizer, ok := publisher.(interface {
+			SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizer)
+		})
+		if !ok {
+			t.Fatal("native creation publisher requires its committed readiness owner")
+		}
+		finalizer.SetCommittedAgentReadinessFinalizer(f.manager)
+	}
 	admission, err := agenttopology.StaticAdmission(sourceSet.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)

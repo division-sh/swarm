@@ -34,12 +34,6 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 				Message:     "timer history is unproven",
 			},
 			{
-				Fact:        runfork.RunForkReplayResumeFactRouteHistory,
-				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: runfork.RunForkBlockerFlowRouteHistoryUnproven,
-				Message:     "route history is unproven",
-			},
-			{
 				Fact:        runfork.RunForkReplayResumeFactSessionHistory,
 				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
 				BlockerCode: runfork.RunForkBlockerSessionHistoryUnproven,
@@ -68,7 +62,6 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 			{Code: runfork.RunForkBlockerDeliveryHistoryUnproven, Message: "delivery history is not replayable"},
 			{Code: runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported, Message: "non-agent work is not replayable"},
 			{Code: runfork.RunForkBlockerTimerHistoryUnproven, Message: "timer history is unproven"},
-			{Code: runfork.RunForkBlockerFlowRouteHistoryUnproven, Message: "route history is unproven"},
 			{Code: runfork.RunForkBlockerSessionHistoryUnproven, Message: "session history is unproven"},
 			{Code: runfork.RunForkBlockerActiveTurnHistoryUnproven, Message: "turn history is unproven"},
 			{Code: runfork.RunForkBlockerConversationAuditUnproven, Message: "audit history is unproven"},
@@ -115,7 +108,11 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerDeliveryHistoryUnproven)
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactDeadLetters, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerDeliveryHistoryUnproven)
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTimers, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerTimerHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRoutes, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerFlowRouteHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRoutes, runfork.RunForkHistoricalReplayAdmissionReconstructedForkState, "")
+	routes, found := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRoutes)
+	if !found || routes.SourceOwner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
+		t.Fatalf("instance history borrowed selected recovery authority: %+v", routes)
+	}
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSessions, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerSessionHistoryUnproven)
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTurns, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerActiveTurnHistoryUnproven)
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactAudits, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerConversationAuditUnproven)

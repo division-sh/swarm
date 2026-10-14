@@ -111,7 +111,7 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
-    pattern: '\bRouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b|\brouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b'
+    pattern: '\bRouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b|\brouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b|\bPubsub(?:Receiver|Declaration)Definitions\b|\bResolveIndependentPubsub(?:ForRun|FromSource)\b|\bresolvePubsubSubscribers\b|\bcontractFrontierPubsubDefinitions\b'
     minimum_matching_files: 4
     required_paths:
       - internal/runtime/runforkadmission/contract_frontier.go
@@ -135,7 +135,7 @@ search_dimensions:
     minimum_matching_files: 11
     required_paths:
       - platform-spec.yaml
-      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/target_owner_projection.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus.go
     canonical_layer: descriptor_evidence_non_authority
@@ -178,7 +178,7 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/pipeline/workflow_instance_activation.go
-      - internal/store/internal/runtimepersistence/sqlite_runtime.go
+      - internal/store/internal/backend/pipelinepersistence/flow_instance_index.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
     canonical_layer: event_context
   - id: event_name_type
@@ -230,7 +230,7 @@ search_dimensions:
     required_paths:
       - platform-spec.yaml
       - internal/runtime/bus/delivery_planner.go
-      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/bus/delivery_planner_test.go
     canonical_layer: route_topology
   - id: target_set
@@ -439,7 +439,6 @@ seam_families:
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/public_input_admission.go
-      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/construction_parent.go
       - internal/runtime/bus/construction_parent_test.go
       - internal/runtime/bus/a9_existing_selection_probe_test.go
@@ -797,13 +796,36 @@ seam_families:
       - platform-spec.yaml
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/routing_derivation_test.go
+      - internal/runtime/bus/import_boundary_alias_routing_test.go
+      - internal/runtime/bus/publication_wildcard_projection_test.go
+      - internal/runtime/bus/indexed_pubsub_receivers.go
+      - internal/runtime/bus/indexed_pubsub_receivers_test.go
+      - internal/runtime/bus/compiled_receiver_fixture_test.go
+      - internal/runtime/bus/durable_dependencies_test.go
+      - internal/runtime/bus/semantic_source_injection_test.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/route_template_admission_test.go
+      - internal/runtime/bus/routing_derivation_operation_test.go
+      - internal/runtime/bus/selected_input_agent_test.go
+      - internal/runtime/bus/selected_input_validation_test.go
+      - internal/runtime/bus/source_event_routes_test.go
+      - internal/runtime/cataloge2e/local_readiness_source_test.go
+      - internal/runtime/cataloge2e/run_scoped_flow_agent_identity_e2e_test.go
+      - internal/runtime/manager/flow_activation_test.go
+      - internal/store/internal/backend/runforkpersistence/run_fork_recipient_activation_equality_test.go
+      - internal/store/internal/runtimepersistence/run_fork_delivery_route_evidence_test.go
+      - internal/store/internal/runtimepersistence/run_fork_recipient_authority_test.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
     search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, typed_connect_recipient_evaluation]
     notes: >
-      RouteTable.Resolve is limited to runless authored direct typed pub/sub
-      consumers in runstart. Selected-fork admission uses
+      RouteTable.Resolve and ResolveForRun are retired with their mutable
+      exact/wildcard resolution cache. Runstart binds explicit compiled root
+      declarations, which cannot establish native existence. Selected-fork admission uses
       ResolveIndependentPubsubFromSource with the exact source run and admitted
       RoutingSource; its SourceEventRouteKeys projection is shared with live
       publication and does not borrow historical receiver targets. The underlying
@@ -819,7 +841,11 @@ seam_families:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_scoped_candidates_test.go
+      - internal/runtime/core/pinrouting/connect_receiver_binding_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_instance_selection.go
+      - internal/runtime/bus/indexed_connect_receivers.go
+      - internal/runtime/bus/indexed_connect_receivers_test.go
       - internal/runtime/bus/connect_candidate_scope_test.go
       - internal/runtime/bus/a9_existing_selection_probe_test.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
@@ -872,9 +898,10 @@ seam_families:
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/active_target_descriptor_dedup_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
-      - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
+      - internal/runtime/bus/durable_dependencies_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/indexed_connect_receivers_test.go
       - internal/runtime/bus/target_owner_projection.go
       - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/scalar_template_instance_store_parity_test.go
@@ -892,11 +919,9 @@ seam_families:
       - internal/runtime/template_instance_delivery_test.go
       - internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go
       - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
+      - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go
-      - internal/store/internal/runtimepersistence/flow_instance_descriptors_sqlite_test.go
-      - internal/store/internal/runtimepersistence/flow_instance_routes_test.go
-      - internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go
     search_dimensions: [descriptor_evidence, connect_route_plan]
     invalid_authority:
       - active-agent descriptor lookup
@@ -909,12 +934,9 @@ seam_families:
       top-level receiver entity fields as supported descriptor evidence;
       nested, arbitrary, undeclared, unindexed, config, and instance
       business-field descriptor/index authority remains split to #1466 or
-      later gated children.
-      The #2612 route-preparation proof reads descriptors through the native
-      selected-store owner and composes the canonical attempt-owned installer;
-      it observes preparation/install ordering, not a second recipient or
-      construction authority. Reset, source and retirement refusals stay bound
-      to the existing EventBus/RouteTable owners.
+      later gated children. #2594 deletes the native descriptor directory and
+      persisted route mirror; current target projections consume scoped native
+      observations and never establish construction or delivery authority.
   - id: event_delivery_plan_compatibility_adapter
     layer: invalid_old_authority
     classification: invalid_old_authority_path
@@ -1023,6 +1045,36 @@ seam_families:
       the #1495 typed route-intent producer model. #1494 guards their use and
       #1495 removes broad raw string producer helper entry points for EventBus
       RoutePlan production.
+  - id: direct_index_failure_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/indexed_connect_receivers_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      TestDirectPlanningPropagatesScopedIndexFailures invokes the existing
+      PlanDirect consumer with an empty compiled scope. It requires the same
+      source/run-bounded native observation owner and preserves cancellation,
+      independent store failures and joined failures. This test adds no direct
+      route producer, target permission, mutable membership or compatibility.
+  - id: materialized_target_index_scope_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/indexed_connect_receivers_test.go
+      - internal/runtime/runforkexecution/materialized_target_lookup_test.go
+    search_dimensions: [route_plan_source_reason]
+    notes: >
+      Test-only route-intent candidates exercise the existing exact native
+      instance lookup and target projection. The proof rejects foreign or
+      unselected observations and preserves absence and independent failures;
+      it does not introduce a route producer or execution permission. The real
+      selected-fork producer carries its admitted handler declaration into
+      root/path-only and nested/keyed native target preparation on both stores.
+      Empty-root binding remains a positive control; contradictory declaration,
+      run and source coordinates are rejected without changing native headers.
+      This producer-to-preparation proof does not claim fork execution or replace
+      fixed-cut historical construction and receipt authority with current index.
   - id: fan_out_publication_route_plan_consumer
     layer: route_plan_authority
     classification: valid_consumer
@@ -1067,6 +1119,20 @@ seam_families:
       wrong-generation coordinators preserve recovery refusal. The fixture
       does not plan subscribed recipients, infer ownership from the readiness
       marker or grant a new direct-delivery or replay capability.
+  - id: compiled_subscription_admission_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/harness_source_test.go
+      - internal/runtime/bus/route_template_admission_test.go
+    search_dimensions: [flow_owned_subscription_pattern_authority]
+    notes: >
+      Test-only freshness and private-input proofs consume the original typed
+      authored subscription admission and compiled pattern projection. They
+      do not use a fixture-only production recompilation API or duplicate
+      cached input lists. The compiled local-event set remains necessary for
+      wildcard declaration filtering; neither declaration admission nor this
+      proof grants native existence, readiness, or inter-flow delivery.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner
@@ -1272,11 +1338,16 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/bus/receiver_materialization.go
+      - internal/runtime/bus/agent_target_admission.go
+      - internal/runtime/bus/connect_receiver_validation.go
     search_dimensions: [descriptor_evidence, route_plan_source_reason]
     notes: >
       The publication-local binder consumes exact compiled receiver claims and
       the canonical node target classification. Agent descriptors can reject
       contradictory ownership but cannot select a receiver or grant readiness.
+      Agent target admission and connect-intent validation preserve captured
+      construction independently of exact actor ownership; route intent labels
+      never supply native or fixed-cut historical construction evidence.
       ReceiverMaterializationPlan owns complete dependency admission. The real
       node/agent, renamed-agent, sibling/nested, competing-materializer and
       duplicate-publication proofs exercise this consumer; those proofs do not
@@ -1545,6 +1616,18 @@ seam_families:
       The compiler-resolved guard names descriptor and delivery consumers to
       reject their reconstruction of transition authority. It does not create
       or resolve delivery routes.
+  - id: receiver_ownership_constructor_guard
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/contracts/receiver_ownership_guard_test.go
+    search_dimensions: [descriptor_evidence]
+    notes: >
+      The exact constructor inventory names the admitted-index projection and
+      overlays one hostile extra descriptor construction into that function.
+      The overlay is scanned, not executed as a runtime producer. The guard
+      preserves exact per-function counts; it does not select a receiver,
+      reinterpret stored identity or grant delivery/attachment authority.
   - id: compiled_template_lifecycle_final_consumer_proof
     layer: route_plan_authority
     classification: valid_consumer
@@ -1569,6 +1652,7 @@ seam_families:
     layer: route_plan_authority
     classification: valid_consumer
     paths:
+      - internal/runtime/bus/agent_historical_construction_test.go
       - internal/runtime/bus/publish_recipient_actual.go
       - internal/runtime/bus/publish_recipient_actual_test.go
       - internal/runtime/bus/recipient_guard_context_test.go

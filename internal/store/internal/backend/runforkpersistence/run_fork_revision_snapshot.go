@@ -68,22 +68,26 @@ type runForkRevisionEntityMutation struct {
 
 type runForkRevisionEntityMetadata struct {
 	runForkRevisionedFact
-	FlowConfig       json.RawMessage `json:"flow_config"`
-	EntityID         string          `json:"entity_id"`
-	FlowInstance     string          `json:"flow_instance"`
-	EntityType       string          `json:"entity_type"`
-	Slug             string          `json:"slug"`
-	Name             string          `json:"name"`
-	CreatedAt        time.Time       `json:"created_at"`
-	ConstructionKind string          `json:"construction_kind"`
-	StageDefined     bool            `json:"stage_defined"`
-	FlowTemplate     string          `json:"flow_template"`
-	Mode             string          `json:"mode"`
-	Status           string          `json:"status"`
-	CurrentState     string          `json:"current_state"`
-	EnteredStateAt   time.Time       `json:"entered_state_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	TerminatedAt     time.Time       `json:"terminated_at"`
+	HistoricalConstruction *runfork.RunForkCapturedHistoricalConstruction `json:"-"`
+	InitialMaterialization json.RawMessage                                `json:"initial_materialization"`
+	FlowConfig             json.RawMessage                                `json:"flow_config"`
+	EntityID               string                                         `json:"entity_id"`
+	FlowInstance           string                                         `json:"flow_instance"`
+	ParentInstance         string                                         `json:"parent_instance"`
+	InstanceKey            string                                         `json:"instance_key"`
+	EntityType             string                                         `json:"entity_type"`
+	Slug                   string                                         `json:"slug"`
+	Name                   string                                         `json:"name"`
+	CreatedAt              time.Time                                      `json:"created_at"`
+	ConstructionKind       string                                         `json:"construction_kind"`
+	StageDefined           bool                                           `json:"stage_defined"`
+	FlowTemplate           string                                         `json:"flow_template"`
+	Mode                   string                                         `json:"mode"`
+	Status                 string                                         `json:"status"`
+	CurrentState           string                                         `json:"current_state"`
+	EnteredStateAt         time.Time                                      `json:"entered_state_at"`
+	UpdatedAt              time.Time                                      `json:"updated_at"`
+	TerminatedAt           time.Time                                      `json:"terminated_at"`
 }
 
 type runForkRevisionDelivery struct {
@@ -369,7 +373,16 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 
 // The oracle shares fork admission and ordering, but needs only mutation
 // coordinates; unrelated historical families are not its evidence operands.
-func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (_ *runForkRevisionSnapshot, err error) {
+func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (*runForkRevisionSnapshot, error) {
+	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, tx, runID, revision, mutationsOnly)
+	if err != nil || mutationsOnly {
+		return snapshot, err
+	}
+	resolver := capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)}
+	return resolver.resolve(ctx, snapshot)
+}
+
+func loadRunForkRevisionSnapshotRaw(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (_ *runForkRevisionSnapshot, err error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision snapshot requires a database transaction")
 	}

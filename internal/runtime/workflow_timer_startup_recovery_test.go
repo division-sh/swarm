@@ -440,9 +440,14 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			occurredAt := time.Now().UTC()
 			construction383Ctx := seedCtx
 			construction383At := occurredAt
+			rootSchema, declared := source.FlowSchemaByID(".")
+			if !declared || !rootSchema.Instance.Empty() {
+				t.Fatal("timer fixture requires its compiled keyless root declaration")
+			}
 			construction383Instance, construction383Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction383Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
+				Mode:       rootSchema.EffectiveMode(),
 				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, construction383At)
@@ -691,11 +696,16 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 			construction620Ctx := seedCtx
 			construction620At := time.Now().UTC()
+			rootSchema, declared := source.FlowSchemaByID(".")
+			if !declared || !rootSchema.Instance.Empty() {
+				t.Fatal("timer fixture requires its compiled keyless root declaration")
+			}
 			construction620Instance, construction620Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction620Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				WorkflowName:    ".",
 				WorkflowVersion: source.WorkflowVersion(),
+				Mode:            rootSchema.EffectiveMode(),
 				CurrentState:    "waiting",
 				Fields:          map[string]any{},
 				EntityType:      "test_entity",
@@ -859,12 +869,17 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 					construction757Ctx := seedCtx
 					construction757At := occurredAt
+					rootSchema, declared := source.FlowSchemaByID(".")
+					if !declared || !rootSchema.Instance.Empty() {
+						t.Fatal("timer fixture requires its compiled keyless root declaration")
+					}
 					construction757Instance, construction757Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction757Ctx, rootOwner, runtimepipeline.WorkflowInstance{
 						InstanceID:      rootIdentity.InstanceID,
 						StorageRef:      rootIdentity.InstancePath,
 						EntityID:        rootIdentity.EntityID,
 						WorkflowName:    ".",
 						WorkflowVersion: source.WorkflowVersion(),
+						Mode:            rootSchema.EffectiveMode(),
 						CurrentState:    "waiting",
 						Fields:          map[string]any{},
 						EntityType:      "test_entity",

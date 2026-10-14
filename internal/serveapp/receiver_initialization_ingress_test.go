@@ -199,7 +199,7 @@ func receiverIngressApplicationSnapshot(t *testing.T, reader receiverProofStateR
 	t.Helper()
 	all, out := requireReceiverApplicationSnapshot(t, reader), map[string][]string{}
 	for _, table := range []string{
-		"runs", "events", "flow_instances", "flow_instance_runtime_readiness", "entity_state", "entity_mutations", "routing_rules",
+		"runs", "events", "flow_instances", "flow_instance_runtime_readiness", "entity_state", "entity_mutations",
 		"event_deliveries", "event_delivery_attempts", "event_receipts", "committed_replay_scopes", "api_idempotency",
 		"author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions",
 	} {

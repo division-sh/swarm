@@ -25,6 +25,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -716,9 +717,15 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	publicationStore := &cancellationBlockingInboundStore{
 		entered: make(chan struct{}, 1),
 	}
-	hash := "bundle-v2:sha256:" + strings.Repeat("7", 64)
+	target := InboundTarget{FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001"}
+	source := inboundTransportSource(t, []InboundTarget{target}, false)
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle.SourceArtifact == nil {
+		t.Fatal("deactivation fixture requires its admitted source")
+	}
+	hash := bundle.SourceArtifact.BundleHash()
 	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner}, InboundTarget{BundleHash: hash, FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001"})
+	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner, ContractBundle: source}, target)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -598,7 +599,6 @@ func (startupRecoveryMinimalEventStore) ListSelectedContractRouteRecoveryRecords
 
 type startupRecoveryEventStore struct {
 	missing     []events.PersistedReplayEvent
-	routes      []runtimeflowidentity.RunScopedFlowInstance
 	claimErr    error
 	obligations *startupRecoveryPipelineOwner
 }
@@ -620,18 +620,6 @@ func (startupRecoveryEventStore) CommitPublication(ctx context.Context, command 
 
 func (startupRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
-}
-
-func (startupRecoveryEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-
-func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
-
-func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
 }
 
 func (startupRecoveryEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
@@ -915,16 +903,10 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
-		routes: []runtimeflowidentity.RunScopedFlowInstance{
-			{
-				RunID: eventtest.UUID("startup-recovery-manager-run"),
-				Route: runtimeflowidentity.DeriveRoute("child", "inst-1"),
-			},
-		},
 	}
 	managerIdentity := agentidentitytest.RootRuntime(t, "persisted-agent", "startup-recovery-manager-work")
 	managerTopology, err := runtimeagenttopology.FlowReadinessAdmission(
-		eventtest.UUID("startup-recovery-manager-run"),
+		managerIdentity.RunID,
 		"review/inst-1",
 		"startup-recovery-manager-readiness",
 	)
@@ -938,7 +920,7 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 		}),
 		Topology: managerTopology,
 	}}}
-	managerStore.session.admitRun(t, managerIdentity.RunID, testSourceArtifactFact(t, runtimeTestBundleHash))
+	managerStore.session.admitRun(t, managerIdentity.RunID, nativeRuntimeLogSourceFactForTest(t, fixture))
 	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
@@ -997,16 +979,21 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 	if got := detailInt(detail["persisted_agent_count"]); got != 1 {
 		t.Fatalf("persisted_agent_count = %d, want 1", got)
 	}
-	if got := detailInt(detail["persisted_flow_instance_route_count"]); got != 1 {
-		t.Fatalf("persisted_flow_instance_route_count = %d, want 1", got)
+	if got := detailInt(detail["persisted_flow_attachment_count"]); got != 0 {
+		t.Fatalf("persisted_flow_attachment_count = %d, want no constructed attachment", got)
+	}
+	if _, legacy := detail["persisted_flow_instance_route_count"]; legacy {
+		t.Fatal("startup diagnostics restored persisted route authority")
 	}
 	if !detailBool(detail["replay_eligible_event_present"]) {
 		t.Fatalf("replay_eligible_event_present = %#v, want true", detail["replay_eligible_event_present"])
 	}
 	classes := detailClasses(detail["recoverable_work_classes"])
 	assertContainsClass(t, classes, "persisted agents")
-	assertContainsClass(t, classes, "persisted flow instance routes")
 	assertContainsClass(t, classes, "events missing pipeline receipts")
+	if !reflect.DeepEqual(classes, []string{"events missing pipeline receipts", "persisted agents"}) {
+		t.Fatalf("manager-only recovery invented attachment work: %v", classes)
+	}
 }
 
 func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {

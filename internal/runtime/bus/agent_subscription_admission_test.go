@@ -40,7 +40,7 @@ func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
 	defer unsubscribeTestAgent(eb, "reviewer")
 
 	for index, eventType := range []events.EventType{"review/inst-1/task.ready", "review/inst-1/task.done"} {
-		evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-admitted-"+string(rune('a'+index))), eventType, "test", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-admitted-"+string(rune('a'+index))), eventType, "test", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 		if err := eb.Publish(context.Background(), evt); err != nil {
 			t.Fatalf("Publish(%s): %v", eventType, err)
 		}

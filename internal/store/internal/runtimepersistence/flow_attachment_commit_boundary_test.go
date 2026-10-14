@@ -27,6 +27,7 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 				"review/entities.yaml": "review_item:\n  request_id: text\n",
 				"review/events.yaml":   "task.started:\n",
 			}, nil, ownStoreTestAgentManager, nil)
+			f.constructKeylessRoot(t)
 			request := f.request("business-key", "rebind-ack", "unused")
 			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
 			if err != nil {
@@ -142,6 +143,7 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 						"review/entities.yaml": "review_item:\n  request_id: text\n",
 						"review/events.yaml":   "task.started:\n",
 					}, nil, ownStoreTestAgentManager, nil)
+					f.constructKeylessRoot(t)
 					ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 					defer cancel()
 					req := f.request("business-key", "commit-boundary", "unused")
@@ -257,10 +259,10 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 						t.Fatal("attachment reconciliation repeated constructor lifecycle evidence")
 					}
 					f.bus.mu.Lock()
-					staged, published := len(f.bus.stagedRequests), len(f.bus.routeRequests)
+					prepared, published := len(f.bus.preparedAgentRoutes), len(f.bus.publishedAgentRoutes)
 					f.bus.mu.Unlock()
-					if staged != 0 || published != 0 {
-						t.Fatalf("store acknowledgment reconciliation installed process routes: staged=%d published=%d", staged, published)
+					if prepared != 0 || published != 0 {
+						t.Fatalf("store acknowledgment reconciliation installed agent carriers: prepared=%d published=%d", prepared, published)
 					}
 				})
 			}
