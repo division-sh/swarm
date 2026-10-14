@@ -117,7 +117,7 @@ func (s *flowInstancePlanningReadSet) reobserve(ctx context.Context, snapshot *f
 		if err != nil {
 			return false, err
 		}
-		equal, err := sameFlowInstancePlanningObservations(read.observations, current)
+		equal, err := sameFlowInstancePlanningObservations(read.observations, current, read.lookup != nil)
 		if err != nil {
 			return false, err
 		}
@@ -128,19 +128,19 @@ func (s *flowInstancePlanningReadSet) reobserve(ctx context.Context, snapshot *f
 	return changed, nil
 }
 
-func sameFlowInstancePlanningObservations(a, b []pipeline.FlowInstanceObservation) (bool, error) {
+func sameFlowInstancePlanningObservations(a, b []pipeline.FlowInstanceObservation, exact bool) (bool, error) {
 	if len(a) != len(b) {
 		return false, nil
 	}
 	for i := range a {
-		if a[i].Identity() != b[i].Identity() || a[i].RunState() != b[i].RunState() || !a[i].SourceFact().Matches(b[i].SourceFact()) {
+		if a[i].Owner() != b[i].Owner() || a[i].Identity() != b[i].Identity() || a[i].RunState() != b[i].RunState() || !a[i].SourceFact().Matches(b[i].SourceFact()) {
 			return false, nil
 		}
-		x, err := captureFlowInstancePlanningDependencies(a[i])
+		x, err := captureFlowInstancePlanningDependencies(a[i], exact)
 		if err != nil {
 			return false, err
 		}
-		y, err := captureFlowInstancePlanningDependencies(b[i])
+		y, err := captureFlowInstancePlanningDependencies(b[i], exact)
 		if err != nil {
 			return false, err
 		}
@@ -159,21 +159,23 @@ type flowInstancePlanningDependencies struct {
 	nativeSet, historicalSet, readinessSet bool
 }
 
-func captureFlowInstancePlanningDependencies(observation pipeline.FlowInstanceObservation) (flowInstancePlanningDependencies, error) {
+func captureFlowInstancePlanningDependencies(observation pipeline.FlowInstanceObservation, exact bool) (flowInstancePlanningDependencies, error) {
 	var out flowInstancePlanningDependencies
 	var err error
 	instance, err := observation.WorkflowInstance()
 	if err != nil {
 		return out, err
 	}
-	// Selection reads identity, availability and captured construction, not
-	// live business fields, workflow counters or settlement bookkeeping. The
-	// canonical re-read still validates the complete header and companions.
+	// Inventories narrow immutable membership/construction. Only an actual
+	// lookup binds availability/readiness used by a positive or negative
+	// decision. Both canonical rereads still validate every header/companion.
 	out.instance = pipeline.WorkflowInstance{
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		EntityType: instance.EntityType, Mode: instance.Mode, InstanceKey: instance.InstanceKey,
-		Status: instance.Status, TerminatedAt: instance.TerminatedAt,
-		CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
+	}
+	if exact {
+		out.instance.Status, out.instance.TerminatedAt = instance.Status, instance.TerminatedAt
+		out.instance.CurrentState, out.instance.StageDefined = instance.CurrentState, instance.StageDefined
 	}
 	out.native, out.nativeSet, err = observation.NativeConstruction()
 	if err != nil {
@@ -181,6 +183,11 @@ func captureFlowInstancePlanningDependencies(observation pipeline.FlowInstanceOb
 	}
 	out.historical, out.historicalSet = observation.HistoricalConstruction()
 	out.readiness, out.readinessSet = observation.Readiness()
+	if !exact {
+		// The plan retains declared-agent identity/configuration and immutable
+		// creation facts even when its mutable attachment progress is not read.
+		out.readiness = pipeline.DynamicFlowRuntimeReadiness{Plan: out.readiness.Plan}
+	}
 	return out, nil
 }
 

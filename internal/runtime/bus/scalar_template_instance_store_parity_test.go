@@ -69,6 +69,43 @@ func (s *sqliteScalarTemplateInstanceStore) ListFlowInstances(ctx context.Contex
 	return s.SQLiteRuntimeStore.ListFlowInstances(ctx, scope)
 }
 
+type scalarPlanningIndexReader struct {
+	runtimepipeline.FlowInstanceIndexReader
+	read func() error
+}
+
+func (r scalarPlanningIndexReader) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	if err := r.read(); err != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, err
+	}
+	return r.FlowInstanceIndexReader.LookupFlowInstance(ctx, request)
+}
+
+func (r scalarPlanningIndexReader) ListFlowInstances(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	if err := r.read(); err != nil {
+		return nil, err
+	}
+	return r.FlowInstanceIndexReader.ListFlowInstances(ctx, scope)
+}
+
+func (s *postgresScalarTemplateInstanceStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope, prepare func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error {
+	return s.PostgresStore.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader runtimepipeline.FlowInstanceIndexReader) error {
+		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, read: func() error {
+			s.indexCalls++
+			return s.indexErr
+		}})
+	})
+}
+
+func (s *sqliteScalarTemplateInstanceStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope, prepare func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error {
+	return s.SQLiteRuntimeStore.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader runtimepipeline.FlowInstanceIndexReader) error {
+		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, read: func() error {
+			s.indexCalls++
+			return s.indexErr
+		}})
+	})
+}
+
 type scalarTemplateInstanceParityStore interface {
 	componentFlowConstructionStore
 	storetest.RunFixtureStore

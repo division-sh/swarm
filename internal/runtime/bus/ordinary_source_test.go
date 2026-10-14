@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -43,9 +44,17 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				{FlowInstance: "beta", EntityID: entityID},
 			}}
 			constructed := StoredFlowInstanceIdentityFixture(source, flow, "", runID, entityID)
-			projection.context = withSelectedTargetOwnerLookupScope(constructionIndexContext(t, source), selectedTargetOwnerLookupScope{
-				observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, runID, constructed, "")},
+			observation := constructionIndexObservation(t, source, runID, constructed, "")
+			ctx := constructionIndexContext(t, source)
+			fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+			lookup, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{flow}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection.context = withSelectedTargetOwnerLookupScope(ctx, selectedTargetOwnerLookupScope{
+				lookup: lookup, observations: []pipeline.FlowInstanceObservation{observation},
 			})
+			projection.instances = constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observation}}
 			local, err := projection.ordinarySource(evt)
 			if err != nil {
 				t.Fatal(err)

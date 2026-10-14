@@ -50,6 +50,7 @@ func (p deliveryPlanner) resolvePreparedRoutePlan(projection selectedRunTargetOw
 			}
 			origins[record.ID] = record.Origin
 		}
+		projection.instances = nil
 		p.preparedOwners.projection = projection
 		p.preparedOwners.present = true
 		p.preparedOwners.origins = origins
@@ -90,6 +91,9 @@ func (p *publicationTargetOwnerEvidence) returnOwner(ctx context.Context, event 
 	if err := p.validate(ctx, event); err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
+	// Ordinary planning has ended its cut; groups are still inside theirs.
+	// Use this owner's live reader, never retain the ordinary expired reader.
+	p.projection.instances = p.planner.connectPlanner.lifecycle.index
 	origin, captured := p.origins[record.ID]
 	if !captured || origin != record.Origin || record.RunID != event.RunID() || record.RequestEventID != event.ID() {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("reply origin differs from its prepared publication")
@@ -120,7 +124,9 @@ func (p *publicationTargetOwnerEvidence) returnOwner(ctx context.Context, event 
 			return events.DeliveryTargetOwnership{}, err
 		}
 		bounded := withSelectedTargetOwnerLookupScope(p.projection.context, scope)
-		p.projection, err = p.planner.recipientPolicy.loadSelectedRunTargetOwnerProjection(bounded)
+		policy := p.planner.recipientPolicy
+		policy.instances = p.planner.connectPlanner.lifecycle.index
+		p.projection, err = policy.loadSelectedRunTargetOwnerProjection(bounded)
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, err
 		}

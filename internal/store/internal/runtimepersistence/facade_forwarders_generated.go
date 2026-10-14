@@ -1295,6 +1295,10 @@ func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempoten
 	return s.postgresOwner.WithAPIIdempotency(ctx, req, execute)
 }
 
+func (s *PostgresStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
+	return s.pipelinePostgresOwner.WithFlowInstancePlanningSnapshot(ctx, scope, prepare)
+}
+
 func (s *SQLiteRuntimeStore) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
 	return s.pipelineSQLiteOwner.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
@@ -2501,4 +2505,8 @@ func (s *SQLiteRuntimeStore) VerifyPreparedPublishEventIdentity(candidate events
 
 func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	return s.sQLiteOwner.WithAPIIdempotency(ctx, req, execute)
+}
+
+func (s *SQLiteRuntimeStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
+	return s.pipelineSQLiteOwner.WithFlowInstancePlanningSnapshot(ctx, scope, prepare)
 }

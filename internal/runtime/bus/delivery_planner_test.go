@@ -395,7 +395,9 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				envelope = events.EventEnvelope{}
 			}
 			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("constructed-static-publication"), "task.completed", "operator", "", nil, 0, runID, envelope, time.Now().UTC())
-			manifest, err := policy.Evaluate(admittedAgentConstructionContext(t, policy.semanticSource, runID), evt, []deliveryRecipientCandidate{{
+			ctx, reader := admittedAgentConstructionFixture(t, policy.semanticSource, runID)
+			policy.instances = reader
+			manifest, err := policy.Evaluate(ctx, evt, []deliveryRecipientCandidate{{
 				ID: "reviewer", AgentIdentity: identity, PersistAsDelivery: true, AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
 			}})
 			if err != nil || len(manifest.DeliveryRoutes) != test.want {
@@ -447,7 +449,7 @@ func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			agents := map[agentidentity.Identity]ActiveAgentDescriptor{test.identity: {Identity: test.identity, EntityID: test.entity}}
 			projection := selectedRunTargetOwnerProjection{agentsAvailable: true, agents: agents, required: true, source: source}
-			projection.context = admittedAgentConstructionContext(t, source, identity.RunID)
+			projection.context, projection.instances = admittedAgentConstructionFixture(t, source, identity.RunID)
 			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: nodeEntity}}
 			envelope := events.EventEnvelope{}
 			if test.explicit {

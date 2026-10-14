@@ -16,7 +16,10 @@ import (
 type selectedRunTargetOwnerProjection struct {
 	prospective        runtimepipeline.PreparedWorkflowPublicationState
 	context            context.Context
+	instances          runtimepipeline.FlowInstanceIndexReader
 	agents             map[agentidentity.Identity]ActiveAgentDescriptor
+	recordedAgents     map[agentidentity.Identity]ActiveAgentDescriptor
+	observedAgents     map[agentidentity.Identity]runtimepipeline.FlowInstanceObservation
 	constructingAgents map[agentidentity.Identity]struct{}
 	activationOwners   map[events.RouteIdentity]runtimepipeline.FlowInstanceActivationPlan
 	agentsAvailable    bool
@@ -122,10 +125,19 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 			if handler.Empty() {
 				return fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
 			}
-			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
+			request := runtimepipeline.DeliveryTargetOwnershipRequest{
 				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-				Handler: handler, Candidates: p.targetOwnerCandidates(),
-			})
+				Handler: handler,
+			}
+			target, err := runtimepipeline.AdmitDeliveryTargetLookupCoordinate(request)
+			if err != nil {
+				return err
+			}
+			request.Candidates, err = p.decisionTargetCandidates(target)
+			if err != nil {
+				return err
+			}
+			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(request)
 			if err != nil {
 				return fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
 			}
@@ -242,6 +254,7 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 	projection := selectedRunTargetOwnerProjection{
 		prospective: p.prospective,
 		context:     ctx,
+		instances:   p.instances,
 		agents:      agents, agentsAvailable: agentsAvailable,
 		descriptors: ordered.descriptors, targetsAvailable: targetsAvailable,
 		source: p.semanticSource, required: p.requireTargetOwners,
@@ -276,7 +289,11 @@ func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint is required")
 	}
 	owners := make(map[events.DeliveryTargetOwnership]struct{})
-	for _, candidate := range p.targetOwnerCandidates() {
+	candidates, err := p.decisionTargetCandidates(blueprint)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	for _, candidate := range candidates {
 		if blueprint.FlowInstance != "" && candidate.Route.FlowInstance != blueprint.FlowInstance {
 			continue
 		}
