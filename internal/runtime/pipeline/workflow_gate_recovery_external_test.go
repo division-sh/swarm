@@ -385,7 +385,10 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			bundle := proposedEffectProofBundle(t, server.URL, false)
 			source := semanticview.Wrap(bundle)
-			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
+			runID := uuid.NewString()
+			entityID := runID
+			ctx, bundleSource := workflowLifecycleSourceContext(t, selected, bundle, runID)
+			bundleHash := bundleSource.BundleHash()
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: bundleSource,
 			},
@@ -410,14 +413,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					Credentials:        credentials,
 				})
 			}
-			coordinator := newCoordinator(gateRecoveryBundle)
+			coordinator := newCoordinator(bundleHash)
 			bus.SetInterceptors(coordinator)
 
-			runID := uuid.NewString()
-			entityID := runID
-			insertGateRecoveryRun(t, selected.events, runID)
-			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
-			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			{
 				construction430Ctx := ctx
@@ -582,7 +580,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if err != nil || readback.DispatchState != "succeeded" {
 				t.Fatalf("proposed-effect readback = %#v, %v", readback, err)
 			}
-			coordinator = newCoordinator(gateRecoveryBundle)
+			coordinator = newCoordinator(bundleHash)
 			bus.SetInterceptors(coordinator)
 			released := loadProposedEffectProofRequest(t, selected.events, runID)
 			forward, _, _, err = coordinator.Intercept(ctx, released)
@@ -840,7 +838,8 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 
 			source := semanticview.Wrap(bundle)
 			supportNode := externalPipelineSourceNode(t, source, ".", "support")
-			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
+			runID, entityID := uuid.NewString(), uuid.NewString()
+			ctx, bundleSource := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: bundleSource,
 			})
@@ -861,10 +860,6 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			})
 			bus.SetInterceptors(coordinator)
 
-			runID, entityID := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected.events, runID)
-			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
-			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			{
 				construction852Ctx := ctx
@@ -1387,14 +1382,13 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 
 func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCase) {
 	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	entityID := runID
-	insertGateRecoveryRun(t, tc.events, runID)
-	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 
 	bundle := gateRecoveryContractBundle(t)
-	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	ctx, sourceFact := workflowLifecycleSourceContext(t, tc, bundle, runID)
+	bundleHash := sourceFact.BundleHash()
+	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1413,7 +1407,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 			SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(bundleHash),
 		})
 	}
-	matching := newCoordinator(gateRecoveryBundle)
+	matching := newCoordinator(bundleHash)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
 	{

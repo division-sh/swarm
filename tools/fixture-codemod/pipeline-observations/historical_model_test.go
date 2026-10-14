@@ -115,7 +115,7 @@ func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) 
 func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) {
 	for _, pin := range []struct{ file, function, digest string }{
 		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "openWorkflowHandlerNativeFixture", "fa6ca50cc31122fef484b3dcb892798c18adb44ad1b86413bc3906969de22847"},
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "2479ed29142e93c40fc306cb993d11586bbecd8945526efb40b0ee2796237d62"},
+		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "d7d11a06f23ac10d626104a7875740c93b0a0da064c5fa8011b49d37c3762ca7"},
 		{"internal/runtime/pipeline/delivery_native_owner_external_test.go", "workflowHandlerNativeCoordinator", "21ef5b19dd26e1d1bb42825279b4b1cad5788f1ed6b96efc445fb2fdbcf256cd"},
 	} {
 		t.Run(pin.function, func(t *testing.T) {
