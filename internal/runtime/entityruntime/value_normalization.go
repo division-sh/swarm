@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -130,7 +131,11 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 	case isIntegerType(contract, typeRef):
 		return normalizeIntegerFieldValue(fieldName, value)
 	case isNumericType(contract, typeRef):
-		return normalizeNumericFieldValue(fieldName, value)
+		normalized, err := canonicaljson.NormalizeRuntimeNumber(value)
+		if err != nil {
+			return nil, fieldTypeError(fieldName, "must be numeric")
+		}
+		return normalized, nil
 	case isBooleanType(contract, typeRef):
 		return normalizeBooleanFieldValue(fieldName, value)
 	case isJSONValueType(contract, typeRef):
