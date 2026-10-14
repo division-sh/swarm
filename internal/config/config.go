@@ -225,12 +225,13 @@ type LLMProviderLimitPolicy struct {
 }
 
 func (p *LLMProviderLimitPolicy) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateConfigSource(yamlsource.ValueFromNode(value), reflect.TypeFor[LLMProviderLimitPolicy](), "llm.provider_limits"); err != nil {
+	source := yamlsource.ValueFromNode(value)
+	if err := validateConfigSource(source, reflect.TypeFor[LLMProviderLimitPolicy](), "llm.provider_limits"); err != nil {
 		return err
 	}
 	type raw LLMProviderLimitPolicy
 	var decoded raw
-	if err := value.Decode(&decoded); err != nil {
+	if err := source.Project(&decoded); err != nil {
 		return err
 	}
 	*p = LLMProviderLimitPolicy(decoded)
