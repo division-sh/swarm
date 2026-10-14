@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -80,6 +82,98 @@ func TestS6PreAttemptCapturedBucketJoinDiagnosticBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("full typed in-progress claim snapshot unchanged with no external attempt; current agent model changed %s/%s -> %s/%s, generation %d -> %d; claim has no agent ConfigRevision join", record.Config.Model, record.Config.ResolvedModel, candidate.Config.Model, candidate.Config.ResolvedModel, before.Generation, after.Generation)
+		})
+	}
+}
+
+// This characterizes the persisted descriptor and claim separately. The native
+// fixture replacement is not evidence of a live Manager changing its backend.
+func TestS6PreAttemptProfileEvidenceDiagnosticBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openManagerNativeDelivery(t, backend)
+			selected := fixture.Store.(storetest.AgentFixtureStore)
+			ctx := fixture.Context
+			record := manager.ReconfigureMemoryNativeFixture(t, false)
+			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+			rows, err := selected.LoadAgents(ctx)
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("persisted descriptor: rows=%+v err=%v", rows, err)
+			}
+			captured := rows[0].Config
+			profile, err := llmselection.ResolveLiveBackend(captured.ResolvedLLMBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selection, err := runtimellm.ValidateAgentExecutionDescriptor(profile, captured); err != nil || selection.Profile.ID != profile.ID {
+				t.Fatalf("exact stored profile: selection=%+v err=%v", selection, err)
+			}
+			for _, cut := range []string{"missing", "provider", "transport", "foreign_profile"} {
+				corrupt := captured
+				switch cut {
+				case "missing":
+					corrupt.ResolvedLLMBackend = ""
+				case "provider":
+					corrupt.ResolvedLLMProvider = "foreign"
+				case "transport":
+					corrupt.ResolvedLLMTransport = "foreign"
+				case "foreign_profile":
+					corrupt.ResolvedLLMBackend = llmselection.BackendOpenAIResponses
+				}
+				before := corrupt
+				if _, err := runtimellm.ValidateAgentExecutionDescriptor(profile, corrupt); err == nil || !reflect.DeepEqual(before, corrupt) {
+					t.Fatalf("descriptor %s did not refuse without repair: %+v err=%v", cut, corrupt, err)
+				}
+			}
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "s6.pre_attempt.profile", "source", "", nil, 0, captured.Identity.RunID, events.EventEnvelope{}, time.Now().UTC())
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(captured.ID), AgentIdentity: captured.Identity}
+			fixture.Publish(t, ctx, event, []events.DeliveryRoute{route}, fixture.Authority)
+			result, err := fixture.ClaimDelivery(ctx, fixture.Authority, event, route)
+			acquired, ok := result.Acquired()
+			if err != nil || !ok || !result.Acknowledged {
+				t.Fatalf("pre-attempt claim: %+v err=%v", result, err)
+			}
+			before, err := fixture.Snapshot(ctx, acquired.Claim.DeliveryID())
+			if err != nil || before.Status != deliverylifecycle.StatusInProgress {
+				t.Fatalf("in-progress readback: %+v err=%v", before, err)
+			}
+			other, err := llmselection.ResolveLiveBackend(llmselection.BackendOpenAIResponses)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := record
+			candidate.Topology = agenttopology.Admission{}
+			candidate.Config.LLMBackend = other.ID
+			resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, other, nil, candidate.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate.Config = resolved.Actor
+			if _, err := runtimellm.ValidateAgentExecutionDescriptor(other, candidate.Config); err != nil {
+				t.Fatal(err)
+			}
+			if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, candidate); err != nil {
+				t.Fatal(err)
+			}
+			rows, err = selected.LoadAgents(ctx)
+			if err != nil || len(rows) != 1 || rows[0].Config.ResolvedLLMBackend != other.ID {
+				t.Fatalf("native candidate profile: rows=%+v err=%v", rows, err)
+			}
+			if _, err := runtimellm.ValidateAgentExecutionDescriptor(profile, rows[0].Config); err == nil {
+				t.Fatal("changed current descriptor substituted for captured profile")
+			}
+			after, err := fixture.Snapshot(ctx, acquired.Claim.DeliveryID())
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("candidate changed the captured claim: before=%+v after=%+v err=%v", before, after, err)
+			}
+			attempts, err := storetest.ReadExternalAttemptStorage(ctx, selected)
+			if err != nil || len(attempts) != 0 {
+				t.Fatalf("pre-attempt cut has provider evidence: count=%d err=%v", len(attempts), err)
+			}
+			if _, err := fixture.SettleSuccess(ctx, acquired.Claim, nil, 0, handlerselection.NotApplicable()); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("captured descriptor validates %s and refuses missing/corrupt/foreign profile; exact claim and source unchanged when native catalog becomes %s; no external attempt, no live Manager-replacement or recovery-join credit", profile.ID, other.ID)
 		})
 	}
 }
