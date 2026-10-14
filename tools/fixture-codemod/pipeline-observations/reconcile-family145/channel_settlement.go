@@ -137,3 +137,17 @@ func composeReadbackHistory(rows []recipe, changes []transition) ([]recipe, []tr
 	}
 	return rows, changes
 }
+
+func composeEntityToolHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		raw, err := selectedreadrole.ComposeEntityToolHistory(".", candidate, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}

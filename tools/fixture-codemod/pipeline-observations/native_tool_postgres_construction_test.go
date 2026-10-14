@@ -86,17 +86,9 @@ func TestNativeToolPostgresConstructionCallerInventoryIsComplete(t *testing.T) {
 			if !ok {
 				continue
 			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				if call, ok := node.(*ast.CallExpr); ok {
-					if formattedNativeReadNode(call.Fun) == "newPostgresHumanTaskToolStoreForTest" {
-						counts[fn.Name.Name]++
-					}
-					if formattedNativeReadNode(call) == "storetest.StartPostgresRuntimeStore(t)" {
-						native[fn.Name.Name]++
-					}
-				}
-				return true
-			})
+			old, current := nativeToolPostgresCallerCounts(fn)
+			counts[fn.Name.Name] += old
+			native[fn.Name.Name] += current
 		}
 	}
 	for _, name := range []string{
@@ -112,7 +104,45 @@ func TestNativeToolPostgresConstructionCallerInventoryIsComplete(t *testing.T) {
 		}
 		delete(counts, name)
 	}
-	if len(counts) != 0 {
-		t.Fatalf("unclassified constructor consumers: %v", counts)
+	for name, count := range counts {
+		if count != 0 {
+			t.Fatalf("unclassified retired constructor consumer: %s/%d", name, count)
+		}
+	}
+}
+
+func nativeToolPostgresCallerCounts(fn *ast.FuncDecl) (retired, native int) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if formattedNativeReadNode(call.Fun) == "newPostgresHumanTaskToolStoreForTest" {
+			retired++
+		}
+		if formattedNativeReadNode(call) == "storetest.StartPostgresRuntimeStore(t)" {
+			native++
+		}
+		return true
+	})
+	return retired, native
+}
+
+func TestNativeToolPostgresCallerRetirementRefusesLostDuplicateAndForeignConstruction(t *testing.T) {
+	valid := "func proof(t *testing.T) { selected := storetest.StartPostgresRuntimeStore(t); _ = selected }"
+	for _, sample := range []struct {
+		body         string
+		old, current int
+	}{
+		{valid, 0, 1},
+		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "newPostgresHumanTaskToolStoreForTest(t)", 1), 1, 0},
+		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "storetest.AdmitPostgresRuntimeStore(t, db)", 1), 0, 0},
+		{strings.Replace(valid, "_ = selected", "_ = selected; storetest.StartPostgresRuntimeStore(t)", 1), 0, 2},
+		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "storetest.StartPostgresRuntimeStore(other)", 1), 0, 0},
+	} {
+		old, current := nativeToolPostgresCallerCounts(projectionShapeFunction(t, sample.body))
+		if old != sample.old || current != sample.current {
+			t.Fatalf("constructor inventory admitted changed call: %s -> %d/%d", sample.body, old, current)
+		}
 	}
 }

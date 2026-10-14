@@ -28,6 +28,7 @@ func TestBudgetHistoryIsOneExactAppendAndAdvanceWithoutMetadataLoss(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
+		current = budgetLaterReadBoundaries(t, root, current, recipes)
 		previous, err := EarlierHistory(root, current, recipes)
 		if err != nil || !bytes.Equal(previous, prior) {
 			t.Fatal("exact historical metadata/order was not restored:", err)
@@ -50,6 +51,31 @@ func TestBudgetHistoryIsOneExactAppendAndAdvanceWithoutMetadataLoss(t *testing.T
 			t.Fatal("unsigned predecessor bytes accepted")
 		}
 	}
+}
+
+func budgetLaterReadBoundaries(t *testing.T, root string, current []byte, recipes bool) []byte {
+	t.Helper()
+	for _, stage := range []struct {
+		prior   func(string, bool) ([]byte, error)
+		compose func(string, []byte, bool) ([]byte, error)
+	}{
+		{selectedreadrole.PriorProcessHistory, selectedreadrole.ComposeProcessHistory},
+		{selectedreadrole.PriorReadbackHistory, selectedreadrole.ComposeReadbackHistory},
+	} {
+		signed, err := stage.prior(root, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var generated, trusted []map[string]any
+		if json.Unmarshal(current, &generated) != nil || json.Unmarshal(signed, &trusted) != nil || !reflect.DeepEqual(generated, trusted) {
+			t.Fatal("budget output differs from a complete later signed read boundary")
+		}
+		current, err = stage.compose(root, signed, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return current
 }
 
 func budgetReadRoleBoundary(t *testing.T, root string, current []byte, recipes bool) []byte {

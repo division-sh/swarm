@@ -188,6 +188,10 @@ func servedSetupPriorHistory(t *testing.T, recipes bool) []byte {
 func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
 	var err error
+	current, err = selectedreadrole.EarlierEntityToolHistory("../../..", current, recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, err = channelsettlement.EarlierHistory("../../..", current, recipes)
 	if err != nil {
 		t.Fatal(err)

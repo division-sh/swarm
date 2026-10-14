@@ -32,7 +32,15 @@ func TestReadRoleCompletePredecessorAndCurrentnessRefuseEveryForeignInput(t *tes
 		if err != nil || body != pin.Before {
 			t.Fatalf("complete signed predecessor changed: %s %v", pin.Function, err)
 		}
-		got, err := EarlierSource(root, pin.File, pin.Function, pin.After)
+		live, err := os.ReadFile(filepath.Join(root, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := Body(live, pin.Function)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := EarlierSource(root, pin.File, pin.Function, current)
 		if err != nil || got != pin.Before {
 			t.Fatalf("current endpoint cannot invert: %s %v", pin.Function, err)
 		}

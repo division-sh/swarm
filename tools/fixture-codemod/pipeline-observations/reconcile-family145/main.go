@@ -45,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "2a2471f86acb1e59df7976b1adc71712ffa015cb325a82122b38de6de3181f12"
+const targetDigest = "1a935d3bf5a203010f8c2c048f69748724e42b1f6fe80da94cac1b402e911cbf"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -371,6 +371,7 @@ func main() {
 	rows, changes = composeSelectedReadRoleHistory(rows, changes)
 	rows, changes = composeProcessReadHistory(rows, changes)
 	rows, changes = composeReadbackHistory(rows, changes)
+	rows, changes = composeEntityToolHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -1305,6 +1306,9 @@ func retiredFixtureReplacement(path, key string, after map[string]string) bool {
 }
 
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if entityToolAbsentDeclaration(path, key, after) {
+		return currentHistoryComparison(path, key, ""), false
+	}
 	if selectedreadrole.ProcessFunction(path, key) {
 		previous, err := selectedreadrole.EarlierProcessSource(".", path, key, after[key])
 		must(err)
@@ -1355,6 +1359,20 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		return "", true
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
+}
+
+func entityToolAbsentDeclaration(path, key string, after map[string]string) bool {
+	if after[key] != "" {
+		return false
+	}
+	pins, err := selectedreadrole.ReadEntityToolPins(".")
+	must(err)
+	for _, pin := range pins {
+		if pin.File == path && pin.Function == key && pin.Removed {
+			return true
+		}
+	}
+	return false
 }
 
 func currentHistoryComparison(path, key, current string) string {

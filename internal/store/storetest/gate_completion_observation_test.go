@@ -2,10 +2,55 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/google/uuid"
 )
+
+func TestGateCompletionAPIWitnessKeepsCompetingActorsBothORArmsAndOrderBothStores(t *testing.T) {
+	for _, backend := range runFixtureProofBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			selected := backend.open(t)
+			writer := selected.(interface {
+				WithAPIIdempotency(context.Context, apiidempotency.Request, func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error)
+			})
+			card, other := uuid.NewString(), uuid.NewString()
+			type seed struct{ method, actor, key, resource, hash string }
+			seeds := []seed{
+				{"event.publish", "z-actor", "other-key", card, "hash-one"},
+				{"event.publish", "a-competing-actor", "target-key", other, "hash-two"},
+				{"fixture.other_method", "b-actor", "other-key", card, "hash-three"},
+				{"event.publish", "excluded-actor", "other-key", other, "hash-four"},
+			}
+			for _, seed := range seeds {
+				req := apiidempotency.Request{Method: seed.method, Actor: apiidempotency.BearerActor(seed.actor), IdempotencyKey: seed.key, RequestHash: seed.hash, ResourceID: seed.resource, Now: time.Now().UTC(), TTL: time.Hour}
+				if _, replay, err := writer.WithAPIIdempotency(context.Background(), req, func(context.Context) (apiidempotency.Completion, error) {
+					return apiidempotency.Completion{ResourceID: seed.resource, Response: json.RawMessage(`{"retained":true}`)}, nil
+				}); err != nil || replay {
+					t.Fatalf("native receipt: replay=%t err=%v", replay, err)
+				}
+			}
+			rows, err := ReadGateCompletionAPIStorage(context.Background(), selected, card, "event.publish", "target-key")
+			if err != nil || len(rows) != 3 {
+				t.Fatalf("broad OR witness lost rows: %+v/%v", rows, err)
+			}
+			response := `{"retained":true}`
+			if backend.name == "postgres" {
+				response = `{"retained": true}`
+			}
+			for i, seed := range []seed{seeds[1], seeds[0], seeds[2]} {
+				want := GateCompletionAPIStorage{Method: seed.method, ActorKind: string(apiidempotency.ActorBearerToken), Actor: seed.actor, Key: seed.key, Hash: seed.hash, ResourceID: seed.resource, Response: response}
+				if !reflect.DeepEqual(rows[i], want) {
+					t.Fatalf("full actor/domain/text/order witness %d=%+v want=%+v", i, rows[i], want)
+				}
+			}
+		})
+	}
+}
 
 func TestGateCompletionReadPortsKeepDistinctCutsAndRefuseForeignEvidenceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {

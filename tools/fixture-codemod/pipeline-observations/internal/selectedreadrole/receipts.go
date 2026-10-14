@@ -95,6 +95,9 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 	for _, pin := range pins {
 		current, err := Body(files[pin.File], pin.Function)
 		if err == nil {
+			current, err = EarlierEntityToolSource(root, pin.File, pin.Function, current)
+		}
+		if err == nil {
 			current, err = EarlierReadbackSource(root, pin.File, pin.Function, current)
 		}
 		if err != nil || current != pin.After {
@@ -107,6 +110,10 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 
 func EarlierSource(root, file, function, current string) (string, error) {
 	var err error
+	current, err = EarlierEntityToolSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = EarlierReadbackSource(root, file, function, current)
 	if err != nil {
 		return "", err
