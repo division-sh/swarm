@@ -6,6 +6,5 @@ test-node:
     item.received:
       rules:
         - when: payload.kind == 'a'
-        - else: true
-          emit:
+        - emit:
             event: routed.unknown

@@ -12,17 +12,27 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		if context == handlerRuleDecodeContextOnComplete {
 			return nil, nodeValueError(value, fmt.Errorf("DIALECT-OC-ORDER: on_complete at %s must be an ordered list of rule rows; write on_complete: [{condition: payload.ready, emit: done}]", value.Location()))
 		}
-		return nil, nodeValueError(value, fmt.Errorf("DIALECT-RULES-ORDER: %s at %s must be an ordered list of rule rows, evaluated top to bottom.\n  %s:\n    - when: payload.kind == 'a'\n      emit: routed.a\n    - else: true\nA mapping keyed by rule name, a single row without \"- \", or a row \"id:\" is not accepted; rows are identified by position.", context, value.Location(), context))
+		return nil, nodeValueError(value, fmt.Errorf("DIALECT-RULES-ORDER: %s at %s must be an ordered list of rule rows, evaluated top to bottom.\n  %s:\n    - when: payload.kind == 'a'\n      emit: routed.a\n    - emit: routed.other\nA mapping keyed by rule name, a single row without \"- \", or a row \"id:\" is not accepted; rows are identified by position. The last row without a predicate is the default branch; a block that matches nothing already succeeds and records no_match.", context, value.Location(), context))
 	}
 	items, err := value.Sequence()
 	if err != nil {
 		return nil, err
 	}
 	var rows []HandlerRuleEntry
-	for _, item := range items {
+	for index, item := range items {
 		row, err := projectNodeRuleEntryValue(item, context)
 		if err != nil {
 			return nil, err
+		}
+		if context == handlerRuleDecodeContextRules && row.Condition == "" &&
+			row.PolicyRow.Kind != PolicySheetRowKindLookup && row.PolicyRow.Kind != PolicySheetRowKindValidate && row.PolicyRow.Kind != PolicySheetRowKindModule {
+			if index != len(items)-1 {
+				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s has no predicate but is not the last row; rows after it are unreachable. Add a when/case/range, or move it last to make it the default branch.", index, item.Location()))
+			}
+			if row.AdvancesTo == "" && !row.Terminate && row.Emit.Empty() && row.Activity.Empty() && !row.DataAccumulation.HasWrites() && row.Compute == nil && row.FanOut == nil {
+				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s is empty; a default row must advance, emit, set data or gates. A block that matches nothing already succeeds and records no_match.", index, item.Location()))
+			}
+			row.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 		}
 		rows = append(rows, row)
 	}
@@ -61,6 +71,9 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		return HandlerRuleEntry{}, err
 	}
 	if len(fields) == 0 {
+		if context == handlerRuleDecodeContextRules {
+			return HandlerRuleEntry{}, nodeValueError(value, fmt.Errorf("DIALECT-RULES-DEFAULT: %s at %s is empty; a default row must advance, emit, set data or gates. A block that matches nothing already succeeds and records no_match.", value.SemanticPath(), value.Location()))
+		}
 		return HandlerRuleEntry{}, fmt.Errorf("EMPTY-AUTHORED-RULE: rule at %s must not be empty", value.Location())
 	}
 	if activity, present := fields["activity"]; present && context == handlerRuleDecodeContextOnComplete {
@@ -125,7 +138,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 
 func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlsource.Value, context handlerRuleDecodeContext, out *HandlerRuleEntry) error {
 	var selected string
-	for _, key := range []string{"when", "case", "range", "lookup", "validate", "compute_module", "else", "default"} {
+	for _, key := range []string{"when", "case", "range", "lookup", "validate", "compute_module"} {
 		if _, present := fields[key]; present {
 			if selected != "" {
 				return fmt.Errorf("POLICY-SHEET-ROW: rule at %s declares multiple row types", value.Location())
@@ -150,14 +163,6 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 		}
 		out.predicateDisplay = "when " + strings.TrimSpace(predicate.Value)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
-	case "else", "default":
-		allowed, err := nodeValueBool(fields[selected], "rule."+selected)
-		if err != nil || !allowed {
-			return fmt.Errorf("POLICY-SHEET-ROW: %s at %s must be true", selected, fields[selected].Location())
-		}
-		out.Condition = "else"
-		out.predicateDisplay = "else"
-		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 	case "case":
 		out.Condition, out.PolicyRow, err = projectNodePolicyCaseValue(fields[selected])
 	case "range":

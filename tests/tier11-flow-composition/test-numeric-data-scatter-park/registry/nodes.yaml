@@ -32,7 +32,6 @@ registry-intake:
             event: investigate.requested
             fields:
               item_id: payload.item_id
-        - else: true
 registry-finalize:
   execution_type: system_node
   subscribes_to: [assessment.reported, investigation.timed_out]

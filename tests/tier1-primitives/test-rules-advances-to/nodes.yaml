@@ -9,4 +9,3 @@ test-node:
           advances_to: approved
           emit:
             event: item.approved
-        - else: true

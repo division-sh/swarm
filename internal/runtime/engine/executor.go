@@ -3121,7 +3121,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		}
 		hasExecutableRow = true
 		condition := strings.TrimSpace(rule.Condition)
-		if condition == "" || strings.EqualFold(condition, "else") {
+		if condition == "" {
 			return rule, idx, nil
 		}
 		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame), joinExpressionOptions(frame))

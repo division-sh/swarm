@@ -20,8 +20,7 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-        - else: true
-          data_accumulation:
+        - data_accumulation:
             writes:
               - target_field: dispatch_count
                 value: 0

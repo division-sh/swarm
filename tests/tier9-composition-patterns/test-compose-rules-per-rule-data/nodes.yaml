@@ -37,4 +37,3 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-        - else: true

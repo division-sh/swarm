@@ -9,4 +9,3 @@ test-node:
           emit:
             event: routed.a
         - when: payload.kind == 'b'
-        - else: true

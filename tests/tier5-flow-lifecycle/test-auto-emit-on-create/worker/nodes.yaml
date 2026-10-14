@@ -11,16 +11,14 @@ worker:
           advances_to: done
         - when: _entity.current_state == 'started'
           advances_to: requested_started
-        - else: true
-          advances_to: requested
+        - advances_to: requested
     auto.started:
       rules:
         - when: _entity.current_state == 'requested'
           advances_to: requested_started
           emit:
             event: auto.processed
-        - else: true
-          advances_to: started
+        - advances_to: started
           emit:
             event: auto.processed
 
@@ -33,5 +31,4 @@ observer:
       rules:
         - when: _entity.current_state == 'requested_started'
           advances_to: done
-        - else: true
-          advances_to: awaiting_requested
+        - advances_to: awaiting_requested

@@ -28,7 +28,6 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
             module: structured_renderer
             input: {component: payload.component}
             into: computed.rendered_bundle
-        - else: true
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +37,7 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := nodes["worker"].EventHandlers["task.ready"].Rules
-	if len(rules) != 4 || rules[0].Compute == nil || rules[0].Compute.Lookup == nil ||
+	if len(rules) != 3 || rules[0].Compute == nil || rules[0].Compute.Lookup == nil ||
 		rules[0].Compute.Lookup.RowID != "rules[0]: lookup" || len(rules[0].Compute.Lookup.Entries) != 2 ||
 		rules[1].Compute.Validation.RowID != "rules[1]: validate" ||
 		rules[1].Compute.Validation.Set != "deploy_manifest" ||
@@ -61,7 +60,6 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 			`nodes["worker"].handlers["task.ready"].rules[0]`,
 			`nodes["worker"].handlers["task.ready"].rules[1]`,
 			`nodes["worker"].handlers["task.ready"].rules[2]`,
-			`nodes["worker"].handlers["task.ready"].rules[3]`,
 		}[index] {
 			t.Fatalf("row[%d] display displaced positional identity: %#v", index, ref)
 		}
