@@ -134,6 +134,38 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 				t.Fatal("current source differs from reviewed successor")
 			}
 			restored := selected.Successor
+			if target.name == "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores" {
+				// A48d11e6069, reviewed in6174528631: failure-only logging;
+				// removing that exact line must recover the prior full successor.
+				const diagnostic = "\t\t\t\t\tt.Logf(\"capability refusal snapshot delta:\\n%s\", forkReceiverCapabilityRefusalSnapshotDelta(before, after))\n"
+				if strings.Count(restored, diagnostic) != 1 {
+					t.Fatal("missing or repeated reviewed capability diagnostic")
+				}
+				restored = strings.Replace(restored, diagnostic, "", 1)
+				canonical, err := canonicalFunction(restored)
+				if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) != "07154c247422a609a09000b3d9fd44b893f5431f2c246586df98f6d2106b34d5" {
+					t.Fatal("capability diagnostic changed its exact prior successor")
+				}
+				const failure = "\t\t\t\tif after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {\n"
+				mutants := map[string]string{
+					"missing_diagnostic":   restored,
+					"duplicate_diagnostic": strings.Replace(actual, diagnostic, diagnostic+diagnostic, 1),
+					"outside_failure":      strings.Replace(restored, failure, diagnostic+failure, 1),
+					"changed_diagnostic":   strings.Replace(actual, diagnostic, strings.Replace(diagnostic, "(before, after)", "(after, before)", 1), 1),
+				}
+				for name, mutant := range mutants {
+					t.Run(name, func(t *testing.T) {
+						if mutant == actual {
+							t.Fatal("capability diagnostic hostile control did not change source")
+						}
+						guard := *selected
+						guard.Before, guard.After, guard.Successor = actual, actual, ""
+						if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+							t.Fatal("unreviewed capability diagnostic accepted")
+						}
+					})
+				}
+			}
 			for name, mutant := range exactOriginOrderingMutants(t, actual) {
 				t.Run(name, func(t *testing.T) {
 					if mutant == actual {
