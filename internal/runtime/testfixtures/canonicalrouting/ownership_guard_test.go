@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -513,6 +514,67 @@ func TestCanonicalRoutingTimerSeparatesBareEventAndNoopHandler(t *testing.T) {
 			if !ok || len(mapping) != 0 {
 				t.Fatalf("no-op handler must be an empty mapping, got %#v", value)
 			}
+		})
+	}
+}
+
+func TestCanonicalRoutingD01DocumentsPreserveReviewedBytes(t *testing.T) {
+	// Pins come from the two off-owner maps at d528702fd before their extraction.
+	// These are complete Documents factories, not exempt non-bundle SourceIDs.
+	activityHashes := map[string]string{
+		"schema.yaml":            "eae6005ef74636c90683c2273fa0cd3f7aac7c2150f9ee3956e22be6064ddfb4",
+		"events.yaml":            "6d51a124fd856efb5376c0fda402f36fe30267c4e0896422134cb52978eaf0f7",
+		"research/schema.yaml":   "82b3bb8edb04b8d5e0cecbb8f22ff670f847c7be1d7f4f14d3131a1c8e3f4323",
+		"research/entities.yaml": "a8c48360389df0978447b89923ff9b8b07f6fcf31671837fc883ce4b5e5a0a4e",
+		"research/nodes.yaml":    "95a8fe55da683df04df59023b5b265be9921f4f23c61d2dedd6478a310acc7c9",
+	}
+	startupHashes := map[string]string{
+		"manifest.yaml":        "0b98bb0dc9ca912634118cf85d7a9bbabb285b23ddb4f41ff1cd8b373900c43b",
+		"schema.yaml":          "3f1b0dfa3863e7b331215e096a40c70f8ecae860ee788d8066ab640765274cfd",
+		"events.yaml":          "ea947a726de783c17191ebb1eb08ad64047b51d3531bd29e03c8434aed7eb8ae",
+		"nodes.yaml":           "b40b746340f62856131f6f9c8e4be1d94229c6ae51a2e12d277e86d6b6fc571f",
+		"worker/schema.yaml":   "d69201d130fd3f9d61c45ffe76ecfd3337211d159d31cf75716d768f4f49cb4f",
+		"worker/manifest.yaml": "61e91cd8884561aed8273c2bbeb4821b93f985131b140fd621b5e7874fb9d28d",
+		"worker/entities.yaml": "ec9c2584f62eef5905b9bed10e15f8fac80b641c73e35ea6f8df689e52a9bd6c",
+		"worker/nodes.yaml":    "1dec27207100b1d277d99f8ee5f1803072bf45421e83538639ab01b8f06e288d",
+	}
+	check := func(t *testing.T, documents, hashes map[string]string, schemaHash string) {
+		t.Helper()
+		if len(documents) != len(hashes) {
+			t.Fatalf("document set changed: got %d want %d", len(documents), len(hashes))
+		}
+		for path, want := range hashes {
+			if path == "schema.yaml" && schemaHash != "" {
+				want = schemaHash
+			}
+			body, found := documents[path]
+			if got := fmt.Sprintf("%x", sha256.Sum256([]byte(body))); !found || got != want {
+				t.Fatalf("%s changed: found=%t hash=%s want=%s", path, found, got, want)
+			}
+		}
+		var restored strings.Builder
+		restored.WriteString("package fixture\nvar files = map[string]string{\n")
+		for path, body := range documents {
+			fmt.Fprintf(&restored, "%q: %q,\n", path, body)
+		}
+		restored.WriteString("}\n")
+		if !goPackageContainsCompleteRoutingBundle(map[string]string{"restored_test.go": restored.String()}) {
+			t.Fatal("restored off-owner inline bundle escaped the closed-construction guard")
+		}
+	}
+	t.Run("ActivityTerminalReplayDocuments", func(t *testing.T) {
+		check(t, ActivityTerminalReplayDocuments(t), activityHashes, "")
+	})
+	for _, label := range []struct {
+		value string
+		hash  string
+	}{
+		{"", startupHashes["schema.yaml"]},
+		{"first", "870ef86d81d0cca14d053e432563f9e2b7fdb1dbe4be4e68740890bf674b56a1"},
+		{"second", "cb2867cd5e4c0f6309c43519ae20ad9115c25c45b8755af94ac9ad5c6231233a"},
+	} {
+		t.Run("DynamicTopologyStartupDocuments/"+label.value, func(t *testing.T) {
+			check(t, DynamicTopologyStartupDocuments(t, label.value), startupHashes, label.hash)
 		})
 	}
 }
