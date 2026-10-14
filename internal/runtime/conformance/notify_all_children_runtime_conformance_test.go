@@ -1867,6 +1867,85 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			}
 			assertNotifyAllChildrenFlowInstanceCount(t, ctx, backend, 3)
 
+			for _, scenario := range []struct {
+				name    string
+				members []string
+			}{
+				{"unavailable_first", []string{"acct-stale", "acct-a", "acct-b"}},
+				{"all_unavailable", []string{"acct-stale", "acct-stale"}},
+			} {
+				t.Run(scenario.name, func(t *testing.T) {
+					publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
+						"portfolio_id": "portfolio-main", "account_ids": scenario.members,
+					})
+					notifyID := publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
+						"portfolio_id": "portfolio-main", "command": scenario.name,
+					})
+					members := loadNotifyAllChildrenItemEvents(t, ctx, backend, runID, notifyID)
+					assertNotifyAllChildrenItemSequence(t, members, scenario.members)
+					assertNotifyAllChildrenContiguousItemOrdinals(t, members)
+					for _, member := range members {
+						routes, err := backend.ListEventDeliveryRoutes(ctx, member.ID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if member.AccountID != "acct-stale" {
+							assertNotifyAllChildrenExactRoutes(t, routes, descriptors[member.AccountID])
+							assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors[member.AccountID].InstancePath, "last_command", scenario.name)
+							continue
+						}
+						if len(routes) != 0 {
+							t.Fatalf("unavailable member acquired executable routes: %+v", routes)
+						}
+						failure := loadNotifyAllChildrenFailure(t, ctx, backend, member.ID)
+						if failure.Class != runtimefailures.ClassTargetUnreachable || !strings.Contains(failure.Detail.Code, "target") {
+							t.Fatalf("unavailable member lost its exact target failure: %+v", failure)
+						}
+						before := storetest.ReadSemanticEventFixtureEvidence(t, ctx, backend, runID, member.ID)
+						if !before.RecordFound || before.PipelineReceiptCount != 1 || len(before.DeliveryProjections) != 0 {
+							t.Fatalf("unavailable member was not accounted exactly once: %+v", before)
+						}
+						letters, err := storetest.ObserveH1DeadLetters(ctx, backend, runID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						var exact []storetest.H1DeadLettersEvidence
+						for _, letter := range letters {
+							if letter.Event == member.ID {
+								exact = append(exact, letter)
+							}
+						}
+						if len(exact) != 1 {
+							t.Fatalf("unavailable member diagnostic count=%d, want exactly one", len(exact))
+						}
+						admitted, err := before.Record.Decode()
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := runtime.bus.Publish(testAuthorActivityContextForBundle(ctx, runtime.sourceArtifactFact), admitted.Event()); err != nil {
+							t.Fatalf("exact unavailable member replay refused: %v", err)
+						}
+						if after := storetest.ReadSemanticEventFixtureEvidence(t, ctx, backend, runID, member.ID); !reflect.DeepEqual(before, after) {
+							t.Fatalf("exact unavailable member replay mutated its evidence: before=%+v after=%+v", before, after)
+						}
+						replayedLetters, err := storetest.ObserveH1DeadLetters(ctx, backend, runID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						var replayed []storetest.H1DeadLettersEvidence
+						for _, letter := range replayedLetters {
+							if letter.Event == member.ID {
+								replayed = append(replayed, letter)
+							}
+						}
+						if !reflect.DeepEqual(exact, replayed) {
+							t.Fatalf("exact unavailable member replay replaced its diagnostic: before=%+v after=%+v", exact, replayed)
+						}
+					}
+					assertNotifyAllChildrenFlowInstanceCount(t, ctx, backend, 3)
+				})
+			}
+
 			// A later supported write changes current membership and state. Replaying
 			// the original A item must still use its persisted route and payload.
 			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{

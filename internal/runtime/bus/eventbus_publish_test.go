@@ -2741,10 +2741,13 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 	var selected targetFailurePublicationStore
+	var reopen func() targetFailurePublicationStore
 	if backend == "postgres" {
-		selected = storetest.StartPostgresRuntimeStore(t)
+		primary, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
 	} else {
-		selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		primary, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
+		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
 	}
 	at := time.Now().UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
@@ -2846,6 +2849,19 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		if err != nil || len(exactDiagnostic.DeadLetters) != 1 || !reflect.DeepEqual(view.DeadLetters, exactDiagnostic.DeadLetters) {
 			t.Fatalf("exact replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, exactDiagnostic.DeadLetters, err)
 		}
+		freshStore := reopen()
+		freshBus, err := newScopedTestEventBus(freshStore, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := freshBus.Publish(ctx, evt); err != nil {
+			t.Fatalf("fresh owner refused exact terminal diagnostic replay: %v", err)
+		}
+		freshEvidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, freshStore, runID, evt.ID())
+		freshDiagnostic, err := freshStore.LoadOperatorEvent(ctx, evt.ID())
+		if err != nil || !reflect.DeepEqual(evidence, freshEvidence) || !reflect.DeepEqual(view.DeadLetters, freshDiagnostic.DeadLetters) || len(freshDiagnostic.Deliveries) != 0 {
+			t.Fatalf("fresh replay changed exact diagnostic or executable route: evidence=%+v diagnostic=%+v err=%v", freshEvidence, freshDiagnostic, err)
+		}
 		foreign := target
 		foreign.EntityID = uuid.NewString()
 		changed, err := events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), foreign))
@@ -2854,6 +2870,9 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		}
 		if err := eb.Publish(ctx, changed); err == nil {
 			t.Fatal("terminal replay accepted a different target")
+		}
+		if err := freshBus.Publish(ctx, changed); err == nil {
+			t.Fatal("fresh terminal replay accepted a different target")
 		}
 		if rejected := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(evidence, rejected) {
 			t.Fatalf("foreign terminal replay mutated evidence: before=%+v after=%+v", evidence, rejected)
