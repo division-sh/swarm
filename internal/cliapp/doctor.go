@@ -88,25 +88,24 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	if opts.target {
 		return runDoctorTargetCommand(repo, cmd, opts)
 	}
-	envFindings := doctorSwarmEnvFindings(repo, opts.configPath)
-	newReport := func() LocalPreflightReport {
-		report := LocalPreflightReport{Owner: localPreflightOwner, Mode: "doctor"}
-		addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
-		return report
-	}
 	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{
 		RepoRoot:        repo,
 		ExplicitPath:    opts.configPath,
 		BackendOverride: opts.backend,
 	})
+	envFindings := doctorSwarmEnvFindings(cfgResult)
+	newReport := func() LocalPreflightReport {
+		report := LocalPreflightReport{Owner: localPreflightOwner, Mode: "doctor"}
+		addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
+		addDoctorConfigReadback(&report, repo, cfgResult)
+		return report
+	}
 	if err != nil {
 		report := newReport()
-		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
 		report.add(localPreflightBackendPrerequisite, "config_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the reported config, backend, or environment source blocker")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	configReport := newReport()
-	addUnifiedConfigDiagnosticsToReport(&configReport, cfgResult.Diagnostics)
 	platformSpecPath := strings.TrimSpace(cfgResult.cli.Paths.PlatformSpecPath)
 	if platformSpecPath == "" {
 		platformSpecPath, err = EmbeddedPlatformSpecPath()
@@ -139,14 +138,12 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix managed credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	apiListenAddr, mcpListenAddr, mcpSource, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
+	apiListenAddr, mcpListenAddr, mcpSource, err := resolveCLIServeListenerAddressesFromConfig(cliServeListenerAddressOptions{
 		APIListenAddr:        opts.apiListenAddr,
 		MCPListenAddr:        opts.mcpListenAddr,
 		APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
 		MCPListenAddrFlagSet: cmd.Flags().Changed("mcp-listen-addr"),
-		ConfigPath:           opts.configPath,
-		RepoRoot:             repo,
-	})
+	}, cfgResult.cli)
 	if err != nil {
 		report := configReport
 		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
@@ -172,15 +169,8 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --workspace-backend or workspace.backend")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if err != nil {
-		report := configReport
-		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
-		report.add(localPreflightBackendPrerequisite, "cli_config_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix SWARM_CONFIG or swarm.yaml")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
-	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfgResult.cli)
 	if err != nil {
 		report := configReport
 		report.add(localPreflightBackendPrerequisite, "swarm_dir_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --swarm-dir or config paths.swarm_dir")
@@ -214,6 +204,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		PlatformPackBase: platformPackBase,
 	})
 	report.SchemaInventory = configReport.SchemaInventory
+	report.ConfigSource = configReport.ConfigSource
 	report.PackInventory = configReport.PackInventory
 	report.CapabilitySubjects = configReport.CapabilitySubjects
 	report.Findings = append(configReport.Findings, report.Findings...)

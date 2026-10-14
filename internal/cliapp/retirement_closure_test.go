@@ -212,14 +212,14 @@ func TestRetirementClosureSelectedEnvDelegationAndReplacement(t *testing.T) {
 				}
 			}
 			writeSingleDeploymentConfig(t, path, "database: {<<: {password_env: SWARM_REVIEW_DB_SECRET}}\n")
-			got, err := loadUnifiedConfigForTest(t, opts)
+			got, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.ExplicitPath})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got.Path != path || got.Config.Database.PasswordEnv != "SWARM_REVIEW_DB_SECRET" {
 				t.Fatalf("wrong selected delegation: path=%q env=%q", got.Path, got.Config.Database.PasswordEnv)
 			}
-			findings := doctorSwarmEnvFindings(repo, opts.ExplicitPath)
+			findings := doctorSwarmEnvFindings(got)
 			found := false
 			for _, finding := range findings {
 				if finding.Name == "SWARM_REVIEW_DB_SECRET" {
