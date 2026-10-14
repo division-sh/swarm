@@ -9,8 +9,7 @@ import (
 
 func TestPolicyValueRowCarrierUsesDeclarationIdentity(t *testing.T) {
 	handler := mustBootHandlerFixture(t, `rules:
-  lookup:
-    lookup:
+  - lookup:
       on: payload.kind
       entries: [{key: service, value: selected}]
       into: computed.choice
@@ -27,5 +26,8 @@ func TestPolicyValueRowCarrierUsesDeclarationIdentity(t *testing.T) {
 	ref := policyRuleElementRef(handler.Rules[0])
 	if !ref.Valid() || ref.Flow().String() != "scout" || ref.Family() != "handler_rule" || ref.SemanticPath() != `nodes["router"].handlers["route.requested"].rules[0]` {
 		t.Fatalf("policy rule ref = %#v", ref)
+	}
+	if handler.Rules[0].DisplayLabel("rules", 0) != "rules[0]: lookup" || handler.Rules[0].Compute.Lookup.RowID != "rules[0]: lookup" {
+		t.Fatalf("lookup diagnostics bypassed the admitted presentation: %#v", handler.Rules[0])
 	}
 }
