@@ -61,7 +61,6 @@ collector:
           advances_to: review
         - when: payload.result in ['approved', 'rejected']
           advances_to: done
-        - else: true
 `)
 	return root
 }
@@ -118,7 +117,6 @@ pins:
             fields: {result: '%s%s/%s'}
 `, choice, prefix, handler, choice)
 			}
-			nodes += "        - else: true\n"
 		}
 		nodes += `collector:
   execution_type: system_node
