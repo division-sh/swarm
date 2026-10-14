@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -147,14 +148,16 @@ func (s *PipelineSQLiteOwner) ListFlowInstances(ctx context.Context, scope pipel
 
 // This memo belongs to one repeatable read, never to a process or a later plan.
 type flowInstanceIndexSnapshot struct {
-	tx         *sql.Tx
-	postgres   bool
-	source     semanticview.Source
-	run        runlifecycle.Snapshot
-	revision   int64
-	historical HistoricalFlowInstanceReader
-	observed   map[string]pipeline.FlowInstanceObservation
-	companions map[string]*flowInstanceCompanions
+	tx              *sql.Tx
+	postgres        bool
+	source          semanticview.Source
+	run             runlifecycle.Snapshot
+	revision        int64
+	historical      HistoricalFlowInstanceReader
+	observed        map[string]pipeline.FlowInstanceObservation
+	headersObserved map[string]pipeline.WorkflowInstance
+	declarations    map[string][]pipeline.FlowInstanceObservation
+	companions      map[string]*flowInstanceCompanions
 }
 
 func validateFlowInstanceIndexSnapshot(source semanticview.Source, hash string, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) error {
@@ -289,6 +292,15 @@ func requireFlowInstanceConstructionSelector(ctx context.Context, tx *sql.Tx, po
 }
 
 func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipeline.FlowInstanceLookupRequest, header pipeline.WorkflowInstance) (pipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
+	if observation, found := s.observed[header.StorageRef]; found && reflect.DeepEqual(s.headersObserved[header.StorageRef], header) {
+		if err := observation.ValidateSelection(request); err != nil {
+			return pipeline.FlowInstanceObservation{}, err
+		}
+		return observation, nil
+	}
 	if err := s.requireRecordedRevision(ctx); err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
@@ -343,6 +355,10 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		}
 	}
 	s.observed[header.StorageRef] = observation
+	if s.headersObserved == nil {
+		s.headersObserved = make(map[string]pipeline.WorkflowInstance)
+	}
+	s.headersObserved[header.StorageRef] = header
 	return observation, nil
 }
 
@@ -428,6 +444,12 @@ func (s *flowInstanceIndexSnapshot) list(ctx context.Context, scope pipeline.Flo
 }
 
 func (s *flowInstanceIndexSnapshot) observeDeclaration(ctx context.Context, scope pipeline.FlowInstanceLookupScope, flowID string) ([]pipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if observations, found := s.declarations[flowID]; found {
+		return slices.Clone(observations), nil
+	}
 	headers, err := s.headers(ctx, `fi.flow_template=$2 ORDER BY fi.instance_path`, scope.RunID(), flowID)
 	if err != nil {
 		return nil, err
@@ -448,5 +470,9 @@ func (s *flowInstanceIndexSnapshot) observeDeclaration(ctx context.Context, scop
 		}
 		observations = append(observations, observation)
 	}
+	if s.declarations == nil {
+		s.declarations = make(map[string][]pipeline.FlowInstanceObservation)
+	}
+	s.declarations[flowID] = slices.Clone(observations)
 	return observations, nil
 }

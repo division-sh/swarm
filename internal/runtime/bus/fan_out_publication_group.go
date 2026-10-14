@@ -14,6 +14,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type fanOutPublicationMember struct {
@@ -22,6 +23,11 @@ type fanOutPublicationMember struct {
 	context         context.Context
 	admitted        events.AdmittedEvent
 	outputConsumers *runtimepinrouting.OutputConsumerResolver
+	instances       runtimepipeline.FlowInstanceIndexReader
+}
+
+type fanOutInstancePlanningGroup interface {
+	WithFlowInstancePlanningSnapshot(context.Context, semanticview.Source, func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error
 }
 
 func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []runtimepipeline.FanOutPublicationRequest) ([]runtimepipeline.FanOutPublicationPreparation, error) {
@@ -67,6 +73,30 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 			return nil, errors.New("publication claim batch substitutes event identity")
 		}
 		members[i].claim = issued[j]
+	}
+	prepare := func(ctx context.Context, instances runtimepipeline.FlowInstanceIndexReader) error {
+		eb.prepareFanOutPublicationMembers(ctx, requests, members, accepted, results, instances)
+		return nil
+	}
+	if planning, ok := group.(fanOutInstancePlanningGroup); ok && len(accepted) != 0 {
+		if err := planning.WithFlowInstancePlanningSnapshot(ctx, eb.semanticSource, prepare); err != nil {
+			var plans []runtimeengine.DurablePublicationPlan
+			for _, result := range results {
+				if result.Publication != nil {
+					plans = append(plans, result.Publication)
+				}
+			}
+			return nil, errors.Join(err, eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		}
+	} else {
+		_ = prepare(ctx, nil)
+	}
+	return results, nil
+}
+
+func (eb *EventBus) prepareFanOutPublicationMembers(ctx context.Context, requests []runtimepipeline.FanOutPublicationRequest, members []fanOutPublicationMember, accepted []int, results []runtimepipeline.FanOutPublicationPreparation, instances runtimepipeline.FlowInstanceIndexReader) {
+	for _, i := range accepted {
+		members[i].instances = instances
 		plans, err := eb.prepareEnginePublicationsWithMember(ctx, []runtimeengine.EmitIntent{requests[i].Intent}, runtimepipeline.PreparedWorkflowPublicationState{}, &members[i])
 		if err == nil && len(plans) != 1 {
 			err = errors.Join(errors.New("fan-out publication requires exactly one plan"), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
@@ -77,7 +107,6 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 			results[i].Publication = plans[0]
 		}
 	}
-	return results, nil
 }
 
 func (eb *EventBus) PrepareFanOutPublication(ctx context.Context, group runtimepipelineobligation.PublicationGroup, ordinal int, intent runtimeengine.EmitIntent) (runtimeengine.DurablePublicationPlan, error) {
