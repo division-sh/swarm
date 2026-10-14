@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -13,54 +14,88 @@ import (
 	"github.com/google/uuid"
 )
 
+type publicAgentTargetFixture struct {
+	ctx        context.Context
+	manager    *AgentManager
+	probe      *terminalSetPersistenceProbe
+	operations *publicTargetDirectiveStore
+	identities []runtimeagentidentity.Identity
+	agents     []*chatTestAgent
+	tokens     []runtimeeffects.LifecycleToken
+}
+
+type publicTargetDirectiveStore struct {
+	runtimeagentcontrol.DirectiveOperationStore
+	reservations int
+}
+
+func (s *publicTargetDirectiveStore) ReserveDirectiveOperation(ctx context.Context, req runtimeagentcontrol.ReserveDirectiveOperationRequest) (runtimeagentcontrol.DirectiveOperationReservation, error) {
+	s.reservations++
+	return s.DirectiveOperationStore.ReserveDirectiveOperation(ctx, req)
+}
+
+func newPublicAgentTargetFixture(t *testing.T, instances ...string) *publicAgentTargetFixture {
+	t.Helper()
+	f := &publicAgentTargetFixture{
+		ctx:   testAuthorActivityContext(context.Background()),
+		probe: &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)},
+	}
+	bus := &directiveTestBus{store: &directiveEventStore{}}
+	f.operations = &publicTargetDirectiveStore{DirectiveOperationStore: bus.store}
+	f.manager = newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		LifecycleStore: f.probe, PersistenceRoles: PersistenceRoles{DirectiveOperations: f.operations},
+	}, &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{Mode: runtimeagentcontrol.RunResolutionSpecified}})
+	records := make([]PersistedAgent, len(instances))
+	for i, instance := range instances {
+		rec := lifecycleTestPersistedAgent(t)
+		rec.Config.ID = "public-target-worker"
+		rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, rec.Config.ID, "public-target-test", "review", instance, "review/"+instance)
+		rec.Config.FlowPath = rec.Config.Identity.FlowInstance()
+		agent := &chatTestAgent{id: rec.Config.ID}
+		if err := f.manager.lifecycle.registerExecution(f.ctx, rec, true, agent, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
+			t.Fatal(err)
+		}
+		f.identities = append(f.identities, rec.Config.Identity)
+		f.agents = append(f.agents, agent)
+		records[i] = rec
+	}
+	runCtx, started, err := f.manager.lifecycle.beginRun(managedExecutionTestContext(t, f.ctx), AgentRunModeStandard, f.manager.workOwner)
+	if err != nil || !started {
+		t.Fatalf("begin owned Manager run: started=%t err=%v", started, err)
+	}
+	if err := f.manager.startShutdownWatcher(runCtx, "public target test shutdown watcher"); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range records {
+		_, token, done, err := replaceCoordinatorLoop(f.manager.lifecycle, f.ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.tokens = append(f.tokens, token)
+		t.Cleanup(func() {
+			if err := releaseCoordinatorLoop(f.manager.lifecycle, token, done); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	return f
+}
+
+func (f *publicAgentTargetFixture) fence(index int) {
+	f.manager.lifecycle.mu.Lock()
+	f.manager.lifecycle.cells[f.identities[index]].execution.fenced = true
+	f.manager.lifecycle.mu.Unlock()
+}
+
 func TestPublicAgentTargetIgnoresRetainedUnpublishedSibling(t *testing.T) {
 	for _, method := range []string{"config", "directive"} {
 		t.Run(method, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
-			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
-			bus := &directiveTestBus{}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LifecycleStore: probe}, &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{
-				RunID: managerIdentityTestRunID, Mode: runtimeagentcontrol.RunResolutionSpecified,
-			}})
-			const agentID = "public-target-worker"
-			identities := make([]runtimeagentidentity.Identity, 2)
-			agents := make([]*chatTestAgent, 2)
-			records := make([]PersistedAgent, 2)
-			for i, instance := range []string{"hidden", "visible"} {
-				rec := lifecycleTestPersistedAgent(t)
-				rec.Config.ID = agentID
-				rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, agentID, "public-target-test", "review", instance, "review/"+instance)
-				rec.Config.FlowPath = rec.Config.Identity.FlowInstance()
-				agents[i] = &chatTestAgent{id: agentID}
-				if err := am.lifecycle.registerExecution(ctx, rec, true, agents[i], testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
-					t.Fatal(err)
-				}
-				identities[i], records[i] = rec.Config.Identity, rec
-			}
-			runCtx, started, err := am.lifecycle.beginRun(managedExecutionTestContext(t, ctx), AgentRunModeStandard, am.workOwner)
-			if err != nil || !started {
-				t.Fatalf("begin owned Manager run: started=%t err=%v", started, err)
-			}
-			if err := am.startShutdownWatcher(runCtx, "public target test shutdown watcher"); err != nil {
-				t.Fatal(err)
-			}
-			tokens := make([]runtimeeffects.LifecycleToken, len(records))
-			for i, rec := range records {
-				_, token, done, err := replaceCoordinatorLoop(am.lifecycle, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				tokens[i] = token
-				t.Cleanup(func() {
-					if err := releaseCoordinatorLoop(am.lifecycle, token, done); err != nil {
-						t.Error(err)
-					}
-				})
-			}
+			f := newPublicAgentTargetFixture(t, "hidden", "visible")
+			am, probe, ctx := f.manager, f.probe, f.ctx
+			identities, agents, tokens := f.identities, f.agents, f.tokens
+			agentID := identities[0].AgentID()
 			// Fencing removes publication, not the retained cleanup identity.
-			am.lifecycle.mu.Lock()
-			am.lifecycle.cells[identities[0]].execution.fenced = true
-			am.lifecycle.mu.Unlock()
+			f.fence(0)
 			before, found, err := probe.LoadAgentLifecycleState(ctx, identities[0])
 			if err != nil || !found || before.Phase != AgentLifecycleRunning {
 				t.Fatalf("retained row: state=%+v found=%t err=%v", before, found, err)
@@ -99,6 +134,54 @@ func TestPublicAgentTargetIgnoresRetainedUnpublishedSibling(t *testing.T) {
 			}
 			if identities := am.lifecycle.executionIdentities(); len(identities) != 2 {
 				t.Fatalf("public selection removed retained cleanup membership: %+v", identities)
+			}
+		})
+	}
+}
+
+func TestPublicAgentTargetKeyedDirectiveReplayAfterFence(t *testing.T) {
+	for _, sibling := range []bool{false, true} {
+		name, instances := "no_public_candidate", []string{"hidden"}
+		if sibling {
+			name, instances = "sole_public_sibling", append(instances, "visible")
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newPublicAgentTargetFixture(t, instances...)
+			identity := f.identities[0]
+			req := runtimeagentcontrol.SendDirectiveRequest{
+				RunID: identity.RunID, AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(),
+				Directive: "accepted before fence", Source: runtimeagentcontrol.DirectiveSourceV1RPC,
+				ActorTokenID: "public-target-operator", IdempotencyKey: "accepted-directive",
+			}
+			first, err := f.manager.SendDirective(f.ctx, req)
+			if err != nil || first.FlowInstance != identity.FlowInstance() || f.agents[0].calls != 1 || f.operations.reservations != 1 {
+				t.Fatalf("initial exact directive: result=%+v calls=%d reservations=%d err=%v", first, f.agents[0].calls, f.operations.reservations, err)
+			}
+			before, found, err := f.operations.LoadDirectiveOperation(f.ctx, first.OperationID)
+			if err != nil || !found || before.State != runtimeagentcontrol.DirectiveOperationSucceeded {
+				t.Fatalf("accepted operation: operation=%+v found=%t err=%v", before, found, err)
+			}
+			f.fence(0)
+			if configs := f.manager.ListAgentConfigs(); len(configs) != len(instances)-1 {
+				t.Fatalf("public candidates after fence: %+v", configs)
+			}
+			replayed, err := f.manager.SendDirective(f.ctx, req)
+			if err != nil || !reflect.DeepEqual(first, replayed) {
+				t.Fatalf("fenced accepted directive lost its exact historical result: first=%+v replay=%+v err=%v", first, replayed, err)
+			}
+			changed := req
+			changed.Directive = "different command on the same key"
+			_, err = f.manager.SendDirective(f.ctx, changed)
+			var conflict *runtimeagentcontrol.DirectiveIdempotencyConflictError
+			if !errors.As(err, &conflict) || conflict.OperationID != first.OperationID {
+				t.Fatalf("changed hash did not retain exact operation conflict: %v", err)
+			}
+			after, found, err := f.operations.LoadDirectiveOperation(f.ctx, first.OperationID)
+			if err != nil || !found || !reflect.DeepEqual(before, after) || f.operations.reservations != 1 || f.agents[0].calls != 1 {
+				t.Fatalf("replay/conflict mutated operation or repeated execution: before=%+v after=%+v calls=%d reservations=%d err=%v", before, after, f.agents[0].calls, f.operations.reservations, err)
+			}
+			if sibling && f.agents[1].calls != 0 {
+				t.Fatal("historical directive replay was redirected to the public sibling")
 			}
 		})
 	}
