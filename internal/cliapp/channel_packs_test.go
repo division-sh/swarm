@@ -22,7 +22,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 			},
 		},
 	}
-	cfgResult := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
+	cfgResult := RuntimeConfigLoadResult{Config: cfg}
 	spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
@@ -106,7 +106,7 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	}
 	load := func(t *testing.T, cfg *config.Config) (ChannelPackLoad, error) {
 		t.Helper()
-		result := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
+		result := RuntimeConfigLoadResult{Config: cfg}
 		spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)

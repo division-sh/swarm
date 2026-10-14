@@ -37,15 +37,8 @@ func LoadConfiguredPlatformPackBase(repo string, cfgResult RuntimeConfigLoadResu
 	if len(configured) == 0 {
 		return embedded, nil
 	}
-	dirs := resolvePlatformPackDirs(repo, packConfigOrigin(cfgResult, "platform.packs.platform_dirs"), configured)
+	dirs := resolvePlatformPackDirs(repo, cfgResult.Path, configured)
 	return packartifact.LoadDevelopmentPlatformPackInventory(runningVersion, dirs, embedded)
-}
-
-func packConfigOrigin(cfgResult RuntimeConfigLoadResult, key string) string {
-	if origin, ok := cfgResult.KeyOrigins[strings.TrimSpace(key)]; ok {
-		return strings.TrimSpace(origin.Path)
-	}
-	return ""
 }
 
 func resolvePlatformPackDirs(repo, configPath string, dirs []string) []string {
