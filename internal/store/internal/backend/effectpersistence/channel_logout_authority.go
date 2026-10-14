@@ -8,9 +8,13 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 func requireChannelLogoutAuthorityTx(ctx context.Context, tx *sql.Tx, a runtimeeffects.Authority, postgres bool) error {
+	if err := generationauthority.FenceMutation(ctx, tx, !postgres); err != nil {
+		return err
+	}
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, a.ChannelLogout.PrincipalID, postgres); err != nil {
 		return invalidExternalAuthority(a, "principal_not_current")
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
@@ -16,7 +17,7 @@ import (
 
 // Platform code receives the existing owner's held construction context, not
 // the runtime manager's unrelated persistence-bearing implementation fields.
-type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error)
+type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error)
 
 type serveSessionBootstrapOwner interface {
 	channelonboarding.SessionBootstrapOwner
@@ -76,42 +77,57 @@ func serveSessionBootstrapRuntimeSelector(manager *runtime.RuntimeContextManager
 	if manager == nil {
 		return nil
 	}
-	return func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+	return func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 		if ctx == nil {
-			return nil, nil, nil, channelonboarding.ErrInvalidRequest
+			return nil, nil, processbinding.Binding{}, nil, channelonboarding.ErrInvalidRequest
 		}
 		if ctx.Err() != nil {
-			return nil, nil, nil, context.Cause(ctx)
+			return nil, nil, processbinding.Binding{}, nil, context.Cause(ctx)
 		}
 		if err := candidate.ValidateDeclaration(); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, processbinding.Binding{}, nil, err
 		}
 		use, lookup, err := manager.AcquireBundleHash(ctx, candidate.Coordinate.BundleHash)
 		if err != nil || !lookup.Loaded() || use == nil {
-			return nil, nil, nil, errors.Join(channelonboarding.ErrRevisionConflict, err)
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(channelonboarding.ErrRevisionConflict, err)
 		}
 		if !candidate.Coordinate.MatchesContextOccurrence(use.Context.RuntimeInstanceID, use.Context.PublicationGeneration) {
-			return nil, nil, nil, errors.Join(channelonboarding.ErrRevisionConflict, use.Done())
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(channelonboarding.ErrRevisionConflict, use.Done())
 		}
 		// Construction holds this use until the connection owns its real runtime
 		// work. Settling the use cannot cancel the durable connection context.
 		owned := correlation.WithSourceArtifactFact(context.WithoutCancel(use.WorkContext()), use.Context.SourceArtifactFact)
 		declarations, err := runtime.ResolveStandingTargetDeclarations(use.Context.Source, use.Context.ProviderTriggerCatalog)
 		if err != nil {
-			return nil, nil, nil, errors.Join(err, use.Done())
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, use.Done())
 		}
 		incoming, err := serveSessionIncomingSelection(use.Context, use.Runtime(), declarations, candidate)
 		if err != nil {
-			return nil, nil, nil, errors.Join(err, use.Done())
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, use.Done())
 		}
 		if _, err := incoming.Bus.AdmitSourceArtifactFact(owned); err != nil {
-			return nil, nil, nil, errors.Join(err, use.Done())
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, use.Done())
 		}
 		if ctx.Err() != nil {
-			return nil, nil, nil, errors.Join(context.Cause(ctx), use.Done())
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(context.Cause(ctx), use.Done())
 		}
-		return owned, incoming, use.Done, nil
+		binding, err := serveSessionProcessBinding(use.Runtime())
+		if err != nil {
+			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, use.Done())
+		}
+		return owned, incoming, binding, use.Done, nil
 	}
+}
+
+func serveSessionProcessBinding(owner *runtime.Runtime) (processbinding.Binding, error) {
+	grant, err := owner.CurrentStartupGrantEvidence()
+	if err != nil {
+		return processbinding.Binding{}, err
+	}
+	binding := processbinding.Binding{ProcessAuthorityID: grant.ProcessAuthorityID, ProcessOwnerID: grant.ProcessOwnerID,
+		ProcessBootID: grant.ProcessBootID, GenerationGrantID: grant.GrantID, BundleHash: grant.BundleHash,
+		RuntimeInstanceID: grant.RuntimeInstanceID, RuntimeGeneration: grant.RuntimeGeneration}
+	return binding, binding.Validate()
 }
 
 func serveSessionIncomingSelection(contextDef runtime.BundleContext, owner *runtime.Runtime, declarations []runtime.StandingTargetDeclaration, candidate channelonboarding.Candidate) (*sessionprovider.RuntimeIncomingOptions, error) {

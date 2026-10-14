@@ -22,7 +22,7 @@ func TestWhatsAppRuntimeLogoutPreparationUsesOriginalSDKBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
-			c := openRuntimeConnectionFixture(t, f)
+			c := openRuntimeLogoutConnectionFixture(t, f)
 			if _, err := c.PrepareSessionLogout(f.ctx, f.operation); err == nil {
 				t.Fatal("unconnected retained state granted a logout target")
 			}
@@ -105,7 +105,7 @@ func TestSessionLogoutJournalDoesNotTreatLocalDeleteFailureAsNoEffectBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
-			c := openRuntimeConnectionFixture(t, f)
+			c := openRuntimeLogoutConnectionFixture(t, f)
 			original := c.state.currentOccurrence()
 			fault := &logoutDeletionFaultFixture{DeviceContainer: original.stores.container, cause: errors.New("exact private deletion fixture refusal")}
 			original.stores.container = fault
@@ -147,7 +147,7 @@ func TestSessionLogoutJournalCanceledAfterLaunchRemainsUncertainBothStores(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
-			c := openRuntimeConnectionFixture(t, f)
+			c := openRuntimeLogoutConnectionFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, c)
 			original := c.state.currentOccurrence()
 			op := reserveRuntimeLogoutFixture(t, f, c)
@@ -196,7 +196,7 @@ func TestSessionLogoutRequiresAcceptedProcessTailBeforeAuthorizationBothStores(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
-			c := openRuntimeConnectionFixture(t, f)
+			c := openRuntimeLogoutConnectionFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, c)
 			original := c.state.currentOccurrence()
 			op := reserveRuntimeLogoutFixture(t, f, c)
@@ -275,7 +275,7 @@ func TestSessionLogoutJournalBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
-				c := openRuntimeConnectionFixture(t, f)
+				c := openRuntimeLogoutConnectionFixture(t, f)
 				connectRuntimeConnectionFixture(t, f, c)
 				op := reserveRuntimeLogoutFixture(t, f, c)
 				ctx := logoutJournalFixture(t, f, op)
@@ -345,7 +345,7 @@ func TestSessionLogoutJournalRecoveryAndRollbackBothStores(t *testing.T) {
 		for _, phase := range []effects.State{effects.StateAuthorized, effects.StateLaunched, effects.StateResponseObserved} {
 			t.Run(backend+"/"+string(phase), func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
-				c := openRuntimeConnectionFixture(t, f)
+				c := openRuntimeLogoutConnectionFixture(t, f)
 				connectRuntimeConnectionFixture(t, f, c)
 				op := reserveRuntimeLogoutFixture(t, f, c)
 				ctx := logoutJournalFixture(t, f, op)
@@ -410,7 +410,7 @@ func TestSessionLogoutJournalRejectsForeignAuthorityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
-			c := openRuntimeConnectionFixture(t, f)
+			c := openRuntimeLogoutConnectionFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, c)
 			op := reserveRuntimeLogoutFixture(t, f, c)
 			ctx := logoutJournalFixture(t, f, op)
@@ -470,7 +470,7 @@ func TestSessionLogoutJournalDrainsAndCancelsWaitBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
-				c := openRuntimeConnectionFixture(t, f)
+				c := openRuntimeLogoutConnectionFixture(t, f)
 				connectRuntimeConnectionFixture(t, f, c)
 				original := c.state.currentOccurrence()
 				op := reserveRuntimeLogoutFixture(t, f, c)
