@@ -216,7 +216,7 @@ func VerifyNativeActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLoc
 	}
 }
 
-func VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -267,7 +267,7 @@ func VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForT
 	}
 }
 
-func VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentityForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentityForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -333,7 +333,7 @@ func VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIde
 	}
 }
 
-func VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -426,13 +426,14 @@ type activityBoringFixture struct {
 	pc     *PipelineCoordinator
 }
 
-func newActivityBoringFixture(t *testing.T, backend, serverURL string, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) activityBoringFixture {
+func newActivityBoringFixture(t *testing.T, backend, serverURL string, open func(*testing.T, string, semanticview.Source) WorkflowActivityNativeFixtureForTest) activityBoringFixture {
 	t.Helper()
-	native := open(t, backend)
+	source := semanticview.Wrap(activityBoringFullFlowBundle(t, serverURL))
+	native := open(t, backend, source)
 	// These direct activity-request controls do not execute workflow nodes or
 	// acquire node delivery authority. The journal/result contract is separate.
 	pc := native.NewCoordinator(nil, PipelineCoordinatorOptions{
-		Module: staticSemanticWorkflowModule{source: semanticview.Wrap(activityBoringFullFlowBundle(t, serverURL))},
+		Module: staticSemanticWorkflowModule{source: source},
 	})
 	bus := observeNativePipelineDeliveryBusForTest(t, pc)
 	return activityBoringFixture{native: native, bus: bus, pc: pc}
