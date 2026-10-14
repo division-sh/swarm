@@ -143,3 +143,25 @@ repair-first classification, not an acceptance frozen into these tests.
 #2617 owns pipeline/flow_constructor.go and manager/flow_activation.go, both live
 consumers. Do not edit them. Recheck its latest head/overlap and actual landed
 constructor semantics before qualification. #2447/#2407/#2349 remain open.
+
+## First production checkpoint (parked for #2617)
+
+The local factor moves only the 14 operational functions above into the three
+planned files; the 26 small support functions stay in contracts.go. Type-specific
+helpers retain the old dispatch order, exact errors and supplied-record phases.
+No existing test, public API, path/mutation owner, source/SQL/spec/CI/registry
+or baseline is edited. All 49 entityruntime roots (including characterization)
+pass race x3: 837 checks, 1.844s, no failures/skips. This is not native/public or
+final exact-head qualification.
+
+Pinned exploratory tools measure normalizeValueForType 52/86 -> 19/5 and
+validateValueRefinements 20/29 -> 7/8 (cyclomatic/cognitive); every new helper is
+below 25 in both metrics. Gross production change is 941 lines (527 added,
+414 removed), net +113. The historical net-neutral/negative condition is NOT
+claimed satisfied: minimize the split further or obtain an explicit disposition
+before a production PR push. No unrelated deletion or formatting compression
+will be used to manufacture neutrality. Exact Git-snapshot ratchet, independent
+omission controls, native/public roots and final preflight remain outstanding.
+
+C's new disjoint D07 replay reservation 6163489309 takes priority. This checkpoint
+is parked; it is not an implementation-complete, reviewer-ready or closure claim.
