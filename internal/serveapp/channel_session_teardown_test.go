@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/google/uuid"
@@ -190,11 +191,11 @@ func TestServeSessionTeardownWaitsForOriginalConstructionBothStores(t *testing.T
 			unblock := func() { releaseOnce.Do(func() { close(release) }) }
 			defer unblock()
 			cause := errors.New("construction ended without a connection")
-			f.adapter.selectRuntime = func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+			f.adapter.selectRuntime = func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 				f.selections.Add(1)
 				close(entered)
 				<-release
-				return nil, nil, nil, cause
+				return nil, nil, processbinding.Binding{}, nil, cause
 			}
 			result := make(chan error, 1)
 			go func() { result <- f.adapter.BootstrapSession(f.ctx, f.op, f.candidate) }()
