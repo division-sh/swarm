@@ -1,19 +1,15 @@
 evaluator:
-  execution_type: system_node
-  subscribes_to: [score.final]
-  produces: [result.demoted]
-  event_handlers:
-    score.final:
-      data_accumulation:
-        writes:
-          - main_score
-          - secondary_score
-      on_complete:
-        - condition: payload.main_score >= policy.high_mark AND payload.secondary_score >= policy.hard_floor
-          advances_to: promoted
-        - condition: payload.main_score >= policy.low_mark
-          advances_to: demoted
-          emit:
-            event: result.demoted
-        -
-          advances_to: rejected
+  score.final:
+    data_accumulation:
+      writes:
+        - main_score
+        - secondary_score
+    on_complete:
+      - condition: payload.main_score >= policy.high_mark AND payload.secondary_score >= policy.hard_floor
+        advances_to: promoted
+      - condition: payload.main_score >= policy.low_mark
+        advances_to: demoted
+        emit:
+          event: result.demoted
+      -
+        advances_to: rejected

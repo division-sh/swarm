@@ -1,12 +1,8 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [flow.spawn_with_config]
-  produces: [flow.spawned]
-  event_handlers:
-    flow.spawn_with_config:
-      emit:
-        event: flow.spawned
-        fields:
-          worker_id: payload.instance_id
-          max_retries: payload.config.max_retries
-          timeout_ms: payload.config.timeout_ms
+  flow.spawn_with_config:
+    emit:
+      event: flow.spawned
+      fields:
+        worker_id: payload.instance_id
+        max_retries: payload.config.max_retries
+        timeout_ms: payload.config.timeout_ms

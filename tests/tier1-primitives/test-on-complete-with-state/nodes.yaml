@@ -1,14 +1,10 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.evaluated]
-  produces: [item.expedited]
-  event_handlers:
-    item.evaluated:
-      on_complete:
-        - condition: has(entity.priority) && entity.priority == 'high'
-          emit:
-            event: item.expedited
-          advances_to: done
+  item.evaluated:
+    on_complete:
+      - condition: has(entity.priority) && entity.priority == 'high'
+        emit:
+          event: item.expedited
+        advances_to: done
   state_schema:
     fields:
       priority: string

@@ -46,7 +46,7 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 		for event, handler := range projected.EventHandlers {
 			for collection, rows := range map[string][]HandlerRuleEntry{"rules": handler.Rules, "on_complete": handler.OnComplete} {
 				for index := range rows {
-					prefix := NodeProvenanceMapPath("event_handlers", event) + fmt.Sprintf(".%s[%d]", collection, index)
+					prefix := NodeProvenanceMapPath("", event) + fmt.Sprintf(".%s[%d]", collection, index)
 					for path, source := range rows[index].admissionProvenance {
 						projected.admissionProvenance[prefix+"."+path] = source
 					}
@@ -60,18 +60,36 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 }
 
 func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) {
-	fields, err := nodeValueFields(value, "node", systemNodeContractFields)
+	entries, err := uniqueYAMLMappingFields(value, "node")
 	if err != nil {
 		return SystemNodeContract{}, err
 	}
+	fields := make(map[string]yamlsource.Value)
+	var handlers []yamlsource.MappingField
+	for _, entry := range entries {
+		switch entry.Name {
+		case "execution_type", "subscribes_to", "produces", "event_handlers":
+			diagnostic := NewUndefinedFieldDiagnostic("node", entry.Name, systemNodeContractFields, entry)
+			diagnostic.Remediation += " Handlers are written directly under the node, keyed by event name; a node receives exactly the events it handles."
+			return SystemNodeContract{}, diagnostic
+		}
+		if _, reserved := systemNodeContractFields[entry.Name]; reserved {
+			fields[entry.Name] = entry.Value
+		} else {
+			handlers = append(handlers, entry)
+		}
+	}
 	var out SystemNodeContract
-	if err := projectNodeScalarFields(fields, &out); err != nil {
-		return SystemNodeContract{}, err
+	if state, present := fields["state_table"]; present {
+		out.StateTable, err = nodeValueText(state, "node.state_table")
+		if err != nil {
+			return SystemNodeContract{}, nodeFieldProjectionError("state_table", state, err)
+		}
 	}
 	if timers, present := fields["timers"]; present {
 		items, err := timers.Sequence()
 		if err != nil {
-			return SystemNodeContract{}, err
+			return SystemNodeContract{}, nodeFieldProjectionError("timers", timers, err)
 		}
 		for _, item := range items {
 			timer, err := projectNodeTimerValue(item)
@@ -84,48 +102,32 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 	if state, present := fields["state_schema"]; present {
 		out.StateSchema, err = projectNodeStateSchemaValue(state)
 		if err != nil {
-			return SystemNodeContract{}, err
+			return SystemNodeContract{}, nodeFieldProjectionError("state_schema", state, err)
 		}
 	}
 	if gates, present := fields["gate_state"]; present {
 		out.GateState, err = projectNodeGateStateValue(gates)
 		if err != nil {
-			return SystemNodeContract{}, err
+			return SystemNodeContract{}, nodeFieldProjectionError("gate_state", gates, err)
 		}
 	}
-	if handlers, present := fields["event_handlers"]; present {
-		out.EventHandlers, err = projectNodeEventHandlersValue(handlers)
-		if err != nil {
-			return SystemNodeContract{}, err
+	out.EventHandlers = make(map[string]SystemNodeEventHandler, len(handlers))
+	for _, field := range handlers {
+		name := strings.TrimSpace(field.Name)
+		if name == "" || name != field.Name {
+			return SystemNodeContract{}, fmt.Errorf("event handler name %q at %s is invalid", field.Name, field.KeyLocation)
 		}
+		projected, err := projectNodeHandlerValue(field.Value)
+		if err != nil {
+			return SystemNodeContract{}, fmt.Errorf("event handler %q: %w", name, err)
+		}
+		out.EventHandlers[name] = projected
 	}
 	return out, nil
 }
 
-func projectNodeEventHandlersValue(value yamlsource.Value) (map[string]SystemNodeEventHandler, error) {
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return nil, fmt.Errorf("event_handlers at %s must be a mapping", value.Location())
-	}
-	fields, err := value.Mapping()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]SystemNodeEventHandler, len(fields))
-	for _, field := range fields {
-		name := strings.TrimSpace(field.Name)
-		if name == "" || name != field.Name {
-			return nil, fmt.Errorf("event handler name %q at %s is invalid", field.Name, field.KeyLocation)
-		}
-		if _, duplicate := out[name]; duplicate {
-			return nil, fmt.Errorf("duplicate event handler %q at %s", name, field.KeyLocation)
-		}
-		projected, err := projectNodeHandlerValue(field.Value)
-		if err != nil {
-			return nil, fmt.Errorf("event handler %q: %w", name, err)
-		}
-		out[name] = projected
-	}
-	return out, nil
+func nodeFieldProjectionError(name string, value yamlsource.Value, err error) error {
+	return fmt.Errorf("%w: %s at %s is a node field, not an event; rename an event that collides: %w", ErrInvalidField, name, value.IntroductionLocation(), err)
 }
 
 func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, error) {

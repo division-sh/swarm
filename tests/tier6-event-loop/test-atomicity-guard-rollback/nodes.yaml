@@ -1,17 +1,13 @@
 processor:
-  execution_type: system_node
-  subscribes_to: [process.requested]
-  produces: []
   gate_state:
     g_processed: gate set when processing succeeds
-  event_handlers:
-    process.requested:
-      guard:
-        id: must_be_ready
-        check: has(entity.status) && has(entity.counter) && entity.status == 'ready'
-      data_accumulation:
-        writes:
-          - target_field: counter
-            value: entity.counter + 1
-      sets_gate: g_processed
-      advances_to: processed
+  process.requested:
+    guard:
+      id: must_be_ready
+      check: has(entity.status) && has(entity.counter) && entity.status == 'ready'
+    data_accumulation:
+      writes:
+        - target_field: counter
+          value: entity.counter + 1
+    sets_gate: g_processed
+    advances_to: processed

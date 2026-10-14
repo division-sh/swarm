@@ -1,33 +1,29 @@
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [batch.requested]
-  produces: [batch.dispatched]
-  event_handlers:
-    batch.requested:
-      count:
-        items_from: payload.items
-        store_as: entity.dispatch_count
-      rules:
-        - id: parallel
-          when: payload.mode == 'parallel'
-          advances_to: dispatched
-          emit:
-            event: batch.dispatched
-        - id: sequential
-          when: payload.mode == 'sequential'
-          data_accumulation:
-            writes:
-              - target_field: dispatch_count
-                value: 1
-          advances_to: dispatched
-          emit:
-            event: batch.dispatched
-        - id: fallback
-          else: true
-          data_accumulation:
-            writes:
-              - target_field: dispatch_count
-                value: 0
-          advances_to: dispatched
-          emit:
-            event: batch.dispatched
+  batch.requested:
+    count:
+      items_from: payload.items
+      store_as: entity.dispatch_count
+    rules:
+      - id: parallel
+        when: payload.mode == 'parallel'
+        advances_to: dispatched
+        emit:
+          event: batch.dispatched
+      - id: sequential
+        when: payload.mode == 'sequential'
+        data_accumulation:
+          writes:
+            - target_field: dispatch_count
+              value: 1
+        advances_to: dispatched
+        emit:
+          event: batch.dispatched
+      - id: fallback
+        else: true
+        data_accumulation:
+          writes:
+            - target_field: dispatch_count
+              value: 0
+        advances_to: dispatched
+        emit:
+          event: batch.dispatched

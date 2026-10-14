@@ -1,12 +1,8 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [check.requested]
-  produces: []
-  event_handlers:
-    check.requested:
-      rules:
-        - id: empty_schema_rule
-          when: payload.empty_schema_rule == true
-          advances_to: done
-        - id: unmatched
-          else: true
+  check.requested:
+    rules:
+      - id: empty_schema_rule
+        when: payload.empty_schema_rule == true
+        advances_to: done
+      - id: unmatched
+        else: true

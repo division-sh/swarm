@@ -1,66 +1,38 @@
 node-1:
-  execution_type: system_node
-  subscribes_to: [chain.start]
-  produces: [chain.e1]
-  event_handlers:
-    chain.start:
-      emit: chain.e1
+  chain.start:
+    emit: chain.e1
 
 node-2:
-  execution_type: system_node
-  subscribes_to: [chain.e1]
-  produces: [chain.e2]
-  event_handlers:
-    chain.e1:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
-      emit: chain.e2
+  chain.e1:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"
+    emit: chain.e2
 
 node-3:
-  execution_type: system_node
-  subscribes_to: [chain.e2]
-  produces: [chain.e3]
-  event_handlers:
-    chain.e2:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
-      emit: chain.e3
+  chain.e2:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"
+    emit: chain.e3
 
 node-4:
-  execution_type: system_node
-  subscribes_to: [chain.e3]
-  produces: [chain.e4]
-  event_handlers:
-    chain.e3:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
-      emit: chain.e4
+  chain.e3:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"
+    emit: chain.e4
 
 node-5:
-  execution_type: system_node
-  subscribes_to: [chain.e4]
-  produces: [chain.e5]
-  event_handlers:
-    chain.e4:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
-      emit: chain.e5
+  chain.e4:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"
+    emit: chain.e5
 
 node-6:
-  execution_type: system_node
-  subscribes_to: [chain.e5]
-  produces: [chain.e6]
-  event_handlers:
-    chain.e5:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
-      emit: chain.e6
+  chain.e5:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"
+    emit: chain.e6
 
 node-7:
-  execution_type: system_node
-  subscribes_to: [chain.e6]
-  produces: []
-  event_handlers:
-    chain.e6:
-      guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+  chain.e6:
+    guard:
+      check: has(entity.chain_marker) && entity.chain_marker == "active"

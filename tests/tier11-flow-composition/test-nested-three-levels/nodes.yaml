@@ -1,18 +1,10 @@
 root-dispatcher:
-  execution_type: system_node
-  subscribes_to: [pipeline.start]
-  produces: [step.begin]
-  event_handlers:
-    pipeline.start:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
-      emit: step.begin
+  pipeline.start:
+    guard:
+      id: selected_owner
+      check: _entity.id != ""
+    emit: step.begin
 
 root-collector:
-  execution_type: system_node
-  subscribes_to: [micro.done]
-  produces: []
-  event_handlers:
-    micro.done:
-      advances_to: done
+  micro.done:
+    advances_to: done

@@ -1,16 +1,12 @@
 fan-out-node:
-  execution_type: system_node
-  subscribes_to: [batch.submitted]
-  produces: [item.assigned]
-  event_handlers:
-    batch.submitted:
-      fan_out:
-        items_from: payload.items
-        as: line_item
-        identity: line_item.id
-        emit:
-          event: item.assigned
-          fields:
-            item: line_item
-            item_id: line_item.id
-      advances_to: scanning
+  batch.submitted:
+    fan_out:
+      items_from: payload.items
+      as: line_item
+      identity: line_item.id
+      emit:
+        event: item.assigned
+        fields:
+          item: line_item
+          item_id: line_item.id
+    advances_to: scanning

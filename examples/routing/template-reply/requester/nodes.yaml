@@ -1,11 +1,8 @@
 requester-node:
-  execution_type: system_node
-  subscribes_to: [requester.setup, requester.requested, provider.replied]
-  event_handlers:
-    requester.setup: {}
-    requester.requested:
-      emit:
-        event: provider.requested
-        fields:
-          account_id: payload.account_id
-    provider.replied: {}
+  requester.setup: {}
+  requester.requested:
+    emit:
+      event: provider.requested
+      fields:
+        account_id: payload.account_id
+  provider.replied: {}

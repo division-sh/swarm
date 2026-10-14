@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,29 +139,30 @@ func TestNodeShapeRewritePreservesExplicitEmptyNode(t *testing.T) {
 }
 
 func TestNodeShapeRewriteDiskCorpusPreservesEveryHandler(t *testing.T) {
-	root, err := filepath.Abs("../..")
+	data, err := os.ReadFile("disk-inputs.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("git", "ls-files", "*nodes.yaml")
-	command.Dir = root
-	paths, err := command.Output()
-	if err != nil {
+	var inputs []diskRewriteInput
+	if err := json.Unmarshal(data, &inputs); err != nil {
 		t.Fatal(err)
 	}
-	files := strings.Fields(string(paths))
-	if len(files) == 0 {
-		t.Fatal("no checked-in node declaration selected")
+	if len(inputs) == 0 {
+		t.Fatal("no immutable node rewrite input selected")
 	}
 	var handlers int
-	for _, path := range files {
-		source, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
+	for _, input := range inputs {
+		path := input.Path
+		source := []byte(input.Before)
+		if got := fmt.Sprintf("%x", sha256.Sum256(source)); got != input.BeforeHash {
+			t.Fatalf("%s: immutable input hash changed", path)
 		}
-		output, _, err := rewriteNodeSource(source)
+		output, counts, err := rewriteNodeSource(source)
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(output)); got != input.AfterHash || counts != input.Counts {
+			t.Fatalf("%s: reviewed rewrite or counts changed: hash=%s counts=%+v", path, got, counts)
 		}
 		var before, after yaml.Node
 		if err := yaml.Unmarshal(source, &before); err != nil {
@@ -196,7 +200,34 @@ func TestNodeShapeRewriteDiskCorpusPreservesEveryHandler(t *testing.T) {
 			t.Fatalf("%s: rewrite is not byte-idempotent: counts=%+v error=%v", path, counts, err)
 		}
 	}
-	t.Logf("preserved all handlers=%d across files=%d", handlers, len(files))
+	t.Logf("preserved all handlers=%d across files=%d", handlers, len(inputs))
+}
+
+func TestNodeShapeRewriteLiveDiskCorpusHasNoRetiredCarriers(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("git", "ls-files", "*nodes.yaml")
+	command.Dir = root
+	paths, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := strings.Fields(string(paths))
+	if len(files) == 0 {
+		t.Fatal("no live node declaration selected")
+	}
+	for _, path := range files {
+		source, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, counts, err := rewriteNodeSource(source)
+		if err != nil || counts.changed() || !bytes.Equal(output, source) {
+			t.Fatalf("%s: retired node carriers remain: counts=%+v error=%v", path, counts, err)
+		}
+	}
 }
 
 func requireMappingValue(t *testing.T, node *yaml.Node, name string) *yaml.Node {

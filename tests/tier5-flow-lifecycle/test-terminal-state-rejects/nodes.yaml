@@ -1,17 +1,9 @@
 complete-node:
-  execution_type: system_node
-  subscribes_to: [task.completed]
-  produces: [task.finished]
-  event_handlers:
-    task.completed:
-      advances_to: done
-      emit:
-        event: task.finished
+  task.completed:
+    advances_to: done
+    emit:
+      event: task.finished
 
 reopen-node:
-  execution_type: system_node
-  subscribes_to: [task.reopen_requested]
-  produces: []
-  event_handlers:
-    task.reopen_requested:
-      advances_to: processing
+  task.reopen_requested:
+    advances_to: processing

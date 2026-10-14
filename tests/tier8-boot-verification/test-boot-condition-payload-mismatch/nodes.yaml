@@ -1,10 +1,6 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [check.requested]
-  produces: []
-  event_handlers:
-    check.requested:
-      guard:
-        id: payload_mismatch_guard
-        check: payload.nonexistent_field >= 50
-      advances_to: done
+  check.requested:
+    guard:
+      id: payload_mismatch_guard
+      check: payload.nonexistent_field >= 50
+    advances_to: done

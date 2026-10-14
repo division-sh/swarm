@@ -1,50 +1,39 @@
 search-intake:
-  execution_type: system_node
-  subscribes_to: [search.requested]
-  produces: [scout.requested]
-  event_handlers:
-    search.requested:
-      advances_to: scouting
-      emit:
-        event: scout.requested
-        fields:
-          query: payload.query
-          candidate_ids: payload.candidate_ids
+  search.requested:
+    advances_to: scouting
+    emit:
+      event: scout.requested
+      fields:
+        query: payload.query
+        candidate_ids: payload.candidate_ids
 scout-collector:
-  execution_type: system_node
-  subscribes_to: [scout.completed]
-  produces: [candidate.requested]
-  event_handlers:
-    scout.completed:
-      advances_to: collecting
-      data_accumulation:
-        writes:
-          - source_field: batch_id
-            target_field: batch_id
-          - source_field: candidate_ids
-            target_field: candidate_ids
-      fan_out:
-        items_from: payload.candidate_ids
-        as: candidate_id
-        max_items: 10
-        emit:
-          event: candidate.requested
-          fields:
-            batch_id: payload.batch_id
-            candidate_id: candidate_id
+  scout.completed:
+    advances_to: collecting
+    data_accumulation:
+      writes:
+        - source_field: batch_id
+          target_field: batch_id
+        - source_field: candidate_ids
+          target_field: candidate_ids
+    fan_out:
+      items_from: payload.candidate_ids
+      as: candidate_id
+      max_items: 10
+      emit:
+        event: candidate.requested
+        fields:
+          batch_id: payload.batch_id
+          candidate_id: candidate_id
 candidate-collector:
-  execution_type: system_node
-  subscribes_to: [candidate.completed]
-  event_handlers:
-    candidate.completed:
-      join:
-        stage: collecting
-        members:
-          from: state.candidate_ids
-          by: payload.candidate_id
-        output: payload.summary
-        on_complete:
-          advances_to: complete
-        deadline: {after: 2m, from: stage_entry}
-        on_deadline:
-          advances_to: failed
+  candidate.completed:
+    join:
+      stage: collecting
+      members:
+        from: state.candidate_ids
+        by: payload.candidate_id
+      output: payload.summary
+      on_complete:
+        advances_to: complete
+      deadline: {after: 2m, from: stage_entry}
+      on_deadline:
+        advances_to: failed

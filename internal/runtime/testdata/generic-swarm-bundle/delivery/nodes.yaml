@@ -1,11 +1,5 @@
 delivery-node:
-  execution_type: system_node
   state_table: delivery_node_state
-  subscribes_to:
-    - item.completed
-    - timer.item.timeout
-  produces:
-    - item.completed
   gate_state:
     delivery_ready: gate set when delivery is ready
   timers:
@@ -15,20 +9,19 @@ delivery-node:
       start_on: state:approved
       cancel_on: state:completed
       recurring: false
-  event_handlers:
-    item.completed:
-      sets_gate: delivery_ready
-      clear_gates:
-        - intake_ready
-        - score_ready
-    timer.item.timeout:
-      advances_to: completed
-      emit:
-        event: item.completed
-      data_accumulation:
-        source_event: timer.item.timeout
-        writes:
-          - target_field: timed_out
-            value: true
-          - target_field: status
-            value: "completed"
+  item.completed:
+    sets_gate: delivery_ready
+    clear_gates:
+      - intake_ready
+      - score_ready
+  timer.item.timeout:
+    advances_to: completed
+    emit:
+      event: item.completed
+    data_accumulation:
+      source_event: timer.item.timeout
+      writes:
+        - target_field: timed_out
+          value: true
+        - target_field: status
+          value: "completed"

@@ -12,16 +12,15 @@ func nodeHandlerAnnotations(value yamlsource.Value) ([]yamlsource.Value, error) 
 	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
 		return nil, nil
 	}
-	handlers, err := value.Lookup("event_handlers")
-	if err != nil || handlers.Presence == yamlsource.PresenceMissing {
-		return nil, err
-	}
-	fields, err := handlers.Value.Mapping()
+	fields, err := value.Mapping()
 	if err != nil {
 		return nil, err
 	}
 	var annotations []yamlsource.Value
 	for _, field := range fields {
+		if _, reserved := systemNodeContractFields[field.Name]; reserved {
+			continue
+		}
 		if field.Value.Presence() != yamlsource.PresenceMapping && field.Value.Presence() != yamlsource.PresenceEmptyMapping {
 			continue
 		}

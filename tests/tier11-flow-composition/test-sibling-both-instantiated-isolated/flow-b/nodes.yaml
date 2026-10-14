@@ -1,7 +1,3 @@
 beta-intake:
-  execution_type: system_node
-  subscribes_to: [work.begin]
-  produces: []
-  event_handlers:
-    work.begin:
-      advances_to: active
+  work.begin:
+    advances_to: active

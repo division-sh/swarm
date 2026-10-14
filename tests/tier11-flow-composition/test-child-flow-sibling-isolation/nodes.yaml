@@ -1,7 +1,3 @@
 parent-node:
-  execution_type: system_node
-  subscribes_to: [run.start]
-  produces: []
-  event_handlers:
-    run.start:
-      advances_to: done
+  run.start:
+    advances_to: done

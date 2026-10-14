@@ -1,13 +1,9 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [cycle.ping, cycle.pong]
-  produces: [cycle.ping, cycle.pong]
-  event_handlers:
-    cycle.ping:
-      advances_to: processing
-      emit:
-        event: cycle.pong
-    cycle.pong:
-      advances_to: done
-      emit:
-        event: cycle.ping
+  cycle.ping:
+    advances_to: processing
+    emit:
+      event: cycle.pong
+  cycle.pong:
+    advances_to: done
+    emit:
+      event: cycle.ping

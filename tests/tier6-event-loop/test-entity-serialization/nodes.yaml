@@ -1,16 +1,12 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [step.first, step.second]
-  produces: [step.first_done, step.second_done]
-  event_handlers:
-    step.first:
-      advances_to: processing
-      emit:
-        event: step.first_done
-    step.second:
-      guard:
-        id: state_check
-        check: _entity.current_state == 'processing'
-      advances_to: complete
-      emit:
-        event: step.second_done
+  step.first:
+    advances_to: processing
+    emit:
+      event: step.first_done
+  step.second:
+    guard:
+      id: state_check
+      check: _entity.current_state == 'processing'
+    advances_to: complete
+    emit:
+      event: step.second_done

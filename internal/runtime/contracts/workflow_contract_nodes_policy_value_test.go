@@ -9,28 +9,27 @@ import (
 
 func TestProjectNodePolicyValueRows(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`worker:
-  event_handlers:
-    task.ready:
-      rules:
-        scaffold_paths:
-          lookup:
-            on: [payload.scaffold_type, payload.language]
-            entries:
-              - {key: [service, go], value: templates/service/go}
-              - {key: [library, go], value: templates/library/go}
-            into: computed.template_path
-            default: fail
-        validate_manifest:
-          validate:
-            set: deploy_manifest
-            input: {source_ref: payload.source_ref}
-            into: computed.validation.deploy_manifest
-        render_bundle:
-          compute_module:
-            module: structured_renderer
-            input: {component: payload.component}
-            into: computed.rendered_bundle
-        fallback: {else: true}
+  task.ready:
+    rules:
+      scaffold_paths:
+        lookup:
+          on: [payload.scaffold_type, payload.language]
+          entries:
+            - {key: [service, go], value: templates/service/go}
+            - {key: [library, go], value: templates/library/go}
+          into: computed.template_path
+          default: fail
+      validate_manifest:
+        validate:
+          set: deploy_manifest
+          input: {source_ref: payload.source_ref}
+          into: computed.validation.deploy_manifest
+      render_bundle:
+        compute_module:
+          module: structured_renderer
+          input: {component: payload.component}
+          into: computed.rendered_bundle
+      fallback: {else: true}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +48,7 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 }
 
 func TestProjectNodePolicyLookupRejectsDuplicateKey(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - id: choose\n          lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.ready:\n    rules:\n      - id: choose\n        lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

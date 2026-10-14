@@ -1,0 +1,184 @@
+[
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_compute_value_test.go",
+    "declaration": "TestProjectNodeComputeAndLoopValue",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    scores.ready:\n      compute:\n        operation: weighted_average\n        keys: {dimension_key: dimension, score_keys: [value]}\n        tiers:\n          - {dimensions: [a, b], weight: 0.6}\n          - {dimensions: [c], weight: 0.4}\n        store_as: entity.composite\n      loop: {start: revise, from: payload.revision}\n`",
+    "after": "`worker:\n  scores.ready:\n    compute:\n      operation: weighted_average\n      keys: {dimension_key: dimension, score_keys: [value]}\n      tiers:\n        - {dimensions: [a, b], weight: 0.6}\n        - {dimensions: [c], weight: 0.4}\n      store_as: entity.composite\n    loop: {start: revise, from: payload.revision}\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_compute_value_test.go",
+    "declaration": "TestProjectNodeComputeValueRejectsInertParams",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    scores.ready:\\n      compute: {operation: sum, params: {ignored: true}}\\n\"",
+    "after": "\"worker:\\n  scores.ready:\\n    compute: {operation: sum, params: {ignored: true}}\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_compute_value_test.go",
+    "declaration": "TestProjectNodeLoopValueRejectsAmbiguousOperation",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.ready:\\n      loop: {start: revise, repeat: revise, from: payload.revision}\\n\"",
+    "after": "\"worker:\\n  task.ready:\\n    loop: {start: revise, repeat: revise, from: payload.revision}\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_control_value_test.go",
+    "declaration": "TestProjectNodeControlValues",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.requested:\n      activity:\n        id: provision\n        tool: infra.provision\n        input: {component_id: payload.component_id}\n        approval: {decision: provision}\n      guard:\n        checks: [{id: known_component, check: payload.component_id != \"\"}]\n        on_fail:\n          escalate:\n            event: task.rejected\n            fields: {component_id: payload.component_id}\n`",
+    "after": "`worker:\n  task.requested:\n    activity:\n      id: provision\n      tool: infra.provision\n      input: {component_id: payload.component_id}\n      approval: {decision: provision}\n    guard:\n      checks: [{id: known_component, check: payload.component_id != \"\"}]\n      on_fail:\n        escalate:\n          event: task.rejected\n          fields: {component_id: payload.component_id}\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_join_value_test.go",
+    "declaration": "TestProjectNodeJoinValuePreservesFanOutMode",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.ready:\n      join:\n        id: collected\n        members: {from_fan_out: true}\n        on_complete: {emit: task.collected}\n`",
+    "after": "`worker:\n  task.ready:\n    join:\n      id: collected\n      members: {from_fan_out: true}\n      on_complete: {emit: task.collected}\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_join_value_test.go",
+    "declaration": "TestProjectNodeJoinValueRejectsArrivalFieldsInFanOutMode",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.ready:\\n      join: {id: collected, stage: waiting, members: {from_fan_out: true}, on_complete: {emit: task.collected}}\\n\"",
+    "after": "\"worker:\\n  task.ready:\\n    join: {id: collected, stage: waiting, members: {from_fan_out: true}, on_complete: {emit: task.collected}}\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_policy_selection_value_test.go",
+    "declaration": "TestProjectNodePolicySelectionValues",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - case: {selector: payload.region, equals: eu}\n          emit: task.eu\n        - range: {value: payload.score, gte: 10, lt: 20}\n          emit: task.mid\n        - else: true\n          emit: task.other\n`",
+    "after": "`worker:\n  task.ready:\n    rules:\n      - case: {selector: payload.region, equals: eu}\n        emit: task.eu\n      - range: {value: payload.score, gte: 10, lt: 20}\n        emit: task.mid\n      - else: true\n        emit: task.other\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_policy_selection_value_test.go",
+    "declaration": "TestProjectNodePolicySelectionRejectsDynamicRangeBound",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.ready:\\n      rules:\\n        - range: {value: payload.score, gt: payload.min}\\n        - else: true\\n\"",
+    "after": "\"worker:\\n  task.ready:\\n    rules:\\n      - range: {value: payload.score, gt: payload.min}\\n      - else: true\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_policy_value_test.go",
+    "declaration": "TestProjectNodePolicyValueRows",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.ready:\n      rules:\n        scaffold_paths:\n          lookup:\n            on: [payload.scaffold_type, payload.language]\n            entries:\n              - {key: [service, go], value: templates/service/go}\n              - {key: [library, go], value: templates/library/go}\n            into: computed.template_path\n            default: fail\n        validate_manifest:\n          validate:\n            set: deploy_manifest\n            input: {source_ref: payload.source_ref}\n            into: computed.validation.deploy_manifest\n        render_bundle:\n          compute_module:\n            module: structured_renderer\n            input: {component: payload.component}\n            into: computed.rendered_bundle\n        fallback: {else: true}\n`",
+    "after": "`worker:\n  task.ready:\n    rules:\n      scaffold_paths:\n        lookup:\n          on: [payload.scaffold_type, payload.language]\n          entries:\n            - {key: [service, go], value: templates/service/go}\n            - {key: [library, go], value: templates/library/go}\n          into: computed.template_path\n          default: fail\n      validate_manifest:\n        validate:\n          set: deploy_manifest\n          input: {source_ref: payload.source_ref}\n          into: computed.validation.deploy_manifest\n      render_bundle:\n        compute_module:\n          module: structured_renderer\n          input: {component: payload.component}\n          into: computed.rendered_bundle\n      fallback: {else: true}\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_policy_value_test.go",
+    "declaration": "TestProjectNodePolicyLookupRejectsDuplicateKey",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.ready:\\n      rules:\\n        - id: choose\\n          lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\\n\"",
+    "after": "\"worker:\\n  task.ready:\\n    rules:\\n      - id: choose\\n        lookup: {on: payload.kind, entries: [{key: a, value: first}, {key: a, value: second}], into: computed.choice}\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_rules_value_test.go",
+    "declaration": "TestProjectNodeRuleRowsValuePreservesOrderAndContext",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.ready:\n      rules:\n        ready: {when: payload.ready, emit: task.accepted}\n        fallback: {else: true, advances_to: stopped}\n      on_complete:\n        - {id: complete, condition: payload.done, emit: task.done}\n`",
+    "after": "`worker:\n  task.ready:\n    rules:\n      ready: {when: payload.ready, emit: task.accepted}\n      fallback: {else: true, advances_to: stopped}\n    on_complete:\n      - {id: complete, condition: payload.done, emit: task.done}\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_rules_value_test.go",
+    "declaration": "TestProjectNodeRuleRowsValueRejectsRetiredCondition",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.ready:\\n      rules:\\n        - condition: payload.ready\\n\"",
+    "after": "\"worker:\\n  task.ready:\\n    rules:\\n      - condition: payload.ready\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_write_value_test.go",
+    "declaration": "TestProjectNodeDataAccumulationValue",
+    "ordinal": 0,
+    "before": "`worker:\n  event_handlers:\n    task.requested:\n      data_accumulation:\n        source_event: task.requested\n        writes:\n          - name\n          - target_field: dispatch_count\n            value: payload.count\n          - op: clear\n            target: entity.old_value\n`",
+    "after": "`worker:\n  task.requested:\n    data_accumulation:\n      source_event: task.requested\n      writes:\n        - name\n        - target_field: dispatch_count\n          value: payload.count\n        - op: clear\n          target: entity.old_value\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  },
+  {
+    "path": "internal/runtime/contracts/workflow_contract_nodes_write_value_test.go",
+    "declaration": "TestProjectNodeDataAccumulationValueRejectsRetiredExpression",
+    "ordinal": 0,
+    "before": "\"worker:\\n  event_handlers:\\n    task.requested:\\n      data_accumulation:\\n        writes: [{target_field: name, expression: payload.name}]\\n\"",
+    "after": "\"worker:\\n  task.requested:\\n    data_accumulation:\\n      writes: [{target_field: name, expression: payload.name}]\\n\"",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 0,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  }
+]

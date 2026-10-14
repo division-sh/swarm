@@ -71,7 +71,7 @@ func (b *WorkflowContractBundle) HandlerValueProvenance(node runtimeidentity.Exe
 	if b == nil {
 		return EffectiveValueProvenance{}, false
 	}
-	path := effectiveNodeProvenancePrefix(node.FlowPath(), node.NodeID()) + "." + NodeProvenanceMapPath("event_handlers", event) + "." + slot
+	path := NodeProvenanceMapPath(effectiveNodeProvenancePrefix(node.FlowPath(), node.NodeID()), event) + "." + slot
 	return b.effectiveProvenance.Lookup(path)
 }
 
@@ -132,7 +132,11 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) error {
 	for _, record := range bundle.ScopedNodeRecords() {
 		prefix := effectiveNodeProvenancePrefix(record.Source.FlowPath, record.LogicalID)
 		for relativePath, provenance := range record.Entry.admissionProvenance {
-			builder.set(prefix+"."+relativePath, provenance)
+			separator := "."
+			if strings.HasPrefix(relativePath, "[") {
+				separator = ""
+			}
+			builder.set(prefix+separator+relativePath, provenance)
 		}
 	}
 	owners := map[string]string{}

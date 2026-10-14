@@ -282,6 +282,16 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			errs = append(errs, fmt.Errorf("%w: node %s semantic scope: %v", ErrInvalidField, nodeID, scopeErr))
 			continue
 		}
+		if len(record.Entry.EventHandlers) == 0 {
+			message := fmt.Errorf("%w: node %s at %s requires a handler directly under the node, keyed by a declared event", ErrInvalidField, nodeID, record.Source.File)
+			for _, name := range sortedContractKeys(systemNodeContractFields) {
+				if proof, present := record.Entry.admissionProvenance[name]; present {
+					message = fmt.Errorf("%w: %s at %s:%d:%d is a node field, not an event; rename the event and declare its handler directly under the node", ErrInvalidField, name, proof.SourceFile, proof.SourceLine, proof.SourceColumn)
+					break
+				}
+			}
+			errs = append(errs, message)
+		}
 		if strings.TrimSpace(record.Entry.ExecutionType) != "" {
 			if err := ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
@@ -328,7 +338,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 
 func validateNodeHandlerEventDeclaration(bundle *WorkflowContractBundle, record ScopedNodeRecord, node runtimeidentity.ExecutableNode, event string) error {
 	location := record.Source.File
-	if proof, ok := record.Entry.admissionProvenance[NodeProvenanceMapPath("event_handlers", event)]; ok {
+	if proof, ok := record.Entry.admissionProvenance[NodeProvenanceMapPath("", event)]; ok {
 		location = fmt.Sprintf("%s:%d:%d", proof.SourceFile, proof.SourceLine, proof.SourceColumn)
 	}
 	if _, reserved := systemNodeContractFields[event]; reserved {

@@ -1,10 +1,6 @@
 producer-node:
-  execution_type: system_node
-  subscribes_to: [account.requested]
-  produces: [account.ready]
-  event_handlers:
-    account.requested:
-      emit:
-        event: account.ready
-        fields:
-          account_id: payload.account_id
+  account.requested:
+    emit:
+      event: account.ready
+      fields:
+        account_id: payload.account_id

@@ -1,19 +1,16 @@
 portfolio-collector:
-  execution_type: system_node
-  subscribes_to: [operating.reported]
-  event_handlers:
-    operating.reported:
-      accumulate:
-        into: operating_reports
-        from: payload
-        key: payload.operating_id
-      data_accumulation:
-        writes:
-          - source_field: period_id
-            target_field: period_id
-          - op: set
-            target: entity.reports
-            key: payload.operating_id
-            value: payload
-          - source_field: revenue
-            target_field: last_revenue
+  operating.reported:
+    accumulate:
+      into: operating_reports
+      from: payload
+      key: payload.operating_id
+    data_accumulation:
+      writes:
+        - source_field: period_id
+          target_field: period_id
+        - op: set
+          target: entity.reports
+          key: payload.operating_id
+          value: payload
+        - source_field: revenue
+          target_field: last_revenue

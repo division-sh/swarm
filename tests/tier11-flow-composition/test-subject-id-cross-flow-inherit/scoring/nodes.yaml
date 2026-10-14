@@ -1,9 +1,5 @@
 score-handler:
-  execution_type: system_node
-  subscribes_to: [score.requested]
-  produces: [score.done]
-  event_handlers:
-    score.requested:
-      advances_to: scored
-      emit:
-        event: score.done
+  score.requested:
+    advances_to: scored
+    emit:
+      event: score.done

@@ -39,7 +39,7 @@ func TestNodeHandlerEventAdmissionDirectoryAndRetainedSource(t *testing.T) {
 			root := t.TempDir()
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: handler-admission\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), fmt.Sprintf("%q:\n", tc.declared))
-			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), fmt.Sprintf("worker:\n  event_handlers:\n    %q: {}\n", tc.event))
+			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), fmt.Sprintf("worker:\n  %q: {}\n", tc.event))
 			artifact, err := sourceartifact.AdmitDirectory(root)
 			if err != nil {
 				t.Fatal(err)
@@ -62,8 +62,8 @@ func TestNodeHandlerEventAdmissionDirectoryAndRetainedSource(t *testing.T) {
 				t.Run(ingress.name, func(t *testing.T) {
 					bundle, err := ingress.load()
 					if tc.want != "" {
-						if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.event) || !strings.Contains(err.Error(), "nodes.yaml:3:") {
-							t.Fatalf("exact handler declaration refusal: bundle=%v error=%v, want %q for %q at nodes.yaml:3", bundle != nil, err, tc.want, tc.event)
+						if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.event) || !strings.Contains(err.Error(), "nodes.yaml:2:") {
+							t.Fatalf("exact handler declaration refusal: bundle=%v error=%v, want %q for %q at nodes.yaml:2", bundle != nil, err, tc.want, tc.event)
 						}
 						return
 					}
@@ -98,10 +98,9 @@ func TestNodeHandlerEventAdmissionKeepsGeneratedAndPlatformDeclarations(t *testi
   http: {method: GET, url: https://example.test}
 `)
 				writeFixtureFile(t, filepath.Join(dir, "nodes.yaml"), fmt.Sprintf(`worker:
-  event_handlers:
-    source.requested:
-      activity: {id: lookup, tool: lookup}
-    %q: {}
+  source.requested:
+    activity: {id: lookup, tool: lookup}
+  %q: {}
 `, event))
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				if strings.HasPrefix(event, "other.") {
@@ -122,14 +121,42 @@ func TestNodeHandlerEventAdmissionKeepsGeneratedAndPlatformDeclarations(t *testi
 	}
 }
 
+func TestNodeHandlerEventAdmissionKeepsReservedMetadataSeparate(t *testing.T) {
+	repo := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: reserved-metadata\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\nstate_schema:\ngate_state:\ntimers:\nstate_table:\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `worker:
+  state_schema: {}
+  gate_state: {}
+  timers: []
+  state_table: worker_state
+  work.requested: {}
+`)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := bundle.Nodes["worker"]
+	if len(node.EventHandlers) != 1 || node.StateTable != "worker_state" {
+		t.Fatalf("reserved metadata became a handler or lost its field: %#v", node)
+	}
+	if _, present := node.EventHandlers["work.requested"]; !present {
+		t.Fatal("explicit empty consumer disappeared")
+	}
+	if got := EffectiveSystemNodeSubscriptions(node); len(got) != 1 || got[0] != "work.requested" {
+		t.Fatalf("declared reserved event borrowed node metadata as a subscription: %v", got)
+	}
+}
+
 func TestNodeHandlerEventAdmissionPreservesIntroductionCoordinates(t *testing.T) {
 	repo := contractRepoRoot(t)
 	for _, tc := range []struct {
 		name, source string
 		line, column int
 	}{
-		{"alias", "first: &node\n  event_handlers:\n    typo.ready: {}\nsecond: *node\n", 4, 9},
-		{"merge", "first: &node\n  event_handlers:\n    typo.ready: {}\nsecond:\n  <<: *node\n", 5, 7},
+		{"alias", "first: &node\n  typo.ready: {}\nsecond: *node\n", 3, 9},
+		{"merge", "first: &node\n  typo.ready: {}\nsecond:\n  <<: *node\n", 4, 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -169,7 +196,7 @@ func TestNodeHandlerEventAdmissionKeepsConnectedReceiverOwnership(t *testing.T) 
 	for _, event := range []string{"work.ready", "work.*"} {
 		t.Run(event, func(t *testing.T) {
 			root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
-			writeFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), fmt.Sprintf("consumer-node:\n  event_handlers:\n    %q: {}\n", event))
+			writeFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), fmt.Sprintf("consumer-node:\n  %q: {}\n", event))
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 			if err != nil {
 				t.Fatal(err)
@@ -194,7 +221,7 @@ func TestNodeHandlerEventAdmissionRejectsSiblingDeclarationBorrow(t *testing.T) 
 				t.Fatal(err)
 			}
 			writeFixtureFile(t, producerEvents, string(events)+"\nforeign.ready:\n")
-			writeFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), fmt.Sprintf("consumer-node:\n  event_handlers:\n    %q: {}\n", event))
+			writeFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), fmt.Sprintf("consumer-node:\n  %q: {}\n", event))
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 			if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "undeclared event") || !strings.Contains(err.Error(), event) {
 				t.Fatalf("sibling declaration granted handler admission: bundle=%v error=%v", bundle != nil, err)

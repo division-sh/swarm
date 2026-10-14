@@ -1,14 +1,10 @@
 processor:
-  execution_type: system_node
-  subscribes_to: [process.requested]
-  produces: []
-  event_handlers:
-    process.requested:
-      guard:
-        id: counter_check
-        check: has(entity.counter) && entity.counter < 3
-      data_accumulation:
-        writes:
-          - target_field: counter
-            value: entity.counter + 1
-      advances_to: processing
+  process.requested:
+    guard:
+      id: counter_check
+      check: has(entity.counter) && entity.counter < 3
+    data_accumulation:
+      writes:
+        - target_field: counter
+          value: entity.counter + 1
+    advances_to: processing

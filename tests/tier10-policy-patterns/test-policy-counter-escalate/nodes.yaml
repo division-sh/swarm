@@ -1,14 +1,10 @@
 processor:
-  execution_type: system_node
-  subscribes_to: [attempt.requested]
-  produces: [attempt.limit_hit]
-  event_handlers:
-    attempt.requested:
-      guard:
-        id: below_limit
-        check: has(entity.attempt_count) && entity.attempt_count < policy.max_attempts
-        on_fail: "escalate:attempt.limit_hit"
-      data_accumulation:
-        writes:
-          - target_field: attempt_count
-            value: entity.attempt_count + 1
+  attempt.requested:
+    guard:
+      id: below_limit
+      check: has(entity.attempt_count) && entity.attempt_count < policy.max_attempts
+      on_fail: "escalate:attempt.limit_hit"
+    data_accumulation:
+      writes:
+        - target_field: attempt_count
+          value: entity.attempt_count + 1

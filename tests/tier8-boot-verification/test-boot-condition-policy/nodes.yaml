@@ -1,10 +1,6 @@
 policy-check-node:
-  execution_type: system_node
-  subscribes_to: [check.requested]
-  produces: []
-  event_handlers:
-    check.requested:
-      guard:
-        id: policy_ref
-        check: payload.score >= policy.nonexistent_key
-      advances_to: done
+  check.requested:
+    guard:
+      id: policy_ref
+      check: payload.score >= policy.nonexistent_key
+    advances_to: done

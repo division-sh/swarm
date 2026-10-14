@@ -1,10 +1,6 @@
 root-node:
-  execution_type: system_node
-  subscribes_to: [root.check]
-  produces: []
-  event_handlers:
-    root.check:
-      guard:
-        id: root_threshold_check
-        check: payload.score >= policy.threshold
-      advances_to: done
+  root.check:
+    guard:
+      id: root_threshold_check
+      check: payload.score >= policy.threshold
+    advances_to: done

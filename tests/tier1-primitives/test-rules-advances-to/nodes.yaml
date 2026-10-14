@@ -1,14 +1,10 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.reviewed]
-  produces: [item.approved]
-  event_handlers:
-    item.reviewed:
-      rules:
-        approve:
-          when: payload.decision == 'approve'
-          advances_to: approved
-          emit:
-            event: item.approved
-        unmatched:
-          else: true
+  item.reviewed:
+    rules:
+      approve:
+        when: payload.decision == 'approve'
+        advances_to: approved
+        emit:
+          event: item.approved
+      unmatched:
+        else: true

@@ -1,7 +1,3 @@
 parent-node:
-  execution_type: system_node
-  subscribes_to: [parent.trigger]
-  produces: []
-  event_handlers:
-    parent.trigger:
-      advances_to: done
+  parent.trigger:
+    advances_to: done

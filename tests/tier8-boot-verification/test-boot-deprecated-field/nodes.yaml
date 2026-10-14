@@ -1,8 +1,4 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.requested]
-  produces: []
-  event_handlers:
-    task.requested:
-      logic: custom
-      advances_to: done
+  task.requested:
+    logic: custom
+    advances_to: done

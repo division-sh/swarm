@@ -1,15 +1,11 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.submitted]
-  produces: []
-  event_handlers:
-    task.submitted:
-      on_complete:
-        - condition: payload.score >= 70
-          advances_to: done
-      rules:
-        route_a:
-          when: payload.type == "a"
-          advances_to: routed
-        unmatched:
-          else: true
+  task.submitted:
+    on_complete:
+      - condition: payload.score >= 70
+        advances_to: done
+    rules:
+      route_a:
+        when: payload.type == "a"
+        advances_to: routed
+      unmatched:
+        else: true

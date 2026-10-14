@@ -9,13 +9,12 @@ import (
 
 func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`worker:
-  event_handlers:
-    task.ready:
-      rules:
-        ready: {when: payload.ready, emit: task.accepted}
-        fallback: {else: true, advances_to: stopped}
-      on_complete:
-        - {id: complete, condition: payload.done, emit: task.done}
+  task.ready:
+    rules:
+      ready: {when: payload.ready, emit: task.accepted}
+      fallback: {else: true, advances_to: stopped}
+    on_complete:
+      - {id: complete, condition: payload.done, emit: task.done}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -34,12 +33,12 @@ func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
 }
 
 func TestProjectNodeRuleRowsValueRejectsRetiredCondition(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - condition: payload.ready\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.ready:\n    rules:\n      - condition: payload.ready\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
-	if err == nil || !strings.Contains(err.Error(), "condition") || !strings.Contains(err.Error(), "nodes.yaml:5:") {
+	if err == nil || !strings.Contains(err.Error(), "condition") || !strings.Contains(err.Error(), "nodes.yaml:4:") {
 		t.Fatalf("expected source-located retired rule predicate, got %v", err)
 	}
 }

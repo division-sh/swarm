@@ -1,11 +1,7 @@
 validator-node:
-  execution_type: system_node
-  subscribes_to: [validation.requested]
-  produces: [validation.started]
-  event_handlers:
-    validation.requested:
-      emit:
-        event: validation.started
-        fields:
-          candidate: payload.candidate
-          validation_case_id: payload.validation_case_id
+  validation.requested:
+    emit:
+      event: validation.started
+      fields:
+        candidate: payload.candidate
+        validation_case_id: payload.validation_case_id

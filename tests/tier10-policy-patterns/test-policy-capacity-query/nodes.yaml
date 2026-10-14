@@ -1,14 +1,10 @@
 admitter:
-  execution_type: system_node
-  subscribes_to: [slot.requested]
-  produces: [slot.granted]
-  event_handlers:
-    slot.requested:
-      guard:
-        checks:
-          - id: has_capacity
-            check: query_entities(current_state == 'active').count < policy.max_capacity
-        on_fail: discard
-      advances_to: active
-      emit:
-        event: slot.granted
+  slot.requested:
+    guard:
+      checks:
+        - id: has_capacity
+          check: query_entities(current_state == 'active').count < policy.max_capacity
+      on_fail: discard
+    advances_to: active
+    emit:
+      event: slot.granted

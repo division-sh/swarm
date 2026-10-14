@@ -9,16 +9,15 @@ import (
 
 func TestProjectNodeDataAccumulationValue(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`worker:
-  event_handlers:
-    task.requested:
-      data_accumulation:
-        source_event: task.requested
-        writes:
-          - name
-          - target_field: dispatch_count
-            value: payload.count
-          - op: clear
-            target: entity.old_value
+  task.requested:
+    data_accumulation:
+      source_event: task.requested
+      writes:
+        - name
+        - target_field: dispatch_count
+          value: payload.count
+        - op: clear
+          target: entity.old_value
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -36,12 +35,12 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
 }
 
 func TestProjectNodeDataAccumulationValueRejectsRetiredExpression(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.requested:\n      data_accumulation:\n        writes: [{target_field: name, expression: payload.name}]\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.requested:\n    data_accumulation:\n      writes: [{target_field: name, expression: payload.name}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
-	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "nodes.yaml:5:") {
+	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "nodes.yaml:4:") {
 		t.Fatalf("expected source-located write retirement, got %v", err)
 	}
 }

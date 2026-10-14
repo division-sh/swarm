@@ -1,21 +1,17 @@
 task-handler:
-  execution_type: system_node
-  subscribes_to: [work.setup, work.assign, worker.requested]
-  produces: []
-  event_handlers:
-    worker.requested:
-      guard:
-        check: payload.worker_id != ''
-    work.setup:
-      data_accumulation:
-        writes:
-          - source_field: worker_id
-            target_field: worker_id
-          - source_field: task_label
-            target_field: task_label
-        source_event: work.setup
-    work.assign:
-      advances_to: complete
+  worker.requested:
+    guard:
+      check: payload.worker_id != ''
+  work.setup:
+    data_accumulation:
+      writes:
+        - source_field: worker_id
+          target_field: worker_id
+        - source_field: task_label
+          target_field: task_label
+      source_event: work.setup
+  work.assign:
+    advances_to: complete
   state_schema:
     fields:
       worker_id: string

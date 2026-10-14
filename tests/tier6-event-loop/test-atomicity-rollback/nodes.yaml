@@ -1,15 +1,11 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.submitted]
-  produces: []
   gate_state:
     approval_gate: gate set when task is accepted
-  event_handlers:
-    task.submitted:
-      guard:
-        id: always_fail
-        check: |-
-                 false
-        on_fail: reject
-      advances_to: done
-      sets_gate: approval_gate
+  task.submitted:
+    guard:
+      id: always_fail
+      check: |-
+               false
+      on_fail: reject
+    advances_to: done
+    sets_gate: approval_gate

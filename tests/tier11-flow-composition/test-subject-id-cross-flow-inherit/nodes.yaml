@@ -1,8 +1,4 @@
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [item.discovered]
-  produces: [score.requested]
-  event_handlers:
-    item.discovered:
-      advances_to: dispatched
-      emit: score.requested
+  item.discovered:
+    advances_to: dispatched
+    emit: score.requested

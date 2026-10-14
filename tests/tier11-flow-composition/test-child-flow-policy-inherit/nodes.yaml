@@ -1,7 +1,3 @@
 parent-node:
-  execution_type: system_node
-  subscribes_to: [review.requested]
-  produces: []
-  event_handlers:
-    review.requested:
-      advances_to: done
+  review.requested:
+    advances_to: done

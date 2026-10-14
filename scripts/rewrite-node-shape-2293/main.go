@@ -247,8 +247,38 @@ func run(paths []string, write bool) error {
 func main() {
 	write := flag.Bool("write", false, "apply the selected node shape rewrite")
 	activities := flag.Bool("capture-activities", false, "read old effective activity identities from explicitly selected source bundle roots")
+	disk := flag.Bool("prepare-disk", false, "capture immutable before inputs and replay hashes for the selected node files")
+	goInputs := flag.Bool("prepare-go", false, "capture an explicit ledger of complete node literals in selected Go functions")
+	goPlan := flag.String("go-plan", "", "apply only the reviewed Go literal ledger (dry run unless -write)")
 	flag.Parse()
 	err := func() error {
+		if *goInputs || *goPlan != "" {
+			if *disk || *activities || *goInputs && (*write || *goPlan != "") || *goPlan != "" && flag.NArg() != 0 {
+				return fmt.Errorf("Go literal rewriting is a separate explicit operation")
+			}
+			if *goPlan != "" {
+				return applyGoInputs(*goPlan, *write)
+			}
+			plan, err := prepareGoInputs(flag.Args())
+			if err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(plan)
+		}
+		if *disk {
+			if *write || *activities {
+				return fmt.Errorf("disk input preparation is a separate read-only operation")
+			}
+			plan, err := prepareDiskInputs(flag.Args())
+			if err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(plan)
+		}
 		if !*activities {
 			return run(flag.Args(), *write)
 		}

@@ -1,13 +1,9 @@
 reduce-node:
-  execution_type: system_node
-  subscribes_to: [scores.submitted]
-  produces: [scores.aggregated]
-  event_handlers:
-    scores.submitted:
-      reduce:
-        items_from: payload.scores
-        operation: weighted_average
-        store_as: entity.composite
-      emit:
-        event: scores.aggregated
-      advances_to: done
+  scores.submitted:
+    reduce:
+      items_from: payload.scores
+      operation: weighted_average
+      store_as: entity.composite
+    emit:
+      event: scores.aggregated
+    advances_to: done

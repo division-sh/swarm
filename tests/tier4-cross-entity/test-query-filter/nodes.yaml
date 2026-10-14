@@ -1,12 +1,8 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [filter.requested]
-  produces: [filter.completed]
-  event_handlers:
-    filter.requested:
-      query:
-        entities: items
-        filter: has(entity.status) && entity.status == 'active'
-      emit:
-        event: filter.completed
-      advances_to: filtered
+  filter.requested:
+    query:
+      entities: items
+      filter: has(entity.status) && entity.status == 'active'
+    emit:
+      event: filter.completed
+    advances_to: filtered

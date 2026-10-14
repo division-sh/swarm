@@ -1,8 +1,4 @@
 string-guard-node:
-  execution_type: system_node
-  subscribes_to: [check.requested]
-  produces: []
-  event_handlers:
-    check.requested:
-      guard: "payload.score > 50"
-      advances_to: done
+  check.requested:
+    guard: "payload.score > 50"
+    advances_to: done

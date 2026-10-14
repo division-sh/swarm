@@ -31,12 +31,12 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var source strings.Builder
-			source.WriteString("worker0: &worker\n  execution_type: system_node\n  event_handlers:\n    task.ready:\n      _note:\n        a0: &a0 [x, x]\n")
+			source.WriteString("worker0: &worker\n  task.ready:\n    _note:\n      a0: &a0 [x, x]\n")
 			for i := 1; i <= tc.depth; i++ {
-				fmt.Fprintf(&source, "        a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
+				fmt.Fprintf(&source, "      a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
 			}
 			if tc.active {
-				fmt.Fprintf(&source, "      emit:\n        event: task.done\n        fields:\n          data: *a%d\n", tc.depth)
+				fmt.Fprintf(&source, "    emit:\n      event: task.done\n      fields:\n        data: *a%d\n", tc.depth)
 			}
 			for i := 1; i < tc.declarations; i++ {
 				if tc.merge {
@@ -45,8 +45,10 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 					fmt.Fprintf(&source, "worker%d: *worker\n", i)
 				}
 			}
-			if tc.name == "repeated-alias" && source.Len() != 755 || tc.name == "repeated-merge" && source.Len() != 845 {
-				t.Fatalf("original reviewer source changed: %d bytes", source.Len())
+			// The 755/845-byte originals are retained in Git history; only the
+			// retired carrier and its indentation changed, not the alias graph.
+			if tc.name == "repeated-alias" && source.Len() != 671 || tc.name == "repeated-merge" && source.Len() != 761 {
+				t.Fatalf("flat reviewer source changed: %d bytes", source.Len())
 			}
 			snapshot, err := yamlsource.Load([]byte(source.String()))
 			if err != nil {
@@ -119,16 +121,16 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 					if err != nil || len(nodes) != tc.declarations {
 						t.Fatalf("valid declarations must survive: %d, %v", len(nodes), err)
 					}
-					wantEntries := 8199 * tc.declarations
+					wantEntries := 8197 * tc.declarations
 					if !tc.active {
-						wantEntries = 5 * tc.declarations
+						wantEntries = 3 * tc.declarations
 					}
 					if entries != wantEntries || entries > yamlsource.MaxExpandedNodes {
 						t.Fatalf("provenance entries = %d, want %d under document limit", entries, wantEntries)
 					}
 					if !tc.active {
 						for _, node := range nodes {
-							if note := node.admissionProvenance["event_handlers[\"task.ready\"]._note"]; note.Origin != EffectiveValueOriginAuthored || note.SourceLine == 0 {
+							if note := node.admissionProvenance["[\"task.ready\"]._note"]; note.Origin != EffectiveValueOriginAuthored || note.SourceLine == 0 {
 								t.Fatal("annotation outer occurrence lost")
 							}
 						}

@@ -1,20 +1,19 @@
 activity-node:
-  event_handlers:
-    request:
-      activity:
-        id: send
-        tool: send
-        input:
-          message: payload.message
-    send.succeeded:
-      rules:
-        - id: observe_success
-          when: payload.result != null
-        - id: unmatched_success
-          else: true
-    send.failed:
-      rules:
-        - id: observe_failure
-          when: payload.failure != null
-        - id: unmatched_failure
-          else: true
+  request:
+    activity:
+      id: send
+      tool: send
+      input:
+        message: payload.message
+  send.succeeded:
+    rules:
+      - id: observe_success
+        when: payload.result != null
+      - id: unmatched_success
+        else: true
+  send.failed:
+    rules:
+      - id: observe_failure
+        when: payload.failure != null
+      - id: unmatched_failure
+        else: true

@@ -1,36 +1,28 @@
 intake-router:
-  execution_type: system_node
   state_table: intake_router_state
-  subscribes_to:
-    - item.created
-    - item.processed
-  produces:
-    - item.processed
-    - item.review_requested
   gate_state:
     intake_ready: gate set when intake is ready
-  event_handlers:
-    item.created:
-      guard:
-        id: accept_item
-        check: payload.item_id != ''
-      fan_out:
-        items_from: payload.items
-        as: intake_item
-        identity: intake_item.id
-        emit:
-          event: item.processed
-          fields:
-            item_id: intake_item.id
-            score: intake_item.score
-    item.processed:
-      accumulate:
-        into: processed_items
-        from: payload
+  item.created:
+    guard:
+      id: accept_item
+      check: payload.item_id != ''
+    fan_out:
+      items_from: payload.items
+      as: intake_item
+      identity: intake_item.id
       emit:
-        event: item.review_requested
+        event: item.processed
         fields:
-          score: payload.score
-      sets_gate: intake_ready
-      clear_gates:
-        - needs_revision
+          item_id: intake_item.id
+          score: intake_item.score
+  item.processed:
+    accumulate:
+      into: processed_items
+      from: payload
+    emit:
+      event: item.review_requested
+      fields:
+        score: payload.score
+    sets_gate: intake_ready
+    clear_gates:
+      - needs_revision

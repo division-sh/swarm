@@ -1,14 +1,8 @@
 validator:
-  execution_type: system_node
-  subscribes_to:
-    - validate.start
-  produces:
-    - validation.done
   gate_state:
     g_validated: gate set when validation completes
-  event_handlers:
-    validate.start:
-      advances_to: done
-      sets_gate: g_validated
-      emit:
-        event: validation.done
+  validate.start:
+    advances_to: done
+    sets_gate: g_validated
+    emit:
+      event: validation.done

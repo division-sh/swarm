@@ -1,16 +1,12 @@
 fan-out-node:
-  execution_type: system_node
-  subscribes_to: [batch.received]
-  produces: [task.dispatched]
-  event_handlers:
-    batch.received:
-      fan_out:
-        items_from: payload.items
-        as: task
-        identity: task.id
-        emit:
-          event: task.dispatched
-          fields:
-            item: task
-            item_id: task.id
-      advances_to: processing
+  batch.received:
+    fan_out:
+      items_from: payload.items
+      as: task
+      identity: task.id
+      emit:
+        event: task.dispatched
+        fields:
+          item: task
+          item_id: task.id
+    advances_to: processing

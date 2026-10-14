@@ -1,26 +1,22 @@
 pipeline:
-  execution_type: system_node
-  subscribes_to: [step.a_done, step.b_done, step.c_done]
-  produces: [release.ready]
   gate_state:
     g_a: first gate in the release chain
     g_b: second gate in the release chain
     g_c: third gate in the release chain
-  event_handlers:
-    step.a_done:
-      sets_gate: g_a
-      advances_to: stage_a
-    step.b_done:
-      guard:
-        id: requires_a
-        check: _entity.gates.g_a == true
-      sets_gate: g_b
-      advances_to: stage_b
-    step.c_done:
-      guard:
-        id: requires_b
-        check: _entity.gates.g_b == true
-      sets_gate: g_c
-      advances_to: released
-      emit:
-        event: release.ready
+  step.a_done:
+    sets_gate: g_a
+    advances_to: stage_a
+  step.b_done:
+    guard:
+      id: requires_a
+      check: _entity.gates.g_a == true
+    sets_gate: g_b
+    advances_to: stage_b
+  step.c_done:
+    guard:
+      id: requires_b
+      check: _entity.gates.g_b == true
+    sets_gate: g_c
+    advances_to: released
+    emit:
+      event: release.ready

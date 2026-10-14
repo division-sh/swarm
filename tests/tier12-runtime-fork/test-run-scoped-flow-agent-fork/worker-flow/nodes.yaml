@@ -1,6 +1,3 @@
 worker-node:
-  execution_type: system_node
-  subscribes_to: [worker.observed]
-  event_handlers:
-    worker.observed:
-      advances_to: complete
+  worker.observed:
+    advances_to: complete

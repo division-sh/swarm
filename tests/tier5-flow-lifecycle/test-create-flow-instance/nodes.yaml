@@ -1,10 +1,6 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [flow.spawn_requested]
-  produces: [flow.spawned]
-  event_handlers:
-    flow.spawn_requested:
-      emit:
-        event: flow.spawned
-        fields:
-          worker_id: payload.worker_id
+  flow.spawn_requested:
+    emit:
+      event: flow.spawned
+      fields:
+        worker_id: payload.worker_id
