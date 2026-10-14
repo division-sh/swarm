@@ -206,7 +206,7 @@ func TestLocalPreflightCIEventAndPaginationBoundaries(t *testing.T) {
 			}
 		})
 	}
-	for _, mode := range []string{"unknown", "foreign-repository", "missing-head", "bad-head", "invalid-ref", "invalid-action", "bad-merge-group"} {
+	for _, mode := range []string{"unknown", "foreign-repository", "missing-head", "bad-head", "invalid-ref", "invalid-action", "bad-merge-group", "framing-collision"} {
 		t.Run(mode, func(t *testing.T) {
 			name := "pull_request"
 			if mode == "unknown" {
@@ -222,12 +222,17 @@ func TestLocalPreflightCIEventAndPaginationBoundaries(t *testing.T) {
 				delete(event["pull_request"].(map[string]any), "head")
 			case "bad-head":
 				event["pull_request"].(map[string]any)["head"].(map[string]any)["sha"] = "invalid"
+			case "framing-collision":
+				head := event["pull_request"].(map[string]any)["head"].(map[string]any)
+				head["repo"].(map[string]any)["full_name"] = "division-sh/swarm\n" + strings.Repeat("a", 40)
+				head["sha"] = nil
 			case "invalid-ref", "bad-merge-group":
 				ref = "refs/heads/not-a-pr"
 			case "invalid-action":
 				event["action"] = "unknown"
 			}
-			if out, _, err := runLocalCIAdmission(t, name, ref, event, nil, false); err == nil {
+			pages := localStatusHistory(localStatus("pending", preflightCIAttemptA), localStatus("success", preflightCIAttemptA))
+			if out, calls, err := runLocalCIAdmission(t, name, ref, event, pages, false); err == nil || len(calls) != 0 {
 				t.Fatalf("malformed event admitted: %s", out)
 			}
 		})
