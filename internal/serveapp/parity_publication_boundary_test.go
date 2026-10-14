@@ -90,7 +90,12 @@ func TestServedParityConversationSourceActivationBoundaryBothStores(t *testing.T
 				t.Fatal(ctx.Err())
 			}
 			// The old gate returns even though the real source owner cannot start yet.
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, initial.RunID)
+			for range 4 {
+				summary, err := rt.ReadRunDeliveries(ctx, initial.RunID)
+				if err != nil || summary.RunID != initial.RunID || summary.Pending != 0 || summary.InProgress != 0 {
+					t.Fatalf("held source does not meet the original empty-delivery predicate: %+v (%v)", summary, err)
+				}
+			}
 			canceled, cancelWait := context.WithCancel(ctx)
 			cancelWait()
 			if _, err := rt.Probe.Raw().Wait(canceled, lifecycleprobe.Signal{Kind: lifecycleprobe.EventPersisted, EventID: initial.EventID}); !errors.Is(err, context.Canceled) {
