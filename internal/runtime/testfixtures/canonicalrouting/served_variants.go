@@ -30,17 +30,14 @@ stages:
           item_id: payload.item_id
 `, `    item.received:
       rules:
-        initialize:
-          when: payload.item_id != 'emit'
+        - when: payload.item_id != 'emit'
           advances_to: waiting
-        emit_processed:
-          when: payload.item_id == 'emit'
+        - when: payload.item_id == 'emit'
           emit:
             event: item.processed
             fields:
               item_id: payload.item_id
-        unmatched:
-          else: true
+        - else: true
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `item-observer:
   execution_type: system_node
@@ -54,11 +51,9 @@ stages:
   event_handlers:
     item.processed:
       rules:
-        complete:
-          when: has(payload.item_id) && payload.item_id == 'review'
+        - when: has(payload.item_id) && payload.item_id == 'review'
           advances_to: done
-        unmatched:
-          else: true
+        - else: true
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
 	return root
