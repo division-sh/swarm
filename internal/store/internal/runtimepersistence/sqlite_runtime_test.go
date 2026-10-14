@@ -1491,6 +1491,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 		"root/entities.yaml": "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
 		"root/events.yaml":   "company.opened:\n",
 	}, nil)
+	f.constructKeylessRoot(t)
 	ctx, owner := f.ctx, f.workflows
 	store := f.store.(*SQLiteRuntimeStore)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
