@@ -49,29 +49,57 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("upsert agent-a: %v", err)
 			}
+			plan := currentAgentFixtureSourceSet(t, ctx, selected)
+			if len(plan.Sources) != 1 {
+				t.Fatalf("agent-a source census = %+v, want the exact fixture source", plan.Sources)
+			}
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+			if err != nil {
+				t.Fatalf("retain agent-a generation grant: %v", err)
+			}
+			admitAgentFixtureFlowGrant(t, ctx, grant)
+			state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
+			if err != nil || !found || state.Phase != runtimemanager.AgentLifecycleRunning {
+				t.Fatalf("load admitted agent-a: state=%+v found=%v err=%v", state, found, err)
+			}
+			authority, err := runtimedelivery.NewNormalExecutionAuthority(
+				mustStoreTestSourceArtifactFact(state.ProcessBinding.BundleHash),
+				state.ProcessBinding.GenerationGrantID, state.ProcessBinding.RuntimeGeneration,
+			)
+			if err != nil {
+				t.Fatalf("admitted agent-a delivery authority: %v", err)
+			}
 			event := eventtest.PersistedProjection(
 				eventID, events.EventType("delivery.evidence"), "gateway", "", json.RawMessage(`{"message":"proof"}`), 0,
 				runID, "", events.EventEnvelope{}, now,
 			)
+			// Both contexts address the same entityless actor, not unrelated
+			// constructor entities. Context remains part of exact delivery identity.
+			target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: identity.Route.ScopeKey, FlowInstance: identity.FlowInstance()})
 			routes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "dead-letter-route-a"}},
-					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()}),
+					Target:  target,
 				},
 				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "dead-letter-route-b"}},
-					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()}),
+					Target:  target,
 				},
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
 				t.Fatalf("commit event with sibling deliveries: %v", err)
 			}
+			if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+				t.Fatalf("activate admitted agent-a delivery authority: %v", err)
+			}
 
 			snapshots := make(map[string]runtimedelivery.Snapshot, len(routes))
 			for index, route := range routes {
-				claimed, err := claimDeliveryFixture(ctx, selected, event, route)
-				if err != nil {
-					t.Fatalf("claim %s: %v", route.Recipient.ID(), err)
+				pending := loadDeliverySnapshotFixture(t, ctx, selected, event.ID(), route)
+				result, err := selected.ClaimDelivery(ctx, pending.Authority, event, route)
+				claimed, acquired := result.Acquired()
+				if err != nil || !acquired {
+					t.Fatalf("claim %s: disposition=%s invariant=%v err=%v", route.Recipient.ID(), result.Disposition, result.Invariant, err)
 				}
 				failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_"+string(rune('a'+index))+"_failed", nil)
 				snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
