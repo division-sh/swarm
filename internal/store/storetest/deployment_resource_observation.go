@@ -11,12 +11,19 @@ type DeploymentIntentProgressStorage = private.DeploymentIntentProgressStorage
 type DeploymentIntentMetadataStorage = private.DeploymentIntentMetadataStorage
 type DeploymentFeedStorage = private.DeploymentFeedStorage
 type DeploymentIntentDiagnosticStorage = private.DeploymentIntentDiagnosticStorage
+type DeploymentIntentCardinalityStorage = private.DeploymentIntentCardinalityStorage
+type PinnedDeploymentFeedStorage = private.PinnedDeploymentFeedStorage
+type DeploymentSettlementDiagnosticStorage = private.DeploymentSettlementDiagnosticStorage
+type PinnedPortfolioDeliveryDiagnosticStorage = private.PinnedPortfolioDeliveryDiagnosticStorage
 type DeploymentReceiptStorage = private.DeploymentReceiptStorage
 type DeploymentDeliveryStorage = private.DeploymentDeliveryStorage
 type DeploymentAttemptStorage = private.DeploymentAttemptStorage
 type DeploymentDeliveryStatusStorage = private.DeploymentDeliveryStatusStorage
 type SelectedDeploymentOperationStorage = private.SelectedDeploymentOperationStorage
 type SelectedDeploymentExecutionStorage = private.SelectedDeploymentExecutionStorage
+type SelectedForkKeyStorage = private.SelectedForkKeyStorage
+type SelectedDeploymentExecutionIdentityStorage = private.SelectedDeploymentExecutionIdentityStorage
+type SelectedDeploymentPointStorage = private.SelectedDeploymentPointStorage
 type DeploymentRunStatusStorage = private.DeploymentRunStatusStorage
 type DeploymentRunControlStorage = private.DeploymentRunControlStorage
 type DeploymentRuntimeLogStorage = private.DeploymentRuntimeLogStorage
@@ -32,6 +39,10 @@ func ReadPortfolioAccountResourcePinStorage(ctx context.Context, selected any, r
 
 func CountAccountDeploymentReceiversStorage(ctx context.Context, selected any, runID string) (int, error) {
 	return private.CountAccountDeploymentReceiversStorageForTest(ctx, selected, runID)
+}
+
+func CountConsumerDeploymentReceiversStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountConsumerDeploymentReceiversStorageForTest(ctx, selected, runID)
 }
 
 func CountDeploymentRouteObligationsStorage(ctx context.Context, selected any, runID string) (int, error) {
@@ -52,6 +63,50 @@ func ReadDeploymentIntentVersionStorage(ctx context.Context, selected any, runID
 
 func ReadDeploymentIntentCursorStorage(ctx context.Context, selected any, runID string) (int, error) {
 	return private.ReadDeploymentIntentCursorStorageForTest(ctx, selected, runID)
+}
+
+func ReadDeploymentOriginIntentVersionStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadDeploymentOriginIntentVersionStorageForTest(ctx, selected, runID)
+}
+
+func CountDeploymentOriginIntentsStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountDeploymentOriginIntentsStorageForTest(ctx, selected, runID)
+}
+
+func ReadDeploymentIntentCardinalityStorage(ctx context.Context, selected any, runID string) (DeploymentIntentCardinalityStorage, error) {
+	return private.ReadDeploymentIntentCardinalityStorageForTest(ctx, selected, runID)
+}
+
+func ReadDeploymentOriginIntentStateStorage(ctx context.Context, selected any, runID string) (DeploymentIntentDiagnosticStorage, error) {
+	return private.ReadDeploymentOriginIntentStateStorageForTest(ctx, selected, runID)
+}
+
+func ReadDeploymentCommittedOrdinalsStorage(ctx context.Context, selected any, runID string) ([]CommittedFanOutOrdinalStorage, error) {
+	return private.ReadDeploymentCommittedOrdinalsStorageForTest(ctx, selected, runID)
+}
+
+func ReadPinnedDeploymentFeedsStorage(ctx context.Context, selected any, run string) ([]PinnedDeploymentFeedStorage, error) {
+	return private.ReadPinnedDeploymentFeedsStorageForTest(ctx, selected, run)
+}
+
+func ReadDeploymentSettlementDiagnosticsStorage(ctx context.Context, selected any, run string) ([]DeploymentSettlementDiagnosticStorage, error) {
+	return private.ReadDeploymentSettlementDiagnosticsStorageForTest(ctx, selected, run)
+}
+
+func CountPinnedPortfolioSuccessfulPipelineReceiptsStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountPinnedPortfolioSuccessfulPipelineReceiptsStorageForTest(ctx, selected, run)
+}
+
+func CountPinnedPortfolioSettledDeliveriesStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountPinnedPortfolioSettledDeliveriesStorageForTest(ctx, selected, run)
+}
+
+func ReadPinnedPortfolioDeliveryDiagnosticsStorage(ctx context.Context, selected any, run string) ([]PinnedPortfolioDeliveryDiagnosticStorage, error) {
+	return private.ReadPinnedPortfolioDeliveryDiagnosticsStorageForTest(ctx, selected, run)
+}
+
+func CountPinnedPortfolioSourceEventsStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountPinnedPortfolioSourceEventsStorageForTest(ctx, selected, run)
 }
 
 func ReadDeploymentIntentProgressStorage(ctx context.Context, selected any, runID string) (DeploymentIntentProgressStorage, error) {
@@ -98,6 +153,10 @@ func CountDeploymentStampedHandoffsStorage(ctx context.Context, selected any, ru
 	return private.CountDeploymentStampedHandoffsStorageForTest(ctx, selected, runID)
 }
 
+func CountRunDeliveredRowsStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountRunDeliveredRowsStorageForTest(ctx, selected, runID)
+}
+
 func CountRootReadyDeliveredStorage(ctx context.Context, selected any, runID string) (int, error) {
 	return private.CountRootReadyDeliveredStorageForTest(ctx, selected, runID)
 }
@@ -120,6 +179,38 @@ func ReadDeploymentDeliveryStatusStorage(ctx context.Context, selected any, runI
 
 func ReadSelectedDeploymentOperationStorage(ctx context.Context, selected any, runID string) (SelectedDeploymentOperationStorage, error) {
 	return private.ReadSelectedDeploymentOperationStorageForTest(ctx, selected, runID)
+}
+
+func ReadSelectedForkKeyStorage(ctx context.Context, selected any, key string) (SelectedForkKeyStorage, error) {
+	return private.ReadSelectedForkKeyStorageForTest(ctx, selected, key)
+}
+
+func ReadSelectedForkKeyRunStateStorage(ctx context.Context, selected any, key, run string) (string, error) {
+	return private.ReadSelectedForkKeyRunStateStorageForTest(ctx, selected, key, run)
+}
+
+func CountSelectedForkKeyOperationsStorage(ctx context.Context, selected any, key string) (int, error) {
+	return private.CountSelectedForkKeyOperationsStorageForTest(ctx, selected, key)
+}
+
+func CountSelectedForkKeyActivatedOperationsStorage(ctx context.Context, selected any, key string) (int, error) {
+	return private.CountSelectedForkKeyActivatedOperationsStorageForTest(ctx, selected, key)
+}
+
+func CountSelectedForkSourceOperationsStorage(ctx context.Context, selected any, run string) (int, error) {
+	return private.CountSelectedForkSourceOperationsStorageForTest(ctx, selected, run)
+}
+
+func ReadLatestSelectedDeploymentExecutionStateStorage(ctx context.Context, selected any, run string) (string, error) {
+	return private.ReadLatestSelectedDeploymentExecutionStateStorageForTest(ctx, selected, run)
+}
+
+func ReadLatestSelectedDeploymentExecutionIdentityStorage(ctx context.Context, selected any, run string) (SelectedDeploymentExecutionIdentityStorage, error) {
+	return private.ReadLatestSelectedDeploymentExecutionIdentityStorageForTest(ctx, selected, run)
+}
+
+func ReadSelectedDeploymentPointStorage(ctx context.Context, selected any, run string) (SelectedDeploymentPointStorage, error) {
+	return private.ReadSelectedDeploymentPointStorageForTest(ctx, selected, run)
 }
 
 func ReadSelectedDeploymentExecutionsStorage(ctx context.Context, selected any, runID string) ([]SelectedDeploymentExecutionStorage, error) {

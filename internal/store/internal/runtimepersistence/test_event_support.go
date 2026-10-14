@@ -1861,6 +1861,10 @@ func ReadFirstRootReadyEventStorageForTest(ctx context.Context, selected any, ru
 	return out, nil
 }
 
+func CountPinnedPortfolioSourceEventsStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, eventrecord.CountPinnedPortfolioSourceEventsStorageTx)
+}
+
 func ReadDeploymentRuntimeLogStorageForTest(ctx context.Context, selected any, runID string) ([]DeploymentRuntimeLogStorage, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, eventrecord.ReadDeploymentRuntimeLogStorageTx)
 }

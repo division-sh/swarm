@@ -177,30 +177,22 @@ type selectedExternalAttempt struct {
 
 func selectedExternalAttempts(t *testing.T, f *deploymentResourceFixture, runID string) []selectedExternalAttempt {
 	t.Helper()
-	rows, err := f.db.QueryContext(f.ctx, `SELECT CAST(o.operation_id AS TEXT),CAST(a.attempt_id AS TEXT),a.state,o.lineage FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind='provider_turn' ORDER BY a.attempt_ordinal`)
+	rows, err := storetest.ReadProviderTurnAttemptLineageStorage(f.ctx, f.selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var attempts []selectedExternalAttempt
-	for rows.Next() {
-		var attempt selectedExternalAttempt
-		var lineageJSON []byte
-		if err := rows.Scan(&attempt.OperationID, &attempt.AttemptID, &attempt.State, &lineageJSON); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		attempt := selectedExternalAttempt{OperationID: row.OperationID, AttemptID: row.AttemptID, State: effects.State(row.State)}
 		var lineage struct {
 			RunID string `json:"run_id"`
 		}
-		if err := json.Unmarshal(lineageJSON, &lineage); err != nil {
+		if err := json.Unmarshal(row.Lineage, &lineage); err != nil {
 			t.Fatal(err)
 		}
 		if lineage.RunID == runID {
 			attempts = append(attempts, attempt)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	return attempts
 }
@@ -397,10 +389,11 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 						t.Fatal("R5 settled effect did not reach post-quiescence activation interruption")
 					}
 				}
-				var childID string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT fork_run_id FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID); err != nil {
+				operation, err := storetest.ReadSelectedForkKeyStorage(f.ctx, f.selected, key)
+				if err != nil {
 					t.Fatal(err)
 				}
+				childID := operation.RunID
 				if stage.name == "settled" {
 					var failed, pending int
 					if err := func() error {
@@ -443,10 +436,11 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				f.runtime.fanOutServing.Close()
 				restarted, recovered := deploymentForkOwner(t, f)
 				t.Logf("R5 %s recovered=%+v attempts=%+v", stage.name, recovered, selectedExternalAttempts(t, f, childID))
-				var feedCount, deliveryCount int
-				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, childID).Scan(&feedCount); err != nil {
+				feedCount, err := storetest.CountDeploymentOriginIntentsStorage(f.ctx, f.selected, childID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				var deliveryCount int
 				if err := func() error {
 					var err error
 					deliveryCount, err = storetest.CountRunDeliveryStorage(f.ctx, f.selected, childID)

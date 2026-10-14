@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -114,35 +115,40 @@ func assertTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *h
 	if summary.Owed != 0 || summary.Open != 0 || summary.Blocked != 0 || summary.Unsettled != 0 || summary.BarrierArmed != 0 || summary.BarrierPending != 0 {
 		t.Fatalf("deployment feed remains unsettled: %+v", summary)
 	}
-	var pin, intentVersion string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pin); err != nil {
+	pin, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, runID)
+	if err != nil {
 		t.Fatalf("read exact run pin: %v", err)
 	}
-	if err := f.db.QueryRowContext(f.ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&intentVersion); err != nil {
+	intentVersion, err := storetest.ReadDeploymentOriginIntentVersionStorage(f.ctx, f.selected, runID)
+	if err != nil {
 		t.Fatalf("read deployment feed version: %v", err)
 	}
 	if pin != string(version.VersionID) || intentVersion != pin {
 		t.Fatalf("feed did not consume exact pinned version: pin=%s feed=%s want=%s", pin, intentVersion, version.VersionID)
 	}
 	for _, check := range []struct {
-		name, query string
-		want        int
+		name string
+		read func(context.Context, any, string) (int, error)
+		want int
 	}{
-		{"deployment intents", `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, 1},
-		{"committed outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, len(rows)},
-		{"row events", `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='root.ready'`, len(rows)},
-		{"delivered routes", `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.status='delivered'`, len(rows)},
-		{"pipeline receipts", `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND e.event_name='root.ready' AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, len(rows)},
+		{"deployment intents", storetest.CountDeploymentOriginIntentsStorage, 1},
+		{"committed outcomes", storetest.CountDeploymentCommittedOutcomesStorage, len(rows)},
+		{"row events", func(ctx context.Context, owner any, run string) (int, error) {
+			return storetest.CountRunNamedEventStorage(ctx, owner, run, "root.ready")
+		}, len(rows)},
+		{"delivered routes", storetest.CountRootReadyDeliveredStorage, len(rows)},
+		{"pipeline receipts", storetest.CountRootReadySuccessfulPipelineReceiptsStorage, len(rows)},
 	} {
-		var got int
-		if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(&got); err != nil {
+		got, err := check.read(f.ctx, f.selected, runID)
+		if err != nil {
 			t.Fatalf("read %s: %v", check.name, err)
 		}
 		if check.name == "pipeline receipts" && got != check.want {
 			deadline := time.Now().Add(5 * time.Second)
 			for got != check.want && time.Now().Before(deadline) {
 				time.Sleep(25 * time.Millisecond)
-				if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(&got); err != nil {
+				got, err = check.read(f.ctx, f.selected, runID)
+				if err != nil {
 					t.Fatalf("read %s after quiescence: %v", check.name, err)
 				}
 			}
@@ -208,11 +214,12 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			server = f.operatorServer(t)
 			startTextFileRun2456(t, f, server, runID, "--data", "root.ready.body="+path)
 			assertTextFileRun2456(t, f, server, runID, version, rows)
-			var runs, versions int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&runs); err != nil {
+			runs, err := storetest.CountPhysicalRunIdentity(f.ctx, f.selected, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM resource_versions WHERE version_id=$1`, string(version.VersionID)).Scan(&versions); err != nil {
+			versions, err := storetest.CountResourceVersionStorage(f.ctx, f.selected, string(version.VersionID))
+			if err != nil {
 				t.Fatal(err)
 			}
 			if runs != 1 || versions != 1 {
@@ -254,15 +261,15 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 1 || forked.DataPins[0].VersionID != version.VersionID {
 				t.Fatalf("old-version selected fork changed source pin: fork=%+v error=%s want=%s", forked, rpcErr, version.VersionID)
 			}
-			var forkPin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, forked.ForkRunID).Scan(&forkPin); err != nil {
+			forkPin, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, forked.ForkRunID)
+			if err != nil {
 				t.Fatalf("read selected fork pin: %v", err)
 			}
 			if forkPin != string(version.VersionID) {
 				t.Fatalf("selected fork pin=%s want=%s", forkPin, version.VersionID)
 			}
-			var forkOutcomes int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, forked.ForkRunID).Scan(&forkOutcomes); err != nil {
+			forkOutcomes, err := storetest.CountNestedRunFanOutOutcomes(f.ctx, f.selected, forked.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if forkOutcomes != 1 {
@@ -369,19 +376,18 @@ func TestDataTextFile2456Keyed37DynamicReceiversBothStores(t *testing.T) {
 			runID := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+directory)
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 3*time.Minute)
 			for _, check := range []struct {
-				name, query string
+				name string
+				read func(context.Context, any, string) (int, error)
 			}{
-				{"dynamic receiver instances", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='consumer'`},
-				{"committed row outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`},
-				{"delivered row events", `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.status='delivered'`},
+				{"dynamic receiver instances", storetest.CountConsumerDeploymentReceiversStorage},
+				{"committed row outcomes", storetest.CountDeploymentCommittedOutcomesStorage},
+				{"delivered row events", storetest.CountRootReadyDeliveredStorage},
 			} {
-				var count int
-				if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(&count); err != nil || count != 37 {
+				if count, err := check.read(f.ctx, f.selected, runID); err != nil || count != 37 {
 					t.Fatalf("%s=%d, %v; want 37", check.name, count, err)
 				}
 			}
-			var pinned string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pinned); err != nil || pinned != string(version.VersionID) {
+			if pinned, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, runID); err != nil || pinned != string(version.VersionID) {
 				t.Fatalf("dynamic receiver pin=%s, %v; want %s", pinned, err, version.VersionID)
 			}
 			seen := map[string]bool{}
@@ -587,27 +593,27 @@ func textFileSnapshot2456(t *testing.T, f *deploymentResourceFixture, runID stri
 	t.Helper()
 	var snapshot textFileBindingSnapshot2456
 	for _, check := range []struct {
-		query string
+		read  func() (int, error)
 		value *int
 	}{
-		{`SELECT COUNT(*) FROM runs WHERE run_id=$1`, &snapshot.runs},
-		{`SELECT COUNT(*) FROM resource_run_creation_operations WHERE run_id=$1`, &snapshot.operations},
-		{`SELECT COUNT(*) FROM resource_versions WHERE flow_path='.' AND event_name='root.ready'`, &snapshot.versions},
-		{`SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1`, &snapshot.pins},
-		{`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, &snapshot.feeds},
-		{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &snapshot.events},
+		{func() (int, error) { return storetest.CountPhysicalRunIdentity(f.ctx, f.selected, runID) }, &snapshot.runs},
+		{func() (int, error) { return storetest.CountRunDataCreationOperationsStorage(f.ctx, f.selected, runID) }, &snapshot.operations},
+		{func() (int, error) { return storetest.CountRootReadyResourceVersionsStorage(f.ctx, f.selected) }, &snapshot.versions},
+		{func() (int, error) { return storetest.CountRunResourcePinsStorage(f.ctx, f.selected, runID) }, &snapshot.pins},
+		{func() (int, error) { return storetest.CountRunFanOutIntentStorage(f.ctx, f.selected, runID) }, &snapshot.feeds},
+		{func() (int, error) { return storetest.CountPhysicalRunEvents(f.ctx, f.selected, runID) }, &snapshot.events},
 	} {
-		args := []any{}
-		if strings.Contains(check.query, "$1") {
-			args = append(args, runID)
-		}
-		if err := f.db.QueryRowContext(f.ctx, check.query, args...).Scan(check.value); err != nil {
+		value, err := check.read()
+		if err != nil {
 			t.Fatal(err)
 		}
+		*check.value = value
 	}
-	if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_heads WHERE flow_path='.' AND event_name='root.ready'`).Scan(&snapshot.head); err != nil {
+	head, err := storetest.ReadResourceHeadVersionStorage(f.ctx, f.selected, durabledata.DeclarationRef{FlowPath: ".", EventName: "root.ready"})
+	if err != nil {
 		t.Fatal(err)
 	}
+	snapshot.head = head
 	return snapshot
 }
 
@@ -878,8 +884,8 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			if newRunID == runID || textFileRequestBinding2456(t, server, newRunID).RequestHash == binding.RequestHash {
 				t.Fatal("new run ID reused the old permanent operation")
 			}
-			var versionCount int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM resource_versions WHERE version_id=$1`, string(original.VersionID)).Scan(&versionCount); err != nil {
+			versionCount, err := storetest.CountResourceVersionStorage(f.ctx, f.selected, string(original.VersionID))
+			if err != nil {
 				t.Fatal(err)
 			}
 			if versionCount != 1 {
@@ -1042,8 +1048,8 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 				}
 				seedRun := startDeploymentResourceRun(t, f, server, "--data", item.name+"="+path)
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, seedRun, 30*time.Second)
-				var version string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name=$2`, seedRun, item.name).Scan(&version); err != nil {
+				version, err := storetest.ReadPortfolioResourcePinStorage(f.ctx, f.selected, seedRun, item.name)
+				if err != nil {
 					t.Fatal(err)
 				}
 				versions[item.name] = version
@@ -1078,15 +1084,15 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 			if boundPins["portfolio/account.notify.requested"] != missingVersion || boundPins["portfolio/account.registered"] != durabledata.VersionID(versions["portfolio/account.registered"]) {
 				t.Fatalf("rejected two-pin request was partially reconstructed: %+v", binding.Pins)
 			}
-			count := func(table string) int {
+			count := func(read func(context.Context, any, string) (int, error)) int {
 				t.Helper()
-				var got int
-				if err := f.db.QueryRowContext(f.ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&got); err != nil {
+				got, err := read(f.ctx, f.selected, runID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				return got
 			}
-			if count("resource_run_creation_operations") != 1 || count("runs") != 0 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
+			if count(storetest.CountRunDataCreationOperationsStorage) != 1 || count(storetest.CountPhysicalRunIdentity) != 0 || count(storetest.CountRunResourcePinsStorage) != 0 || count(storetest.CountRunFanOutIntentStorage) != 0 || count(storetest.CountPhysicalRunEvents) != 0 {
 				t.Fatal("rejected multi-pin operation created a run, pin, feed, or event")
 			}
 			changedPath := filepath.Join(t.TempDir(), "changed.jsonl")
@@ -1095,8 +1101,8 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 			}
 			changedRun := startDeploymentResourceRun(t, f, server, "--data", "portfolio/account.registered="+changedPath)
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, changedRun, 30*time.Second)
-			var newHead string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_heads WHERE flow_path='portfolio' AND event_name='portfolio/account.registered'`).Scan(&newHead); err != nil {
+			newHead, err := storetest.ReadResourceHeadVersionStorage(f.ctx, f.selected, durabledata.DeclarationRef{FlowPath: "portfolio", EventName: "portfolio/account.registered"})
+			if err != nil {
 				t.Fatal(err)
 			}
 			if newHead == versions["portfolio/account.registered"] {
@@ -1118,7 +1124,7 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			replay := textFileRPCWire2456(t, server, independentWire)
-			if len(replay.Error) == 0 || !bytes.Equal(replay.Error, first.Error) || count("resource_run_creation_operations") != 1 || count("runs") != 0 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
+			if len(replay.Error) == 0 || !bytes.Equal(replay.Error, first.Error) || count(storetest.CountRunDataCreationOperationsStorage) != 1 || count(storetest.CountPhysicalRunIdentity) != 0 || count(storetest.CountRunResourcePinsStorage) != 0 || count(storetest.CountRunFanOutIntentStorage) != 0 || count(storetest.CountPhysicalRunEvents) != 0 {
 				t.Fatalf("rejected multi-pin replay changed permanent outcome: first=%s replay=%s", first.Error, replay.Error)
 			}
 			if after := textFileRequestBinding2456(t, server, runID); !reflect.DeepEqual(after, binding) {
@@ -1254,19 +1260,21 @@ func textFileGrammarState2456(t *testing.T, f *deploymentResourceFixture) textFi
 	t.Helper()
 	var state textFileGrammarCounts2456
 	for _, item := range []struct {
-		query string
-		out   *int
+		read func(context.Context, any) (int, error)
+		out  *int
 	}{
-		{`SELECT COUNT(*) FROM resource_source_invocations`, &state.sources},
-		{`SELECT COUNT(*) FROM resource_run_creation_operations`, &state.operations},
-		{`SELECT COUNT(*) FROM runs`, &state.runs},
-		{`SELECT COUNT(*) FROM resource_versions`, &state.versions},
-		{`SELECT COUNT(*) FROM resource_version_pins`, &state.pins},
-		{`SELECT COUNT(*) FROM fan_out_intents`, &state.feeds},
+		{storetest.CountGlobalResourceSourceInvocationsStorage, &state.sources},
+		{storetest.CountGlobalDataCreationOperationsStorage, &state.operations},
+		{storetest.CountGlobalRunStorage, &state.runs},
+		{storetest.CountGlobalResourceVersionsStorage, &state.versions},
+		{storetest.CountGlobalResourcePinsStorage, &state.pins},
+		{storetest.CountServingGlobalIntents, &state.feeds},
 	} {
-		if err := f.db.QueryRowContext(f.ctx, item.query).Scan(item.out); err != nil {
+		got, err := item.read(f.ctx, f.selected)
+		if err != nil {
 			t.Fatal(err)
 		}
+		*item.out = got
 	}
 	return state
 }

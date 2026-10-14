@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -104,32 +105,39 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 					t.Fatalf("R6a final publication settlement not reached: %v", ctx.Err())
 				}
 			}
-			var childID, operationState, executionState, feedStatus, deliveryStatus string
-			var cursor, cardinality, outcomes, receipts, attempts int
-			var handoff bool
-			if err := f.db.QueryRowContext(ctx, `SELECT CAST(fork_run_id AS TEXT),state FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID, &operationState); err != nil {
+			operation, err := storetest.ReadSelectedForkKeyStorage(ctx, f.selected, key)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, childID).Scan(&executionState); err != nil {
+			childID, operationState := operation.RunID, operation.State
+			executionState, err := storetest.ReadSelectedRuntimeExecutionStateStorage(ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(ctx, `SELECT status,cursor,cardinality FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, childID).Scan(&feedStatus, &cursor, &cardinality); err != nil {
+			feed, err := storetest.ReadDeploymentOriginIntentStateStorage(ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(ctx, `SELECT status,continuation_handoff_at IS NOT NULL FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, childID, finalEventID).Scan(&deliveryStatus, &handoff); err != nil {
+			feedStatus, cursor, cardinality := feed.Status, feed.Cursor, feed.Cardinality
+			delivery, err := storetest.ReadDeploymentRunEventDeliveryCutStorage(ctx, f.selected, childID, finalEventID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			deliveryStatus, handoff := delivery.Status, delivery.Handoff
+			var outcomes, receipts, attempts int
 			for _, check := range []struct {
-				query string
-				into  *int
+				read func(context.Context, any, string) (int, error)
+				into *int
 			}{
-				{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, &outcomes},
-				{`SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, &receipts},
-				{`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1`, &attempts},
+				{storetest.CountDeploymentCommittedOutcomesStorage, &outcomes},
+				{storetest.CountClosedReceiverPipelineSuccessStorage, &receipts},
+				{storetest.CountDeploymentRunDeliveryAttemptsStorage, &attempts},
 			} {
-				if err := f.db.QueryRowContext(ctx, check.query, childID).Scan(check.into); err != nil {
+				got, err := check.read(ctx, f.selected, childID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				*check.into = got
 			}
 			if operationState != "materialized" || executionState != "running" || feedStatus != "closed" || cursor != 1 || cardinality != 1 || outcomes != 1 || receipts != 1 || deliveryStatus != "pending" || !handoff || attempts != 0 || gate.deferred.Load() == 0 {
 				t.Fatalf("R6a final-row pending cut: operation=%s execution=%s feed=%s cursor=%d/%d outcomes=%d receipts=%d delivery=%s handoff=%t attempts=%d deferred=%d", operationState, executionState, feedStatus, cursor, cardinality, outcomes, receipts, deliveryStatus, handoff, attempts, gate.deferred.Load())
@@ -152,8 +160,8 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			if result.err == nil && len(result.rpcErr) == 0 {
 				t.Fatalf("R6a unfinished receiver was reported as activated: %+v", result.result)
 			}
-			var activated int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE idempotency_key=$1 AND state='activated'`, key).Scan(&activated); err != nil {
+			activated, err := storetest.CountSelectedForkKeyActivatedOperationsStorage(f.ctx, f.selected, key)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if activated != 0 {

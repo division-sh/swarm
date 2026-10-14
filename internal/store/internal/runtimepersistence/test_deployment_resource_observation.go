@@ -18,12 +18,19 @@ type DeploymentIntentProgressStorage = pipelinepersistence.DeploymentIntentProgr
 type DeploymentIntentMetadataStorage = pipelinepersistence.DeploymentIntentMetadataStorage
 type DeploymentFeedStorage = pipelinepersistence.DeploymentFeedStorage
 type DeploymentIntentDiagnosticStorage = pipelinepersistence.DeploymentIntentDiagnosticStorage
+type DeploymentIntentCardinalityStorage = pipelinepersistence.DeploymentIntentCardinalityStorage
+type PinnedDeploymentFeedStorage = pipelinepersistence.PinnedDeploymentFeedStorage
+type DeploymentSettlementDiagnosticStorage = pipelinepersistence.DeploymentSettlementDiagnosticStorage
+type PinnedPortfolioDeliveryDiagnosticStorage = delivery.PinnedPortfolioDeliveryDiagnosticStorage
 type DeploymentReceiptStorage = pipelinepersistence.DeploymentReceiptStorage
 type DeploymentDeliveryStorage = delivery.DeploymentDeliveryStorage
 type DeploymentAttemptStorage = delivery.DeploymentAttemptStorage
 type DeploymentDeliveryStatusStorage = delivery.DeploymentDeliveryStatusStorage
 type SelectedDeploymentOperationStorage = runforkpersistence.SelectedDeploymentOperationStorage
 type SelectedDeploymentExecutionStorage = runforkpersistence.SelectedDeploymentExecutionStorage
+type SelectedForkKeyStorage = runforkpersistence.SelectedForkKeyStorage
+type SelectedDeploymentExecutionIdentityStorage = runforkpersistence.SelectedDeploymentExecutionIdentityStorage
+type SelectedDeploymentPointStorage = runforkpersistence.SelectedDeploymentPointStorage
 type DeploymentRunStatusStorage = runlifecycle.DeploymentRunStatusStorage
 type DeploymentRunControlStorage = runlifecycle.DeploymentRunControlStorage
 
@@ -58,6 +65,10 @@ func CountAccountDeploymentReceiversStorageForTest(ctx context.Context, selected
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountAccountDeploymentReceiversStorageTx)
 }
 
+func CountConsumerDeploymentReceiversStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountConsumerDeploymentReceiversStorageTx)
+}
+
 func CountDeploymentRouteObligationsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountDeploymentRouteObligationsStorageTx)
 }
@@ -76,6 +87,46 @@ func ReadDeploymentIntentVersionStorageForTest(ctx context.Context, selected any
 
 func ReadDeploymentIntentCursorStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentCursorStorageTx)
+}
+
+func ReadDeploymentOriginIntentVersionStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentOriginIntentVersionStorageTx)
+}
+
+func CountDeploymentOriginIntentsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.CountDeploymentOriginIntentsStorageTx)
+}
+
+func ReadDeploymentIntentCardinalityStorageForTest(ctx context.Context, selected any, runID string) (DeploymentIntentCardinalityStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentCardinalityStorageTx)
+}
+
+func ReadDeploymentOriginIntentStateStorageForTest(ctx context.Context, selected any, runID string) (DeploymentIntentDiagnosticStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentOriginIntentStateStorageTx)
+}
+
+func ReadDeploymentCommittedOrdinalsStorageForTest(ctx context.Context, selected any, runID string) ([]CommittedFanOutOrdinalStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentCommittedOrdinalsStorageTx)
+}
+
+func ReadPinnedDeploymentFeedsStorageForTest(ctx context.Context, selected any, run string) ([]PinnedDeploymentFeedStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, pipelinepersistence.ReadPinnedDeploymentFeedsStorageTx)
+}
+
+func ReadDeploymentSettlementDiagnosticsStorageForTest(ctx context.Context, selected any, run string) ([]DeploymentSettlementDiagnosticStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, pipelinepersistence.ReadDeploymentSettlementDiagnosticsStorageTx)
+}
+
+func CountPinnedPortfolioSuccessfulPipelineReceiptsStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, pipelinepersistence.CountPinnedPortfolioSuccessfulPipelineReceiptsStorageTx)
+}
+
+func CountPinnedPortfolioSettledDeliveriesStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, delivery.CountPinnedPortfolioSettledDeliveriesStorageTx)
+}
+
+func ReadPinnedPortfolioDeliveryDiagnosticsStorageForTest(ctx context.Context, selected any, run string) ([]PinnedPortfolioDeliveryDiagnosticStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, delivery.ReadPinnedPortfolioDeliveryDiagnosticsStorageTx)
 }
 
 func ReadDeploymentIntentProgressStorageForTest(ctx context.Context, selected any, runID string) (DeploymentIntentProgressStorage, error) {
@@ -122,6 +173,10 @@ func CountDeploymentStampedHandoffsStorageForTest(ctx context.Context, selected 
 	return readDeploymentStorageForTest(ctx, selected, runID, delivery.CountDeploymentStampedHandoffsStorageTx)
 }
 
+func CountRunDeliveredRowsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, delivery.CountRunDeliveredRowsStorageTx)
+}
+
 func CountRootReadyDeliveredStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, delivery.CountRootReadyDeliveredStorageTx)
 }
@@ -144,6 +199,43 @@ func ReadDeploymentDeliveryStatusStorageForTest(ctx context.Context, selected an
 
 func ReadSelectedDeploymentOperationStorageForTest(ctx context.Context, selected any, runID string) (SelectedDeploymentOperationStorage, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, runforkpersistence.ReadSelectedDeploymentOperationStorageTx)
+}
+
+func ReadSelectedForkKeyStorageForTest(ctx context.Context, selected any, key string) (SelectedForkKeyStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, key, runforkpersistence.ReadSelectedForkKeyStorageTx)
+}
+
+func ReadSelectedForkKeyRunStateStorageForTest(ctx context.Context, selected any, key, run string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, key); err != nil {
+		return "", err
+	}
+	return readDeploymentStorageForTest(ctx, selected, run, func(ctx context.Context, tx *sql.Tx, run string) (string, error) {
+		return runforkpersistence.ReadSelectedForkKeyRunStateStorageTx(ctx, tx, key, run)
+	})
+}
+
+func CountSelectedForkKeyOperationsStorageForTest(ctx context.Context, selected any, key string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, key, runforkpersistence.CountSelectedForkKeyOperationsStorageTx)
+}
+
+func CountSelectedForkKeyActivatedOperationsStorageForTest(ctx context.Context, selected any, key string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, key, runforkpersistence.CountSelectedForkKeyActivatedOperationsStorageTx)
+}
+
+func CountSelectedForkSourceOperationsStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, runforkpersistence.CountSelectedForkSourceOperationsStorageTx)
+}
+
+func ReadLatestSelectedDeploymentExecutionStateStorageForTest(ctx context.Context, selected any, run string) (string, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, runforkpersistence.ReadLatestSelectedDeploymentExecutionStateStorageTx)
+}
+
+func ReadLatestSelectedDeploymentExecutionIdentityStorageForTest(ctx context.Context, selected any, run string) (SelectedDeploymentExecutionIdentityStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, runforkpersistence.ReadLatestSelectedDeploymentExecutionIdentityStorageTx)
+}
+
+func ReadSelectedDeploymentPointStorageForTest(ctx context.Context, selected any, run string) (SelectedDeploymentPointStorage, error) {
+	return readDeploymentStorageForTest(ctx, selected, run, runforkpersistence.ReadSelectedDeploymentPointStorageTx)
 }
 
 func ReadSelectedDeploymentExecutionsStorageForTest(ctx context.Context, selected any, runID string) ([]SelectedDeploymentExecutionStorage, error) {

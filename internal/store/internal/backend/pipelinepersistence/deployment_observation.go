@@ -15,6 +15,12 @@ func CountAccountDeploymentReceiversStorageTx(ctx context.Context, tx *sql.Tx, r
 	return count, err
 }
 
+func CountConsumerDeploymentReceiversStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='consumer'`, runID).Scan(&count)
+	return count, err
+}
+
 func CountDeploymentRouteObligationsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM decision_card_route_obligations r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1`, runID).Scan(&count)
@@ -45,6 +51,112 @@ func ReadDeploymentIntentCursorStorageTx(ctx context.Context, tx *sql.Tx, runID 
 	var cursor int
 	err := tx.QueryRowContext(ctx, `SELECT cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&cursor)
 	return cursor, err
+}
+
+func ReadDeploymentOriginIntentVersionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var version string
+	err := tx.QueryRowContext(ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&version)
+	return version, err
+}
+
+func CountDeploymentOriginIntentsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&count)
+	return count, err
+}
+
+type DeploymentIntentCardinalityStorage struct{ Cursor, Cardinality int }
+
+func ReadDeploymentIntentCardinalityStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentCardinalityStorage, error) {
+	var out DeploymentIntentCardinalityStorage
+	err := tx.QueryRowContext(ctx, `SELECT cursor,cardinality FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&out.Cursor, &out.Cardinality)
+	return out, err
+}
+
+func ReadDeploymentOriginIntentStateStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentDiagnosticStorage, error) {
+	var out DeploymentIntentDiagnosticStorage
+	err := tx.QueryRowContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&out.Status, &out.Cardinality, &out.Cursor)
+	return out, err
+}
+
+func ReadDeploymentCommittedOrdinalsStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]delivery.CommittedFanOutOrdinalStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,CAST(event_id AS TEXT) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed' ORDER BY ordinal`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []delivery.CommittedFanOutOrdinalStorage
+	for rows.Next() {
+		var row delivery.CommittedFanOutOrdinalStorage
+		if err := rows.Scan(&row.Ordinal, &row.ID); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type PinnedDeploymentFeedStorage struct {
+	Declaration, Version, Status string
+	Cardinality, Cursor          int
+}
+
+func ReadPinnedDeploymentFeedsStorageTx(ctx context.Context, tx *sql.Tx, run string) ([]PinnedDeploymentFeedStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT source_resource_event_name,source_resource_version_id,status,cardinality,cursor
+		FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' ORDER BY source_resource_event_name`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PinnedDeploymentFeedStorage
+	for rows.Next() {
+		var row PinnedDeploymentFeedStorage
+		if err := rows.Scan(&row.Declaration, &row.Version, &row.Status, &row.Cardinality, &row.Cursor); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func CountPinnedPortfolioSuccessfulPipelineReceiptsStorageTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND e.event_name IN ('portfolio/account.registered','portfolio/account.notify.requested') AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, run).Scan(&out)
+	return out, err
+}
+
+type DeploymentSettlementDiagnosticStorage struct{ EventID, EventName, Outcome string }
+
+func ReadDeploymentSettlementDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, run string) ([]DeploymentSettlementDiagnosticStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.event_id,e.event_name,COALESCE(r.outcome,'missing')
+		FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id
+		AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
+		WHERE e.run_id=$1 ORDER BY e.created_at`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentSettlementDiagnosticStorage
+	for rows.Next() {
+		var row DeploymentSettlementDiagnosticStorage
+		if err := rows.Scan(&row.EventID, &row.EventName, &row.Outcome); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func ReadDeploymentIntentProgressStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentProgressStorage, error) {

@@ -34,7 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -88,12 +87,9 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 	f := &deploymentResourceFixture{source: semanticview.Wrap(bundle)}
 	switch backend {
 	case "sqlite":
-		selected := storetest.StartSQLiteRuntimeStore(t)
-		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
+		f.selected = storetest.StartSQLiteRuntimeStore(t)
 	case "postgres":
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
+		f.selected = storetest.StartPostgresRuntimeStore(t)
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
 	}

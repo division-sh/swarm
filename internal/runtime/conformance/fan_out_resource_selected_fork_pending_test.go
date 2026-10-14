@@ -19,6 +19,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -147,20 +148,15 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					t.Fatalf("R3b receiver claim did not reach the held gate at T: %v", waitCtx.Err())
 				}
 			}
-			var deliveryID, deliveryStatus string
-			var handoffStamped bool
-			var pipelineReceipts, attempts int
-			err := f.db.QueryRowContext(f.ctx, `SELECT CAST(d.delivery_id AS TEXT),d.status,d.continuation_handoff_at IS NOT NULL,
-					(SELECT COUNT(*) FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'),
-					(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id)
-					FROM event_deliveries d WHERE d.run_id=$1 AND d.event_id=$2`, sourceRunID, pointEventID).
-				Scan(&deliveryID, &deliveryStatus, &handoffStamped, &pipelineReceipts, &attempts)
+			cut, err := storetest.ReadDeploymentPendingReceiverCutStorage(f.ctx, f.selected, sourceRunID, pointEventID)
 			if err != nil {
 				if err == sql.ErrNoRows {
 					t.Fatal("R3b dispatch completed without persisted receiver delivery")
 				}
 				t.Fatal(err)
 			}
+			deliveryID, deliveryStatus, handoffStamped := cut.ID, cut.Status, cut.Handoff
+			pipelineReceipts, attempts := cut.Receipts, cut.Attempts
 			if deliveryID == "" || deliveryStatus != "pending" || pipelineReceipts != 1 || !handoffStamped || attempts != 0 || gate.deferred.Load() == 0 {
 				t.Fatalf("R3b requires settled pipeline, stamped handoff and unclaimed receiver at T: delivery=%q status=%q receipt=%d handoff=%t attempts=%d deferred=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 			}
@@ -217,8 +213,8 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 			if !seen["old"] || !seen["new"] {
 				t.Fatalf("fixed-T fork failed to retain old pending and new pin rows: %+v", seen)
 			}
-			var newFeedOutcomes int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, result.ForkRunID).Scan(&newFeedOutcomes); err != nil {
+			newFeedOutcomes, err := storetest.CountDeploymentCommittedOutcomesStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if newFeedOutcomes != 1 {

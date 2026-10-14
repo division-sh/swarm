@@ -151,3 +151,17 @@ func composeEntityToolHistory(rows []recipe, changes []transition) ([]recipe, []
 	}
 	return rows, changes
 }
+
+func composeDeploymentResourceHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		raw, err := selectedreadrole.ComposeDeploymentResourceHistory(".", candidate, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}

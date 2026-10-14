@@ -5,6 +5,12 @@ import (
 	"database/sql"
 )
 
+func CountPinnedPortfolioSourceEventsStorageTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('portfolio/account.registered','portfolio/account.notify.requested')`, run).Scan(&out)
+	return out, err
+}
+
 type DeploymentRuntimeLogStorage struct{ EventID, Payload string }
 type DeploymentRecentEventStorage struct {
 	Name    string

@@ -118,4 +118,6 @@ Constructors, remaining resource projections and the final db-field deletion
 are still pending. No heavy per-wave history/census/ratchet was run. Native
 component receipts carry into the one combined checkpoint, which is not due
 before22:08Z and must be accepted by01:48Z. The single rebase now waits for
-#2617 plus G and A to merge, per the latest orchestrator direction.
+#2617, G's codec, and A #2592 to merge, at the first checkpoint boundary after
+all three. The recorded overlap is13 files with D,4 with A and1 with F; no
+intermediate rebase is planned.

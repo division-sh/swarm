@@ -391,15 +391,15 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 	defer ticker.Stop()
 	lastLogged := time.Time{}
 	for {
-		var cardinality, cursor int
-		var status string
 		queryStarted := time.Now()
-		if err := f.db.QueryRowContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&status, &cardinality, &cursor); err != nil {
-			stats := f.db.Stats()
+		progress, err := storetest.ReadDeploymentOriginIntentStateStorage(ctx, f.selected, runID)
+		if err != nil {
+			stats := storetest.ObserveSelectedPool(t, f.selected)
 			t.Fatalf("load deployment progress after %s (query %s, pool in_use=%d open=%d wait_count=%d wait_duration=%s): %v", time.Since(started), time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration, err)
 		}
+		status, cardinality, cursor := progress.Status, progress.Cardinality, progress.Cursor
 		if expected == 1362 && (lastLogged.IsZero() || time.Since(lastLogged) >= 10*time.Second || cursor == expected) {
-			stats := f.db.Stats()
+			stats := storetest.ObserveSelectedPool(t, f.selected)
 			t.Logf("deployment progress elapsed=%s status=%s cursor=%d/%d query=%s pool in_use=%d open=%d wait_count=%d wait_duration=%s", time.Since(started), status, cursor, cardinality, time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration)
 			lastLogged = time.Now()
 		}
@@ -413,16 +413,20 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 			settlementStarted := time.Now()
 			var outcomes, events, delivered int
 			for _, check := range []struct {
-				query string
+				read  func(context.Context, any, string) (int, error)
 				value *int
 			}{
-				{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, &outcomes},
-				{`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='portfolio/account.registered'`, &events},
-				{`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered' AND d.status='delivered'`, &delivered},
+				{storetest.CountDeploymentCommittedOutcomesStorage, &outcomes},
+				{func(ctx context.Context, owner any, run string) (int, error) {
+					return storetest.CountRunNamedEventStorage(ctx, owner, run, "portfolio/account.registered")
+				}, &events},
+				{storetest.CountPortfolioDeliveredDeploymentRowsStorage, &delivered},
 			} {
-				if err := f.db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
+				got, err := check.read(ctx, f.selected, runID)
+				if err != nil {
 					t.Fatalf("load deployment settlement progress: %v", err)
 				}
+				*check.value = got
 			}
 			if outcomes == expected && events == expected && delivered == expected {
 				elapsed := time.Since(started)
