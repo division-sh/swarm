@@ -103,7 +103,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	cfg := cfgResult.Config
 	posture := executionposture.Live
-	storeSelection, err := cliapp.ResolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfg)
+	storeSelection, err := cliapp.ResolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfgResult)
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: resolve store backend: %v\n", err)
