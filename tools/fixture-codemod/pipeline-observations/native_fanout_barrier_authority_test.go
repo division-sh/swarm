@@ -58,7 +58,12 @@ func TestNativeFanOutBarrierFixtureDropsRawAuthorityAcrossAll27Calls(t *testing.
 		want, err := canonicalFunction(changed)
 		got, afterErr := canonicalFunction(row.After)
 		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		if err != nil || afterErr != nil || sourceErr != nil || want != got || actual != got {
+		currentMatches := row.Successor == "" && actual == got
+		if row.Successor != "" {
+			_, successorErr := fixtureSetupCurrentEndpoint2617(row, actual)
+			currentMatches = successorErr == nil
+		}
+		if err != nil || afterErr != nil || sourceErr != nil || want != got || !currentMatches {
 			t.Fatalf("%s changed barrier workload/owner/clock beyond unused argument removal", row.Function)
 		}
 		for _, cut := range []string{"advanceFanOutBarriersAttempt(ctx, selected,", "time.Now().UTC()", "base.Add(", "fixture.runID", "assertFanOutBarrierState(", "t.Fatal(", "t.Fatalf("} {
