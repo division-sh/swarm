@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +24,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -275,6 +278,20 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 				})
 			}
+			t.Run("rollback_after_initial_delivery_before_complete_lineage", func(t *testing.T) {
+				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				// The lineage's delivery FK proves that the initial publication and
+				// delivery have been inserted before this existing fault fires.
+				remove := installReceiverComposedFault(t, fixture.db, backend.name, "run_fork_delivery_event_replays", "INSERT", "")
+				activation, err := owner.ActivateRunFork(ctx, request)
+				remove()
+				if err == nil || !strings.Contains(err.Error(), "typed_receiver_owner_fault") || activation.Activated {
+					t.Fatalf("lineage fault must refuse after initial delivery: %+v err=%v", activation, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+					t.Fatal("failed replay leaked event, scope, delivery, lineage, source freeze or revision effects")
+				}
+			})
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 			activation, err := owner.ActivateRunFork(ctx, request)
 			if err != nil {
@@ -338,6 +355,70 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			}
 			if err := prepared.Validate(); err != nil {
 				t.Fatalf("reconstructed child aggregate: %v", err)
+			}
+			adapter := sqliteDeliveryAdapter
+			if backend.name == "postgres" {
+				adapter = postgresDeliveryAdapter
+			}
+			publicationOwner := fixture.store.(eventCommitTxStore)
+			for _, test := range []struct {
+				name    string
+				prepare func() bus.PreparedPublishEvent
+				refusal error
+				message string
+			}{
+				{"exact_duplicate", func() bus.PreparedPublishEvent { return prepared }, nil, ""},
+				{"crossed_route_aggregate", func() bus.PreparedPublishEvent {
+					candidate := prepared
+					candidate.DeliveryRoutes = append([]events.DeliveryRoute(nil), prepared.DeliveryRoutes...)
+					candidate.DeliveryRoutes[0].PayloadProjection, err = events.NewDeliveryPayloadProjection(map[string]string{"hostile_receipt": "crossed"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return candidate
+				}, nil, "historical replay duplicate crosses its complete durable delivery aggregate"},
+				{"conflicting_duplicate_event", func() bus.PreparedPublishEvent {
+					candidate := prepared
+					record, err := eventrecord.FromAdmitted(prepared.Event, prepared.Settlement)
+					if err != nil {
+						t.Fatal(err)
+					}
+					record.TaskID = "foreign-replay-task"
+					candidate.Event, err = record.Decode()
+					if err != nil {
+						t.Fatal(err)
+					}
+					return candidate
+				}, events.ErrEventIdentityConflict, ""},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					candidate := test.prepare()
+					if err := candidate.Validate(); err != nil {
+						t.Fatalf("hostile publication must reach the initial owner, not fail its unrelated setup: %v", err)
+					}
+					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					var outcome bus.EventAppendOutcome
+					var proofs []deliverylifecycle.DurableHandoffProof
+					err := runSelectedFixtureMutation(ctx, fixture.store, "historical replay initial owner", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+						var err error
+						outcome, proofs, err = adapter.CommitHistoricalReplayInitialPublication(ctx, attempt, publicationOwner, candidate, children[0].Authority)
+						return err
+					})
+					if test.refusal != nil {
+						if !errors.Is(err, test.refusal) {
+							t.Fatalf("duplicate identity refusal=%v, want %v", err, test.refusal)
+						}
+					} else if test.message != "" {
+						if err == nil || !strings.Contains(err.Error(), test.message) {
+							t.Fatalf("crossed aggregate refusal=%v", err)
+						}
+					} else if err != nil || outcome != bus.EventAppendExactDuplicate || len(proofs) != len(children) {
+						t.Fatalf("exact duplicate lost its admitted aggregate: outcome=%v proofs=%d err=%v", outcome, len(proofs), err)
+					}
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("duplicate replay changed durable event, scope, delivery, lineage, construction or revision evidence")
+					}
+				})
 			}
 			after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 			if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), `fork activation requires materialized fork status "paused"; got "running"`) {
