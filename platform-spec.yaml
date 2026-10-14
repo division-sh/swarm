@@ -18163,6 +18163,10 @@ platform_tables:
         parent-interrupted or settled attempt. An ended attempt is not necessarily a delivery settlement: parent
         terminalization closes interrupted version N and atomically creates a separate settled version N+1. Only
         closure_kind=settled is public delivery-outcome evidence; older settled retry versions remain visible.
+        Ordinary and standing agent acquisition captures its admitted provider profile and immutable configuration/source
+        identity in agent_claim_profile on version 1, in the original claim transaction. Later claims retain that first
+        capture rather than consulting a replacement configuration. Selected historical agents retain their existing
+        preparation_binding actor instead. This evidence grants neither execution nor capacity permission.
       rule_selection: Exact selections observed by unsuccessful attempts are deliberately not persisted in this ledger.
       ddl: |
         CREATE TABLE event_delivery_attempts (
@@ -18172,6 +18176,7 @@ platform_tables:
             started_at       TIMESTAMPTZ NOT NULL,
             lease_expires_at TIMESTAMPTZ NOT NULL,
             current_delivery_id UUID,
+            agent_claim_profile JSONB,
             active_session_id UUID,
             session_delivery_id UUID,
             session_run_id    UUID,
@@ -18199,6 +18204,7 @@ platform_tables:
             FOREIGN KEY (session_delivery_id, session_run_id, session_subscriber_type, session_agent_id, session_agent_name_owner, session_agent_name_source, session_agent_route_presence, session_agent_flow_scope_key, session_agent_flow_instance_id, session_agent_flow_instance_path) REFERENCES event_deliveries(delivery_id, run_id, subscriber_type, subscriber_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path),
             FOREIGN KEY (current_delivery_id, claim_version, open_marker) REFERENCES event_deliveries(delivery_id, current_attempt_version, current_attempt_open) DEFERRABLE INITIALLY DEFERRED,
             CHECK (lease_expires_at > started_at),
+            CHECK (claim_version = 1 OR agent_claim_profile IS NULL),
             CHECK ((open_marker = TRUE AND current_delivery_id = delivery_id) OR (open_marker = FALSE AND current_delivery_id IS NULL)),
             CHECK ((active_session_id IS NULL AND session_delivery_id IS NULL AND session_run_id IS NULL AND session_subscriber_type IS NULL AND session_agent_id IS NULL AND session_agent_name_owner IS NULL AND session_agent_name_source IS NULL AND session_agent_route_presence IS NULL AND session_agent_flow_scope_key IS NULL AND session_agent_flow_instance_id IS NULL AND session_agent_flow_instance_path IS NULL) OR (active_session_id IS NOT NULL AND session_delivery_id = delivery_id AND session_run_id IS NOT NULL AND session_subscriber_type = 'agent' AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_name_owner, '')), '') IS NOT NULL AND session_agent_name_source IN ('declared', 'runtime_created') AND session_agent_route_presence IN ('present', 'root') AND session_agent_flow_scope_key IS NOT NULL AND session_agent_flow_instance_id IS NOT NULL AND session_agent_flow_instance_path IS NOT NULL)),
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
