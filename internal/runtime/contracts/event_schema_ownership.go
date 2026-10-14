@@ -355,6 +355,39 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runt
 	return entry, key, ok
 }
 
+func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimeidentity.ExecutableNode, eventType string) bool {
+	if _, _, found := b.ResolveExecutableNodeEventCatalogEntry(ref, eventType); found {
+		return true
+	}
+	if PlatformEventCatalogContains(b.Platform, eventType) {
+		return true
+	}
+	if !eventidentity.IsCanonicalPattern(eventType) {
+		return false
+	}
+	pattern := b.ResolveExecutableNodeEventPattern(ref, eventType)
+	matches := func(bindings compiledFlowEventSchemas) bool {
+		for name := range bindings.bindings {
+			if eventidentity.MatchPattern(pattern, b.ResolveExecutableNodeEventReference(ref, name)) {
+				return true
+			}
+		}
+		return false
+	}
+	if matches(b.compiledEventSchemas[ref.FlowPath()]) {
+		return true
+	}
+	if b.connectionInputs.value != nil && matches(b.connectionInputs.value.receivers[ref.FlowPath()].scope) {
+		return true
+	}
+	for _, name := range PlatformEventCatalogNames(b.Platform) {
+		if eventidentity.MatchPattern(pattern, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *WorkflowContractBundle) resolveEffectiveExecutableNodeEventDeclaration(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
 	if b == nil || !ref.Valid() {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
