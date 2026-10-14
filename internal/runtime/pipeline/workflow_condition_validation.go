@@ -27,12 +27,6 @@ func ValidateConditionCELWithOptions(expression string, context WorkflowConditio
 	if expression == "" {
 		return nil
 	}
-	if strings.EqualFold(expression, "else") {
-		if context == WorkflowConditionContextRule || context == WorkflowConditionContextOnComplete {
-			return nil // Internal selection defaults; authored predicates reject this at admission.
-		}
-		return fmt.Errorf("%s requires a CEL predicate, not the internal default marker else", context)
-	}
 	normalized, _, err := normalizeWorkflowExpression(expression, workflowExpressionContext{AllowUnresolvedQueryOperands: true, DeclaredPolicy: opts.DeclaredPolicy})
 	if err != nil {
 		return err
@@ -84,7 +78,7 @@ func workflowConditionAmbientTimeCall(expression string) string {
 
 func WorkflowConditionMissingRecognizedPrefix(expression string, context WorkflowConditionContext) bool {
 	expression = strings.TrimSpace(expression)
-	if expression == "" || strings.EqualFold(expression, "else") {
+	if expression == "" {
 		return false
 	}
 	switch strings.ToLower(expression) {

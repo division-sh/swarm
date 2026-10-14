@@ -190,9 +190,6 @@ func appendExecutableReader(out *[]WorkflowExecutableReader, kind, expression st
 }
 
 func appendConditionExecutableReader(out *[]WorkflowExecutableReader, kind, expression string, phase WorkflowEntityFieldLifecyclePhase, context WorkflowConditionContext) {
-	if strings.EqualFold(strings.TrimSpace(expression), "else") && (context == WorkflowConditionContextRule || context == WorkflowConditionContextOnComplete) {
-		return // Only internal selection defaults are not executable expressions.
-	}
 	before := len(*out)
 	appendExecutableReader(out, kind, expression, phase)
 	if len(*out) > before {

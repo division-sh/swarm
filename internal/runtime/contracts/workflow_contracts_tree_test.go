@@ -493,8 +493,7 @@ validation-orchestrator:
   event_handlers:
     vertical.shortlisted:
       rules:
-        - else: true
-          emit: validation.rule
+        - emit: validation.rule
       on_success:
         emit: validation.started
 `)

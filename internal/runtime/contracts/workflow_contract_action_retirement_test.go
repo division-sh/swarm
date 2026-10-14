@@ -40,10 +40,10 @@ func TestRetiredHandlerActionsRejectedOnPresence(t *testing.T) {
 func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 	contexts := []struct{ name, pattern string }{
 		{"handler", "%s: %s\n"},
-		{"rules_sequence", "rules: [{else: true, %s: %s}]\n"},
-		{"rules_singleton", "rules: {else: true, %s: %s}\n"},
+		{"rules_sequence", "rules: [{when: true, %s: %s}]\n"},
+		{"rules_singleton", "rules: {when: true, %s: %s}\n"},
 		{"rules_lone_field", "rules: {%s: %s}\n"},
-		{"rules_keyed", "rules: {chosen: {else: true, %s: %s}}\n"},
+		{"rules_keyed", "rules: {chosen: {when: true, %s: %s}}\n"},
 		{"completion", "on_complete: [{condition: true, %s: %s}]\n"},
 		{"success", "on_success: {%s: %s}\n"},
 		{"join", "join: {%s: %s}\n"},
@@ -59,7 +59,7 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 					switch site.name {
 					case "rules_singleton", "rules_keyed":
 						requireRetiredHandlerCollectionShape(t, err)
-						err = decodeNodeTestYAML([]byte(fmt.Sprintf("rules: [{else: true, %s: %s}]\n", key, value)), &handler)
+						err = decodeNodeTestYAML([]byte(fmt.Sprintf("rules: [{when: true, %s: %s}]\n", key, value)), &handler)
 					case "rules_lone_field":
 						requireRetiredHandlerCollectionShape(t, err)
 						body := fmt.Sprintf("rules: [{%s: %s}]\n", key, value)
@@ -69,7 +69,7 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 						err = decodeNodeTestYAML([]byte(body), &handler)
 					}
 					if site.name == "rules_lone_field" && value == "{}" {
-						if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
+						if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-DEFAULT") || !strings.Contains(err.Error(), "is empty") {
 							t.Fatalf("empty keyed rule %q was admitted: %v", key, err)
 						}
 						return
@@ -174,8 +174,7 @@ func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
 rules:
   - when: payload.score > 0
     emit: {fields: {label: "positive"}}
-  - else: true
-    emit: {fields: {label: "other"}}
+  - emit: {fields: {label: "other"}}
 `), &handler)
 		if err != nil {
 			t.Fatal(err)
@@ -214,7 +213,7 @@ rules:
 			}
 		}
 		var handler SystemNodeEventHandler
-		if err := decodeNodeTestYAML([]byte("rules: [{else: true, emit: result}]\n"), &handler); err != nil || len(handler.Rules) != 1 || handler.Rules[0].Emit.EventType() != "result" {
+		if err := decodeNodeTestYAML([]byte("rules: [{emit: result}]\n"), &handler); err != nil || len(handler.Rules) != 1 || handler.Rules[0].Emit.EventType() != "result" {
 			t.Fatalf("canonical fallback output changed: %#v, %v", handler.Rules, err)
 		}
 	})

@@ -110,7 +110,7 @@ func TestExecutorCompiledTransitionRejectsMissingExactCarrier(t *testing.T) {
 		{"foreign_flow_same_pair", func(r *ExecutionRequest) { r.ExecutionFlowID = identity.NormalizeFlowID("sibling") }},
 		{"missing_flow_graph", func(r *ExecutionRequest) { r.ExecutionFlowID = identity.NormalizeFlowID("missing") }},
 		{"rule_cannot_borrow_handler_pair", func(r *ExecutionRequest) {
-			r.Handler = contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "done"}}}
+			r.Handler = contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{AdvancesTo: "done"}}}
 		}},
 		{"self_target_requires_carrier", func(r *ExecutionRequest) { r.Handler.AdvancesTo = "ready" }},
 	} {
@@ -149,10 +149,10 @@ func TestExecutorCompiledOrdinaryTransitionRetainsSelectedCarrier(t *testing.T) 
 		selectedIndex int
 	}{
 		{"direct", contracts.SystemNodeEventHandler{AdvancesTo: "done"}, contracts.HandlerAdvanceCarrierHandler, -1},
-		{"inherited", contracts.SystemNodeEventHandler{AdvancesTo: "done", Rules: []contracts.HandlerRuleEntry{{Condition: "else", Emit: contracts.EmitSpec{Event: "work.accepted"}}}}, contracts.HandlerAdvanceCarrierHandler, 0},
-		{"first_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "true", AdvancesTo: "done"}, {Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 0},
-		{"second_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "false", AdvancesTo: "done"}, {Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 1},
-		{"completion", contracts.SystemNodeEventHandler{OnComplete: []contracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierOnComplete, 0},
+		{"inherited", contracts.SystemNodeEventHandler{AdvancesTo: "done", Rules: []contracts.HandlerRuleEntry{{Emit: contracts.EmitSpec{Event: "work.accepted"}}}}, contracts.HandlerAdvanceCarrierHandler, 0},
+		{"first_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "true", AdvancesTo: "done"}, {AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 0},
+		{"second_same_pair", contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{Condition: "false", AdvancesTo: "done"}, {AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierRules, 1},
+		{"completion", contracts.SystemNodeEventHandler{OnComplete: []contracts.HandlerRuleEntry{{AdvancesTo: "done"}}}, contracts.HandlerAdvanceCarrierOnComplete, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, err := completeSemanticFixtureHandlerRuleIdentity(node, "work.requested", tc.handler)

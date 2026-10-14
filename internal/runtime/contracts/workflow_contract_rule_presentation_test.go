@@ -15,13 +15,14 @@ func TestHandlerRulePresentationCapturesAuthoredPredicateOnce(t *testing.T) {
 		{"case", "case: {selector: payload.kind, equals: 'gold'}", "case {selector: payload.kind, equals: 'gold'}"},
 		{"tuple case", `case: {selectors: [payload.kind, payload.ready], equals: ["gold", true]}`, `case {selectors: [payload.kind, payload.ready], equals: ["gold", true]}`},
 		{"range", "range: {value: payload.score, gte: 2, lt: policy.limit, monotonicity: ['2 <= policy.limit']}", "range {value: payload.score, gte: 2, lt: policy.limit, monotonicity: ['2 <= policy.limit']}"},
-		{"else", "else: true", "else"},
-		{"default stays admitted", "default: true", "else"},
-		{"predicate-less stays admitted", "emit: done", ""},
+		{"trailing default", "emit: done", "default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			source := "rules:\n  - " + tc.row + "\n  - else: true\n"
+			source := "rules:\n  - " + tc.row + "\n"
+			if tc.want != "default" {
+				source += "  - emit: fallback\n"
+			}
 			if err := decodeNodeTestYAML([]byte(source), &handler); err != nil {
 				t.Fatal(err)
 			}
@@ -81,8 +82,8 @@ func TestHandlerRulePresentationKeepsContextIdentityAndFullTextSeparate(t *testi
 
 func TestHandlerRulePresentationPreservesResolvedAliasAndMergeText(t *testing.T) {
 	for _, body := range []string{
-		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: *predicate}, {else: true}]\n",
-		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: {<<: *predicate}}, {else: true}]\n",
+		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: *predicate}, {emit: fallback}]\n",
+		"_note: &predicate {selector: payload.kind, equals: 'gold'}\nrules: [{case: {<<: *predicate}}, {emit: fallback}]\n",
 	} {
 		var handler SystemNodeEventHandler
 		if err := decodeNodeTestYAML([]byte(body), &handler); err != nil {
