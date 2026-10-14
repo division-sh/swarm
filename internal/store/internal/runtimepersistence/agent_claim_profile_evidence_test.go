@@ -35,6 +35,11 @@ type agentClaimProfileFixture struct {
 func newAgentClaimProfileFixture(t *testing.T, backend string) agentClaimProfileFixture {
 	t.Helper()
 	ctx, selected := newAgentFixtureAuthorityStore(t, backend)
+	return admitAgentClaimProfileFixture(t, ctx, selected)
+}
+
+func admitAgentClaimProfileFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) agentClaimProfileFixture {
+	t.Helper()
 	source := grantReceiverEntitySource(t)
 	bundle, _ := semanticview.Bundle(source)
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
