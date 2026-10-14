@@ -91,6 +91,14 @@ func TestFanOutGroupMixedExecutionBothStores(t *testing.T) {
 						t.Fatalf("duplicate real agent execution: %s", event.ID())
 					}
 				case <-deadline.C:
+					readCtx, cancel := context.WithTimeout(context.WithoutCancel(f.ctx), 2*time.Second)
+					for _, emitted := range f.events {
+						public, err := f.raw.(interface {
+							LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+						}).LoadOperatorEvent(readCtx, emitted.ID())
+						t.Logf("mixed execution failure readback event=%s deliveries=%+v read_error=%v", emitted.ID(), public.Deliveries, err)
+					}
+					cancel()
 					t.Fatalf("real agent execution missing: %v", got)
 				}
 			}
@@ -541,9 +549,6 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
-		t.Fatal(err)
-	}
 	catalog, err := f.raw.(selectedFanOutMixedRouteOwner).RegisterAuthorActivityEventCatalog(authoractivity.BundleScope(runtimeID, f.seed.bundleHash), []authoractivity.EventDescriptor{
 		{EventType: "producer/mixed.one", Disposition: authoractivity.StoryAuthored},
 		{EventType: "producer/mixed.agent", Disposition: authoractivity.StoryAuthored},
@@ -622,7 +627,18 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	if _, err := f.grant.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.grant.AdmitExecution(ctx); err != nil {
+	evidence, err := f.grant.AdmitExecution(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err = deliverylifecycle.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
 	managed, err := managedexecution.New(managedexecution.KindNormalRuntime, runtimeID, 1, "", "mixed-group", f.seed.bundleHash, nil)
