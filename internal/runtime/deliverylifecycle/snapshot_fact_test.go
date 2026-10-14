@@ -52,17 +52,11 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDecodeHistoricalSnapshotRetainsContinuationHandoff(t *testing.T) {
+func TestDecodeHistoricalSnapshotRejectsPhysicalContinuationHandoff(t *testing.T) {
 	fact := historicalRouteFact(t, historicalRouteFixtures(t)[0].route, deliverylifecycle.StatusPending)
 	handoff := time.Now().UTC().Truncate(time.Microsecond)
 	fact["continuation_handoff_at"] = handoff.Format(time.RFC3339Nano)
-	decoded, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !decoded.ContinuationHandoffAt.Equal(handoff) {
-		t.Fatalf("historical handoff = %s, want %s", decoded.ContinuationHandoffAt, handoff)
-	}
+	assertHistoricalRejects(t, fact)
 }
 
 func TestDecodeHistoricalSnapshotNonConnectPreservesEmptyClaim(t *testing.T) {
@@ -343,7 +337,7 @@ func TestDecodeHistoricalSnapshotRejectsUnknownFieldsAndLiveTokens(t *testing.T)
 			if bytes.Contains(historicalJSON(t, decoded), []byte("claim_token")) || decoded.Authority.Validate() == nil {
 				t.Fatal("historical snapshot exposed a live capability")
 			}
-			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at"} {
+			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at"} {
 				t.Run(field, func(t *testing.T) {
 					fact := historicalRouteFact(t, fixture.route, deliverylifecycle.StatusInProgress)
 					fact[field] = "f03e9ff9-7a7f-45dc-89d3-a15ed401388a"
