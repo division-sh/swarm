@@ -31,6 +31,7 @@ func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
 		{"<<: {max_concurrent_agent: 2}", func() any { return &RuntimeConfig{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
 		{"llm: {claude_cli: {retrie: 2}}", func() any { return &Config{} }, []string{"retries", "no_session_persistence", "use_tmux"}, []string{"command", "timeout"}},
 		{"database: {<<: {passwor: secret}}", func() any { return &Config{} }, []string{"password"}, []string{"password_env", "password_file"}},
+		{"paths: {unrecognized: file}", func() any { return &Config{} }, []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file"}, []string{"swarm_dir", "monitor_dir", "platform_spec_path"}},
 	} {
 		t.Run(row.source, func(t *testing.T) {
 			target := row.target()
@@ -70,6 +71,9 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 		{"llm.claude_cli.retries", "timeout"},
 		{"llm.claude_cli.no_session_persistence", "command"},
 		{"llm.claude_cli.use_tmux", "output_format"},
+		{"paths.agent_config_map_file", "swarm_dir"},
+		{"paths.verification_gates_file", "monitor_dir"},
+		{"paths.tooling_lock_file", "swarm_dir"},
 	} {
 		parts := strings.Split(row.path, ".")
 		key := parts[len(parts)-1]
