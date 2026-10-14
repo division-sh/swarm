@@ -2589,7 +2589,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	if _, err := owner.Settle(waitCtx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		t.Fatal(err)
 	}
-	requireServedDirectivePipelineReceiptCount(t, rt, queued.EventID, 1)
+	requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, 1)
 	summary, err := owner.SummarizeRun(waitCtx, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -3866,7 +3866,7 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationExecuted || len(op.Response) == 0 || op.Failure != nil {
 					t.Fatalf("%s acknowledgment-loss durable operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 0)
 				var result servedAgentDirectiveProofResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &result)
 				requireServedAgentDirectiveResult(t, rt.Backend, result)
@@ -3874,12 +3874,12 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 					t.Fatalf("%s acknowledgment-loss convergence state = %s", rt.Backend, op.State)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 1)
 			} else {
 				if op.State != runtimeagentcontrol.DirectiveOperationExecuting || len(op.Response) != 0 || op.Failure != nil {
 					t.Fatalf("%s rollback durable operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 0)
 				expireServedDirectiveLease(t, rt, op.OperationID)
 				replay := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", params)
 				replayedFailure := servedDirectiveErrorFailure(t, rt.Backend, replay, apiv1.AgentDirectiveOutcomeIndeterminateCode)
@@ -3890,7 +3890,7 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationIndeterminate || op.Failure == nil || op.Failure.Detail.Code != runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail {
 					t.Fatalf("%s rollback convergence operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 1)
 			}
 			if got := effects.Load(); got != before+1 {
 				t.Fatalf("%s result persistence replay effects = %d, want %d", rt.Backend, got, before+1)
@@ -4025,23 +4025,30 @@ func expireServedDirectiveLease(t *testing.T, rt servedControlProofRuntime, oper
 	}
 }
 
-func requireServedDirectivePipelineReceiptCount(t *testing.T, rt servedControlProofRuntime, eventID string, want int) {
+func requireServedDirectivePipelineReceiptCount(t *testing.T, reader servedEventCountReader, backend, eventID string, want int) {
 	t.Helper()
 	var count int
-	switch rt.Backend {
+	read := func() error {
+		return reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			count, err = storetest.CountPipelineEventReceiptStorage(ctx, reader, eventID)
+			return err
+		})
+	}
+	switch backend {
 	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+		if err := read(); err != nil {
 			t.Fatalf("count Postgres directive receipts: %v", err)
 		}
 	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+		if err := read(); err != nil {
 			t.Fatalf("count SQLite directive receipts: %v", err)
 		}
 	default:
-		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+		t.Fatalf("unknown directive proof backend %q", backend)
 	}
 	if count != want {
-		t.Fatalf("%s directive receipt count = %d, want %d", rt.Backend, count, want)
+		t.Fatalf("%s directive receipt count = %d, want %d", backend, count, want)
 	}
 }
 

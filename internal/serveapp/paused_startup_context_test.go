@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -34,18 +33,15 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			cfg := &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}}
 			var selected *selectedStoreOwner
-			var db *sql.DB
 			if backend == "sqlite" {
 				selected = openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "paused-startup.db"), cfg)
-				db = selectedStoreDatabaseForTest(t, selected)
 				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
 					t.Fatal(err)
 				}
 			} else {
 				dsn, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				db = postgresDB
-				selected = openSelectedPostgresOwner(t, dsn, db, cfg)
+				selected = openSelectedPostgresOwner(t, dsn, postgresDB, cfg)
 			}
 			t.Cleanup(func() { closeUnactivatedSelectedStore(t, selected) })
 			module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), writeServedTestSetupFixture(t), filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
@@ -186,7 +182,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				if err != nil || summary.Acknowledged != 0 || summary.Replayable != 1 {
 					t.Fatalf("source %d paused pipeline summary = %+v, %v", index, summary, err)
 				}
-				requireServedDirectivePipelineReceiptCount(t, servedControlProofRuntime{DB: db, Backend: backend}, runningEvents[index], 1)
+				requireServedDirectivePipelineReceiptCount(t, requireReceiverProofStateReader(t, deps.EventStore), backend, runningEvents[index], 1)
 			}
 		})
 	}
