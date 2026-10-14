@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -40,14 +39,16 @@ type s6CreationActivityStore interface {
 }
 
 type s6CreationActivityFixture struct {
-	store   s6CreationActivityStore
-	bus     *bus.EventBus
-	ctx     context.Context
-	source  semanticview.Source
-	plan    pipeline.DynamicFlowRuntimeReadinessPlan
-	attempt pipeline.DynamicFlowRuntimeActivationAttempt
-	parent  events.Event
-	event   events.Event
+	store     s6CreationActivityStore
+	bus       *bus.EventBus
+	ctx       context.Context
+	source    semanticview.Source
+	plan      pipeline.DynamicFlowRuntimeReadinessPlan
+	attempt   pipeline.DynamicFlowRuntimeActivationAttempt
+	parent    events.Event
+	event     events.Event
+	workflow  *pipeline.PipelineCoordinator
+	construct func(context.Context, pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, pipeline.DynamicFlowRuntimeActivationAttempt)
 }
 
 func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6CreationActivityFixture {
@@ -57,9 +58,7 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 	case "sqlite":
 		selected = storetest.StartSQLiteRuntimeStore(t)
 	case "postgres":
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected = storetest.AdmitPostgresRuntimeStore(t, db)
+		selected = storetest.StartPostgresRuntimeStore(t)
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
@@ -176,7 +175,7 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 	if err != nil {
 		t.Fatal(err)
 	}
-	construct := func(request pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, pipeline.DynamicFlowRuntimeActivationAttempt) {
+	construct := func(ctx context.Context, request pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, pipeline.DynamicFlowRuntimeActivationAttempt) {
 		plan, err := am.PrepareFlowInstanceActivation(ctx, request)
 		if err != nil {
 			t.Fatal(err)
@@ -185,7 +184,7 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 		if err != nil || !committed.Acknowledged || !committed.Created {
 			t.Fatalf("canonical construction: %+v err=%v", committed, err)
 		}
-		row, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, run, plan.Identity.Route())
+		row, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, plan.Readiness.RunID, plan.Identity.Route())
 		if err != nil || !found {
 			t.Fatalf("constructed readiness: found=%t err=%v", found, err)
 		}
@@ -211,7 +210,7 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 		return plan, admitted.Attempt
 	}
 	root := flowidentity.Stored(source, ".", run, run, "", "")
-	construct(pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
+	construct(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
 	parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.recorded", "operator-api", "", []byte(`{"worker_id":"worker-001"}`), 0, run, events.EventEnvelope{}, time.Now().UTC())
 	if err := publisher.Publish(ctx, parent); err != nil {
 		t.Fatal(err)
@@ -221,21 +220,27 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, attempt := construct(pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: child, ConstructorInput: childScope.AutoEmitEvent, ResolvedKey: "worker-001", TriggerEvent: parent, OccurredAt: time.Now().UTC()})
-	creation := activation.Readiness.CreationEvent
+	activation, attempt := construct(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: child, ConstructorInput: childScope.AutoEmitEvent, ResolvedKey: "worker-001", TriggerEvent: parent, OccurredAt: time.Now().UTC()})
+	event := newS6CreationActivityEvent(t, source, activation.Readiness)
+	return s6CreationActivityFixture{store: selected, bus: publisher, ctx: ctx, source: source, plan: activation.Readiness, attempt: attempt, parent: parent, event: event, workflow: workflow, construct: construct}
+}
+
+func newS6CreationActivityEvent(t *testing.T, source semanticview.Source, plan pipeline.DynamicFlowRuntimeReadinessPlan) events.Event {
+	t.Helper()
+	creation := plan.CreationEvent
 	if creation == nil {
 		t.Fatal("fixture omitted actual auto-emit")
 	}
-	route := events.RouteIdentity{FlowID: activation.Identity.TemplateID, FlowInstance: activation.Identity.InstancePath, EntityID: activation.Identity.EntityID}
-	routing, err := pinrouting.AdmitFlowExecutionRoutingSource(source, run, activation.Identity, route)
+	route := events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID}
+	routing, err := pinrouting.AdmitFlowExecutionRoutingSource(source, plan.RunID, plan.Identity, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{ID: creation.EventID, Type: events.EventType(creation.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "flow-instance-activator"}, Payload: creation.Payload, Envelope: events.EnvelopeForSourceRoute(events.EventEnvelope{FlowInstance: route.FlowInstance, EntityID: route.EntityID}, route), RoutingSource: routing, CreatedAt: creation.CreatedAt, ExecutionMode: executionmode.Live}, Lineage: events.EventLineage{RunID: run, ParentEventID: creation.ParentEventID, ExecutionMode: executionmode.Live}})
+	event, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{ID: creation.EventID, Type: events.EventType(creation.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "flow-instance-activator"}, Payload: creation.Payload, Envelope: events.EnvelopeForSourceRoute(events.EventEnvelope{FlowInstance: route.FlowInstance, EntityID: route.EntityID}, route), RoutingSource: routing, CreatedAt: creation.CreatedAt, ExecutionMode: executionmode.Live}, Lineage: events.EventLineage{RunID: plan.RunID, ParentEventID: creation.ParentEventID, ExecutionMode: executionmode.Live}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s6CreationActivityFixture{store: selected, bus: publisher, ctx: ctx, source: source, plan: activation.Readiness, attempt: attempt, parent: parent, event: event}
+	return event
 }
 
 func (f s6CreationActivityFixture) commit(event events.Event) error {
