@@ -46,8 +46,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/missing_%s/shutdown_%t", backend.name, scenario.missing, scenario.shutdown), func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected.events, runID)
-				ctx, cancel := context.WithTimeout(withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)), 10*time.Second)
+				ctx, cancel := context.WithTimeout(withLiveGateExecution(correlation.WithRunID(context.Background(), runID)), 10*time.Second)
 				defer cancel()
 				missing := scenario.missing
 				first := "source"
@@ -64,7 +63,21 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 					"orders/entities.yaml": "work:\n  order_id: {type: text, indexed: true}\n",
 					"orders/agents.yaml":   fmt.Sprintf("a-installed:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\nz-held:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\n", first, missing),
 				}))
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+				bundle, found := semanticview.Bundle(source)
+				if !found || bundle.SourceArtifact == nil {
+					t.Fatal("partial attachment requires its exact compiled artifact")
+				}
+				fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx = testAuthorActivityContextForSource(t, ctx, fact)
+				if err := storetest.MaterializeRun(ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -94,6 +107,8 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				at := time.Now().UTC()
+				constructA2StructuralRoot(t, ctx, am, bus, source, parent, at)
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, parent)
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"one"}`), 0, runID, events.EventEnvelope{}, at)
 				plan, err := am.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance,
 					ConstructorInput: "order.created", ResolvedKey: "one", TriggerEvent: event, OccurredAt: at})
@@ -104,6 +119,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				if err != nil || !committed.Acknowledged {
 					t.Fatalf("native construction: acknowledged=%t err=%v", committed.Acknowledged, err)
 				}
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, instance)
 				finished := make(chan error, 1)
 				go func() { finished <- am.FinalizeCommittedFlowInstanceActivation(ctx, committed) }()
 				select {
@@ -192,9 +208,24 @@ func (d *partialAttachmentDispatch) DispatchDeliveryContinuation(ctx context.Con
 
 func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, am *manager.AgentManager, route events.DeliveryRoute, release func(), finished <-chan error) func() {
 	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || fact.Validate() != nil {
+		t.Fatal("partial continuation requires its admitted source fact")
+	}
+	configs := am.ListAgentConfigs()
+	if len(configs) != 1 {
+		t.Fatal("partial continuation requires its one installed sibling")
+	}
+	frame, err := am.ResolveAgentFrameConfig(route.AgentIdentity.RunID, configs[0].ID, configs[0].Identity.FlowInstance(), false)
+	if err != nil || frame.BundleHash != fact.BundleHash() {
+		t.Fatalf("partial continuation manager source disagrees with its context: frame=%+v err=%v", frame, err)
+	}
 	authority, err := bus.DeliveryAuthority()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !authority.SourceArtifact().Matches(fact) {
+		t.Fatal("partial continuation bus source disagrees with its context")
 	}
 	if err := selected.events.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
@@ -222,7 +253,7 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
 	dispatch := &partialAttachmentDispatch{bus: bus, results: make(chan deliverycontinuation.DispatchResult, 8)}
-	coordinator, err := deliverycontinuation.New(selected.events, selected.events, authority, pipelineExternalTestWorkOwner(t), dispatch, nil)
+	coordinator, err := deliverycontinuation.New(selected.events, selected.events, authority, pipelineExternalTestWorkOwnerForSource(t, fact), dispatch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +332,14 @@ func (a *partialAttachmentAgent) OnEvent(context.Context, events.Event) ([]event
 
 func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, factory manager.AgentFactory) (*manager.AgentManager, startupownership.LiveGenerationGrant, func()) {
 	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || fact.Validate() != nil {
+		t.Fatal("partial attachment manager requires its admitted source fact")
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != fact.BundleHash() {
+		t.Fatal("partial attachment manager source disagrees with its context")
+	}
 	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "partial-attachment", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -316,7 +355,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 		})
 	}
 	t.Cleanup(releaseProcess)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +370,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	} else if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fact.BundleHash(),
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: set.Revision})
 	if err != nil {
 		t.Fatal(err)
@@ -342,14 +381,14 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatal(err)
 	}
-	admission, err := agenttopology.StaticAdmission(set.Revision, authorActivityTestSourceArtifactFact.BundleHash(), agenttopology.LifetimeDurableManaged)
+	admission, err := agenttopology.StaticAdmission(set.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}
 	am := manager.NewAgentManagerWithOptions(bus, factory, manager.AgentManagerOptions{
-		BaseContext: ctx, SemanticSource: source, SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact,
 		WorkflowInstances: pc, LifecycleStore: grant, DeliveryStore: selected.events,
-		WorkOwner: pipelineExternalTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
+		WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
 		PersistenceRoles: manager.PersistenceRoles{
 			FlowActivation: bus, AgentRoutes: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 			LifecycleState: selected.events.(manager.AgentLifecycleStateReader), LifecycleOutcome: selected.events.(manager.AgentLifecycleOutcomeReader),
@@ -363,7 +402,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 			t.Error(err)
 		}
 	})
-	execution, err := managedexecution.New(managedexecution.KindNormalRuntime, "partial-attachment", 1, "", "partial-attachment", authorActivityTestSourceArtifactFact.BundleHash(), nil)
+	execution, err := managedexecution.New(managedexecution.KindNormalRuntime, "partial-attachment", 1, "", "partial-attachment", fact.BundleHash(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
