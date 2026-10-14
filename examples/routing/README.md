@@ -1,6 +1,8 @@
 # Routing Examples
 
-These directories are the positive authoring owners for supported routing patterns. Run commands from the repository root after configuring the required first-party provider trigger pack directories in your elevated local operator `swarm.yaml`.
+These directories are the positive authoring owners for supported routing patterns. Run commands from the repository root. Swarm uses the binary's embedded inventory by default; these examples do not require a pack-directory override.
+
+For development packs, configure `platform.packs.platform_dirs` in one file: `.swarm/swarm.yaml`, or the whole file selected by `--config` or `SWARM_CONFIG`. The directory list is a complete replacement of the embedded pack inventory. Relative pack paths resolve relative to the selected config file, not the invocation or example directory.
 
 | Need | Example | Decision |
 |---|---|---|
