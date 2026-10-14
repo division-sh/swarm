@@ -1000,7 +1000,13 @@ func (s *DeliverySQLiteOwner) TerminalizeRun(ctx context.Context, runID, reason 
 }
 
 func declareAuthorityDeliveryRuns(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, attempt *mutationprotocol.Attempt) error {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CAST(run_id AS TEXT) FROM event_deliveries WHERE run_id IS NOT NULL AND execution_authority_kind=$1 AND authority_bundle_hash=$2 AND execution_authority_id=$3 AND execution_authority_generation=$4`, string(authority.Kind()), authority.SourceArtifact().BundleHash(), authority.ExecutionID(), authority.Generation())
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT CAST(run_id AS TEXT) FROM event_deliveries
+		WHERE run_id IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=event_deliveries.run_id AND frozen.status='forked')
+		  AND execution_authority_kind=$1 AND authority_bundle_hash=$2
+		  AND execution_authority_id=$3 AND execution_authority_generation=$4`,
+		string(authority.Kind()), authority.SourceArtifact().BundleHash(), authority.ExecutionID(), authority.Generation())
 	if err != nil {
 		return fmt.Errorf("resolve delivery authority affected runs: %w", err)
 	}
