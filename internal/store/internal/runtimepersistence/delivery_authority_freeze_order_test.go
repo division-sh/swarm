@@ -84,10 +84,14 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 					firstStore = newBootstrappedSQLiteRuntimeStoreForPath(t, sqlite.Path())
 					secondStore = barrier.observeSQLiteStore(t, sqlite.Path())
 				}
-				// Both operations reach this real revision write only after owning
-				// the existing native ordering fence. The contender must actually
+				// Both operations reach this real write only after owning the
+				// existing native ordering fence. The contender must actually
 				// wait on that fence (PG) or roll back BUSY (SQLite), not just start.
-				barrier.install(t, fixture.db, source, child, "writer")
+				point := "writer"
+				if first == "freeze" {
+					point = "source_freeze"
+				}
+				barrier.install(t, fixture.db, source, child, point)
 				invoke := func(ctx context.Context, store authorActivityReceiptStore, operation string) forkContentionResult {
 					if operation == "freeze" {
 						_, _, err := store.(runlifecycle.OperationOwner).ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: source, ContinuedAsRunID: child, EndedAt: time.Now().UTC()})
