@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -72,8 +71,6 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 				t.Run(backend.name+"/"+mode+"/"+phase, func(t *testing.T) {
 					selected := backend.open(t)
 					runID, lastID, untilID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-					insertGateRecoveryRun(t, selected.events, runID)
-					ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 					files := a2CountJoinFiles(2)
 					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {final: true}", "  ready: {final: true}\n  dispatching: {}\n  cancelled: {final: true}", 1)
 					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, abort.requested, resume.requested]", 1)
@@ -84,6 +81,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					}
 					files["nodes.yaml"] += "controller:\n  execution_type: system_node\n  event_handlers:\n    abort.requested: {advances_to: " + next + "}\n    resume.requested: {advances_to: awaiting}\n"
 					source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+					ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 					collector := externalPipelineSourceNode(t, source, ".", "collector")
 					controller := externalPipelineSourceNode(t, source, ".", "controller")
 					nodes, err := pipeline.LoadWorkflowNodes(source)
@@ -103,7 +101,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					newBus := func() *runtimebus.EventBus {
 						t.Helper()
 						bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-							ContractBundle: source, TestLifecycleProbe: probe, Logger: logger,
+							ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger,
 						}, "platform.join_complete", "platform.join_timeout")
 						if err != nil {
 							t.Fatal(err)
@@ -116,7 +114,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					coordinatorStore := selected
 					coordinatorStore.events = gate
 					pc := newGateRecoveryCoordinator(bus, coordinatorStore, pipeline.PipelineCoordinatorOptions{
-						Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+						Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 					})
 					bus.SetInterceptors(pc)
 					owner := testRunScopedWorkflowInstanceForRun(runID, runID)
@@ -309,7 +307,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					bus = newBus()
 					schedules, _ = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 					pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-						Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+						Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 					})
 					bus.SetInterceptors(pc)
 					if restored, err := schedules.Restore(ctx); err != nil || restored != 0 {
