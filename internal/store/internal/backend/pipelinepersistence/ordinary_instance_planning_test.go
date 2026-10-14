@@ -3,7 +3,9 @@ package pipelinepersistence
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -76,5 +78,44 @@ func TestOrdinaryPlanningMemoKeepsLaterReadFailuresAndCancellation(t *testing.T)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOrdinaryPlanningScopeKeepsSourceAndLineageRefusals(t *testing.T) {
+	artifact := sourceartifactfixture.Artifact()
+	source := semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact, Semantics: contracts.WorkflowSemanticView{Version: "original"}})
+	scope, err := pipeline.NewFlowInstanceLookupScope(source, sourceartifactfixture.FactFor(artifact), "11111111-1111-1111-1111-111111111111", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runlifecycle.Snapshot{RunID: scope.RunID(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()}
+	for _, fault := range []string{"exact", "changed_source", "missing_lineage", "missing_owner", "invalid_state", "malformed_hash"} {
+		t.Run(fault, func(t *testing.T) {
+			snapshot := &flowInstanceIndexSnapshot{source: source, run: run, historical: &snapshotHistoricalReader{}}
+			switch fault {
+			case "changed_source":
+				snapshot.run.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
+			case "missing_lineage":
+				snapshot.run.Origin = runlifecycle.RunOrigin{}
+			case "missing_owner":
+				snapshot.historical = nil
+			case "invalid_state":
+				snapshot.run.State = "unknown"
+			case "malformed_hash":
+				snapshot.run.BundleHash = "not-an-artifact"
+			}
+			called := false
+			err := snapshot.withPlanningReader(context.Background(), scope, func(context.Context, pipeline.FlowInstanceIndexReader) error {
+				called = true
+				return nil
+			})
+			if called != (fault == "exact") || (err == nil) != (fault == "exact") {
+				t.Fatalf("%s planning reader crossed its admitted source/lineage: called=%t err=%v", fault, called, err)
+			}
+			var conflict *pipeline.FlowInstanceSourceConflict
+			if errors.As(err, &conflict) != (fault == "changed_source") {
+				t.Fatalf("planning scope changed the source-conflict disposition: %v", err)
+			}
+		})
 	}
 }
