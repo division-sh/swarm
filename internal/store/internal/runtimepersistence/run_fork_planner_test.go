@@ -8,12 +8,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -649,9 +652,74 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	deadRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()})}
 	deliveredRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()})}
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("sibling receiver fixture requires its exact admitted run source")
+	}
+	for _, route := range []*events.DeliveryRoute{&deadRoute, &deliveredRoute} {
+		target := route.Target.Route()
+		route.AgentIdentity = mustTestAgentIdentityForRun(runID, "agent-shared", target.FlowInstance)
+		record := agentFixtureStaticRecord(t, route.AgentIdentity)
+		record.Config.FlowID, record.Config.FlowPath, record.Config.EntityID = target.FlowID, target.FlowInstance, target.EntityID
+		if err := agentfixture.UpsertStaticForSource(t, ctx, pg, record, source); err != nil {
+			t.Fatalf("admit exact sibling actor: %v", err)
+		}
+	}
+	actorPlan := currentAgentFixtureSourceSet(t, ctx, pg)
+	if len(actorPlan.Sources) != 1 || len(actorPlan.Agents) != 2 {
+		t.Fatalf("sibling actor source set = %#v, want one source and both exact actors", actorPlan)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, actorPlan, actorPlan.Sources[0])
+	if err != nil {
+		t.Fatalf("admit sibling receiver generation: %v", err)
+	}
+	admitAgentFixtureFlowGrant(t, ctx, grant)
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []events.DeliveryRoute{deadRoute, deliveredRoute} {
+		state, found, err := pg.LoadAgentLifecycleState(ctx, route.AgentIdentity)
+		if err != nil || !found || state.Phase != manager.AgentLifecycleRunning || state.ProcessBinding.GenerationGrantID != evidence.GrantID {
+			t.Fatalf("sibling receiver lacks its exact retained grant: state=%#v found=%v err=%v", state, found, err)
+		}
+		if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+			t.Fatalf("commit sibling obligation: %v", err)
+		}
+	}
+	if err := pg.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatalf("activate exact sibling delivery grant: %v", err)
+	}
+	deadClaim, err := claimDeliveryFixture(ctx, pg, event, deadRoute)
+	if err != nil {
+		t.Fatalf("claim dead-letter sibling: %v", err)
+	}
+	deliveredClaim, err := claimDeliveryFixture(ctx, pg, event, deliveredRoute)
+	if err != nil {
+		t.Fatalf("claim delivered sibling: %v", err)
+	}
+	for _, claimed := range []runtimedelivery.ClaimedObligation{deadClaim, deliveredClaim} {
+		if err := claimed.Claim.Validate(); err != nil || claimed.Snapshot.Authority.ExecutionID() != evidence.GrantID || claimed.Snapshot.Authority.Generation() != evidence.RuntimeGeneration {
+			t.Fatalf("sibling claim lost its exact retained authority: snapshot=%#v err=%v", claimed.Snapshot, err)
+		}
+	}
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_failed", nil)
-	dead := seedDeliveryStateFixture(t, ctx, pg, event, deadRoute, runtimedelivery.StateExhausted, &failure)
-	delivered := seedDeliveryStateFixture(t, ctx, pg, event, deliveredRoute, runtimedelivery.StateDelivered, nil)
+	dead, err := pg.SettleFailure(ctx, deadClaim.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: failure.Detail.Code,
+		Failure: &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
+	})
+	if err != nil {
+		t.Fatalf("settle exact dead-letter sibling: %v", err)
+	}
+	delivered, err := pg.SettleSuccess(ctx, deliveredClaim.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
+	if err != nil {
+		t.Fatalf("settle exact delivered sibling: %v", err)
+	}
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
