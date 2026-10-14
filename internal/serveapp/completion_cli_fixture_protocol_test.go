@@ -26,7 +26,7 @@ import (
 
 const completion2270StartupPrompt = "Startup validation probe. Do not call any tools. Reply with the exact text ok."
 
-func TestCompletion2270CLIProtocolFixture(t *testing.T) {
+func TestClaudeCLICompletion2270ProtocolFixture(t *testing.T) {
 	for _, tc := range []struct {
 		name, prompt, model, refusal string
 		remove                       string
@@ -106,7 +106,7 @@ func TestCompletion2270CLIProtocolFixture(t *testing.T) {
 	}
 }
 
-func TestCompletion2270CLIInvocationOracleRejectsRedispatch(t *testing.T) {
+func TestClaudeCLICompletion2270InvocationOracleRejectsRedispatch(t *testing.T) {
 	root, args, attemptID := completion2270ProtocolFixture(t, "")
 	args = append(args, "--model", "request-A")
 	for i := 0; i < 2; i++ {
@@ -124,7 +124,7 @@ func TestCompletion2270CLIInvocationOracleRejectsRedispatch(t *testing.T) {
 	}
 }
 
-func TestCompletion2270InvocationReaderUsesPublishedProjectionWorkspaces(t *testing.T) {
+func TestClaudeCLICompletion2270InvocationReaderUsesPublishedProjectionWorkspaces(t *testing.T) {
 	ctx := t.Context()
 	attemptID := uuid.NewString()
 	var loaded []runtimepkg.BundleContext
@@ -178,7 +178,7 @@ func TestCompletion2270InvocationReaderUsesPublishedProjectionWorkspaces(t *test
 	}
 }
 
-func TestCompletion2270InvocationReaderRefusesMissingOwners(t *testing.T) {
+func TestClaudeCLICompletion2270InvocationReaderRefusesMissingOwners(t *testing.T) {
 	var proof completion2270InvocationProof
 	if _, err := proof.read(t.Context()); err == nil {
 		t.Fatal("reader accepted an unpublished owner")
