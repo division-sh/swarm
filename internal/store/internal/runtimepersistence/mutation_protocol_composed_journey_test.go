@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	runtimeconfig "github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -186,7 +185,7 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 	if bootstrap {
 		storetest.RequireBundleDataCatalog(t, s.ctx, selected.SourceArtifactWriter(), bundle)
 	}
-	cfg, err := runtimeconfig.Load(f.configPath)
+	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: f.repo, ExplicitPath: f.configPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +198,7 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 		t.Fatal(err)
 	}
 	deps := selected.RuntimeDeps()
-	deps.Config = cfg
+	deps.Config = cfgResult.Config
 	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: s.process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
 	s.runtime, err = swarmruntime.NewRuntime(s.ctx, deps)
 	if err != nil {
