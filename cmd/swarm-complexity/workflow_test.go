@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,8 +31,8 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, ok := workflow.Jobs["complexity"]
-	if !ok || job.If != "" || len(job.Needs) != 0 {
-		t.Fatal("complexity is conditional on proof profile/plan")
+	if !ok || job.If != "" || !slices.Equal(job.Needs, []string{"ci-preflight"}) {
+		t.Fatal("complexity must depend only on cheap admission, never proof profile/expensive plan")
 	}
 	for _, event := range []string{"pull_request", "push", "workflow_dispatch", "schedule"} {
 		if _, ok := workflow.On[event]; !ok {
