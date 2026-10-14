@@ -4,16 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -113,6 +120,76 @@ func TestCompletion2270CLIInvocationOracleRejectsRedispatch(t *testing.T) {
 		}
 		if i == 0 && validateCompletion2270SingleInvocation(rows, uuid.NewString()) == nil {
 			t.Fatal("oracle accepted a foreign admitted attempt")
+		}
+	}
+}
+
+func TestCompletion2270InvocationReaderUsesPublishedProjectionWorkspaces(t *testing.T) {
+	ctx := t.Context()
+	attemptID := uuid.NewString()
+	var loaded []runtimepkg.BundleContext
+	var reads int
+	for _, name := range []string{"original", "selected"} {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = projection.Release() })
+		template := workspace.NewDockerManager()
+		var bound *workspace.DockerManager
+		template.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+			containers := bound.SystemWorkspaceContainers()
+			if len(args) != 7 || args[0] != "exec" || (args[1] != containers[0] && args[1] != containers[1]) || args[6] != "/tmp/"+completion2270InvocationFile {
+				return "", fmt.Errorf("invocation reader used template or foreign workspace: %v", args)
+			}
+			reads++
+			if args[1] != containers[0] {
+				return "", nil
+			}
+			row, err := json.Marshal(completion2270Invocation{AttemptID: attemptID, InvocationID: name, Model: "request-A"})
+			return string(row), err
+		})
+		lifecycle, err := template.RebindSourceProjection(projection, semanticview.Wrap(&contracts.WorkflowContractBundle{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound = lifecycle.(*workspace.DockerManager)
+		t.Cleanup(func() { _ = bound.ReleaseSourceProjection(context.Background()) })
+		if reflect.DeepEqual(template.SystemWorkspaceContainers(), bound.SystemWorkspaceContainers()) {
+			t.Fatal("fixture did not distinguish template from projection-bound runtime")
+		}
+		loaded = append(loaded, runtimepkg.BundleContext{Runtime: &runtimepkg.Runtime{Workspace: bound}})
+	}
+	rows, err := readCompletion2270ContextInvocations(ctx, []runtimepkg.BundleContext{loaded[0], loaded[0]})
+	if err != nil || reads != 2 || validateCompletion2270SingleInvocation(rows, attemptID) != nil {
+		t.Fatalf("original published workspace was not read exactly once: rows=%+v reads=%d err=%v", rows, reads, err)
+	}
+	rows, err = readCompletion2270ContextInvocations(ctx, loaded)
+	if err != nil || reads != 6 || len(rows) != 2 || validateCompletion2270SingleInvocation(rows, attemptID) == nil {
+		t.Fatalf("reader omitted a selected runtime redispatch: rows=%+v reads=%d err=%v", rows, reads, err)
+	}
+}
+
+func TestCompletion2270InvocationReaderRefusesMissingOwners(t *testing.T) {
+	var proof completion2270InvocationProof
+	if _, err := proof.read(t.Context()); err == nil {
+		t.Fatal("reader accepted an unpublished owner")
+	}
+	for _, contexts := range [][]runtimepkg.BundleContext{
+		nil,
+		{{}},
+		{{Runtime: &runtimepkg.Runtime{Workspace: workspace.NewHostManager()}}},
+	} {
+		if _, err := readCompletion2270ContextInvocations(t.Context(), contexts); err == nil {
+			t.Fatalf("reader accepted missing or non-Docker ownership: %+v", contexts)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -90,25 +91,39 @@ type completion2270Invocation struct {
 
 type completion2270InvocationProof struct {
 	mu       sync.Mutex
-	managers []*workspace.DockerManager
+	contexts *runtimepkg.RuntimeContextManager
 }
 
-func (p *completion2270InvocationProof) add(manager *workspace.DockerManager) {
+func (p *completion2270InvocationProof) observe(contexts *runtimepkg.RuntimeContextManager) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.managers = append(p.managers, manager)
+	p.contexts = contexts
 }
 
 func (p *completion2270InvocationProof) read(ctx context.Context) ([]completion2270Invocation, error) {
 	p.mu.Lock()
-	managers := append([]*workspace.DockerManager(nil), p.managers...)
+	contexts := p.contexts
 	p.mu.Unlock()
-	if len(managers) == 0 {
-		return nil, fmt.Errorf("CLI invocation proof has no original workspace owner")
+	if contexts == nil {
+		return nil, fmt.Errorf("CLI invocation proof has no published runtime context owner")
+	}
+	return readCompletion2270ContextInvocations(ctx, contexts.LoadedContexts())
+}
+
+func readCompletion2270ContextInvocations(ctx context.Context, contexts []runtimepkg.BundleContext) ([]completion2270Invocation, error) {
+	if len(contexts) == 0 {
+		return nil, fmt.Errorf("CLI invocation proof has no loaded runtime context")
 	}
 	seen := map[string]bool{}
 	var evidence []completion2270Invocation
-	for _, manager := range managers {
+	for _, contextDef := range contexts {
+		if contextDef.Runtime == nil {
+			return nil, fmt.Errorf("CLI invocation proof has no published runtime")
+		}
+		manager, ok := contextDef.Runtime.Workspace.(*workspace.DockerManager)
+		if !ok || manager == nil {
+			return nil, fmt.Errorf("CLI invocation proof requires the published Docker workspace owner")
+		}
 		containers, err := manager.RuntimeWorkspaceContainers(ctx)
 		if err != nil {
 			return nil, err

@@ -119,13 +119,13 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						}
 						opts.MCPListenAddr = net.JoinHostPort(addresses[0].Gateway, "0")
 						previous := cliapp.ConfiguredWorkspaceLifecycleForServe
+						opts.TestRuntimeContextsReadyHook = invocationProof.observe
 						cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 							manager := workspace.NewDockerManager()
 							settings := workspace.DefaultDockerConfig()
 							settings.WorkspaceImage, settings.SourceProjection = image, projection
 							manager.SetConfig(settings)
 							manager.SetSemanticSource(source)
-							invocationProof.add(manager)
 							return manager, nil
 						}
 						t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
