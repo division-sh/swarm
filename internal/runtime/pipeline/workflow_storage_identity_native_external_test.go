@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -94,7 +95,7 @@ func workflowParentRouteControlNativeFixture(t *testing.T, backend string, sourc
 		if err != nil {
 			return err
 		}
-		parent.EntityID = "parent-ent"
+		parent.EntityID = eventtest.UUID("parent-ent")
 		parentKey, err := pipeline.AdmitFlowInstanceKey(source, parent.TemplateID, "root")
 		if err != nil {
 			return err
