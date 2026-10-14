@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "db1bb68208f1ac428c47596fd5e6c1977a0acbc86f7303cf3bde3e3094da8768"
+const targetDigest = "85c0dc98a1f98e11187d11193277b6a17b40561a44b4371b4bb496dcd167f082"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -210,6 +210,8 @@ var gateRecoveryTargets = map[string]map[string]bool{
 		"TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader":              true,
 	},
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go": {
+		"openSQLiteGateRecoveryStore":                                                          true,
+		"openPostgresGateRecoveryStore":                                                        true,
 		"TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores":                  true,
 		"TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores": true,
 		"TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBothStores":   true,
