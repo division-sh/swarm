@@ -112,7 +112,7 @@ func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
 		case "handler.rules[0].emit_template":
 			wantDisplay, wantPath = "rules[0]: when payload.score >= 80", `nodes["root-node"].handlers["root.start"].rules[0]`
 		case "handler.rules[1].emit_template":
-			wantDisplay, wantPath = "rules[1]: else", `nodes["root-node"].handlers["root.start"].rules[1]`
+			wantDisplay, wantPath = "rules[1]: default", `nodes["root-node"].handlers["root.start"].rules[1]`
 		default:
 			t.Fatalf("template site lost its exact position: %#v", match)
 		}
@@ -355,8 +355,7 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
       on_success:
         emit: ` + successEventType + `
       rules:
-        - else: true
-          emit: ` + ruleEventType + `
+        - emit: ` + ruleEventType + `
 `
 }
 
@@ -377,8 +376,7 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
           emit:
             fields:
               bucket: 'high'
-        - else: true
-          emit:
+        - emit:
             fields:
               bucket: 'low'
 `
