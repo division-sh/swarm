@@ -347,7 +347,7 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bo
 	t.Helper()
 	activity := "activity:\n        tool: source_scrape\n        input: {url: payload.url}"
 	if ruleActivity {
-		activity = "rules:\n        - when: payload.url != ''\n          activity:\n            id: scanner_source_requested_source_scrape\n            tool: source_scrape\n            input: {url: payload.url}\n        - else: true"
+		activity = "rules:\n        - when: payload.url != ''\n          activity:\n            id: scanner_source_requested_source_scrape\n            tool: source_scrape\n            input: {url: payload.url}"
 	}
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {}}\n",
@@ -371,8 +371,7 @@ consumer:
               - {target_field: title, value: payload.result.title}
               - {target_field: folded, value: entity.local + 1}
               - {target_field: received, value: entity.received + 1}
-        - else: true
-          data_accumulation:
+        - data_accumulation:
             writes:
               - {target_field: title, value: 'unexpected result'}
 `, activity, success, success),

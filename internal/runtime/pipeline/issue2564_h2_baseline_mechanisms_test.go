@@ -194,13 +194,10 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
       data_accumulation:
         writes: [{target_field: count, value: entity.count + 1}]
       rules:
-        - id: in_s1
-          when: _entity.current_state == 's1'
+        - when: _entity.current_state == 's1'
           data_accumulation:
             writes: [{target_field: c1, value: entity.c1 + 1}]
-        - id: in_s2
-          else: true
-          data_accumulation:
+        - data_accumulation:
             writes: [{target_field: c2, value: entity.c2 + 1}]
 `,
 				})
