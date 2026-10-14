@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
+	"gopkg.in/yaml.v3"
 )
 
 func preflightStatusFixture(t *testing.T) (string, preflightReceipt, string) {
@@ -443,6 +444,56 @@ func TestPreflightStatusRejectsEarlyOverridesAndInvalidAttempts(t *testing.T) {
 	}
 }
 
+func TestPreflightStatusWriterFeedsActualCIReader(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct{ Name, Run string }
+		}
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	steps := workflow.Jobs["ci-preflight"].Steps
+	if len(steps) != 1 || steps[0].Name != "Admit exact source before checkout" {
+		t.Fatal("missing actual CI status-consumption owner")
+	}
+	directory, receipt, _ := preflightStatusFixture(t)
+	attempt := startPreflightStatusFixture(t, receipt)
+	event, err := json.Marshal(map[string]any{"repository": map[string]string{"full_name": "division-sh/swarm"}, "action": "synchronize",
+		"pull_request": map[string]any{"draft": false, "head": map[string]any{"repo": map[string]string{"full_name": "division-sh/swarm"}, "sha": receipt.Plan.HeadSHA, "ref": "agent-f/topic"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventPath := filepath.Join(directory, "event.json")
+	if err := os.WriteFile(eventPath, event, 0600); err != nil {
+		t.Fatal(err)
+	}
+	read := func() error {
+		command := exec.Command("bash", "-c", steps[0].Run)
+		command.Env = append(os.Environ(), "EVENT_NAME=pull_request", "GITHUB_REF=refs/pull/17/merge", "GITHUB_SHA="+strings.Repeat("b", 40),
+			"GITHUB_REPOSITORY=division-sh/swarm", "GITHUB_EVENT_PATH="+eventPath, "RUNNER_TEMP="+directory, "GITHUB_STEP_SUMMARY="+filepath.Join(directory, "summary"))
+		out, err := command.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("actual CI reader: %w: %s", err, out)
+		}
+		return nil
+	}
+	if err := read(); err == nil {
+		t.Fatal("writer's pending attempt gained CI admission")
+	}
+	if _, err := attempt.finish(context.Background(), directory, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if err := read(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPreflightStatusCommandProcess(t *testing.T) {
 	if os.Getenv("PREFLIGHT_STATUS_TEST_PROCESS") != "1" {
 		return
@@ -471,6 +522,24 @@ func TestPreflightStatusCommandProcess(t *testing.T) {
 	fail := func() { fmt.Fprintln(os.Stderr, "SENSITIVE_AUTH_DIAGNOSTIC"); os.Exit(1) }
 	var response any
 	switch {
+	case slices.Contains(args, "--slurp"):
+		var statuses []map[string]any
+		for _, call := range readPreflightStatusCalls(t, os.Getenv("PREFLIGHT_STATUS_TEST_CALLS")) {
+			if len(call.Input) == 0 {
+				continue
+			}
+			var body map[string]string
+			if json.Unmarshal(call.Input, &body) != nil {
+				os.Exit(2)
+			}
+			id := 101
+			if body["state"] != "pending" {
+				id = 123
+			}
+			statuses = append(statuses, map[string]any{"id": id, "state": body["state"], "context": body["context"], "description": body["description"]})
+		}
+		slices.Reverse(statuses)
+		response = [][]map[string]any{statuses}
 	case len(args) > 1 && args[0] == "repo":
 		if mode == "auth-error" {
 			fail()
