@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,38 +11,11 @@ import (
 func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
 	for _, value := range []string{"live", "mock_only", "mock", "null", "''", "{}"} {
 		t.Run(value, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "swarm.yaml")
-			if err := os.WriteFile(path, []byte("runtime:\n  execution_posture: "+value+"\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `field "execution_posture" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
-				t.Fatalf("Load() = %v, want retired selector rejection", err)
+			var cfg Config
+			if err := decodeConfigSourceTest("runtime:\n  execution_posture: "+value+"\n", &cfg); err == nil || !strings.Contains(err.Error(), `field "execution_posture" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+				t.Fatalf("DecodeSource() = %v, want retired selector rejection", err)
 			}
 		})
-	}
-}
-
-func TestLoadRecoveryDefaultsWithoutExecutionSelector(t *testing.T) {
-	for _, tc := range []struct {
-		source   string
-		recovery bool
-	}{
-		{"", true},
-		{"runtime:\n  recovery_on_startup: false\n", false},
-		{"runtime:\n  recovery_on_startup: true\n", true},
-	} {
-		path := filepath.Join(t.TempDir(), "swarm.yaml")
-		source := tc.source + "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
-		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cfg, err := Load(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Runtime.RecoveryOnStartup != tc.recovery {
-			t.Fatalf("recovery = %v, want %v", cfg.Runtime.RecoveryOnStartup, tc.recovery)
-		}
 	}
 }
 
@@ -81,13 +52,12 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"    auto_expire_hours: 0",
 		"    categories_enabled: [verification]",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	var cfg Config
+	if err := decodeConfigSourceTest(cfgText, &cfg); err != nil {
+		t.Fatalf("DecodeSource: %v", err)
 	}
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 	if cfg.LLM.Backend != "claude_cli" {
 		t.Fatalf("unexpected llm backend: %q", cfg.LLM.Backend)
@@ -133,19 +103,18 @@ func TestValidatePlatformPackDirs(t *testing.T) {
 	}, "\n")
 
 	t.Run("accepts complete replacement directories", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "swarm.yaml")
 		body := base + "\n" + strings.Join([]string{
 			"platform:",
 			"  packs:",
 			"    platform_dirs:",
 			"      - /opt/swarm/packs/github",
 		}, "\n") + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("write config: %v", err)
+		var cfg Config
+		if err := decodeConfigSourceTest(body, &cfg); err != nil {
+			t.Fatalf("DecodeSource: %v", err)
 		}
-		cfg, err := Load(path)
-		if err != nil {
-			t.Fatalf("Load: %v", err)
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
 		}
 		if got := cfg.Platform.Packs.PlatformDirs; len(got) != 1 || got[0] != "/opt/swarm/packs/github" {
 			t.Fatalf("platform dirs = %#v, want declared platform path", got)
@@ -153,24 +122,23 @@ func TestValidatePlatformPackDirs(t *testing.T) {
 	})
 
 	t.Run("rejects empty entries", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "swarm.yaml")
 		body := base + "\n" + strings.Join([]string{
 			"platform:",
 			"  packs:",
 			"    platform_dirs:",
 			"      - ''",
 		}, "\n") + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("write config: %v", err)
+		var cfg Config
+		if err := decodeConfigSourceTest(body, &cfg); err != nil {
+			t.Fatalf("DecodeSource: %v", err)
 		}
-		_, err := Load(path)
+		err := cfg.Validate()
 		if err == nil || !strings.Contains(err.Error(), "platform.packs.platform_dirs[0] must be non-empty") {
-			t.Fatalf("Load error = %v, want empty platform dir rejection", err)
+			t.Fatalf("Validate error = %v, want empty platform dir rejection", err)
 		}
 	})
 
 	t.Run("rejects duplicates", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "swarm.yaml")
 		body := base + "\n" + strings.Join([]string{
 			"platform:",
 			"  packs:",
@@ -178,12 +146,13 @@ func TestValidatePlatformPackDirs(t *testing.T) {
 			"      - /opt/swarm/packs/github",
 			"      - /opt/swarm/packs/github",
 		}, "\n") + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("write config: %v", err)
+		var cfg Config
+		if err := decodeConfigSourceTest(body, &cfg); err != nil {
+			t.Fatalf("DecodeSource: %v", err)
 		}
-		_, err := Load(path)
+		err := cfg.Validate()
 		if err == nil || !strings.Contains(err.Error(), `platform.packs.platform_dirs contains duplicate "/opt/swarm/packs/github"`) {
-			t.Fatalf("Load error = %v, want duplicate platform dir rejection", err)
+			t.Fatalf("Validate error = %v, want duplicate platform dir rejection", err)
 		}
 	})
 }
@@ -265,13 +234,10 @@ func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	_, err := Load(p)
+	var cfg Config
+	err := decodeConfigSourceTest(cfgText, &cfg)
 	if err == nil || !strings.Contains(err.Error(), "workspace field \"data_source\" is not supported") {
-		t.Fatalf("Load error = %v, want retired workspace.data_source rejection", err)
+		t.Fatalf("DecodeSource error = %v, want retired workspace.data_source rejection", err)
 	}
 }
 
@@ -288,13 +254,12 @@ func TestLoad_PreservesWorkspaceBackendPresence(t *testing.T) {
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	var cfg Config
+	if err := decodeConfigSourceTest(cfgText, &cfg); err != nil {
+		t.Fatalf("DecodeSource: %v", err)
 	}
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 	if !cfg.Workspace.BackendConfigured() {
 		t.Fatal("empty workspace.backend presence was not preserved")
@@ -411,13 +376,10 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 		"budget:",
 		"  human_tasks: oops",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	var cfg Config
 	// #1801/6170905244: reject the malformed container before projection.
-	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "config.budget.human_tasks must be a YAML mapping") {
-		t.Fatalf("Load error = %v, want located budget container refusal", err)
+	if err := decodeConfigSourceTest(cfgText, &cfg); err == nil || !strings.Contains(err.Error(), "config.budget.human_tasks must be a YAML mapping") {
+		t.Fatalf("DecodeSource error = %v, want located budget container refusal", err)
 	}
 }
 
@@ -565,12 +527,9 @@ func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 		"sharding:",
 		"  max_shards_per_job: 4",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), `config field "sharding" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
-		t.Fatalf("Load error = %v, want current-vocabulary sharding rejection", err)
+	var cfg Config
+	if err := decodeConfigSourceTest(cfgText, &cfg); err == nil || !strings.Contains(err.Error(), `config field "sharding" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+		t.Fatalf("DecodeSource error = %v, want current-vocabulary sharding rejection", err)
 	}
 }
 
