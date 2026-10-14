@@ -18,12 +18,20 @@ import (
 )
 
 type fanOutPublicationMember struct {
-	group           runtimepipelineobligation.PublicationGroup
-	claim           runtimepipelineobligation.Claim
-	context         context.Context
-	admitted        events.AdmittedEvent
-	outputConsumers *runtimepinrouting.OutputConsumerResolver
-	instances       runtimepipeline.FlowInstanceIndexReader
+	group                runtimepipelineobligation.PublicationGroup
+	claim                runtimepipelineobligation.Claim
+	context              context.Context
+	admitted             events.AdmittedEvent
+	outputConsumers      *runtimepinrouting.OutputConsumerResolver
+	instances            runtimepipeline.FlowInstanceIndexReader
+	reads                fanOutPreparationReader
+	dispatchGateDeferred bool
+}
+
+type fanOutPreparationReader interface {
+	runtimepipeline.FlowInstanceIndexReader
+	PreparedPublishEventReader
+	ActiveAgentDescriptorLister
 }
 
 type fanOutInstancePlanningGroup interface {
@@ -99,12 +107,50 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 	} else {
 		_ = prepare(ctx, nil)
 	}
+	if len(accepted) != 0 && members[accepted[0]].instances != nil {
+		eb.finishFanOutPublicationPreparation(group, members, accepted, results)
+	}
 	return results, nil
+}
+
+func (eb *EventBus) finishFanOutPublicationPreparation(group runtimepipelineobligation.PublicationGroup, members []fanOutPublicationMember, accepted []int, results []runtimepipeline.FanOutPublicationPreparation) {
+	for _, i := range accepted {
+		if results[i].Publication == nil {
+			continue
+		}
+		plan := results[i].Publication.(EnginePublicationPlan)
+		// Mutable dispatch gates remain fresh, outside the held read cut.
+		var err error
+		if members[i].dispatchGateDeferred {
+			var reason string
+			reason, err = eb.dispatchQueueReason(members[i].context, plan.prepared.Event)
+			if reason != "" && !plan.prepared.dispatchQueued {
+				plan.prepared.dispatchQueued, plan.prepared.queueReason = true, reason
+			}
+		}
+		if err == nil {
+			err = group.RecordPrepared(members[i].context, plan.prepared.publicationClaim.Claim(), plan)
+		}
+		if err != nil {
+			results[i].Err = errors.Join(err, eb.ReleaseEnginePublications(context.WithoutCancel(members[i].context), []runtimeengine.DurablePublicationPlan{plan}))
+			results[i].Publication = nil
+		} else {
+			results[i].Publication = plan
+		}
+	}
 }
 
 func (eb *EventBus) prepareFanOutPublicationMembers(ctx context.Context, requests []runtimepipeline.FanOutPublicationRequest, members []fanOutPublicationMember, accepted []int, results []runtimepipeline.FanOutPublicationPreparation, instances runtimepipeline.FlowInstanceIndexReader) {
 	for _, i := range accepted {
 		members[i].instances = instances
+		if instances != nil {
+			var ok bool
+			members[i].reads, ok = instances.(fanOutPreparationReader)
+			if !ok {
+				results[i].Err = errors.New("native group preparation requires its scoped metadata readers")
+				continue
+			}
+		}
 		plans, err := eb.prepareEnginePublicationsWithMember(ctx, []runtimeengine.EmitIntent{requests[i].Intent}, runtimepipeline.PreparedWorkflowPublicationState{}, &members[i])
 		if err == nil && len(plans) != 1 {
 			err = errors.Join(errors.New("fan-out publication requires exactly one plan"), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))

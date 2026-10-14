@@ -186,6 +186,11 @@ func (c *groupProofConn) CheckNamedValue(value *driver.NamedValue) error {
 }
 
 func (c *groupProofConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if opts.ReadOnly {
+		if err := c.owner.call("before_read_begin", ""); err != nil {
+			return nil, err
+		}
+	}
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
 	if err != nil {
 		return nil, err
