@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/standingdiagnostic"
 )
 
@@ -60,7 +61,11 @@ func TestFamily145StandingDiagnosticWholeChainRetainsExactPredecessorsAndCallers
 			t.Fatal("diagnostic predecessor is not source-pinned:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := selectedreadrole.EarlierStandingIngressSource("../../..", pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
+		if err != nil || actual != pin.After {
 			t.Fatal("diagnostic caller, assertion or teardown changed:", pin.Function, err)
 		}
 		after, err := standingdiagnostic.Transform(rule, pin.Before)
