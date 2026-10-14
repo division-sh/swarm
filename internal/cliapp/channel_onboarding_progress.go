@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 )
 
 func startCLIChannelOnboarding(ctx context.Context, client *cliAPIClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
+	if opts.credentialStdin {
+		return startCLIChannelWithReplacement(ctx, client, params, opts, errOut)
+	}
 	var result channelOnboardingResult
 	err := client.call(ctx, "channel.onboarding_start", params, &result)
 	if err != nil {
@@ -24,7 +28,7 @@ func startCLIChannelOnboarding(ctx context.Context, client *cliAPIClient, params
 		if err != nil {
 			return result, returnCLIValidationError(errOut, err)
 		}
-	} else if !opts.credentialStdin {
+	} else {
 		return result, nil
 	}
 	credential, err := readSelectedChannelCredential(result, opts, errOut)
@@ -63,12 +67,7 @@ func selectedChannelCredentialReadback(ctx context.Context, client *cliAPIClient
 	if err != nil || result.Operation.OperationID != data.Details.OperationID || role != data.Details.Role {
 		return result, errors.New("credential admission contradicts the selected provider requirement")
 	}
-	for _, reservation := range result.Operation.CredentialReservations {
-		if reservation.Role == role && reservation.StoreKey == data.Details.StoreKey {
-			return result, nil
-		}
-	}
-	return result, errors.New("credential admission contradicts the retained credential reservation")
+	return result, nil
 }
 
 func readSelectedChannelCredential(result channelOnboardingResult, opts channelConnectOptions, errOut io.Writer) (string, error) {
@@ -87,7 +86,7 @@ func readSelectedChannelCredential(result channelOnboardingResult, opts channelC
 }
 
 func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
-	pending, err := result.SessionPreparationPending()
+	pending, err := result.SessionPairingPending(time.Now())
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -96,6 +95,13 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 	}
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
 		if pending {
+			if result.Pairing.Status != channelonboarding.PairingStatusPreparing {
+				fmt.Fprintf(w, "Channel %s pairing: %s (not READY). Resume with `swarm channel resume %s`.\n", result.Operation.Provider, result.Pairing.Status, result.Operation.OperationID)
+				if result.Pairing.Code != "" {
+					fmt.Fprintf(w, "Pairing material (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), result.Pairing.Code)
+				}
+				return
+			}
 			fmt.Fprintf(w, "Channel %s preparation is pending (not READY). Resume with `swarm channel resume %s`.\n", strings.TrimSpace(result.Operation.Provider), result.Operation.OperationID)
 			return
 		}
@@ -105,7 +111,7 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 }
 
 func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
-	pending, err := result.SessionPreparationPending()
+	pending, err := result.SessionPairingPending(time.Now())
 	if err != nil || result.Operation.OperationID == "" || result.Operation.Revision < 1 || !result.Operation.Phase.Valid() {
 		return false, errors.New("channel onboarding response has invalid progress evidence")
 	}
