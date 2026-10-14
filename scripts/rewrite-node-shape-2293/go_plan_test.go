@@ -84,6 +84,10 @@ func TestNodeShapeGoProducerLedgerReplaysReviewedLiteral(t *testing.T) {
 	proveNodeShapeGoLedger(t, "go-producer-inputs.json", 1)
 }
 
+func TestNodeShapeGoActivityForkLedgerReplaysReviewedLiteral(t *testing.T) {
+	proveNodeShapeGoLedger(t, "go-activity-fork-inputs.json", 1)
+}
+
 func proveNodeShapeGoLedger(t *testing.T, path string, count int) {
 	t.Helper()
 	data, err := os.ReadFile(path)

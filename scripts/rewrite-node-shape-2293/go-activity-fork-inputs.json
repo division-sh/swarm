@@ -1,0 +1,15 @@
+[
+  {
+    "path": "internal/runtime/runforkexecution/activity_fork_execution_test.go",
+    "declaration": "selectedContractActivityDeclaredSource",
+    "ordinal": 11,
+    "before": "`test-node:\n  execution_type: system_node\n  subscribes_to: [review.start, review.requested, review.retry, review.close]\n  event_handlers:\n    review.start:\n      loop: {start: revision, from: pending}\n      advances_to: review\n    review.requested:\n      loop: {admit: revision, from: review}\n      advances_to: review\n      activity: {id: connector, tool: provider.connector}\n    review.retry:\n      loop: {repeat: revision, from: review}\n      advances_to: review\n    review.close:\n      loop: {close: revision, from: review}\n      advances_to: closed\n`",
+    "after": "`test-node:\n  review.start:\n    loop: {start: revision, from: pending}\n    advances_to: review\n  review.requested:\n    loop: {admit: revision, from: review}\n    advances_to: review\n    activity: {id: connector, tool: provider.connector}\n  review.retry:\n    loop: {repeat: revision, from: review}\n    advances_to: review\n  review.close:\n    loop: {close: revision, from: review}\n    advances_to: closed\n`",
+    "counts": {
+      "Subscriptions": 1,
+      "ExecutionTypes": 1,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  }
+]

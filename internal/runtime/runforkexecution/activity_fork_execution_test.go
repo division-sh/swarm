@@ -448,22 +448,19 @@ loops:
 		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
 		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
-  execution_type: system_node
-  subscribes_to: [review.start, review.requested, review.retry, review.close]
-  event_handlers:
-    review.start:
-      loop: {start: revision, from: pending}
-      advances_to: review
-    review.requested:
-      loop: {admit: revision, from: review}
-      advances_to: review
-      activity: {id: connector, tool: provider.connector}
-    review.retry:
-      loop: {repeat: revision, from: review}
-      advances_to: review
-    review.close:
-      loop: {close: revision, from: review}
-      advances_to: closed
+  review.start:
+    loop: {start: revision, from: pending}
+    advances_to: review
+  review.requested:
+    loop: {admit: revision, from: review}
+    advances_to: review
+    activity: {id: connector, tool: provider.connector}
+  review.retry:
+    loop: {repeat: revision, from: review}
+    advances_to: review
+  review.close:
+    loop: {close: revision, from: review}
+    advances_to: closed
 `,
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
@@ -481,6 +478,19 @@ loops:
 	bundle, ok := semanticview.Bundle(loaded.Source)
 	if !ok {
 		t.Fatal("activity fixture requires its admitted source bundle")
+	}
+	sites := bundle.ActivitySites()
+	if len(sites) != 1 || sites[0].Node.FlowPath() != "flow_a" || sites[0].Node.NodeID() != "test-node" ||
+		sites[0].HandlerEventKey != "review.requested" || sites[0].Spec.ID != "connector" ||
+		sites[0].Source != "handler.activity" || sites[0].RuleIndex != -1 {
+		t.Fatalf("node-carrier rewrite changed the authored activity identity: %#v", sites)
+	}
+	wantEvents := runtimecontracts.ActivityResultEvents{
+		ActivityID: "connector", SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
+		RevisionRequested: "flow_a/connector.revision_requested", Rejected: "flow_a/connector.rejected",
+	}
+	if got := runtimecontracts.ActivityResultEventsForSite(sites[0]); got != wantEvents {
+		t.Fatalf("node-carrier rewrite changed activity result identities: got %+v, want %+v", got, wantEvents)
 	}
 	entityType, _, ok := bundle.FlowPrimaryEntityContract("flow_a")
 	if !ok || entityType != "test_entity" {
