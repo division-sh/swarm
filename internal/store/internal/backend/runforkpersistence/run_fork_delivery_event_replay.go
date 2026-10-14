@@ -265,15 +265,9 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 	if source.Target.Empty() {
 		return projectRunForkReplayDeliveryRoute(source, snapshot.RunID, forkRunID)
 	}
-	construction := source.Target
-	if !source.Initialization.Empty() {
-		if err := source.Initialization.ValidateEvent(event); err != nil {
-			return events.DeliveryRoute{}, err
-		}
-		construction = source.Initialization.ConstructionTarget()
-	}
-	if !construction.ExistingEntity() && !construction.MaterializingEntity() {
-		return events.DeliveryRoute{}, fmt.Errorf("agent replay requires exact flow construction independent of actor ownership")
+	construction, err := replayReceiverConstructionTarget(event, source)
+	if err != nil {
+		return events.DeliveryRoute{}, err
 	}
 	target := construction.Route()
 	state, err := loadRunForkConstructedEntityState(snapshot, target.EntityID)
@@ -307,6 +301,20 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, err
 	}
 	return projected, nil
+}
+
+func replayReceiverConstructionTarget(event events.Event, source events.DeliveryRoute) (events.DeliveryTargetOwnership, error) {
+	construction := source.Target
+	if !source.Initialization.Empty() {
+		if err := source.Initialization.ValidateEvent(event); err != nil {
+			return events.DeliveryTargetOwnership{}, err
+		}
+		construction = source.Initialization.ConstructionTarget()
+	}
+	if !construction.ExistingEntity() && !construction.MaterializingEntity() {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("agent replay requires exact flow construction independent of actor ownership")
+	}
+	return construction, nil
 }
 
 func projectRunForkReplayActorTarget(sourceRunID, forkRunID string, target events.DeliveryTargetOwnership, constructedPath string) (events.DeliveryTargetOwnership, error) {
